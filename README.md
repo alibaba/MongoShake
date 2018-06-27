@@ -1,4 +1,4 @@
-This is a brief introduction of Mongo-Shake, please visit [english wiki]() or [chinese wiki]() if you want to see more details including architecture, data flow, performance test, business showcase and so on.
+This is a brief introduction of Mongo-Shake, please visit [english wiki]() or [chinese wiki](https://yq.aliyun.com/articles/603329) if you want to see more details including architecture, data flow, performance test, business showcase and so on.
 
 # Mongo-Shake
 ---
@@ -43,8 +43,7 @@ Please see the detail documents listed at the beginning if you want to see more 
 # Usage
 ---
 *  git clone git@github.com:aliyun/mongo-shake.git
-*  cd mongo-shake
-*  cd mongo-shake/src/vendor  #install govendor and pull all dependencies
-*  govendor sync
+*  cd mongo-shake/src/vendor
+*  govendor sync     #please note: install govendor first and then pull all dependencies
 *  cd ../../ && ./build.sh
 *  ./bin/start.sh -conf=conf/collector.conf
