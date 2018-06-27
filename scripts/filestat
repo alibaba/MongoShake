@@ -1,0 +1,44 @@
+#!/usr/bin/env python
+
+# -*- coding:utf-8 -*-
+
+import os, sys, struct
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print "Usage : filestat dump.data"
+        sys.exit(-1)
+
+    with open(sys.argv[1]) as data:
+        magic, proto, cksm, reserved = struct.unpack(">Qii16s", data.read(32))
+
+        # print file header
+        print "magic:%x" % magic
+        print "protocol:%d" % proto
+
+        compress = 0
+        worker = [0] * 1024
+        count = 0
+        cksm = 0
+        while True:
+            try:
+                cksm, tag, shard, comp, none, length = struct.unpack(">6i", data.read(24))
+                compress = comp
+                while length > 0:
+                    size, = struct.unpack(">i", data.read(4))
+                    none = struct.unpack(">%ds" % (size), data.read(size))
+                    length -= (size + 4)
+                    count += 1
+                    worker[shard] += 1
+            except Exception:
+                break
+
+        cut = 1023
+        while cut >= 0 and worker[cut] == 0:
+            cut -= 1
+        worker = worker[0:cut + 1]
+
+        print "checksum:%s" % cksm
+        print "compress:%d" % compress
+        print "logs:%d" % count
+        print "workers[%d]: " % len(worker), worker

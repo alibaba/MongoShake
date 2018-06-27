@@ -1,0 +1,108 @@
+{
+	"comment": "",
+	"ignore": "test",
+	"package": [
+		{
+			"checksumSHA1": "ZRovVDfwx5YwVNJkatVZKRejzQY=",
+			"path": "github.com/Shopify/sarama",
+			"revision": "46cf3e2cf1acef7876068f66cf69ec31aad2d0b2",
+			"revisionTime": "2018-06-15T22:43:12Z"
+		},
+		{
+			"checksumSHA1": "CSPbwbyzqA6sfORicn4HFtIhF/c=",
+			"path": "github.com/davecgh/go-spew/spew",
+			"revision": "8991bc29aa16c548c550c7ff78260e27b9ab7c73",
+			"revisionTime": "2018-02-21T22:46:20Z"
+		},
+		{
+			"checksumSHA1": "y2Kh4iPlgCPXSGTCcFpzePYdzzg=",
+			"path": "github.com/eapache/go-resiliency/breaker",
+			"revision": "ea41b0fad31007accc7f806884dcdf3da98b79ce",
+			"revisionTime": "2018-03-26T13:24:23Z"
+		},
+		{
+			"checksumSHA1": "WHl96RVZlOOdF4Lb1OOadMpw8ls=",
+			"path": "github.com/eapache/go-xerial-snappy",
+			"revision": "bb955e01b9346ac19dc29eb16586c90ded99a98c",
+			"revisionTime": "2016-06-09T14:24:08Z"
+		},
+		{
+			"checksumSHA1": "SJhV59StVXLFvLU0l9s0d00nV10=",
+			"path": "github.com/eapache/queue",
+			"revision": "093482f3f8ce946c05bcba64badd2c82369e084d",
+			"revisionTime": "2018-02-27T14:14:24Z"
+		},
+		{
+			"checksumSHA1": "h1d2lPZf6j2dW/mIqVnd1RdykDo=",
+			"path": "github.com/golang/snappy",
+			"revision": "2e65f85255dbc3072edf28d6b5b8efc472979f5a",
+			"revisionTime": "2018-05-18T05:39:59Z"
+		},
+		{
+			"checksumSHA1": "TCwS/hQ5BG+9pfDLLMY1xhuYPX0=",
+			"path": "github.com/gugemichael/nimo4go",
+			"revision": "2b2be4086334014df56e8a015881de1c25378a2e"
+		},
+		{
+			"checksumSHA1": "Zw2mCFVLS4o1miFcZ7MrT0vGD0Y=",
+			"path": "github.com/nightlyone/lockfile",
+			"revision": "6a197d5ea61168f2ac821de2b7f011b250904900",
+			"revisionTime": "2017-08-04T11:40:28Z"
+		},
+		{
+			"checksumSHA1": "WDgX011m3uQMKWf8cHb5Ndyzmj8=",
+			"path": "github.com/pierrec/lz4",
+			"revision": "6b9367c9ff401dbc54fabce3fb8d972e799b702d",
+			"revisionTime": "2018-06-10T16:27:16Z"
+		},
+		{
+			"checksumSHA1": "lpMy6c/DV9QGLA90OluUIjdtTN0=",
+			"path": "github.com/pierrec/lz4/internal/xxh32",
+			"revision": "6b9367c9ff401dbc54fabce3fb8d972e799b702d",
+			"revisionTime": "2018-06-10T16:27:16Z"
+		},
+		{
+			"checksumSHA1": "an5RM8wjgPPloolUUYkvEncbHu4=",
+			"path": "github.com/rcrowley/go-metrics",
+			"revision": "e2704e165165ec55d062f5919b4b29494e9fa790",
+			"revisionTime": "2018-05-03T17:46:38Z"
+		},
+		{
+			"checksumSHA1": "N9tdQG7wlhVMjVlFDMLTbKl/K+s=",
+			"path": "github.com/vinllen/log4go",
+			"revision": "3848a366df9df5ffb69805be2bfdfb5b1b5c495e",
+			"revisionTime": "2018-05-14T12:41:25Z"
+		},
+		{
+			"checksumSHA1": "9Qx59vqxk5ZYAgqegUThpJaMFI8=",
+			"path": "github.com/vinllen/mgo",
+			"revision": "e602c6ee54c2e70da4ef82edf107115057218616",
+			"revisionTime": "2018-05-16T06:55:53Z"
+		},
+		{
+			"checksumSHA1": "DqnKbupL7yiSYpmgKt30Uzp6Zlc=",
+			"path": "github.com/vinllen/mgo/bson",
+			"revision": "e602c6ee54c2e70da4ef82edf107115057218616",
+			"revisionTime": "2018-05-16T06:55:53Z"
+		},
+		{
+			"checksumSHA1": "1fOPYx7Y7eFeSBbajEEb6ZLQct4=",
+			"path": "github.com/vinllen/mgo/internal/json",
+			"revision": "e602c6ee54c2e70da4ef82edf107115057218616",
+			"revisionTime": "2018-05-16T06:55:53Z"
+		},
+		{
+			"checksumSHA1": "ai/5rRSh/6kWhGfA1dHaQNUXiMU=",
+			"path": "github.com/vinllen/mgo/internal/sasl",
+			"revision": "e602c6ee54c2e70da4ef82edf107115057218616",
+			"revisionTime": "2018-05-16T06:55:53Z"
+		},
+		{
+			"checksumSHA1": "TwmlhTUpQBCa0oO20tw9EnlF6xs=",
+			"path": "github.com/vinllen/mgo/internal/scram",
+			"revision": "e602c6ee54c2e70da4ef82edf107115057218616",
+			"revisionTime": "2018-05-16T06:55:53Z"
+		}
+	],
+	"rootPath": "/Users/vinllen-ali/code/github-mongoshake/mongo-shake/src"
+}
