@@ -35,15 +35,16 @@ Gzip, zlib, deflate compressor are supported in batched oplogs before sending.
 
 # Other Details
 ---
-Mongo-Shake uses [mgo.v2 library](gopkg.in/mgo.v2) to fetch oplogs from source MongoDB which is later than the given timestamp in configuration. Then, it filters oplogs based on whitelist, blacklist, and gid. All the oplogs will be transferred at least once which is acceptable because of idempotent of oplog DML. We use __seq__ and __ack__ to make sure the package is received which is similar to the sequence and acknowledgment numbers in TCP.<br>
+Mongo-Shake uses [mgo.v2 library](https://github.com/vinllen/mgo) which is a modification version of [mgo.v2](https://github.com/go-mgo/mgo/tree/v2) to fetch oplogs from source MongoDB which is later than the given timestamp in configuration. Then, it filters oplogs based on whitelist, blacklist, and gid. All the oplogs will be transferred at least once which is acceptable because of idempotent of oplog DML. We use __seq__ and __ack__ to make sure the package is received which is similar to the sequence and acknowledgment numbers in TCP.<br>
 The oplogs are batched together in the handling pipeline.<br>
 Users can adjust the worker concurrency and executor concurrency according to the different environment.<br>
 Please see the detail documents listed at the beginning if you want to see more details.<br>
 
 # Usage
 ---
-*  git clone xxx
+*  git clone git@github.com:aliyun/mongo-shake.git
 *  cd mongo-shake
-*  install go vendor and pull all dependencies(cmd: `govendor fetch`)
-*  ./build.sh
-*  ./bin/start.sh -conf=conf/mongoshake.conf
+*  cd mongo-shake/src/vendor  #install govendor and pull all dependencies
+*  govendor sync
+*  cd ../../ && ./build.sh
+*  ./bin/start.sh -conf=conf/collector.conf
