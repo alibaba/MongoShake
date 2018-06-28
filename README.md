@@ -46,4 +46,4 @@ Please see the detail documents listed at the beginning if you want to see more 
 *  cd mongo-shake/src/vendor
 *  GOPATH=\`pwd\`/../..; govendor sync     #please note: must install govendor first and then pull all dependencies
 *  cd ../../ && ./build.sh
-*  ./bin/collector -conf=conf/collector.conf #please note: user must modify collector.conf first to match needs. You can also use start.sh script which supports hypervisor mechanism in Linux OS.
+*  ./bin/collector -conf=conf/collector.conf #please note: user must modify collector.conf first to match needs. You can also use \"start.sh\" script which supports hypervisor mechanism in Linux OS only.
