@@ -42,8 +42,8 @@ Please see the detail documents listed at the beginning if you want to see more 
 
 # Usage
 ---
-*  git clone git@github.com:aliyun/mongo-shake.git
+*  git clone https://github.com/aliyun/mongo-shake.git
 *  cd mongo-shake/src/vendor
-*  govendor sync     #please note: install govendor first and then pull all dependencies
+*  GOPATH=`pwd`/../..; govendor sync     #please note: must install govendor first and then pull all dependencies
 *  cd ../../ && ./build.sh
 *  ./bin/start.sh -conf=conf/collector.conf
