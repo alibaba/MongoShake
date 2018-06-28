@@ -44,6 +44,6 @@ Please see the detail documents listed at the beginning if you want to see more 
 ---
 *  git clone https://github.com/aliyun/mongo-shake.git
 *  cd mongo-shake/src/vendor
-*  GOPATH=`pwd`/../..; govendor sync     #please note: must install govendor first and then pull all dependencies
+*  GOPATH=\`pwd\`/../..; govendor sync     #please note: must install govendor first and then pull all dependencies
 *  cd ../../ && ./build.sh
 *  ./bin/start.sh -conf=conf/collector.conf
