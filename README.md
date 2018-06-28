@@ -40,6 +40,24 @@ The oplogs are batched together in the handling pipeline.<br>
 Users can adjust the worker concurrency and executor concurrency according to the different environment.<br>
 Please see the detail documents listed at the beginning if you want to see more details.<br>
 
+# Code Branch Rules
+Version rules: A.B.C.
+
+*  A: major version
+*  B: minor version. Even number means stable version.
+*  C: bugfix version
+
+Branch Name | Rules
+- | :-
+master | master branch, do not allowed push code. Store the latest stable version.
+develop | develop branch. All the bellowing branches fork from this.
+feature-\* | new feature branch. Forked from develop branch and then merge back after finish developing, testing, and code review.
+bugfix-\* | bugfix branch. Forked from develop branch and then merge back after finish developing, testing, and code review.
+improve-\* | improvement branch. Forked from develop branch and then merge back after finish developing, testing, and code review. 
+
+Tag rules:
+Add tag when releasing: "release-v{version}-{date}". For example: "release-v1.0.2-20180628"
+
 # Usage
 ---
 *  git clone https://github.com/aliyun/mongo-shake.git
