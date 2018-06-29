@@ -19,3 +19,4 @@ data
 .cache/
 diagnostic/
 *.pid
+src/vendor/github.com/
