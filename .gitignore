@@ -19,3 +19,5 @@ data
 .cache/
 diagnostic/
 *.pid
+src/vendor/
+!vendor.json
