@@ -120,7 +120,7 @@ func sanitizeOptions() error {
 	if len(conf.Options.MongoUrls) == 1 && conf.Options.ContextStorageUrl != "" {
 		return errors.New("storage server should not be configured while single mongo server")
 	}
-	if len(conf.Options.MongoUrls) > 1 && conf.Options.ContextStorageUrl != "" {
+	if len(conf.Options.MongoUrls) > 1 && conf.Options.ContextStorageUrl == "" {
 		return errors.New("storage server should be configured while mongo shard servers")
 	}
 	if len(conf.Options.MongoUrls) > 1 && conf.Options.WorkerNum != len(conf.Options.MongoUrls) {
