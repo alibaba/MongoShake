@@ -1,3 +1,8 @@
-2018-06-28  Alibaba Cloud.
-
+2018-07-18 Alibaba Cloud.
+	* version: 1.0.0
+	* BUG FIX: upsert/remove error when old value isn't exist
+	* BUG FIX: connect to Alibaba Cloud MongoDB instance without permission
+	* BUG FIX: some logs can't be print out when crash
+	
+2018-06-28 Alibaba Cloud.
 	* mongo-shake: initial release.
