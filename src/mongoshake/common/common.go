@@ -56,7 +56,7 @@ func RunStatusMessage(status uint64) string {
 	}
 }
 
-func InitialLogger(logFile string, level string, verbose bool) bool {
+func InitialLogger(logFile string, level string, logBuffer bool, verbose bool) bool {
 	logLevel := parseLogLevel(level)
 	if verbose {
 		LOG.AddFilter("console", logLevel, LOG.NewConsoleLogWriter())
@@ -65,6 +65,11 @@ func InitialLogger(logFile string, level string, verbose bool) bool {
 		// create logs folder for log4go. because of its mistake that doesn't create !
 		if err := os.MkdirAll("logs", os.ModeDir|os.ModePerm); err != nil {
 			return false
+		}
+		if logBuffer {
+			LOG.LogBufferLength = 32
+		} else {
+			LOG.LogBufferLength = 0
 		}
 		fileLogger := LOG.NewFileLogWriter(fmt.Sprintf("logs/%s", logFile), true)
 		fileLogger.SetRotateDaily(true)

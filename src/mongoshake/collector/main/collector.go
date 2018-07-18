@@ -21,8 +21,11 @@ import (
 	"github.com/vinllen/mgo/bson"
 )
 
+type Exit struct {Code int}
+
 func main() {
 	var err error
+	defer handleExit()
 	defer LOG.Close()
 	defer utils.Goodbye()
 
@@ -33,7 +36,7 @@ func main() {
 
 	if *configuration == "" {
 		fmt.Println(utils.VERSION)
-		os.Exit(0)
+		panic(Exit{0})
 	}
 
 	var file *os.File
@@ -52,7 +55,7 @@ func main() {
 		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
 	}
 
-	utils.InitialLogger(conf.Options.LogFileName, conf.Options.LogLevel, *verbose)
+	utils.InitialLogger(conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogBuffer, *verbose)
 	nimo.Profiling(int(conf.Options.SystemProfile))
 	nimo.RegisterSignalForProfiling(syscall.SIGUSR2)
 	nimo.RegisterSignalForPrintStack(syscall.SIGUSR1, func(bytes []byte) {
@@ -202,5 +205,14 @@ func sanitizeOptions() error {
 
 func crash(msg string, errCode int) {
 	fmt.Println(msg)
-	os.Exit(errCode)
+	panic(Exit{errCode})
+}
+
+func handleExit() {
+	if e := recover(); e != nil {
+		if exit, ok := e.(Exit); ok == true {
+			os.Exit(exit.Code)
+		}
+		panic(e)
+	}
 }

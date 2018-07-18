@@ -11,6 +11,7 @@ import (
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	"fmt"
 )
 
 // ReplicationCoordinator global coordinator instance. consist of
@@ -56,7 +57,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	var err error
 	var hasUniqIndex = false
 	rs := map[string]int{}
-	for _, src := range coordinator.Sources {
+	for i, src := range coordinator.Sources {
 		if conn, err = dbpool.NewMongoConn(src.URL, false); conn == nil || !conn.IsGood() || err != nil {
 			LOG.Critical("Connect mongo server error. %v, url : %s", err, src.URL)
 			return err
@@ -70,11 +71,11 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 
 		// check if there has dup server every replica set in RS or Shard
 		rsName := conn.AcquireReplicaSetName()
-		// rsName should not be empty
+		// rsName will be set to default if empty
 		if rsName == "" {
-			LOG.Critical("Source mongodb have empty replica set name, url : %s", src.URL)
-			conn.Close()
-			return errors.New("no replica set name found")
+			rsName = fmt.Sprintf("default-%d", i)
+			LOG.Warn("Source mongodb have empty replica set name, url[%s], change to default[%s]",
+				src.URL, rsName)
 		}
 
 		if _, exist := rs[rsName]; exist {

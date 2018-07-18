@@ -35,10 +35,11 @@ type BasicWriter interface {
 }
 
 func NewDbWriter(session *mgo.Session, metadata bson.M) BasicWriter {
-	if _, ok := metadata["g"]; ok {
-		return &CommandWriter{session: session}
-	}
-	return &GeneralWriter{session: session}
+	//if _, ok := metadata["g"]; ok {
+	//	return &CommandWriter{session: session}
+	//}
+	//return &GeneralWriter{session: session}
+	return &CommandWriter{session: session}
 }
 
 // use run_command to execute command
@@ -254,7 +255,7 @@ func (gw *GeneralWriter) doInsert(database, collection string, metadata bson.M, 
 func (gw *GeneralWriter) doUpdateOnInsert(database, collection string, metadata bson.M,
 	oplogs []*OplogRecord, upsert bool) error {
 	type pair struct {
-		id interface{}
+		id   interface{}
 		data interface{}
 	}
 	var updates []*pair
@@ -299,12 +300,16 @@ func (gw *GeneralWriter) doUpdate(database, collection string, metadata bson.M,
 		oplogs []*OplogRecord, upsert bool) error {
 	collectionHandle := gw.session.DB(database).C(collection)
 	var errMsgs []string
+	var err error
 	for _, log := range oplogs {
-		if err := collectionHandle.Update(log.original.partialLog.Query, log.original.partialLog.Object);
-				err != nil && mgo.IsDup(err) == false {
-			errMsg := fmt.Sprintf("update old-data[%v] with new-data[%v] failed[%v]",
+		if upsert {
+			_, err = collectionHandle.Upsert(log.original.partialLog.Query, log.original.partialLog.Object)
+		} else {
+			err = collectionHandle.Update(log.original.partialLog.Query, log.original.partialLog.Object)
+		}
+		if err != nil && mgo.IsDup(err) == false && !isNotFound(err) {
+			errMsg := fmt.Sprintf("update/upsert old-data[%v] with new-data[%v] failed[%v]",
 				log.original.partialLog.Query, log.original.partialLog.Object, err.Error())
-			// LOG.Warn(errMsg)
 			errMsgs = append(errMsgs, errMsg)
 		}
 	}
@@ -320,7 +325,8 @@ func (gw *GeneralWriter) doDelete(database, collection string, metadata bson.M,
 	collectionHandle := gw.session.DB(database).C(collection)
 	var errMsgs []string
 	for _, log := range oplogs {
-		if err := collectionHandle.Remove(log.original.partialLog.Query); err != nil {
+		// ignore ErrNotFound
+		if err := collectionHandle.Remove(log.original.partialLog.Query); err != nil && !isNotFound(err) {
 			errMsg := fmt.Sprintf("delete data[%v] failed[%v]", log.original.partialLog.Query,
 				err.Error())
 			errMsgs = append(errMsgs, errMsg)
@@ -427,4 +433,8 @@ func (s SnapshotDiffer) dump(coll *mgo.Collection) {
 		coll.Find(bson.M{"_id": s.log.Object["_id"]}).One(s.foundInDB)
 	}
 	s.write2Log()
+}
+
+func isNotFound(err error) bool {
+	return err.Error() == mgo.ErrNotFound.Error()
 }

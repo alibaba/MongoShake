@@ -8,6 +8,7 @@ type Configuration struct {
 	SystemProfile         int      `config:"system_profile"`
 	LogLevel              string   `config:"log_level"`
 	LogFileName           string   `config:"log_file"`
+	LogBuffer             bool     `config:"log_buffer"`
 	OplogGIDS             string   `config:"oplog.gids"`
 	ShardKey              string   `config:"shard_key"`
 	WorkerNum             int      `config:"worker"`
