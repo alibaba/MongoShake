@@ -299,13 +299,24 @@ func (gw *GeneralWriter) doUpdate(database, collection string, metadata bson.M,
 		oplogs []*OplogRecord, upsert bool) error {
 	collectionHandle := gw.session.DB(database).C(collection)
 	var errMsgs []string
-	for _, log := range oplogs {
-		if err := collectionHandle.Update(log.original.partialLog.Query, log.original.partialLog.Object);
+	switch upsert {
+	case false:
+		for _, log := range oplogs {
+			if err := collectionHandle.Update(log.original.partialLog.Query, log.original.partialLog.Object);
 				err != nil && mgo.IsDup(err) == false {
-			errMsg := fmt.Sprintf("update old-data[%v] with new-data[%v] failed[%v]",
-				log.original.partialLog.Query, log.original.partialLog.Object, err.Error())
-			// LOG.Warn(errMsg)
-			errMsgs = append(errMsgs, errMsg)
+				errMsg := fmt.Sprintf("update old-data[%v] with new-data[%v] failed[%v]",
+					log.original.partialLog.Query, log.original.partialLog.Object, err.Error())
+				errMsgs = append(errMsgs, errMsg)
+			}
+		}
+	case true:
+		for _, log := range oplogs {
+			if _, err := collectionHandle.Upsert(log.original.partialLog.Query, log.original.partialLog.Object);
+				err != nil && mgo.IsDup(err) == false {
+				errMsg := fmt.Sprintf("upsert old-data[%v] with new-data[%v] failed[%v]",
+					log.original.partialLog.Query, log.original.partialLog.Object, err.Error())
+				errMsgs = append(errMsgs, errMsg)
+			}
 		}
 	}
 

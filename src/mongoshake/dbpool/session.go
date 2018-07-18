@@ -57,10 +57,9 @@ func (conn *MongoConn) IsGood() bool {
 
 func (conn *MongoConn) AcquireReplicaSetName() string {
 	var replicaset struct {
-		Id string `bson:"_id"`
+		Id string `bson:"set"`
 	}
-	if err := conn.Session.DB("local").C("system.replset").
-		Find(bson.M{}).One(&replicaset); err != nil {
+	if err := conn.Session.DB("admin").Run(bson.M{"replSetGetStatus":1}, &replicaset); err != nil {
 		LOG.Warn("Replica set name not found in system.replset, %v", err)
 	}
 	return replicaset.Id
