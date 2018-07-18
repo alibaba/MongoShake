@@ -43,6 +43,12 @@ fi
 # golang version
 goversion=$(go version | awk -F' ' '{print $3;}')
 info=$info","$goversion
+bigVersion=$(echo $goversion | awk -F'[o.]' '{print $2}')
+midVersion=$(echo $goversion | awk -F'[o.]' '{print $3}')
+if  [ $bigVersion -lt "1" -o $bigVersion -eq "1" -a $midVersion -lt "10" ]; then
+    echo "go version[$goversion] must >= 1.10"
+    exit 1
+fi
 
 t=$(date "+%Y-%m-%d_%H:%M:%S")
 info=$info","$t
