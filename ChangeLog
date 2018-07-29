@@ -1,3 +1,9 @@
+2018-07-29 Alibaba Cloud.
+	* version: 1.1.0
+	* Feature: Use general write instead of op_command. When the version is
+	greater than or equal to 3.2, the bulk writer is used for batch writing,
+	otherwise the single writer is used for single writing.	
+
 2018-07-18 Alibaba Cloud.
 	* version: 1.0.0
 	* BUG FIX: upsert/remove error when old value isn't exist
