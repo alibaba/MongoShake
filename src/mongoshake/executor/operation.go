@@ -93,7 +93,6 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 				err = dbWriter.doCommand(dc[0], metadata, group.oplogRecords)
 			case "n":
 				// exec.batchExecutor.ReplMetric.AddFilter(count)
-				fallthrough
 			default:
 				LOG.Warn("Unknown type oplogs found. op '%s'", group.op)
 			}
