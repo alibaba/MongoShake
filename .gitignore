@@ -8,6 +8,7 @@ logs
 *.output
 *.data
 *.sw[ap]
+tags
 
 dump.data
 runtime.trace
