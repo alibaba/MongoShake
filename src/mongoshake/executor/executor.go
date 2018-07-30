@@ -26,10 +26,12 @@ const (
 
 	OplogsMaxGroupNum       = 1000
 	OplogsMaxGroupSize      = 12 * 1024 * 1024 // MongoDB limits 16MB
-	ConflictDetectWaterMark = 50000
 )
 
-var GlobalExecutorId int32 = -1
+var (
+	GlobalExecutorId int32 = -1
+	ThresholdVersion string = "3.2.0"
+)
 
 type PartialLogWithCallbak struct {
 	partialLog *oplog.PartialLog
@@ -166,6 +168,9 @@ type Executor struct {
 
 	// mongo connection
 	session *mgo.Session
+
+	// bulk insert or single insert
+	bulkInsert bool
 }
 
 func GenerateExecutorId() int {

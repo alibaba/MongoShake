@@ -7,11 +7,11 @@ import (
 
 	"mongoshake/dbpool"
 	"mongoshake/oplog"
+	"mongoshake/collector/configure"
+	"mongoshake/common"
 
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-
-	"mongoshake/collector/configure"
 	LOG "github.com/vinllen/log4go"
 )
 
@@ -46,6 +46,7 @@ func (exec *Executor) ensureConnection() bool {
 			return false
 		} else {
 			exec.session = conn.Session
+			exec.bulkInsert = utils.GetAndCompareVersion(exec.session, ThresholdVersion)
 		}
 	}
 
@@ -67,7 +68,7 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 		}
 		// just use the first log. they has the same metadata
 		metadata := buildMetadata(group.oplogRecords[0].original.partialLog)
-		dbWriter := NewDbWriter(exec.session, metadata)
+		dbWriter := NewDbWriter(exec.session, metadata, exec.bulkInsert)
 		var err error
 
 		LOG.Debug("Replay-%d oplog collection ns [%s] with command [%s] batch count %d, metadata %v",

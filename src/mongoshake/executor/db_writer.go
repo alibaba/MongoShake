@@ -34,12 +34,13 @@ type BasicWriter interface {
 	doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error
 }
 
-func NewDbWriter(session *mgo.Session, metadata bson.M) BasicWriter {
-	//if _, ok := metadata["g"]; ok {
-	//	return &CommandWriter{session: session}
-	//}
-	//return &GeneralWriter{session: session}
-	return &CommandWriter{session: session}
+func NewDbWriter(session *mgo.Session, metadata bson.M, bulkInsert bool) BasicWriter {
+	if !bulkInsert { // bulk insertion disable
+		return &SingleWriter{session: session}
+	} else if _, ok := metadata["g"]; ok { // has gid
+		return &CommandWriter{session: session}
+	}
+	return &BulkWriter{session: session} // bulk insertion enable
 }
 
 // use run_command to execute command
@@ -221,19 +222,19 @@ func (cw *CommandWriter) applyOps(database string, metadata bson.M, oplogs []*op
 	return nil
 }
 
-// use general interface such like Insert/Update/Delete to execute command
-type GeneralWriter struct {
+// use general bulk interface such like Insert/Update/Delete to execute command
+type BulkWriter struct {
 	// mongo connection
 	session *mgo.Session
 }
 
-func (gw *GeneralWriter) doInsert(database, collection string, metadata bson.M, oplogs []*OplogRecord,
+func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, oplogs []*OplogRecord,
 		dupUpdate bool) error {
 	var inserts []interface{}
 	for _, log := range oplogs {
 		inserts = append(inserts, log.original.partialLog.Object)
 	}
-	collectionHandle := gw.session.DB(database).C(collection)
+	collectionHandle := bw.session.DB(database).C(collection)
 
 	var err error
 	if err = collectionHandle.Insert(inserts...); err != nil {
@@ -245,107 +246,79 @@ func (gw *GeneralWriter) doInsert(database, collection string, metadata bson.M, 
 		// update on duplicated key occur
 		if dupUpdate {
 			LOG.Info("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
-			return gw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.ReplayerExecutorUpsert)
+			return bw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.ReplayerExecutorUpsert)
 		}
 		return nil
 	}
 	return err
 }
 
-func (gw *GeneralWriter) doUpdateOnInsert(database, collection string, metadata bson.M,
-	oplogs []*OplogRecord, upsert bool) error {
-	type pair struct {
-		id   interface{}
-		data interface{}
-	}
-	var updates []*pair
+func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bson.M,
+		oplogs []*OplogRecord, upsert bool) error {
+	var update []interface{}
 	for _, log := range oplogs {
 		// insert must have _id
 		if id, exist := log.original.partialLog.Object["_id"]; exist {
-			updates = append(updates, &pair{id: id, data: log.original.partialLog.Object})
+			// updates = append(updates, &pair{id: id, data: log.original.partialLog.Object})
+			update = append(update, bson.M{"_id": id}, log.original.partialLog.Object)
 		} else {
 			LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
 		}
 	}
 
-	collectionHandle := gw.session.DB(database).C(collection)
-	var errMsgs []string
+	bulk := bw.session.DB(database).C(collection).Bulk()
 	if upsert {
-		for _, update := range updates {
-			if _, err := collectionHandle.UpsertId(update.id, update.data); err != nil {
-				errMsg := fmt.Sprintf("upsert _id[%v] with data[%v] failed[%v]", update.id, update.data,
-					err.Error())
-				// LOG.Warn(errMsg)
-				errMsgs = append(errMsgs, errMsg)
-			}
-		}
+		bulk.Upsert(update...)
 	} else {
-		for _, update := range updates {
-			if err := collectionHandle.UpdateId(update.id, update.data); err != nil && mgo.IsDup(err) == false {
-				errMsg := fmt.Sprintf("update _id[%v] with data[%v] failed[%v]", update.id, update.data,
-					err.Error())
-				// LOG.Warn(errMsg)
-				errMsgs = append(errMsgs, errMsg)
-			}
-		}
+		bulk.Update(update...)
 	}
-
-	if len(errMsgs) != 0 {
-		return fmt.Errorf(strings.Join(errMsgs, "; "))
+	if _, err := bulk.Run(); err != nil {
+		return fmt.Errorf("doUpdateOnInsert run upsert/update[%v] failed[%v]", upsert, err)
 	}
 	return nil
 }
 
-func (gw *GeneralWriter) doUpdate(database, collection string, metadata bson.M,
+func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 		oplogs []*OplogRecord, upsert bool) error {
-	collectionHandle := gw.session.DB(database).C(collection)
-	var errMsgs []string
-	var err error
+	var update []interface{}
 	for _, log := range oplogs {
-		if upsert {
-			_, err = collectionHandle.Upsert(log.original.partialLog.Query, log.original.partialLog.Object)
-		} else {
-			err = collectionHandle.Update(log.original.partialLog.Query, log.original.partialLog.Object)
-		}
-		if err != nil && mgo.IsDup(err) == false && !isNotFound(err) {
-			errMsg := fmt.Sprintf("update/upsert old-data[%v] with new-data[%v] failed[%v]",
-				log.original.partialLog.Query, log.original.partialLog.Object, err.Error())
-			errMsgs = append(errMsgs, errMsg)
-		}
+		update = append(update, log.original.partialLog.Query, log.original.partialLog.Object)
 	}
 
-	if len(errMsgs) != 0 {
-		return fmt.Errorf(strings.Join(errMsgs, "; "))
+	bulk := bw.session.DB(database).C(collection).Bulk()
+	if upsert {
+		bulk.Upsert(update...)
+	} else {
+		bulk.Update(update...)
+	}
+	if _, err := bulk.Run(); err != nil {
+		return fmt.Errorf("doUpdate run upsert/update[%v] failed[%v]", upsert, err)
 	}
 	return nil
 }
 
-func (gw *GeneralWriter) doDelete(database, collection string, metadata bson.M,
+func (bw *BulkWriter) doDelete(database, collection string, metadata bson.M,
 		oplogs []*OplogRecord) error {
-	collectionHandle := gw.session.DB(database).C(collection)
-	var errMsgs []string
+	var delete []interface{}
 	for _, log := range oplogs {
-		// ignore ErrNotFound
-		if err := collectionHandle.Remove(log.original.partialLog.Query); err != nil && !isNotFound(err) {
-			errMsg := fmt.Sprintf("delete data[%v] failed[%v]", log.original.partialLog.Query,
-				err.Error())
-			errMsgs = append(errMsgs, errMsg)
-		}
+		delete = append(delete, log.original.partialLog.Object)
 	}
 
-	if len(errMsgs) != 0 {
-		return fmt.Errorf(strings.Join(errMsgs, "; "))
+	bulk := bw.session.DB(database).C(collection).Bulk()
+	bulk.Remove(delete...)
+	if _, err := bulk.Run(); err != nil {
+		return fmt.Errorf("doDelete run delete[%v] failed[%v]", delete, err)
 	}
 	return nil
 }
 
-func (gw *GeneralWriter) doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error {
+func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error {
 	var err error
 	for _, log := range oplogs {
 		operation, found := extraCommandName(log.original.partialLog.Object)
 		if !conf.Options.ReplayerDMLOnly || (found && isSyncDataCommand(operation)) {
 			// execute one by one with sequence order
-			if err = gw.applyOps(database, operation, log.original.partialLog); err == nil {
+			if err = bw.applyOps(database, operation, log.original.partialLog); err == nil {
 				LOG.Info("Execute command (op==c) oplog dml_only mode [%t], operation [%s]", conf.Options.ReplayerDMLOnly, operation)
 			} else {
 				return err
@@ -357,8 +330,8 @@ func (gw *GeneralWriter) doCommand(database string, metadata bson.M, oplogs []*O
 	return nil
 }
 
-func (gw *GeneralWriter) applyOps(database, operation string, log *oplog.PartialLog) error {
-	dbHandle := gw.session.DB(database)
+func (bw *BulkWriter) applyOps(database, operation string, log *oplog.PartialLog) error {
+	dbHandle := bw.session.DB(database)
 
 	var err error
 	switch operation {
@@ -379,6 +352,203 @@ func (gw *GeneralWriter) applyOps(database, operation string, log *oplog.Partial
 	case "dropIndexes":
 		fallthrough
 	// case "renameCollection":
+	// 	fallthrough
+	case "convertToCapped":
+		fallthrough
+	case "emptycapped":
+		// convert bson.M to bson.D
+		var store bson.D
+		for key, value := range log.Object {
+			store = append(store, bson.DocElem{Name: key, Value: value})
+		}
+		// call Run()
+		err = dbHandle.Run(store, nil)
+	default:
+		LOG.Info("applyOps meets type[%s] which is not implemented", operation)
+	}
+
+	return err
+}
+
+// use general single writer interface to execute command
+type SingleWriter struct {
+	// mongo connection
+	session *mgo.Session
+}
+
+func (sw *SingleWriter) doInsert(database, collection string, metadata bson.M, oplogs []*OplogRecord,
+		dupUpdate bool) error {
+	collectionHandle := sw.session.DB(database).C(collection)
+	var upserts []*OplogRecord
+	var errMsgs []string
+	for _, log := range oplogs {
+		if err := collectionHandle.Insert(log.original.partialLog.Object); err != nil {
+			if mgo.IsDup(err) {
+				upserts = append(upserts, log)
+			} else {
+				errMsg := fmt.Sprintf("insert data[%v] failed[%v]", log.original.partialLog.Object,
+					err)
+				errMsgs = append(errMsgs, errMsg)
+			}
+		}
+	}
+
+	if len(errMsgs) != 0 {
+		return fmt.Errorf(strings.Join(errMsgs, ";"))
+	}
+
+	if len(upserts) != 0 {
+		HandleDuplicated(collectionHandle, upserts, OpInsert)
+		// update on duplicated key occur
+		if dupUpdate {
+			LOG.Info("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
+			return sw.doUpdateOnInsert(database, collection, metadata, upserts, conf.Options.ReplayerExecutorUpsert)
+		}
+		return nil
+	}
+	return nil
+}
+
+func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata bson.M,
+	oplogs []*OplogRecord, upsert bool) error {
+	type pair struct {
+		id   interface{}
+		data interface{}
+	}
+	var updates []*pair
+	for _, log := range oplogs {
+		// insert must have _id
+		if id, exist := log.original.partialLog.Object["_id"]; exist {
+			updates = append(updates, &pair{id: id, data: log.original.partialLog.Object})
+		} else {
+			LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
+		}
+	}
+
+	collectionHandle := sw.session.DB(database).C(collection)
+	var errMsgs []string
+	if upsert {
+		for _, update := range updates {
+			if _, err := collectionHandle.UpsertId(update.id, update.data); err != nil {
+				errMsg := fmt.Sprintf("upsert _id[%v] with data[%v] failed[%v]", update.id, update.data,
+					err)
+				errMsgs = append(errMsgs, errMsg)
+			}
+		}
+	} else {
+		for _, update := range updates {
+			if err := collectionHandle.UpdateId(update.id, update.data); err != nil && mgo.IsDup(err) == false {
+				errMsg := fmt.Sprintf("update _id[%v] with data[%v] failed[%v]", update.id, update.data,
+					err.Error())
+				errMsgs = append(errMsgs, errMsg)
+			}
+		}
+	}
+
+	if len(errMsgs) != 0 {
+		return fmt.Errorf(strings.Join(errMsgs, "; "))
+	}
+	return nil
+}
+
+func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
+		oplogs []*OplogRecord, upsert bool) error {
+	collectionHandle := sw.session.DB(database).C(collection)
+	var errMsgs []string
+	if upsert {
+		for _, log := range oplogs {
+			_, err := collectionHandle.Upsert(log.original.partialLog.Query, log.original.partialLog.Object)
+			if err != nil && mgo.IsDup(err) == false {
+				errMsg := fmt.Sprintf("doUpdate[upsert] old-data[%v] with new-data[%v] failed[%v]",
+					log.original.partialLog.Query, log.original.partialLog.Object, err)
+				errMsgs = append(errMsgs, errMsg)
+			}
+		}
+	} else {
+		for _, log := range oplogs {
+			err := collectionHandle.Update(log.original.partialLog.Query, log.original.partialLog.Object)
+			if err != nil && mgo.IsDup(err) == false {
+				if isNotFound(err) {
+					LOG.Warn("doUpdate[update] data[%v] not found", log.original.partialLog.Query)
+				} else {
+					errMsg := fmt.Sprintf("doUpdate[update] old-data[%v] with new-data[%v] failed[%v]",
+						log.original.partialLog.Query, log.original.partialLog.Object, err)
+					errMsgs = append(errMsgs, errMsg)
+				}
+			}
+		}
+	}
+
+	if len(errMsgs) != 0 {
+		return fmt.Errorf(strings.Join(errMsgs, "; "))
+	}
+	return nil
+
+}
+
+func (sw *SingleWriter) doDelete(database, collection string, metadata bson.M,
+		oplogs []*OplogRecord) error {
+	collectionHandle := sw.session.DB(database).C(collection)
+	var errMsgs []string
+	for _, log := range oplogs {
+		// ignore ErrNotFound
+		if err := collectionHandle.RemoveId(log.original.partialLog.Object["_id"]); err != nil {
+			if isNotFound(err) {
+				LOG.Warn("doDelete data[%v] not found", log.original.partialLog.Query)
+			} else {
+				errMsg := fmt.Sprintf("delete data[%v] failed[%v]", log.original.partialLog.Query,
+					err)
+				errMsgs = append(errMsgs, errMsg)
+			}
+		}
+	}
+
+	if len(errMsgs) != 0 {
+		return fmt.Errorf(strings.Join(errMsgs, "; "))
+	}
+	return nil
+}
+
+func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error {
+	var err error
+	for _, log := range oplogs {
+		operation, found := extraCommandName(log.original.partialLog.Object)
+		if !conf.Options.ReplayerDMLOnly || (found && isSyncDataCommand(operation)) {
+			// execute one by one with sequence order
+			if err = sw.applyOps(database, operation, log.original.partialLog); err == nil {
+				LOG.Info("Execute command (op==c) oplog dml_only mode [%t], operation [%s]", conf.Options.ReplayerDMLOnly, operation)
+			} else {
+				return err
+			}
+		} else {
+			// exec.batchExecutor.ReplMetric.AddFilter(1)
+		}
+	}
+	return nil
+}
+
+func (sw *SingleWriter) applyOps(database, operation string, log *oplog.PartialLog) error {
+	dbHandle := sw.session.DB(database)
+
+	var err error
+	switch operation {
+	case "dropDatabase":
+		err = dbHandle.DropDatabase()
+	case "create":
+		fallthrough
+	case "collMod":
+		fallthrough
+	case "drop":
+		fallthrough
+	case "deleteIndex":
+		fallthrough
+	case "deleteIndexes":
+		fallthrough
+	case "dropIndex":
+		fallthrough
+	case "dropIndexes":
+		fallthrough
+	//case "renameCollection":
 	// 	fallthrough
 	case "convertToCapped":
 		fallthrough
