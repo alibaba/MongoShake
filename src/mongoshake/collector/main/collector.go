@@ -19,9 +19,10 @@ import (
 	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
 	"github.com/vinllen/mgo/bson"
+	"os/exec"
 )
 
-type Exit struct {Code int}
+type Exit struct{ Code int }
 
 func main() {
 	var err error
@@ -32,7 +33,16 @@ func main() {
 	// argument options
 	configuration := flag.String("conf", "", "configure file absolute path")
 	verbose := flag.Bool("verbose", false, "show logs on console")
+	version := flag.Bool("version", false, "show version")
 	flag.Parse()
+
+	if *version {
+		out, err := exec.Command("git", "describe", "--tags").Output()
+		if err != nil {
+			fmt.Println(err)
+		}
+		fmt.Printf("%s", out)
+	}
 
 	if *configuration == "" {
 		fmt.Println(utils.VERSION)
