@@ -19,7 +19,6 @@ import (
 	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
 	"github.com/vinllen/mgo/bson"
-	"os/exec"
 )
 
 type Exit struct{ Code int }
@@ -37,11 +36,7 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		out, err := exec.Command("git", "describe", "--tags").Output()
-		if err != nil {
-			fmt.Println(err)
-		}
-		fmt.Printf("%s", out)
+		fmt.Println(utils.VERSION_OF_MONGOSHAKE)
 	}
 
 	if *configuration == "" {
