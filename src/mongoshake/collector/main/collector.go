@@ -36,11 +36,11 @@ func main() {
 	flag.Parse()
 
 	if *version {
-		fmt.Println(utils.VERSION_OF_MONGOSHAKE)
+		fmt.Println(utils.VERSION)
 	}
 
 	if *configuration == "" {
-		fmt.Println(utils.VERSION)
+		fmt.Println(utils.BRANCH)
 		panic(Exit{0})
 	}
 

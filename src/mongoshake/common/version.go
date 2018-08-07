@@ -1,3 +1,3 @@
 package utils
 
-const VERSION_OF_MONGOSHAKE = "v1.2.0"
+const VERSION = "v1.2.0"
