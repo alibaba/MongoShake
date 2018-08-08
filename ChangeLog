@@ -1,3 +1,8 @@
+2018-08-08 Alibaba Cloud.
+	* version: 1.2.1
+	* BUG FIX: remove `$v` field in oplog to fix the bug that update oplog
+	error in MongoDB 3.6
+
 2018-07-29 Alibaba Cloud.
 	* version: 1.2.0
 	* Feature: Use general write instead of op_command. When the version is
