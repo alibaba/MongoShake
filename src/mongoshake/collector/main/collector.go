@@ -21,7 +21,7 @@ import (
 	"github.com/vinllen/mgo/bson"
 )
 
-type Exit struct {Code int}
+type Exit struct{ Code int }
 
 func main() {
 	var err error
@@ -32,10 +32,15 @@ func main() {
 	// argument options
 	configuration := flag.String("conf", "", "configure file absolute path")
 	verbose := flag.Bool("verbose", false, "show logs on console")
+	version := flag.Bool("version", false, "show version")
 	flag.Parse()
 
-	if *configuration == "" {
+	if *version {
 		fmt.Println(utils.VERSION)
+	}
+
+	if *configuration == "" {
+		fmt.Println(utils.BRANCH)
 		panic(Exit{0})
 	}
 

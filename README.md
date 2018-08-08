@@ -1,5 +1,10 @@
 This is a brief introduction of Mongo-Shake, please visit [english wiki](https://github.com/aliyun/mongo-shake/wiki/MongoShake-Detailed-Documentation) or [chinese wiki](https://yq.aliyun.com/articles/603329) if you want to see more details including architecture, data flow, performance test, business showcase and so on.
 
+*  [English document](https://github.com/aliyun/mongo-shake/wiki/MongoShake-Detailed-Documentation)
+*  [Chinese document](https://yq.aliyun.com/articles/603329)
+*  [FAQ document](https://github.com/aliyun/mongo-shake/wiki/FAQ)
+*  [Performance test document](https://github.com/aliyun/mongo-shake/wiki/MongoShake-Performance-Document)
+
 # Mongo-Shake
 ---
 Mongo-Shake is developed and maintained by DocumentDB Develop Team in Alibaba-Cloud.<br>
