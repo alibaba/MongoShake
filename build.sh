@@ -11,7 +11,7 @@ tags=""
 #branch=`git symbolic-ref --short -q HEAD`
 branch=$(git symbolic-ref -q HEAD | awk -F'/' '{print $3;}')
 cid=$(git rev-parse HEAD)
-version=$branch","$cid
+branch=$branch","$cid
 
 output=./bin/
 
@@ -30,7 +30,7 @@ if [ -z "$DEBUG" ]; then
     DEBUG=0
 fi
 
-info="mongoshake/common.VERSION=$version"
+info="mongoshake/common.BRANCH=$branch"
 # inject program information about compile
 if [ $DEBUG -eq 1 ]; then
 	echo "[ BUILD DEBUG ]"
