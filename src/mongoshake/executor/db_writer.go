@@ -13,6 +13,10 @@ import(
 	LOG "github.com/vinllen/log4go"
 )
 
+const (
+	verisonMark = "$v"
+)
+
 type BasicWriter interface {
 	// insert operation
 	doInsert(database, collection string, metadata bson.M, oplogs []*OplogRecord,
@@ -282,7 +286,12 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 		oplogs []*OplogRecord, upsert bool) error {
 	var update []interface{}
 	for _, log := range oplogs {
-		update = append(update, log.original.partialLog.Query, log.original.partialLog.Object)
+		oFiled := log.original.partialLog.Object
+		// we should handle the special case: "o" filed may include "$v" in mongo-3.6 which is not support in mgo.v2 library
+		if _, ok := oFiled[verisonMark]; ok {
+			delete(oFiled, verisonMark)
+		}
+		update = append(update, log.original.partialLog.Query, oFiled)
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
@@ -457,7 +466,12 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 	var errMsgs []string
 	if upsert {
 		for _, log := range oplogs {
-			_, err := collectionHandle.Upsert(log.original.partialLog.Query, log.original.partialLog.Object)
+			oFiled := log.original.partialLog.Object
+			// we should handle the special case: "o" filed may include "$v" in mongo-3.6 which is not support in mgo.v2 library
+			if _, ok := oFiled[verisonMark]; ok {
+				delete(oFiled, verisonMark)
+			}
+			_, err := collectionHandle.Upsert(log.original.partialLog.Query, oFiled)
 			if err != nil && mgo.IsDup(err) == false {
 				errMsg := fmt.Sprintf("doUpdate[upsert] old-data[%v] with new-data[%v] failed[%v]",
 					log.original.partialLog.Query, log.original.partialLog.Object, err)
@@ -466,7 +480,12 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 		}
 	} else {
 		for _, log := range oplogs {
-			err := collectionHandle.Update(log.original.partialLog.Query, log.original.partialLog.Object)
+			oFiled := log.original.partialLog.Object
+			// we should handle the special case: "o" filed may include "$v" in mongo-3.6 which is not support in mgo.v2 library
+			if _, ok := oFiled[verisonMark]; ok {
+				delete(oFiled, verisonMark)
+			}
+			err := collectionHandle.Update(log.original.partialLog.Query, oFiled)
 			if err != nil && mgo.IsDup(err) == false {
 				if isNotFound(err) {
 					LOG.Warn("doUpdate[update] data[%v] not found", log.original.partialLog.Query)

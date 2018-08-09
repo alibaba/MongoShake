@@ -19,7 +19,7 @@ const (
 )
 
 // Build info
-var VERSION = "$"
+var BRANCH = "$"
 
 const (
 	APPNAME = "mongoshake"
