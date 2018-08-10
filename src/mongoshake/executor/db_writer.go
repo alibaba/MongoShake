@@ -300,7 +300,12 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 	} else {
 		bulk.Update(update...)
 	}
+
 	if _, err := bulk.Run(); err != nil {
+		if mgo.IsDup(err) {
+			HandleDuplicated(bw.session.DB(database).C(collection), oplogs, OpUpdate)
+			return nil
+		}
 		return fmt.Errorf("doUpdate run upsert/update[%v] failed[%v]", upsert, err)
 	}
 	return nil
