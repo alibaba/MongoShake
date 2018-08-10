@@ -277,6 +277,9 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 		bulk.Update(update...)
 	}
 	if _, err := bulk.Run(); err != nil {
+		if mgo.IsDup(err) {
+			return nil
+		}
 		return fmt.Errorf("doUpdateOnInsert run upsert/update[%v] failed[%v]", upsert, err)
 	}
 	return nil
