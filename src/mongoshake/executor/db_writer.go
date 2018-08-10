@@ -300,7 +300,12 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 	} else {
 		bulk.Update(update...)
 	}
+
 	if _, err := bulk.Run(); err != nil {
+		if mgo.IsDup(err) {
+			HandleDuplicated(bw.session.DB(database).C(collection), oplogs, OpUpdate)
+			return nil
+		}
 		return fmt.Errorf("doUpdate run upsert/update[%v] failed[%v]", upsert, err)
 	}
 	return nil
@@ -472,7 +477,11 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 				delete(oFiled, verisonMark)
 			}
 			_, err := collectionHandle.Upsert(log.original.partialLog.Query, oFiled)
-			if err != nil && mgo.IsDup(err) == false {
+			if err != nil {
+				if mgo.IsDup(err) {
+					HandleDuplicated(collectionHandle, oplogs, OpUpdate)
+					continue
+				}
 				errMsg := fmt.Sprintf("doUpdate[upsert] old-data[%v] with new-data[%v] failed[%v]",
 					log.original.partialLog.Query, log.original.partialLog.Object, err)
 				errMsgs = append(errMsgs, errMsg)
@@ -486,9 +495,11 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 				delete(oFiled, verisonMark)
 			}
 			err := collectionHandle.Update(log.original.partialLog.Query, oFiled)
-			if err != nil && mgo.IsDup(err) == false {
+			if err != nil {
 				if isNotFound(err) {
 					LOG.Warn("doUpdate[update] data[%v] not found", log.original.partialLog.Query)
+				} else if mgo.IsDup(err) {
+					HandleDuplicated(collectionHandle, oplogs, OpUpdate)
 				} else {
 					errMsg := fmt.Sprintf("doUpdate[update] old-data[%v] with new-data[%v] failed[%v]",
 						log.original.partialLog.Query, log.original.partialLog.Object, err)
