@@ -24,7 +24,7 @@ func (tunnel *KafkaWriter) Prepare() bool {
 	return true
 }
 
-func (tunnel *KafkaWriter) Send(message *TMessage) int64 {
+func (tunnel *KafkaWriter) Send(message *WMessage) int64 {
 	if len(message.RawLogs) == 0 || message.Tag&MsgProbe != 0 {
 		return 0
 	}
@@ -63,6 +63,6 @@ func (tunnel *KafkaWriter) AckRequired() bool {
 	return false
 }
 
-func (tunnel *KafkaWriter) PasedLogsRequired() bool {
+func (tunnel *KafkaWriter) ParsedLogsRequired() bool {
 	return false
 }

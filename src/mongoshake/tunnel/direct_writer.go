@@ -33,7 +33,7 @@ func (writer *DirectWriter) Prepare() bool {
 	return true
 }
 
-func (writer *DirectWriter) Send(message *TMessage) int64 {
+func (writer *DirectWriter) Send(message *WMessage) int64 {
 	writer.batchExecutor.Sync(message.ParsedLogs, nil)
 	return 0
 }
@@ -42,6 +42,6 @@ func (writer *DirectWriter) AckRequired() bool {
 	return false
 }
 
-func (writer *DirectWriter) PasedLogsRequired() bool {
+func (writer *DirectWriter) ParsedLogsRequired() bool {
 	return true
 }

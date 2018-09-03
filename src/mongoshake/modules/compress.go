@@ -105,7 +105,7 @@ func (compressor *Compressor) Install() bool {
 	return true
 }
 
-func (compressor *Compressor) Handle(message *tunnel.TMessage) int64 {
+func (compressor *Compressor) Handle(message *tunnel.WMessage) int64 {
 	var originSize, compressedSize = 0, 0
 	// compress log entry data
 	if len(message.RawLogs) != 0 {
