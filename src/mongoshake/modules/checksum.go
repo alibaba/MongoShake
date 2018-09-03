@@ -20,7 +20,7 @@ func (coder *ChecksumCalculator) Install() bool {
 	return true
 }
 
-func (coder *ChecksumCalculator) Handle(message *tunnel.TMessage) int64 {
+func (coder *ChecksumCalculator) Handle(message *tunnel.WMessage) int64 {
 	// write checksum value
 	if len(message.RawLogs) != 0 {
 		message.Checksum = message.Crc32()

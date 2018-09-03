@@ -48,7 +48,7 @@ func (s *SyncWriter) SimpleWrite(input []byte) error {
 }
 
 func (s *SyncWriter) send(input []byte) error {
-	// use timestap as key
+	// use timestamp as key
 	key := strconv.FormatInt(time.Now().UnixNano(), 16)
 
 	msg := &sarama.ProducerMessage{

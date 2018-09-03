@@ -3,6 +3,7 @@ package kafka
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Shopify/sarama"
 	"github.com/rcrowley/go-metrics"
@@ -10,15 +11,16 @@ import (
 
 var (
 	topicDefault           = "mongoshake"
-	topicSpliter           = "@"
-	brokersSpliter         = ","
+	topicSplitter          = "@"
+	brokersSplitter        = ","
 	defaultPartition int32 = 0
 )
 
 type Message struct {
-	key    []byte
-	Value  []byte
-	offset int64
+	Key       []byte
+	Value     []byte
+	Offset    int64
+	TimeStamp time.Time
 }
 
 type Config struct {
@@ -41,7 +43,7 @@ func NewConfig() *Config {
 
 // parse the address (topic@broker1,broker2,...)
 func parse(address string) (string, []string, error) {
-	arr := strings.Split(address, topicSpliter)
+	arr := strings.Split(address, topicSplitter)
 	l := len(arr)
 	if l == 0 || l > 2 {
 		return "", nil, fmt.Errorf("address format error")
@@ -52,6 +54,6 @@ func parse(address string) (string, []string, error) {
 		topic = arr[0]
 	}
 
-	brokers := strings.Split(arr[l - 1], brokersSpliter)
+	brokers := strings.Split(arr[l - 1], brokersSplitter)
 	return topic, brokers, nil
 }

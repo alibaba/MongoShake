@@ -1,11 +1,12 @@
 package tunnel
 
 import (
-	"mongoshake/oplog"
 	"bytes"
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
+
+	"mongoshake/oplog"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
@@ -34,13 +35,17 @@ const (
 	ReplyDecompressInvalid            = -8
 )
 
+// WMessage wrapped TMessage
+type WMessage struct {
+	*TMessage                      // whole raw log
+	ParsedLogs []*oplog.PartialLog // parsed log
+}
 type TMessage struct {
 	Checksum   uint32
 	Tag        uint32
 	Shard      uint32
 	Compress   uint32
 	RawLogs    [][]byte
-	ParsedLogs []*oplog.PartialLog
 }
 
 func (msg *TMessage) Crc32() uint32 {
@@ -130,12 +135,12 @@ type Writer interface {
 	 * the max oplog ts as ACK offset and discard the returned value (ACK offset).
 	 * error on returning a negative number
 	 */
-	Send(message *TMessage) int64
+	Send(message *WMessage) int64
 
 	/**
 	 * whether need parsed log or raw log
 	 */
-	PasedLogsRequired() bool
+	ParsedLogsRequired() bool
 }
 
 type WriterFactory struct {
@@ -168,6 +173,8 @@ func (factory *WriterFactory) Create(address []string, workerId uint32) Writer {
 // or usefully meta
 func (factory *ReaderFactory) Create(address string) Reader {
 	switch factory.Name {
+	case "kafka":
+		return &KafkaReader{address: address}
 	case "tcp":
 		return &TCPReader{listenAddress: address}
 	case "rpc":

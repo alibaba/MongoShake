@@ -192,7 +192,7 @@ func (writer *TCPWriter) pollRemoteAckValue() {
 	})
 }
 
-func (writer *TCPWriter) Send(message *TMessage) int64 {
+func (writer *TCPWriter) Send(message *WMessage) int64 {
 	tcp := writer.channel[TransferChannel]
 	var err error
 	if err = tcp.ensureNetwork(); err != nil {
@@ -243,7 +243,7 @@ func (writer *TCPWriter) AckRequired() bool {
 	return true
 }
 
-func (writer *TCPWriter) PasedLogsRequired() bool {
+func (writer *TCPWriter) ParsedLogsRequired() bool {
 	return false
 }
 
