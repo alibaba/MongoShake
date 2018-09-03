@@ -3,7 +3,7 @@
 set -o errexit
 
 # compile specified module
-modules=(collector)
+modules=(collector receiver)
 
 tags=""
 

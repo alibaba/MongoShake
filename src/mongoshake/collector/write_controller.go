@@ -38,7 +38,7 @@ type Module interface {
 	 * @return tunnel's error code (<0) or ack value
 	 *
 	 */
-	Handle(message *tunnel.TMessage) int64
+	Handle(message *tunnel.WMessage) int64
 }
 
 // the order of controller modules declared strictly
@@ -87,10 +87,12 @@ func (controller *WriteController) Send(logs []*oplog.GenericOplog, tag uint32) 
 		return controller.LatestLsnAck
 	}
 
-	message := &tunnel.TMessage{
-		Tag:        tag,
-		Shard:      controller.worker.id,
-		RawLogs:    oplog.LogEntryEncode(logs),
+	message := &tunnel.WMessage{
+		TMessage: &tunnel.TMessage {
+			Tag:        tag,
+			Shard:      controller.worker.id,
+			RawLogs:    oplog.LogEntryEncode(logs),
+		},
 		ParsedLogs: oplog.LogParsed(logs),
 	}
 	for _, m := range controller.moduleList {

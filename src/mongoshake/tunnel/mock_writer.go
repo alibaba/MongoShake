@@ -8,7 +8,7 @@ import (
 type MockWriter struct {
 }
 
-func (tunnel *MockWriter) Send(message *TMessage) int64 {
+func (tunnel *MockWriter) Send(message *WMessage) int64 {
 	nimo.AssertTrue(len(message.RawLogs) > 0,
 		"ack is not required. we should never receive empty messages")
 	LOG.Debug("MockTunnel received message length %d, shard %d ", len(message.RawLogs), message.Shard)
@@ -24,6 +24,6 @@ func (tunnel *MockWriter) AckRequired() bool {
 	return false
 }
 
-func (tunnel *MockWriter) PasedLogsRequired() bool {
+func (tunnel *MockWriter) ParsedLogsRequired() bool {
 	return false
 }

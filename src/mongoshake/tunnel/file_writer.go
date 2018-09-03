@@ -85,9 +85,9 @@ func (dataFile *DataFile) ReadHeader() *FileHeader {
 	return fileHeader
 }
 
-func (tunnel *FileWriter) Send(message *TMessage) int64 {
+func (tunnel *FileWriter) Send(message *WMessage) int64 {
 	if message.Tag&MsgProbe == 0 {
-		oplogMessage <- message
+		oplogMessage <- message.TMessage
 	}
 	return 0
 }
@@ -159,6 +159,6 @@ func (tunnel *FileWriter) AckRequired() bool {
 	return false
 }
 
-func (tunnel *FileWriter) PasedLogsRequired() bool {
+func (tunnel *FileWriter) ParsedLogsRequired() bool {
 	return false
 }

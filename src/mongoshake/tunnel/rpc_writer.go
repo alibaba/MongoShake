@@ -18,7 +18,7 @@ type RPCWriter struct {
 	rpcClient *rpc.Client
 }
 
-func (tunnel *RPCWriter) Send(message *TMessage) int64 {
+func (tunnel *RPCWriter) Send(message *WMessage) int64 {
 	var err error
 	if tunnel.rpcConn == nil {
 		// we try just one time as higher layer will handle this error
@@ -36,9 +36,10 @@ func (tunnel *RPCWriter) Send(message *TMessage) int64 {
 	// DON'T need to check len(logs) == 0. It may be a reasonable
 	// probe request sending
 	var reply int64
-	err = tunnel.rpcClient.Call("TunnelRPC.Transfer", message, &reply)
+	err = tunnel.rpcClient.Call("TunnelRPC.Transfer", message.TMessage, &reply)
 
 	if err != nil {
+		LOG.Error("Remote rpc server send error[%v]", err)
 		// error is from network or rpc system.
 		tunnel.rpcClient.Close()
 		tunnel.rpcConn.Close()
@@ -69,6 +70,7 @@ func (tunnel *RPCWriter) Prepare() bool {
 	}
 	// just test the connection
 	conn.Close()
+
 	return true
 }
 
@@ -76,6 +78,6 @@ func (tunnel *RPCWriter) AckRequired() bool {
 	return true
 }
 
-func (tunnel *RPCWriter) PasedLogsRequired() bool {
+func (tunnel *RPCWriter) ParsedLogsRequired() bool {
 	return false
 }
