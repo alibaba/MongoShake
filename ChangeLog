@@ -1,3 +1,7 @@
+2018-09-04 Alibaba Cloud.
+	* version: 1.4.1
+	* BUG FIX: fix bug of the time zone converter
+
 2018-09-03 Alibaba Cloud.
 	* version: 1.4.0
 	* Feature: Add receiver which is used to connect to different tunnels
