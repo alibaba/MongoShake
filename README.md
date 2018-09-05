@@ -20,7 +20,7 @@ There are three options for parallel replication which we call 'shad\_key': __id
 # High Availability
 ---
 Mongo-Shake periodically persistent its context into register center which by default is the source database. Currently, the context is checkpoint which marks the position of successfully replay oplog.<br>
-Hypervisor mechanism is also supported so that it will restart immediately when dies.
+Hypervisor mechanism is also supported so that it will restart immediately when dies(`master_quorum` in configuration).
 
 # Filter
 ---
@@ -29,15 +29,20 @@ Support filtering database and collection namespace with whitelist and blacklist
 # Global ID
 ---
 In Aliyun internal version, global id(also called gid) is supported which marks the id of the database. It can be used to avoid loop when two databases become backup of each other. Mongo-Shake only fetches the oplogs equal to source database id, all the oplogs are be fetched when no gid gave. For current opensource version, it's not supported limited by the modification of MongoDB kernel.
+If you want to build active-active replication with `gid` supported, please visit [FAQ document](https://github.com/aliyun/mongo-shake/wiki/FAQ) to see more details.
 
 # Tunnel
 ---
-As mentioned above, we support several tunnel types such like: rcp, tcp, file, kafka, mock and direct. __rpc__ and __tcp__ means connecting to receiver synchronously by net/rcp and TCP respectively; __file__ means writing output into file; __kafka__ is an asynchronous way of sending the message; __mock__ is used by testing that throws away all the data; __direct__ means writing into target MongoDB directly. Users can also add or modify current tunnel type.
+As mentioned above, we support several tunnel types such like: rcp, tcp, file, kafka, mock and direct. __rpc__ and __tcp__ means connecting to receiver synchronously by net/rcp and TCP respectively; __file__ means writing output into file; __kafka__ is an asynchronous way of sending the message; __mock__ is used by testing that throws away all the data; __direct__ means writing into target MongoDB directly. Users can also add or modify current tunnel type.<br>
 We offer receiver to connect to different tunnels like: rpc, tcp, file, mock and kafka. Please visit [FAQ document](https://github.com/aliyun/mongo-shake/wiki/FAQ) to see more details.
 
 # Compressor
 ---
 Gzip, zlib, deflate compressor are supported in batched oplogs before sending.
+
+# Monitor & Debug
+---
+User can monitor or debug Mongo-Shake through RESTful API, please visit [FAQ document](https://github.com/aliyun/mongo-shake/wiki/FAQ) to see more details.
 
 # Other Details
 ---
