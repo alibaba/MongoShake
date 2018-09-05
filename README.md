@@ -29,7 +29,7 @@ Support filtering database and collection namespace with whitelist and blacklist
 # Global ID
 ---
 In Aliyun internal version, global id(also called gid) is supported which marks the id of the database. It can be used to avoid loop when two databases become backup of each other. Mongo-Shake only fetches the oplogs equal to source database id, all the oplogs are be fetched when no gid gave. For current opensource version, it's not supported limited by the modification of MongoDB kernel.
-If you want to build active-active replication with `gid` supported, please visit [FAQ document](https://github.com/aliyun/mongo-shake/wiki/FAQ) to see more details.
+If you want to build active-active replication without `gid` supported, please visit [FAQ document](https://github.com/aliyun/mongo-shake/wiki/FAQ) to see more details.
 
 # Tunnel
 ---
