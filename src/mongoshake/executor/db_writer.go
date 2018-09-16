@@ -241,7 +241,7 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, opl
 	collectionHandle := bw.session.DB(database).C(collection)
 
 	var err error
-	if err = collectionHandle.Insert(inserts...); err != nil {
+	if err = collectionHandle.Insert(inserts...); err == nil {
 		return nil
 	}
 
