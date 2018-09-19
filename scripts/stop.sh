@@ -9,5 +9,5 @@ ppid=$(ps -ef | awk '{if ($2=='`cat $1`') print $3}')
 if [ $ppid -eq 1 ];then
     kill -9 "$(cat "$1")"
 else
-    kill -9 "$(cat "$1")" "$ppid"
+    kill -9 "$ppid" "$(cat "$1")"
 fi
