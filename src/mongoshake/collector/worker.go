@@ -124,9 +124,10 @@ func (worker *Worker) startWorker() {
 		default:
 			if batch = worker.findFirstAvailableBatch(); batch == nil {
 				worker.probe()
+			} else {
+				worker.transfer(batch)
+				worker.syncer.replMetric.AddConsume(uint64(len(batch)))
 			}
-			worker.transfer(batch)
-			worker.syncer.replMetric.AddConsume(uint64(len(batch)))
 			utils.DEBUG_LOG("Collector-worker-%d poll queued batch oplogs. total[%d]", worker.id, len(batch))
 		}
 	}
@@ -155,7 +156,7 @@ func (worker *Worker) transfer(batch []*oplog.GenericOplog) {
 	var tag uint32
 	done := false
 
-	// transfer util the
+	// transfer util current batch is sent(done == true)
 	for !done {
 		if worker.retransmit {
 			// TODO: send all unack logs ? it's possible very big

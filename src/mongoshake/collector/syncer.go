@@ -258,13 +258,15 @@ func (sync *OplogSyncer) next() bool {
 	}
 
 	if err != nil && err != TimeoutError {
-		LOG.Warn("Oplog syncer internal error : %s", err.Error())
+		LOG.Error("Oplog syncer internal error: %v", err)
 		// error is nil indicate that only timeout incur syncer.next()
 		// return false. so we regardless that
 		sync.replMetric.ReplStatus.Update(utils.FetchBad)
 		utils.YieldInMs(DurationTime)
 
 		// alarm
+	} else if err == TimeoutError { // zhuzhao test
+		LOG.Error("timeout!!!!!!, log[%v]", log)
 	}
 
 	// buffered oplog or trigger to flush. log is nil

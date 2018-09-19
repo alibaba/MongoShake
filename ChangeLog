@@ -1,6 +1,14 @@
+2018-09-19 Alibaba Cloud.
+	* version: 1.4.2
+	* BUG FIX: fix bug of `start.sh` script.
+	* BUG FIX: fix bug of error judge sentence in bulk writer commited by
+	`chensi01`.
+	* IMPROVE: add timeout configuration and flush strategy for the syncer.
+	* IMPROVE: remove "send [0] logs" hint in log.
+
 2018-09-04 Alibaba Cloud.
 	* version: 1.4.1
-	* BUG FIX: fix bug of the time zone converter
+	* BUG FIX: fix bug of the time zone converter.
 
 2018-09-03 Alibaba Cloud.
 	* version: 1.4.0
@@ -9,7 +17,7 @@
 
 2018-08-08 Alibaba Cloud.
 	* version: 1.2.1
-	* BUG FIX: remove `$v` field in oplog to fix the bug in MongoDB 3.6
+	* BUG FIX: remove `$v` field in oplog to fix the bug in MongoDB 3.6.
 
 2018-07-29 Alibaba Cloud.
 	* version: 1.2.0
@@ -19,9 +27,9 @@
 
 2018-07-18 Alibaba Cloud.
 	* version: 1.0.0
-	* BUG FIX: upsert/remove error when old value isn't exist
-	* BUG FIX: connect to Alibaba Cloud MongoDB instance without permission
-	* BUG FIX: some logs can't be print out when crash
+	* BUG FIX: upsert/remove error when old value isn't exist.
+	* BUG FIX: connect to Alibaba Cloud MongoDB instance without permission.
+	* BUG FIX: some logs can't be print out when crash.
 	
 2018-06-28 Alibaba Cloud.
 	* mongo-shake: initial release.
