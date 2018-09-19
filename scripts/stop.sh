@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #kill -9 "$(cat "$1")"
 if [ $# != 1 ] ; then
-    echo "USAGE: $0 [pidfile]"
+    echo "USAGE: $0 [pid filename which by default is 'mongoshake.pid']"
     exit 0
 fi
 ppid=$(ps -ef | awk '{if ($2=='`cat $1`') print $3}')
