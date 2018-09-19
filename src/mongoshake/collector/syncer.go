@@ -266,7 +266,7 @@ func (sync *OplogSyncer) next() bool {
 
 		// alarm
 	} else if err == TimeoutError { // zhuzhao test
-		LOG.Error("timeout!!!!!!, log[%v]", log)
+		// LOG.Error("timeout!!!!!!, log[%v]", log)
 	}
 
 	// buffered oplog or trigger to flush. log is nil

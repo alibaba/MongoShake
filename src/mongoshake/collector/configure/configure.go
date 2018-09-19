@@ -11,6 +11,7 @@ type Configuration struct {
 	LogBuffer             bool     `config:"log_buffer"`
 	OplogGIDS             string   `config:"oplog.gids"`
 	ShardKey              string   `config:"shard_key"`
+	SyncerBufferTime      uint     `config:"syncer.buffer_time"`
 	WorkerNum             int      `config:"worker"`
 	WorkerOplogCompressor string   `config:"worker.oplog_compressor"`
 	WorkerBatchQueueSize  uint64   `config:"worker.batch_queue_size"`

@@ -10,6 +10,7 @@ import (
 
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
+	"mongoshake/collector/configure"
 )
 
 const (
@@ -112,7 +113,7 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 	reader.conn.Session.SetBatch(8192)
 	reader.conn.Session.SetPrefetch(0.2)
 	reader.oplogsIterator = reader.conn.Session.DB("local").C(dbpool.OplogNS).
-		Find(reader.query).LogReplay().Tail(time.Second * 3)
+		Find(reader.query).LogReplay().Tail(time.Second * time.Duration(conf.Options.SyncerBufferTime))
 	return
 }
 

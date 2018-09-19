@@ -1,6 +1,6 @@
 2018-09-19 Alibaba Cloud.
 	* version: 1.4.2
-	* BUG FIX: fix bug of `start.sh` script.
+	* BUG FIX: fix bug of `start.sh` script commited by `ManleyLiu`.
 	* BUG FIX: fix bug of error judge sentence in bulk writer commited by
 	`chensi01`.
 	* IMPROVE: add timeout configuration and flush strategy for the syncer.
