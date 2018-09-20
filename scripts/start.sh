@@ -21,5 +21,5 @@ GOMAXPROCS=0
 if [ $GOMAXPROCS != 0 ] ; then
 	./bin/hypervisor --daemon --exec="GOMAXPROCS=$GOMAXPROCS ./bin/$name -conf=$1 2>&1 1>> $name.output" 1>>hypervisor.output 2>&1
 else
-	./bin/hypervisor --daemon --exec="./bin/$name -conf=$2 2>&1 1>> $name.output" 1>>hypervisor.output 2>&1
+	./bin/hypervisor --daemon --exec="./bin/$name -conf=$1 2>&1 1>> $name.output" 1>>hypervisor.output 2>&1
 fi
