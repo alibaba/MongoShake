@@ -216,6 +216,7 @@ func (sync *OplogSyncer) poll() {
 		return
 	}
 	sync.reader.SetQueryTimestampOnEmpty(checkpoint.Timestamp)
+	go sync.reader.StartFetcher() // start reader fetcher
 
 	// every syncer should under the control of global rate limiter
 	rc := sync.coordinator.rateController

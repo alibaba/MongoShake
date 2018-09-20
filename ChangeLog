@@ -3,7 +3,8 @@
 	* BUG FIX: fix bug of `start.sh` script commited by `ManleyLiu`.
 	* BUG FIX: fix bug of error judge sentence in bulk writer commited by
 	`chensi01`.
-	* IMPROVE: add timeout configuration and flush strategy for the syncer.
+	* IMPROVE: add timeout configuration and flush strategy for the oplog
+	reader .
 	* IMPROVE: remove "send [0] logs" hint in log.
 
 2018-09-04 Alibaba Cloud.

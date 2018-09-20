@@ -156,7 +156,7 @@ func sanitizeOptions() error {
 		conf.Options.ShardKey != oplog.ShardAutomatic {
 		return errors.New("shard key type is unknown")
 	}
-	if conf.Options.SyncerBufferTime == 0 {
+	if conf.Options.SyncerReaderBufferTime == 0 {
 		return errors.New("syncer buffer time can't be 0")
 	}
 	if conf.Options.WorkerNum <= 0 || conf.Options.WorkerNum > 256 {
