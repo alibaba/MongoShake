@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"sync"
 
 	"mongoshake/dbpool"
 	"mongoshake/oplog"
@@ -44,7 +45,9 @@ type OplogReader struct {
 	query bson.M
 
 	// oplog channel
-	oplogChan chan *retOplog
+	oplogChan    chan *retOplog
+	fetcherExist bool
+	fetcherlock  sync.Mutex
 }
 
 // NewOplogReader creates reader with mongodb url
@@ -98,6 +101,19 @@ func (reader *OplogReader) get() (log *bson.Raw, err error) {
 
 // fetch oplog and put into channel, must be started manually
 func (reader *OplogReader) StartFetcher() {
+	if reader.fetcherExist == true {
+		return
+	}
+
+	reader.fetcherlock.Lock()
+	if reader.fetcherExist == false { // double check
+		reader.fetcherExist = true
+		go reader.fetcher()
+	}
+	reader.fetcherlock.Unlock()
+}
+
+func (reader *OplogReader) fetcher() {
 	var log *bson.Raw
 	for {
 		if err := reader.ensureNetwork(); err != nil {
