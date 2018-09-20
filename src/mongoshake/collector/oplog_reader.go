@@ -45,7 +45,6 @@ type OplogReader struct {
 
 	// oplog channel
 	oplogChan chan *retOplog
-	fetcherExist bool
 }
 
 // NewOplogReader creates reader with mongodb url
