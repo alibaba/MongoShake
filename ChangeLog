@@ -1,3 +1,8 @@
+2018-09-25 Alibaba Cloud.
+	* version: 1.4.3
+	* IMPROVE: stop syncing data when collection capped error happen in source
+	database.
+
 2018-09-19 Alibaba Cloud.
 	* version: 1.4.2
 	* BUG FIX: fix bug of `start.sh` script commited by `ManleyLiu`.
