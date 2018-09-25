@@ -149,9 +149,9 @@ func (ckpt *MongoCheckpoint) Get() *CheckpointContext {
 		ckpt.StartPosition = int64(math.Max(float64(ckpt.StartPosition), 1))
 		value.Name = ckpt.Name
 		value.Timestamp = bson.MongoTimestamp(ckpt.StartPosition << 32)
-		LOG.Info("Regenerate checkpoint. content %v", value)
+		LOG.Info("Regenerate checkpoint but won't insert. content %v", value)
 		// insert current ckpt snapshot in memory
-		ckpt.QueryHandle.Insert(value)
+		// ckpt.QueryHandle.Insert(value)
 		return value
 	}
 
@@ -166,13 +166,13 @@ func (ckpt *MongoCheckpoint) Insert(updates *CheckpointContext) error {
 		return errors.New("record ckpt network failed")
 	}
 
-	if err := ckpt.QueryHandle.Update(bson.M{CheckpointName: ckpt.Name}, updates); err != nil {
-		LOG.Warn("Record checkpoint %v update error %v", updates, err)
+	if _, err := ckpt.QueryHandle.Upsert(bson.M{CheckpointName: ckpt.Name}, updates); err != nil {
+		LOG.Warn("Record checkpoint %v upsert error %v", updates, err)
 		ckpt.close()
 		return err
 	}
 
-	LOG.Debug("Record new checkpoint success [%d]", int64(utils.ExtractMongoTimestamp(updates.Timestamp)))
+	LOG.Info("Record new checkpoint success [%d]", int64(utils.ExtractMongoTimestamp(updates.Timestamp)))
 	return nil
 }
 
@@ -215,5 +215,7 @@ func (ckpt *HttpApiCheckpoint) Insert(insert *CheckpointContext) error {
 		LOG.Warn("Context api manager write request failed, %v", err)
 		return err
 	}
+
+	LOG.Info("Record new checkpoint success [%d]", int64(utils.ExtractMongoTimestamp(insert.Timestamp)))
 	return nil
 }
