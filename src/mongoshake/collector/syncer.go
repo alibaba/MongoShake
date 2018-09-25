@@ -216,6 +216,7 @@ func (sync *OplogSyncer) poll() {
 		return
 	}
 	sync.reader.SetQueryTimestampOnEmpty(checkpoint.Timestamp)
+	sync.reader.StartFetcher() // start reader fetcher if not exist
 
 	// every syncer should under the control of global rate limiter
 	rc := sync.coordinator.rateController
@@ -258,7 +259,12 @@ func (sync *OplogSyncer) next() bool {
 	}
 
 	if err != nil && err != TimeoutError {
-		LOG.Warn("Oplog syncer internal error : %s", err.Error())
+		if err == CollectionCappedError {
+			LOG.Error("oplog collection capped error, users should fix it manually")
+			return false
+		}
+		LOG.Error("oplog syncer internal error: %v", err)
+
 		// error is nil indicate that only timeout incur syncer.next()
 		// return false. so we regardless that
 		sync.replMetric.ReplStatus.Update(utils.FetchBad)
