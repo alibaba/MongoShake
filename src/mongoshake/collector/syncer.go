@@ -256,15 +256,11 @@ func (sync *OplogSyncer) next() bool {
 		sync.replMetric.SetOplogMax(payload)
 		sync.replMetric.SetOplogAvg(payload)
 		sync.replMetric.ReplStatus.Clear(utils.FetchBad)
-	}
-
-	if err != nil && err != TimeoutError {
-		if err == CollectionCappedError {
-			LOG.Error("oplog collection capped error, users should fix it manually")
-			return false
-		}
+	} else if err == CollectionCappedError {
+		LOG.Error("oplog collection capped error, users should fix it manually")
+		return false
+	} else if err != nil && err != TimeoutError {
 		LOG.Error("oplog syncer internal error: %v", err)
-
 		// error is nil indicate that only timeout incur syncer.next()
 		// return false. so we regardless that
 		sync.replMetric.ReplStatus.Update(utils.FetchBad)
