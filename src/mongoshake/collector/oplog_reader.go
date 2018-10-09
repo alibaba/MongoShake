@@ -192,7 +192,7 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 	oldestTs := reader.getOldestTimestamp()
 	queryTs = reader.query[QueryTs].(bson.M)[QueryOpGTE].(bson.MongoTimestamp)
 	if oldestTs > queryTs && !reader.firstRead {
-		return fmt.Errorf("current starting point[%v] is lower than the oldest timestamp[%v]", queryTs, oldestTs)
+		return CollectionCappedError
 	}
 	reader.firstRead = false
 
