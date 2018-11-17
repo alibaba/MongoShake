@@ -238,21 +238,21 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, opl
 	for _, log := range oplogs {
 		inserts = append(inserts, log.original.partialLog.Object)
 	}
-	collectionHandle := bw.session.DB(database).C(collection)
+	// collectionHandle := bw.session.DB(database).C(collection)
+	bulk := bw.session.DB(database).C(collection).Bulk()
 
-	var err error
-	if err = collectionHandle.Insert(inserts...); err == nil {
-		return nil
-	}
+	bulk.Insert(inserts...)
 
-	if mgo.IsDup(err) {
-		HandleDuplicated(collectionHandle, oplogs, OpInsert)
-		// update on duplicated key occur
-		if dupUpdate {
-			LOG.Info("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
-			return bw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.ReplayerExecutorUpsert)
+	if _, err := bulk.Run(); err != nil {
+		if mgo.IsDup(err) {
+			HandleDuplicated(bw.session.DB(database).C(collection), oplogs, OpInsert)
+			// update on duplicated key occur
+			if dupUpdate {
+				LOG.Info("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
+				return bw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.ReplayerExecutorUpsert)
+			}
+			return nil
 		}
-		return nil
 	}
 	return err
 }
