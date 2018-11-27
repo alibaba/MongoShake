@@ -32,12 +32,7 @@ func main() {
 	// argument options
 	configuration := flag.String("conf", "", "configure file absolute path")
 	verbose := flag.Bool("verbose", false, "show logs on console")
-	version := flag.Bool("version", false, "show version")
 	flag.Parse()
-
-	if *version {
-		fmt.Println(utils.VERSION)
-	}
 
 	if *configuration == "" {
 		fmt.Println(utils.BRANCH)

@@ -238,23 +238,24 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, opl
 	for _, log := range oplogs {
 		inserts = append(inserts, log.original.partialLog.Object)
 	}
-	collectionHandle := bw.session.DB(database).C(collection)
+	// collectionHandle := bw.session.DB(database).C(collection)
+	bulk := bw.session.DB(database).C(collection).Bulk()
+	bulk.Unordered()
+	bulk.Insert(inserts...)
 
-	var err error
-	if err = collectionHandle.Insert(inserts...); err == nil {
-		return nil
-	}
-
-	if mgo.IsDup(err) {
-		HandleDuplicated(collectionHandle, oplogs, OpInsert)
-		// update on duplicated key occur
-		if dupUpdate {
-			LOG.Info("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
-			return bw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.ReplayerExecutorUpsert)
+	if _, err := bulk.Run(); err != nil {
+		if mgo.IsDup(err) {
+			HandleDuplicated(bw.session.DB(database).C(collection), oplogs, OpInsert)
+			// update on duplicated key occur
+			if dupUpdate {
+				LOG.Info("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
+				return bw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.ReplayerExecutorUpsert)
+			}
+			return nil
 		}
-		return nil
+		return err
 	}
-	return err
+	return nil
 }
 
 func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bson.M,
@@ -271,6 +272,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
+	bulk.Unordered()
 	if upsert {
 		bulk.Upsert(update...)
 	} else {
@@ -298,6 +300,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
+	bulk.Unordered()
 	if upsert {
 		bulk.Upsert(update...)
 	} else {
@@ -322,6 +325,7 @@ func (bw *BulkWriter) doDelete(database, collection string, metadata bson.M,
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
+	bulk.Unordered()
 	bulk.Remove(delete...)
 	if _, err := bulk.Run(); err != nil {
 		return fmt.Errorf("doDelete run delete[%v] failed[%v]", delete, err)
