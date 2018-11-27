@@ -9,6 +9,7 @@
 	* IMPROVE: disbale print version in command.
 	* IMPROVE: add `adaptive.batching_max_size` and `fetcher.buffer_capacity`
 	in configuration so users can control the memory usage.
+	* BUG FIX: do not use bulk writer to operate index.
 
 2018-09-25 Alibaba Cloud.
 	* version: 1.4.3
