@@ -1,3 +1,16 @@
+2018-11-27 Alibaba Cloud.
+	* version: 1.4.4
+	* BUG FIX: enable bulk.Unordered when using bulk writer, so all the
+	operations will be executed even some of them have failed. At the
+	mean time, disable `replayer.executor.upsert` and
+	`replayer.executor.insert_on_dup_update` by default.
+	* IMPROVE: filter config database.
+	* IMPROVE: print `_id` type and value when can't be hashed.
+	* IMPROVE: disbale print version in command.
+	* IMPROVE: add `adaptive.batching_max_size` and `fetcher.buffer_capacity`
+	in configuration so users can control the memory usage.
+	* BUG FIX: do not use bulk writer to operate index.
+
 2018-09-25 Alibaba Cloud.
 	* version: 1.4.3
 	* IMPROVE: stop syncing data when collection capped error happen in source
