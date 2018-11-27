@@ -68,14 +68,15 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 		}
 		// just use the first log. they has the same metadata
 		metadata := buildMetadata(group.oplogRecords[0].original.partialLog)
-		dbWriter := NewDbWriter(exec.session, metadata, exec.bulkInsert)
+		hasIndex := strings.Contains(group.ns, "system.indexes")
+		dbWriter := NewDbWriter(exec.session, metadata, exec.bulkInsert && !hasIndex)
 		var err error
 
 		LOG.Debug("Replay-%d oplog collection ns [%s] with command [%s] batch count %d, metadata %v",
 			exec.batchExecutor.ReplayerId, group.ns, strings.ToUpper(lookupOpName(group.op)), count, metadata)
 
 		// for indexes
-		if conf.Options.ReplayerDMLOnly && strings.Contains(group.ns, "system.indexes") {
+		if conf.Options.ReplayerDMLOnly && hasIndex {
 			// exec.batchExecutor.ReplMetric.AddFilter(uint64(len(group.oplogRecords)))
 		} else {
 			// "0" -> database, "1" -> collection

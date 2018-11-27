@@ -240,7 +240,7 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, opl
 	}
 	// collectionHandle := bw.session.DB(database).C(collection)
 	bulk := bw.session.DB(database).C(collection).Bulk()
-
+	bulk.Unordered()
 	bulk.Insert(inserts...)
 
 	if _, err := bulk.Run(); err != nil {
@@ -253,8 +253,9 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, opl
 			}
 			return nil
 		}
+		return err
 	}
-	return err
+	return nil
 }
 
 func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bson.M,
@@ -271,6 +272,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
+	bulk.Unordered()
 	if upsert {
 		bulk.Upsert(update...)
 	} else {
@@ -298,6 +300,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
+	bulk.Unordered()
 	if upsert {
 		bulk.Upsert(update...)
 	} else {
@@ -322,6 +325,7 @@ func (bw *BulkWriter) doDelete(database, collection string, metadata bson.M,
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
+	bulk.Unordered()
 	bulk.Remove(delete...)
 	if _, err := bulk.Run(); err != nil {
 		return fmt.Errorf("doDelete run delete[%v] failed[%v]", delete, err)
