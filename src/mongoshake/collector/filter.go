@@ -12,6 +12,7 @@ import (
 var NsShouldBeIgnore = [...]string{
 	"admin.",
 	"local.",
+	"config.",
 
 	// oplogs belong to this app. AppDatabase and
 	// APPConflictDatabase should be initialized already
