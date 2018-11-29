@@ -125,9 +125,14 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.M,
 		oplogs []*OplogRecord, upsert bool) error {
 	var updates []bson.M
 	for _, log := range oplogs {
+		oFiled := log.original.partialLog.Object
+		// we should handle the special case: "o" field may include "$v" in mongo-3.6 which is not support in mgo.v2 library
+		if _, ok := oFiled[verisonMark]; ok {
+			delete(oFiled, verisonMark)
+		}
 		updates = append(updates, bson.M{
 			"q":      log.original.partialLog.Query,
-			"u":      log.original.partialLog.Object,
+			"u":      oFiled,
 			"upsert": upsert,
 			"multi":  false})
 	}
@@ -292,7 +297,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 	var update []interface{}
 	for _, log := range oplogs {
 		oFiled := log.original.partialLog.Object
-		// we should handle the special case: "o" filed may include "$v" in mongo-3.6 which is not support in mgo.v2 library
+		// we should handle the special case: "o" field may include "$v" in mongo-3.6 which is not support in mgo.v2 library
 		if _, ok := oFiled[verisonMark]; ok {
 			delete(oFiled, verisonMark)
 		}
