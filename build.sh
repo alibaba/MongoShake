@@ -8,9 +8,14 @@ modules=(collector receiver)
 tags=""
 
 # older version Git don't support --short !
-#branch=`git symbolic-ref --short -q HEAD`
-branch=$(git symbolic-ref -q HEAD | awk -F'/' '{print $3;}')
-cid=$(git rev-parse HEAD)
+if [ -d ".git" ];then
+    #branch=`git symbolic-ref --short -q HEAD`
+    branch=$(git symbolic-ref -q HEAD | awk -F'/' '{print $3;}')
+    cid=$(git rev-parse HEAD)
+else
+    branch="unknown"
+    cid="0.0"
+fi
 branch=$branch","$cid
 
 output=./bin/
