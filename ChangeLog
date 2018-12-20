@@ -2,6 +2,7 @@
 	* version: 1.4.5
 	* IMPROVE: modify `build.sh` to solve the problem of building error when
 	download zip from github instead of `git clone`.
+	* IMPROVE: modify error log level of `_id` type unknown.
 
 2018-11-27 Alibaba Cloud.
 	* version: 1.4.4
