@@ -4,6 +4,7 @@ This is a brief introduction of Mongo-Shake, please visit [english wiki](https:/
 *  [Chinese document](https://yq.aliyun.com/articles/603329)
 *  [FAQ document](https://github.com/aliyun/mongo-shake/wiki/FAQ)
 *  [Performance test document](https://github.com/aliyun/mongo-shake/wiki/MongoShake-Performance-Document)
+*  [WeChat discuss group](https://github.com/aliyun/mongo-shake#wechat-discuss-group)
 
 # Mongo-Shake
 ---
