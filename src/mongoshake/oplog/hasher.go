@@ -79,10 +79,10 @@ func Hash(hashObject interface{}) uint32 {
 	case int:
 		return uint32(object)
 	case nil:
-		LOG.Critical("Hash object is NIL. use default value %d", DefaultHashValue)
+		LOG.Warn("Hash object is NIL. use default value %d", DefaultHashValue)
 	default:
-		LOG.Critical("Hash object is UNKNOWN type[%v], value is [%v]. use default value %d",
-			object, hashObject, DefaultHashValue)
+		LOG.Warn("Hash object is UNKNOWN type[%T], value is [%v]. use default value %d",
+			hashObject, hashObject, DefaultHashValue)
 	}
 
 	return DefaultHashValue
