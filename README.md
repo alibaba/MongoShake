@@ -51,7 +51,7 @@ The oplogs are batched together in the handling pipeline.<br>
 Users can adjust the worker concurrency and executor concurrency according to the different environment.<br>
 Please see the detail documents listed at the beginning if you want to see more details.<br>
 
-# code branch rules
+# Code branch rules
 version rules: a.b.c.
 
 *  a: major version
@@ -69,10 +69,14 @@ version rules: a.b.c.
 tag rules:
 add tag when releasing: "release-v{version}-{date}". for example: "release-v1.0.2-20180628"
 
-# usage
+# Usage
 ---
 *  git clone https://github.com/aliyun/mongo-shake.git
 *  cd mongo-shake/src/vendor
 *  GOPATH=\`pwd\`/../..; govendor sync     #please note: must install govendor first and then pull all dependencies
 *  cd ../../ && ./build.sh
 *  ./bin/collector -conf=conf/collector.conf #please note: user must modify collector.conf first to match needs. You can also use \"start.sh\" script which supports hypervisor mechanism in Linux OS only.
+
+# WeChat discuss group
+---
+We have a WeChat group so that users can join and discuss, but the group user number is limited. So please add my WeChat number: `vinllen_xingge` first, and I will add you to this group.
