@@ -7,7 +7,7 @@ This is a brief introduction of Mongo-Shake, please visit [english wiki](https:/
 
 # Mongo-Shake
 ---
-Mongo-Shake is developed and maintained by DocumentDB Develop Team in Alibaba-Cloud.<br>
+Mongo-Shake is developed and maintained by Nosql Team in Alibaba-Cloud.<br>
 Mongo-Shake is a universal platform for services based on MongoDB's oplog. It fetches oplog from source mongo database, and replays in the target mongo database or sends to other ends in different tunnels. If the target side is mongo database which means replay oplog directly, it's like a syncing tool that used to copy data from source MongoDB to another MongoDB to build redundant replication or active-active replication. Except for this direct way, there are others tunnel types such like rpc, file, tcp, kafka. Receivers wrote by users must define their own interfaces to connecting to these tunnels respectively. Users can also define there own tunnel type which is pluggable. If connecting to a third-party message middleware like kafka, the consumer can get the subscriber data in an asynchronous way in pub/sub module flexibly.
 Here comes general data flow, <br>
 ![pic1](resources/dataflow.png)<br>
