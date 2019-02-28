@@ -76,3 +76,12 @@ add tag when releasing: "release-v{version}-{date}". for example: "release-v1.0.
 *  GOPATH=\`pwd\`/../..; govendor sync     #please note: must install govendor first and then pull all dependencies
 *  cd ../../ && ./build.sh
 *  ./bin/collector -conf=conf/collector.conf #please note: user must modify collector.conf first to match needs. You can also use \"start.sh\" script which supports hypervisor mechanism in Linux OS only.
+
+# Shake series tool
+---
+We also provide some tools for synchronization in Shake series.<br>
+
+* [mongo-shake](https://github.com/aliyun/mongo-shake): mongodb data synchronization tool.
+* [redis-shake](https://github.com/aliyun/redis-shake): redis data synchronization tool.
+* [redis-full-check](https://github.com/aliyun/redis-full-check): redis data synchronization verification tool.
+
