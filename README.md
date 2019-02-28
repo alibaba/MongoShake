@@ -4,6 +4,7 @@ This is a brief introduction of Mongo-Shake, please visit [english wiki](https:/
 *  [Chinese document](https://yq.aliyun.com/articles/603329)
 *  [FAQ document](https://github.com/aliyun/mongo-shake/wiki/FAQ)
 *  [Performance test document](https://github.com/aliyun/mongo-shake/wiki/MongoShake-Performance-Document)
+*  [WeChat discuss group](https://github.com/aliyun/mongo-shake#shake-series-tool)
 
 # Mongo-Shake
 ---
@@ -51,7 +52,7 @@ The oplogs are batched together in the handling pipeline.<br>
 Users can adjust the worker concurrency and executor concurrency according to the different environment.<br>
 Please see the detail documents listed at the beginning if you want to see more details.<br>
 
-# code branch rules
+# Code branch rules
 version rules: a.b.c.
 
 *  a: major version
@@ -69,7 +70,7 @@ version rules: a.b.c.
 tag rules:
 add tag when releasing: "release-v{version}-{date}". for example: "release-v1.0.2-20180628"
 
-# usage
+# Usage
 ---
 *  git clone https://github.com/aliyun/mongo-shake.git
 *  cd mongo-shake/src/vendor
@@ -85,3 +86,4 @@ We also provide some tools for synchronization in Shake series.<br>
 * [redis-shake](https://github.com/aliyun/redis-shake): redis data synchronization tool.
 * [redis-full-check](https://github.com/aliyun/redis-full-check): redis data synchronization verification tool.
 
+Plus, we have a WeChat group so that users can join and discuss, but the group user number is limited. So please add my WeChat number: `vinllen_xingge` first, and I will add you to this group.<br>
