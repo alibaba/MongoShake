@@ -4,7 +4,7 @@ This is a brief introduction of Mongo-Shake, please visit [english wiki](https:/
 *  [Chinese document](https://yq.aliyun.com/articles/603329)
 *  [FAQ document](https://github.com/aliyun/mongo-shake/wiki/FAQ)
 *  [Performance test document](https://github.com/aliyun/mongo-shake/wiki/MongoShake-Performance-Document)
-*  [WeChat discuss group](https://github.com/aliyun/mongo-shake#wechat-discuss-group)
+*  [WeChat discuss group](https://github.com/aliyun/mongo-shake#shake-series-tool)
 
 # Mongo-Shake
 ---
@@ -78,6 +78,12 @@ add tag when releasing: "release-v{version}-{date}". for example: "release-v1.0.
 *  cd ../../ && ./build.sh
 *  ./bin/collector -conf=conf/collector.conf #please note: user must modify collector.conf first to match needs. You can also use \"start.sh\" script which supports hypervisor mechanism in Linux OS only.
 
-# WeChat discuss group
+# Shake series tool
 ---
-We have a WeChat group so that users can join and discuss, but the group user number is limited. So please add my WeChat number: `vinllen_xingge` first, and I will add you to this group.
+We also provide some tools for synchronization in Shake series.<br>
+
+* [mongo-shake](https://github.com/aliyun/mongo-shake): mongodb data synchronization tool.
+* [redis-shake](https://github.com/aliyun/redis-shake): redis data synchronization tool.
+* [redis-full-check](https://github.com/aliyun/redis-full-check): redis data synchronization verification tool.
+
+Plus, we have a WeChat group so that users can join and discuss, but the group user number is limited. So please add my WeChat number: `vinllen_xingge` first, and I will add you to this group.<br>
