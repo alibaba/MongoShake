@@ -1,4 +1,3 @@
-bin
 pkg
 .gopath
 .idea
@@ -10,6 +9,8 @@ logs
 *.sw[ap]
 *.yml
 tags
+*.bak
+*.tar.gz
 
 dump.data
 runtime.trace
