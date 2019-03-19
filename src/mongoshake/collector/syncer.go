@@ -68,6 +68,13 @@ type OplogSyncer struct {
 	replMetric *utils.ReplicationMetric
 }
 
+/*
+ * Syncer is used to fetch oplog from source MongoDB and then send to different workers which can be seen as
+ * a network sender. There are several syncer coexist to improve the fetching performance.
+ * The data flow in syncer is:
+ * source mongodb --> reader --> pending queue(raw data) --> logs queue(parsed data) --> worker
+ * The reason we split pending queue and logs queue is to improve the performance.
+ */
 func NewOplogSyncer(
 	coordinator *ReplicationCoordinator,
 	replset string,
@@ -120,10 +127,12 @@ func (sync *OplogSyncer) init() {
 	sync.RestAPI()
 }
 
+// bind different worker
 func (sync *OplogSyncer) bind(w *Worker) {
 	sync.batcher.workerGroup = append(sync.batcher.workerGroup, w)
 }
 
+// start to polling oplog
 func (sync *OplogSyncer) start() {
 	LOG.Info("Poll oplog syncer start. ckpt_interval[%dms], gid[%s], shard_key[%s]",
 		conf.Options.CheckpointInterval, conf.Options.OplogGIDS, conf.Options.ShardKey)
@@ -151,6 +160,7 @@ func (sync *OplogSyncer) start() {
 	}
 }
 
+// fetch all oplog from logs queue, batched together and then send to different workers.
 func (sync *OplogSyncer) startBatcher() {
 	var batcher = sync.batcher
 
@@ -169,6 +179,7 @@ func (sync *OplogSyncer) startBatcher() {
 	})
 }
 
+// how many pending queue we create
 func calculatePendingQueueConcurrency() int {
 	// single {pending|logs}queue while it'is multi source shard
 	if conf.Options.IsShardCluster() {
@@ -177,6 +188,7 @@ func calculatePendingQueueConcurrency() int {
 	return PipelineQueueMaxNr
 }
 
+// deserializer: fetch oplog from pending queue, parsed and then add into logs queue.
 func (sync *OplogSyncer) startDeserializer() {
 	parallel := calculatePendingQueueConcurrency()
 	sync.pendingQueue = make([]chan []*bson.Raw, parallel, parallel)
@@ -203,6 +215,7 @@ func (sync *OplogSyncer) deserializer(index int) {
 	}
 }
 
+// only master(maybe several mongo-shake starts) can poll oplog.
 func (sync *OplogSyncer) poll() {
 	// we should reload checkpoint. in case of other collector
 	// has fetched oplogs when master quorum leader election
@@ -246,6 +259,7 @@ func (sync *OplogSyncer) poll() {
 	}
 }
 
+// fetch oplog from reader.
 func (sync *OplogSyncer) next() bool {
 	var log *bson.Raw
 	var err error
@@ -344,6 +358,7 @@ func (sync *OplogSyncer) RestAPI() {
 	})
 }
 
+// as we mentioned before, Batcher is used to batch oplog before sending in order to improve performance.
 type Batcher struct {
 	// related oplog syncer. not owned
 	syncer *OplogSyncer
