@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 
 	"mongoshake/tunnel/kafka"
+
+	LOG "github.com/vinllen/log4go"
 )
 
 type KafkaReader struct {
@@ -16,6 +18,7 @@ type KafkaReader struct {
 func (tunnel *KafkaReader) Link(replayer []Replayer) error {
 	reader, err := kafka.NewReader(tunnel.address)
 	if err != nil {
+		LOG.Critical("KafkaReader link[%v] create reader error[%v]", tunnel.address, err)
 		return err
 	}
 
