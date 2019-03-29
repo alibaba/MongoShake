@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 
 	"mongoshake/tunnel/kafka"
+
+	LOG "github.com/vinllen/log4go"
 )
 
 type KafkaWriter struct {
@@ -15,9 +17,11 @@ type KafkaWriter struct {
 func (tunnel *KafkaWriter) Prepare() bool {
 	writer, err := kafka.NewSyncWriter(tunnel.RemoteAddr)
 	if err != nil {
+		LOG.Critical("KafkaWriter prepare[%v] create writer error[%v]", tunnel.RemoteAddr, err)
 		return false
 	}
 	if err := writer.Start(); err != nil {
+		LOG.Critical("KafkaWriter prepare[%v] start writer error[%v]", tunnel.RemoteAddr, err)
 		return false
 	}
 	tunnel.writer = writer
@@ -52,6 +56,7 @@ func (tunnel *KafkaWriter) Send(message *WMessage) int64 {
 	err := tunnel.writer.SimpleWrite(byteBuffer.Bytes())
 
 	if err != nil {
+		LOG.Error("KafkaWriter send[%v] error[%v]", tunnel.RemoteAddr, err)
 		return ReplyError
 	}
 
