@@ -15,8 +15,8 @@ type Configuration struct {
 	WorkerNum               int      `config:"worker"`
 	WorkerOplogCompressor   string   `config:"worker.oplog_compressor"`
 	WorkerBatchQueueSize    uint64   `config:"worker.batch_queue_size"`
-	AdaptiveBatchingMaxSize int   `config:"adaptive.batching_max_size"`
-	FetcherBufferCapacity   int   `config:"fetcher.buffer_capacity"`
+	AdaptiveBatchingMaxSize int      `config:"adaptive.batching_max_size"`
+	FetcherBufferCapacity   int      `config:"fetcher.buffer_capacity"`
 	Tunnel                  string   `config:"tunnel"`
 	TunnelAddress           []string `config:"tunnel.address"`
 	MasterQuorum            bool     `config:"master_quorum"`
