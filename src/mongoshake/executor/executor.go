@@ -24,8 +24,8 @@ const (
 	OpInsert = 0x01
 	OpUpdate = 0x02
 
-	OplogsMaxGroupNum       = 1000
-	OplogsMaxGroupSize      = 12 * 1024 * 1024 // MongoDB limits 16MB
+	OplogsMaxGroupNum  = 1000
+	OplogsMaxGroupSize = 16 * 1024 * 1024 // MongoDB limits 16MB
 )
 
 var (
@@ -251,20 +251,20 @@ func (combiner LogsGroupCombiner) mergeToGroups(logs []*OplogRecord) (groups []*
 		last := len(groups) - 1
 
 		if !forceSplit && // force split by log's wait function
-			len(groups) > 0 && // have one group existing at least
-			len(groups[last].oplogRecords) < combiner.maxGroupNr && // no more than max group number
-			sizeInGroup <= combiner.maxGroupSize && // no more than one group size
-			groups[last].op == op && groups[last].ns == ns { // same op and ns
-
-			// we can merge this oplog into lastest batched oplogRecords group
+				len(groups) > 0 && // have one group existing at least
+				len(groups[last].oplogRecords) < combiner.maxGroupNr && // no more than max group number
+				sizeInGroup + log.original.partialLog.RawSize < combiner.maxGroupSize && // no more than one group size
+				groups[last].op == op && groups[last].ns == ns { // same op and ns
+			// we can merge this oplog into the latest batched oplogRecords group
 			combiner.merge(groups[len(groups)-1], log)
+			sizeInGroup += log.original.partialLog.RawSize // add size
 		} else {
 			// new start of a group
 			groups = append(groups, combiner.startNewGroup(log))
+			sizeInGroup = log.original.partialLog.RawSize
 		}
 
 		// can't be merge more oplogRecords further. this log should be the end in this group
-		sizeInGroup = log.original.partialLog.RawSize
 		forceSplit = log.wait != nil
 	}
 	return
