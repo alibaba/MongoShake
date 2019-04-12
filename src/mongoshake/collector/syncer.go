@@ -99,13 +99,19 @@ func NewOplogSyncer(
 	}
 
 	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+	// gid filter
 	if gid != "" {
 		filterList = append(filterList, &filter.GidFilter{Gid: gid})
 	}
+	// namespace filter
 	if len(conf.Options.FilterNamespaceWhite) != 0 || len(conf.Options.FilterNamespaceBlack) != 0 {
 		namespaceFilter := filter.NewNamespaceFilter(conf.Options.FilterNamespaceWhite,
 			conf.Options.FilterNamespaceBlack)
 		filterList = append(filterList, namespaceFilter)
+	}
+	// DDL filter
+	if conf.Options.ReplayerDMLOnly {
+		filterList = append(filterList, new(filter.DDLFilter))
 	}
 
 	// oplog filters. drop the oplog if any of the filter
@@ -147,11 +153,12 @@ func (sync *OplogSyncer) start() {
 	// 3. start checkpoint persist routine
 	sync.newCheckpointManager(sync.replset)
 
-	// start batcher and deserializer
+	// start deserializer: parse data from pending queue, and then push into logs queue.
 	sync.startDeserializer()
+	// start batcher: pull oplog from logs queue and then batch together before adding into worker.
 	sync.startBatcher()
 
-	// for ever fetching next oplog entry
+	// forever fetching oplog from mongodb into oplog_reader
 	for {
 		sync.poll()
 
@@ -169,10 +176,12 @@ func (sync *OplogSyncer) startBatcher() {
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
 		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
-		if worked := batcher.dispatchBatches(batcher.batchMore()); worked {
-			sync.replMetric.SetLSN(utils.TimestampToInt64(batcher.getLastOplog().Timestamp))
+		batchedOplog := batcher.batchMore()
+		if worked := batcher.dispatchBatches(batchedOplog); worked {
+			newestTs := batcher.getLastOplog().Timestamp
+			sync.replMetric.SetLSN(utils.TimestampToInt64(newestTs))
 			// update latest fetched timestamp in memory
-			sync.reader.UpdateQueryTimestamp(batcher.getLastOplog().Timestamp)
+			sync.reader.UpdateQueryTimestamp(newestTs)
 		}
 
 		// flush checkpoint value
