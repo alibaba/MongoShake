@@ -14,7 +14,7 @@ import(
 )
 
 const (
-	verisonMark = "$v"
+	versionMark = "$v"
 )
 
 type BasicWriter interface {
@@ -127,8 +127,8 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.M,
 	for _, log := range oplogs {
 		oFiled := log.original.partialLog.Object
 		// we should handle the special case: "o" field may include "$v" in mongo-3.6 which is not support in mgo.v2 library
-		if _, ok := oFiled[verisonMark]; ok {
-			delete(oFiled, verisonMark)
+		if _, ok := oFiled[versionMark]; ok {
+			delete(oFiled, versionMark)
 		}
 		updates = append(updates, bson.M{
 			"q":      log.original.partialLog.Query,
@@ -298,8 +298,8 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 	for _, log := range oplogs {
 		oFiled := log.original.partialLog.Object
 		// we should handle the special case: "o" field may include "$v" in mongo-3.6 which is not support in mgo.v2 library
-		if _, ok := oFiled[verisonMark]; ok {
-			delete(oFiled, verisonMark)
+		if _, ok := oFiled[versionMark]; ok {
+			delete(oFiled, versionMark)
 		}
 		update = append(update, log.original.partialLog.Query, oFiled)
 	}
@@ -485,8 +485,8 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 		for _, log := range oplogs {
 			oFiled := log.original.partialLog.Object
 			// we should handle the special case: "o" filed may include "$v" in mongo-3.6 which is not support in mgo.v2 library
-			if _, ok := oFiled[verisonMark]; ok {
-				delete(oFiled, verisonMark)
+			if _, ok := oFiled[versionMark]; ok {
+				delete(oFiled, versionMark)
 			}
 			_, err := collectionHandle.Upsert(log.original.partialLog.Query, oFiled)
 			if err != nil {
@@ -503,8 +503,8 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 		for _, log := range oplogs {
 			oFiled := log.original.partialLog.Object
 			// we should handle the special case: "o" filed may include "$v" in mongo-3.6 which is not support in mgo.v2 library
-			if _, ok := oFiled[verisonMark]; ok {
-				delete(oFiled, verisonMark)
+			if _, ok := oFiled[versionMark]; ok {
+				delete(oFiled, versionMark)
 			}
 			err := collectionHandle.Update(log.original.partialLog.Query, oFiled)
 			if err != nil {
