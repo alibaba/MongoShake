@@ -115,13 +115,9 @@ func NewOplogSyncer(
 	}
 
 	// oplog filters. drop the oplog if any of the filter
-	// list returns true. The order of all filters is not significant
-	syncer.batcher = &Batcher{
-		syncer:      syncer,
-		filterList:  filterList,
-		handler:     syncer,
-		workerGroup: []*Worker{}, // assign later by syncer.bind()
-	}
+	// list returns true. The order of all filters is not significant.
+	// workerGroup is assigned later by syncer.bind()
+	syncer.batcher = NewBatcher(syncer, filterList, syncer, []*Worker{})
 	return syncer
 }
 
@@ -176,16 +172,38 @@ func (sync *OplogSyncer) startBatcher() {
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
 		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
-		batchedOplog := batcher.batchMore()
+		batchedOplog, barrier := batcher.batchMore()
+
+		var newestTs bson.MongoTimestamp
+		if log := batcher.getLastOplog(); log != nil {
+			newestTs = log.Timestamp
+		} else {
+			// if log is nil, no need to run anymore.
+			return
+		}
+
 		if worked := batcher.dispatchBatches(batchedOplog); worked {
-			newestTs := batcher.getLastOplog().Timestamp
 			sync.replMetric.SetLSN(utils.TimestampToInt64(newestTs))
 			// update latest fetched timestamp in memory
 			sync.reader.UpdateQueryTimestamp(newestTs)
 		}
 
 		// flush checkpoint value
-		sync.checkpoint()
+		sync.checkpoint(barrier)
+
+		// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
+		if barrier && newestTs > 0 {
+			LOG.Info("find barrier")
+			for {
+				checkpointTs := sync.ckptManager.Get().Timestamp
+				LOG.Info("compare remote checkpoint[%v] to local newestTs[%v]", checkpointTs, newestTs)
+				if checkpointTs >= newestTs {
+					LOG.Info("barrier checkpoint updated")
+					break
+				}
+				utils.YieldInMs(300) // 500ms
+			}
+		}
 	})
 }
 
