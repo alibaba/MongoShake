@@ -168,4 +168,26 @@ func TestMergeToGroups(t *testing.T) {
 		assert.Equal(t, 1, len(groups[3].oplogRecords), "should be equal")
 		assert.Equal(t, 1, len(groups[4].oplogRecords), "should be equal")
 	}
+
+	{
+		fmt.Printf("TestMergeToGroups case %d.\n", nr)
+		nr++
+
+		combiner := LogsGroupCombiner{
+			maxGroupNr: 10,
+			maxGroupSize: 12 * 1024 * 1024,
+		}
+
+		logs := []*OplogRecord{
+			mockLogs("op1", "ns1", 16 * 1024 * 1024, false),
+			mockLogs("op1", "ns2", 16 * 1024 * 1024, false),
+			mockLogs("op1", "ns1", 16 * 1024 * 1024, false),
+			mockLogs("op1", "ns1", 16 * 1024 * 1024, false),
+			mockLogs("op1", "ns1", 16 * 1024 * 1024, false),
+			mockLogs("op1", "ns3", 16 * 1024 * 1024, false),
+			mockLogs("op1", "ns1", 16 * 1024 * 1024, false),
+		}
+		groups := combiner.mergeToGroups(logs)
+		assert.Equal(t, 7, len(groups), "should be equal")
+	}
 }
