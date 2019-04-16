@@ -4,13 +4,13 @@ import(
 	"fmt"
 	"strings"
 
-	"mongoshake/common"
 	"mongoshake/collector/configure"
 	"mongoshake/oplog"
 
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
+	"mongoshake/common"
 )
 
 const (
@@ -34,7 +34,15 @@ type BasicWriter interface {
 	doDelete(database, collection string, metadata bson.M,
 		oplogs []*OplogRecord) error
 
-	// command operation
+	/*
+	 * command operation
+	 * Generally speaking, we should use `applyOps` command in mongodb to insert these data,
+	 * but this way will make the oplog in the target bigger than the source.
+	 * In the following two cases, this will raise error:
+	 *    1. mongoshake cascade: the oplog will be bigger every time go through mongoshake
+	 *    2. the oplog is near 16MB(the oplog max threshold), use `applyOps` command will
+	 *       make the oplog bigger than 16MB so that rejected by the target mongodb.
+	 */
 	doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error
 }
 
@@ -340,12 +348,14 @@ func (bw *BulkWriter) doDelete(database, collection string, metadata bson.M,
 
 func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error {
 	var err error
+	dbHandle := bw.session.DB(database)
 	for _, log := range oplogs {
 		operation, found := extraCommandName(log.original.partialLog.Object)
 		if !conf.Options.ReplayerDMLOnly || (found && isSyncDataCommand(operation)) {
 			// execute one by one with sequence order
-			if err = bw.applyOps(database, operation, log.original.partialLog); err == nil {
-				LOG.Info("Execute command (op==c) oplog dml_only mode [%t], operation [%s]", conf.Options.ReplayerDMLOnly, operation)
+			if err = applyOps(operation, log.original.partialLog, dbHandle); err == nil {
+				LOG.Info("Execute command (op==c) oplog dml_only mode [%t], operation [%s]",
+					conf.Options.ReplayerDMLOnly, operation)
 			} else {
 				return err
 			}
@@ -354,46 +364,6 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*Oplo
 		}
 	}
 	return nil
-}
-
-func (bw *BulkWriter) applyOps(database, operation string, log *oplog.PartialLog) error {
-	dbHandle := bw.session.DB(database)
-
-	var err error
-	switch operation {
-	case "dropDatabase":
-		err = dbHandle.DropDatabase()
-	case "create":
-		fallthrough
-	case "collMod":
-		fallthrough
-	case "drop":
-		fallthrough
-	case "deleteIndex":
-		fallthrough
-	case "deleteIndexes":
-		fallthrough
-	case "dropIndex":
-		fallthrough
-	case "dropIndexes":
-		fallthrough
-	// case "renameCollection":
-	// 	fallthrough
-	case "convertToCapped":
-		fallthrough
-	case "emptycapped":
-		// convert bson.M to bson.D
-		var store bson.D
-		for key, value := range log.Object {
-			store = append(store, bson.DocElem{Name: key, Value: value})
-		}
-		// call Run()
-		err = dbHandle.Run(store, nil)
-	default:
-		LOG.Info("applyOps meets type[%s] which is not implemented", operation)
-	}
-
-	return err
 }
 
 // use general single writer interface to execute command
@@ -508,7 +478,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 			}
 			err := collectionHandle.Update(log.original.partialLog.Query, oFiled)
 			if err != nil {
-				if isNotFound(err) {
+				if utils.IsNotFound(err) {
 					LOG.Warn("doUpdate[update] data[%v] not found", log.original.partialLog.Query)
 				} else if mgo.IsDup(err) {
 					HandleDuplicated(collectionHandle, oplogs, OpUpdate)
@@ -535,7 +505,7 @@ func (sw *SingleWriter) doDelete(database, collection string, metadata bson.M,
 	for _, log := range oplogs {
 		// ignore ErrNotFound
 		if err := collectionHandle.RemoveId(log.original.partialLog.Object["_id"]); err != nil {
-			if isNotFound(err) {
+			if utils.IsNotFound(err) {
 				LOG.Warn("doDelete data[%v] not found", log.original.partialLog.Query)
 			} else {
 				errMsg := fmt.Sprintf("delete data[%v] failed[%v]", log.original.partialLog.Query,
@@ -553,12 +523,14 @@ func (sw *SingleWriter) doDelete(database, collection string, metadata bson.M,
 
 func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error {
 	var err error
+	dbHandle := sw.session.DB(database)
 	for _, log := range oplogs {
 		operation, found := extraCommandName(log.original.partialLog.Object)
 		if !conf.Options.ReplayerDMLOnly || (found && isSyncDataCommand(operation)) {
 			// execute one by one with sequence order
-			if err = sw.applyOps(database, operation, log.original.partialLog); err == nil {
-				LOG.Info("Execute command (op==c) oplog dml_only mode [%t], operation [%s]", conf.Options.ReplayerDMLOnly, operation)
+			if err = applyOps(operation, log.original.partialLog, dbHandle); err == nil {
+				LOG.Info("Execute command (op==c) oplog dml_only mode [%t], operation [%s]",
+					conf.Options.ReplayerDMLOnly, operation)
 			} else {
 				return err
 			}
@@ -569,9 +541,7 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*Op
 	return nil
 }
 
-func (sw *SingleWriter) applyOps(database, operation string, log *oplog.PartialLog) error {
-	dbHandle := sw.session.DB(database)
-
+func applyOps(operation string, log *oplog.PartialLog, dbHandle *mgo.Database) error {
 	var err error
 	switch operation {
 	case "dropDatabase":
@@ -603,50 +573,9 @@ func (sw *SingleWriter) applyOps(database, operation string, log *oplog.PartialL
 		// call Run()
 		err = dbHandle.Run(store, nil)
 	default:
-		LOG.Info("applyOps meets type[%s] which is not implemented", operation)
+		// TODO, use applyOps to run
+		LOG.Warn("applyOps meets type[%s] which is not implemented", operation)
 	}
 
 	return err
-}
-
-func HandleDuplicated(collection *mgo.Collection, records []*OplogRecord, op int8) {
-	for _, record := range records {
-		log := record.original.partialLog
-		switch conf.Options.ReplayerConflictWriteTo {
-		case DumpConflictToDB:
-			// general process : write record to specific database
-			session := collection.Database.Session
-			// discard conflict again
-			session.DB(utils.APPConflictDatabase).C(collection.Name).Insert(log.Object)
-		case DumpConflictToSDK, NoDumpConflict:
-		}
-
-		if utils.SentinelOptions.DuplicatedDump {
-			SnapshotDiffer{op: op, log: log}.dump(collection)
-		}
-	}
-}
-
-type SnapshotDiffer struct {
-	op        int8
-	log       *oplog.PartialLog
-	foundInDB bson.M
-}
-
-func (s SnapshotDiffer) write2Log() {
-	LOG.Info("Found in DB ==> %v", s.foundInDB)
-	LOG.Info("Oplog ==> %v", s.log.Object)
-}
-
-func (s SnapshotDiffer) dump(coll *mgo.Collection) {
-	if s.op == OpUpdate {
-		coll.Find(s.log.Query).One(s.foundInDB)
-	} else {
-		coll.Find(bson.M{"_id": s.log.Object["_id"]}).One(s.foundInDB)
-	}
-	s.write2Log()
-}
-
-func isNotFound(err error) bool {
-	return err.Error() == mgo.ErrNotFound.Error()
 }

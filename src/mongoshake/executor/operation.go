@@ -75,44 +75,44 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 		LOG.Debug("Replay-%d oplog collection ns [%s] with command [%s] batch count %d, metadata %v",
 			exec.batchExecutor.ReplayerId, group.ns, strings.ToUpper(lookupOpName(group.op)), count, metadata)
 
+		/*
+		 * in the former version, we filter DDL here. But in current version, all messages that need filter
+		 * have already removed in the collector(syncer). So here, we only need to write all oplogs.
+		 */
 		// for indexes
-		if conf.Options.ReplayerDMLOnly && hasIndex {
-			// exec.batchExecutor.ReplMetric.AddFilter(uint64(len(group.oplogRecords)))
-		} else {
-			// "0" -> database, "1" -> collection
-			dc := strings.SplitN(group.ns, ".", 2)
-			switch group.op {
-			case "i":
-				err = dbWriter.doInsert(dc[0], dc[1], metadata, group.oplogRecords,
-					conf.Options.ReplayerExecutorInsertOnDupUpdate)
-			case "u":
-				err = dbWriter.doUpdate(dc[0], dc[1], metadata, group.oplogRecords,
-					conf.Options.ReplayerExecutorUpsert)
-			case "d":
-				err = dbWriter.doDelete(dc[0], dc[1], metadata, group.oplogRecords)
-			case "c":
-				err = dbWriter.doCommand(dc[0], metadata, group.oplogRecords)
-			case "n":
-				// exec.batchExecutor.ReplMetric.AddFilter(count)
-			default:
-				LOG.Warn("Unknown type oplogs found. op '%s'", group.op)
-			}
+		// "0" -> database, "1" -> collection
+		dc := strings.SplitN(group.ns, ".", 2)
+		switch group.op {
+		case "i":
+			err = dbWriter.doInsert(dc[0], dc[1], metadata, group.oplogRecords,
+				conf.Options.ReplayerExecutorInsertOnDupUpdate)
+		case "u":
+			err = dbWriter.doUpdate(dc[0], dc[1], metadata, group.oplogRecords,
+				conf.Options.ReplayerExecutorUpsert)
+		case "d":
+			err = dbWriter.doDelete(dc[0], dc[1], metadata, group.oplogRecords)
+		case "c":
+			err = dbWriter.doCommand(dc[0], metadata, group.oplogRecords)
+		case "n":
+			// exec.batchExecutor.ReplMetric.AddFilter(count)
+		default:
+			LOG.Warn("Unknown type oplogs found. op '%s'", group.op)
+		}
 
-			// a few known error we can skip !! such as "ShardKeyNotFound" returned
-			// if mongoshake connected to MongoS
-			if exec.errorIgnore(err) {
-				LOG.Info("Discard known error %v, It's acceptable", err)
-				err = nil
-			}
+		// a few known error we can skip !! such as "ShardKeyNotFound" returned
+		// if mongoshake connected to MongoS
+		if exec.errorIgnore(err) {
+			LOG.Info("Discard known error %v, It's acceptable", err)
+			err = nil
+		}
 
-			if err != nil {
-				LOG.Critical("Replayer-%d, executor-%d, oplog for [%s] op[%s] failed. (%v) [%v], logs %d. firstLog %v",
-					exec.batchExecutor.ReplayerId, exec.id, group.ns, group.op, reflect.TypeOf(err), err.Error(), count,
-					group.oplogRecords[0].original.partialLog)
-				exec.dropConnection()
+		if err != nil {
+			LOG.Critical("Replayer-%d, executor-%d, oplog for [%s] op[%s] failed. (%v) [%v], logs %d. firstLog %v",
+				exec.batchExecutor.ReplayerId, exec.id, group.ns, group.op, reflect.TypeOf(err), err.Error(), count,
+				group.oplogRecords[0].original.partialLog)
+			exec.dropConnection()
 
-				return err
-			}
+			return err
 		}
 	}
 	// exec.batchExecutor.ReplMetric.ReplStatus.Clear(utils.ReplicaExecBad)

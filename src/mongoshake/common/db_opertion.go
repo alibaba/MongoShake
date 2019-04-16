@@ -49,3 +49,7 @@ func GetAndCompareVersion(session *mgo.Session, threshold string) bool {
 	}
 	return true
 }
+
+func IsNotFound(err error) bool {
+	return err.Error() == mgo.ErrNotFound.Error()
+}
