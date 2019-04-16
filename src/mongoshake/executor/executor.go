@@ -25,7 +25,7 @@ const (
 	OpUpdate = 0x02
 
 	OplogsMaxGroupNum  = 1000
-	OplogsMaxGroupSize = 16 * 1024 * 1024 // MongoDB limits 16MB
+	OplogsMaxGroupSize = 12 * 1024 * 1024 // MongoDB limits 16MB
 )
 
 var (
