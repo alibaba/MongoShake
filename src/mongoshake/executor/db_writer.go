@@ -348,12 +348,11 @@ func (bw *BulkWriter) doDelete(database, collection string, metadata bson.M,
 
 func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error {
 	var err error
-	dbHandle := bw.session.DB(database)
 	for _, log := range oplogs {
 		operation, found := extraCommandName(log.original.partialLog.Object)
 		if !conf.Options.ReplayerDMLOnly || (found && isSyncDataCommand(operation)) {
 			// execute one by one with sequence order
-			if err = applyOps(operation, log.original.partialLog, dbHandle); err == nil {
+			if err = runCommand(database, operation, log.original.partialLog, bw.session); err == nil {
 				LOG.Info("Execute command (op==c) oplog dml_only mode [%t], operation [%s]",
 					conf.Options.ReplayerDMLOnly, operation)
 			} else {
@@ -523,12 +522,11 @@ func (sw *SingleWriter) doDelete(database, collection string, metadata bson.M,
 
 func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error {
 	var err error
-	dbHandle := sw.session.DB(database)
 	for _, log := range oplogs {
 		operation, found := extraCommandName(log.original.partialLog.Object)
 		if !conf.Options.ReplayerDMLOnly || (found && isSyncDataCommand(operation)) {
 			// execute one by one with sequence order
-			if err = applyOps(operation, log.original.partialLog, dbHandle); err == nil {
+			if err = runCommand(database, operation, log.original.partialLog, sw.session); err == nil {
 				LOG.Info("Execute command (op==c) oplog dml_only mode [%t], operation [%s]",
 					conf.Options.ReplayerDMLOnly, operation)
 			} else {
@@ -541,11 +539,12 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*Op
 	return nil
 }
 
-func applyOps(operation string, log *oplog.PartialLog, dbHandle *mgo.Database) error {
+func runCommand(database, operation string, log *oplog.PartialLog, session *mgo.Session) error {
+	dbHandler := session.DB(database)
 	var err error
 	switch operation {
 	case "dropDatabase":
-		err = dbHandle.DropDatabase()
+		err = dbHandler.DropDatabase()
 	case "create":
 		fallthrough
 	case "collMod":
@@ -560,9 +559,11 @@ func applyOps(operation string, log *oplog.PartialLog, dbHandle *mgo.Database) e
 		fallthrough
 	case "dropIndexes":
 		fallthrough
-	//case "renameCollection":
-	// 	fallthrough
 	case "convertToCapped":
+		fallthrough
+	case "renameCollection":
+		fallthrough
+	case "applyOps":
 		fallthrough
 	case "emptycapped":
 		// convert bson.M to bson.D
@@ -571,10 +572,13 @@ func applyOps(operation string, log *oplog.PartialLog, dbHandle *mgo.Database) e
 			store = append(store, bson.DocElem{Name: key, Value: value})
 		}
 		// call Run()
-		err = dbHandle.Run(store, nil)
+		if !isRunOnAdminCommand(operation) {
+			err = dbHandler.Run(store, nil)
+		} else {
+			err = session.DB("admin").Run(store, nil)
+		}
 	default:
-		// TODO, use applyOps to run
-		LOG.Warn("applyOps meets type[%s] which is not implemented", operation)
+		LOG.Warn("runCommand meets type[%s] which is not implemented, ignore!", operation)
 	}
 
 	return err
