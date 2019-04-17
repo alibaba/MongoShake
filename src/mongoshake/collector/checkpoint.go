@@ -34,12 +34,12 @@ func (sync *OplogSyncer) checkpoint(flush bool) {
 	// we force update the ckpt time even failed
 	sync.ckptTime = now
 
-	// TODO: we delayed a few minutes to tolerate the receiver's flush buffer
+	// we delayed a few minutes to tolerate the receiver's flush buffer
 	// in AckRequired() tunnel. such as "rpc". While collector is restarted,
 	// we can't get the correct worker ack offset since collector have lost
 	// the unack offset...
-	if !flush && now.Before(sync.startTime.Add(3 * time.Minute)) {
-		//LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
+	if !flush && conf.Options.Tunnel != "direct" && now.Before(sync.startTime.Add(3 * time.Minute)) {
+		// LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
 		return
 	}
 

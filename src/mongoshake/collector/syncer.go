@@ -25,7 +25,8 @@ const (
 	PipelineQueueMinNr = 1
 	PipelineQueueLen   = 64
 
-	DurationTime = 6000
+	DurationTime          = 6000 //ms
+	DDLCheckpointInterval = 300  // ms
 )
 
 type OplogHandler interface {
@@ -201,7 +202,10 @@ func (sync *OplogSyncer) startBatcher() {
 					LOG.Info("barrier checkpoint updated")
 					break
 				}
-				utils.YieldInMs(300) // 500ms
+				utils.YieldInMs(DDLCheckpointInterval)
+
+				// re-flush
+				sync.checkpoint(true)
 			}
 		}
 	})
@@ -246,8 +250,8 @@ func (sync *OplogSyncer) deserializer(index int) {
 // only master(maybe several mongo-shake starts) can poll oplog.
 func (sync *OplogSyncer) poll() {
 	// we should reload checkpoint. in case of other collector
-	// has fetched oplogs when master quorum leader election
-	//	happens frequently. so we simply reload.
+ 	// has fetched oplogs when master quorum leader election
+	// happens frequently. so we simply reload.
 	checkpoint := sync.ckptManager.Get()
 	if checkpoint == nil {
 		// we doesn't continue working on ckpt fetched failed. because we should

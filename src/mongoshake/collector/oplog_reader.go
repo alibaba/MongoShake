@@ -85,6 +85,10 @@ func (reader *OplogReader) UpdateQueryTimestamp(ts bson.MongoTimestamp) {
 	reader.query[QueryTs] = bson.M{QueryOpGT: ts}
 }
 
+func (reader *OplogReader) getQueryTimestamp() bson.MongoTimestamp {
+	return reader.query[QueryTs].(bson.M)[QueryOpGT].(bson.MongoTimestamp)
+}
+
 // Next returns an oplog by raw bytes which is []byte
 func (reader *OplogReader) Next() (*bson.Raw, error) {
 	return reader.get()
@@ -179,7 +183,7 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 	if reader.firstRead == true {
 		// check whether the starting fetching timestamp is less than the oldest timestamp exist in the oplog
 		newestTs := reader.getNewestTimestamp()
-		queryTs = reader.query[QueryTs].(bson.M)[QueryOpGT].(bson.MongoTimestamp)
+		queryTs = reader.getQueryTimestamp()
 		if newestTs < queryTs {
 			return fmt.Errorf("current starting point[%v] is bigger than the newest timestamp[%v]", queryTs, newestTs)
 		}
@@ -190,7 +194,7 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 	 * this may happen when collection capped.
 	 */
 	oldestTs := reader.getOldestTimestamp()
-	queryTs = reader.query[QueryTs].(bson.M)[QueryOpGT].(bson.MongoTimestamp)
+	queryTs = reader.getQueryTimestamp()
 	if oldestTs > queryTs && !reader.firstRead {
 		return CollectionCappedError
 	}
