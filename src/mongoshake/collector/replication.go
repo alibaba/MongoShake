@@ -3,6 +3,8 @@ package collector
 import (
 	"encoding/json"
 	"errors"
+	"mongoshake/collector/docsyncer"
+	"sync"
 
 	"mongoshake/collector/configure"
 	"mongoshake/common"
@@ -48,8 +50,28 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	coordinator.sentinel = &utils.Sentinel{}
 	coordinator.sentinel.Register()
 
-	// startup collector
-	return coordinator.startReplication()
+	switch conf.Options.SyncMode {
+	case "all":
+		if err := coordinator.startDocumentReplication(); err != nil {
+			return err
+		}
+		if err := coordinator.startOplogReplication(); err != nil {
+			return err
+		}
+	case "document":
+		if err := coordinator.startDocumentReplication(); err != nil {
+			return err
+		}
+	case "oplog":
+		if err := coordinator.startOplogReplication(); err != nil {
+			return err
+		}
+	default:
+		LOG.Critical("unknown sync mode %v", conf.Options.SyncMode)
+		return errors.New("unknown sync mode " + conf.Options.SyncMode)
+	}
+
+	return nil
 }
 
 func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
@@ -107,7 +129,27 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	return nil
 }
 
-func (coordinator *ReplicationCoordinator) startReplication() error {
+func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
+	var wg sync.WaitGroup
+
+	var replError error
+	for _, src := range coordinator.Sources {
+		docSyncer := docsyncer.NewDocumentSyncer(src.URL, conf.Options.TunnelAddress[0])
+		wg.Add(1)
+		nimo.GoRoutine(func() {
+			if err := docSyncer.Start(); err != nil {
+				LOG.Critical("Document Replication for url=%v failed. %v", src.URL, err)
+				replError = err
+			}
+			wg.Done()
+		})
+	}
+	wg.Wait()
+
+	return replError
+}
+
+func (coordinator *ReplicationCoordinator) startOplogReplication() error {
 	// replicate speed limit on all syncer
 	coordinator.rateController = nimo.NewSimpleRateController()
 
