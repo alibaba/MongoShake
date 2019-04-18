@@ -56,7 +56,7 @@ Please see the detail documents listed at the beginning if you want to see more 
 version rules: a.b.c.
 
 *  a: major version
-*  b: minor version. even number means stable version.
+*  b: minor version. **even number means stable version**. e.g. 1.2.x, 1.4.x, 2.0.x are stable while 1.5.x, 2.1.x aren't.
 *  c: bugfix version
 
 | branch name | rules |
