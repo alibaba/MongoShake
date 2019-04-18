@@ -31,8 +31,6 @@ type DocumentSyncer struct {
 	toMongoConn		*dbpool.MongoConn
 
 	replMetric 		*utils.ReplicationMetric
-
-	syncError		error
 }
 
 func NewDocumentSyncer(
@@ -113,7 +111,7 @@ func (syncer *DocumentSyncer) prepare(wg *sync.WaitGroup) (err error) {
 func (syncer *DocumentSyncer) collectionSync(replayerId uint32, ns dbpool.NS) error {
 	reader := NewDocumentReader(syncer.fromMongoUrl, ns)
 
-	toColName := fmt.Sprintf("%s_%s", ns.Collection, conf.Options.CollectorId)
+	toColName := fmt.Sprintf("%s_%s", ns.Collection, utils.APPNAME)
 
 	toNS := dbpool.NS{Database:ns.Database, Collection:toColName}
 

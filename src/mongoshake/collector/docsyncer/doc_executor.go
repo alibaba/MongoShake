@@ -41,10 +41,6 @@ func NewCollectionExecutor(ReplayerId uint32, mongoUrl string, ns dbpool.NS) *Co
 }
 
 func (batchExecutor *CollectionExecutor) Start() {
-	// max concurrent execute connection sets to 64. And the total
-	// conns = number of executor * number of batchExecutor. Normally max
-	// is 64. if collector hashed oplogRecords by _id and the number of collector
-	// is bigger we will use single executer in respective batchExecutor
 	parallel := conf.Options.ReplayerExecutor
 	batchExecutor.docBatch = make(chan []*bson.Raw, parallel)
 
@@ -59,7 +55,6 @@ func (batchExecutor *CollectionExecutor) Start() {
 func (batchExecutor *CollectionExecutor) Sync(docs []*bson.Raw) {
 	count := uint64(len(docs))
 	if count == 0 {
-		// may be probe request
 		return
 	}
 
@@ -137,11 +132,8 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 	}
 
 	if err := exec.session.DB(ns.Database).C(ns.Collection).Insert(idocs...); err != nil {
-		return fmt.Errorf("Insert docs[%v] into ns[%v] of dest mongo failed. %v", docs, ns, err)
+		return fmt.Errorf("Insert docs [%v] into ns %v of dest mongo failed. %v", docs, ns, err)
 	}
-
-	//LOG.Info("Replayer-%d Executor-%d doSync doc ns[%v] received[%d].",
-	//	exec.batchExecutor.replayerId, exec.id, exec.batchExecutor.ns, len(docs))
 
 	return nil
 }

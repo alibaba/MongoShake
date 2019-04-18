@@ -5,6 +5,7 @@ import (
 	"errors"
 	"mongoshake/collector/docsyncer"
 	"sync"
+	"time"
 
 	"mongoshake/collector/configure"
 	"mongoshake/common"
@@ -50,12 +51,14 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	coordinator.sentinel = &utils.Sentinel{}
 	coordinator.sentinel.Register()
 
+
 	switch conf.Options.SyncMode {
 	case "all":
+		oplogStartPosition := time.Now().Unix()
 		if err := coordinator.startDocumentReplication(); err != nil {
 			return err
 		}
-		if err := coordinator.startOplogReplication(); err != nil {
+		if err := coordinator.startOplogReplication(oplogStartPosition); err != nil {
 			return err
 		}
 	case "document":
@@ -63,7 +66,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			return err
 		}
 	case "oplog":
-		if err := coordinator.startOplogReplication(); err != nil {
+		if err := coordinator.startOplogReplication(conf.Options.ContextStartPosition); err != nil {
 			return err
 		}
 	default:
@@ -149,14 +152,14 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	return replError
 }
 
-func (coordinator *ReplicationCoordinator) startOplogReplication() error {
+func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition int64) error {
 	// replicate speed limit on all syncer
 	coordinator.rateController = nimo.NewSimpleRateController()
 
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
 	for _, src := range coordinator.Sources {
-		syncer := NewOplogSyncer(coordinator, src.ReplicaName, src.URL, src.Gid)
+		syncer := NewOplogSyncer(coordinator, src.ReplicaName, oplogStartPosition, src.URL, src.Gid)
 		// syncerGroup http api registry
 		syncer.init()
 		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)

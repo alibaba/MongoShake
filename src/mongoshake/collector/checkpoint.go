@@ -15,10 +15,10 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
-func (sync *OplogSyncer) newCheckpointManager(name string) {
+func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int64) {
 	LOG.Info("Oplog sync create checkpoint manager with [%s] [%s]",
 		conf.Options.ContextStorage, conf.Options.ContextAddress)
-	sync.ckptManager = ckpt.NewCheckpointManager(name)
+	sync.ckptManager = ckpt.NewCheckpointManager(name, startPosition)
 }
 
 func (sync *OplogSyncer) checkpoint() {

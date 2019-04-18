@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
+	"mongoshake/common"
 	"mongoshake/dbpool"
 )
 
@@ -21,7 +22,7 @@ func GetAllNamespace(src string) (allNs []dbpool.NS, err error) {
 	}
 	allNs = make([]dbpool.NS, 0, 128)
 	for _, db := range dbNames {
-		if db != "admin" && db != "local" {
+		if db != "admin" && db != "local" && db != utils.AppDatabase {
 			colNames, err := conn.Session.DB(db).CollectionNames()
 			if err != nil {
 				err = fmt.Errorf("get collection names of mongodb instance [%s] error. %s", src, err.Error())
@@ -51,7 +52,7 @@ type DocumentReader struct {
 	query bson.M
 }
 
-// NewOplogReader creates reader with mongodb url
+// NewDocumentReader creates reader with mongodb url
 func NewDocumentReader(src string, ns dbpool.NS) *DocumentReader {
 	return &DocumentReader{src: src, ns: ns, query: bson.M{}}
 }
