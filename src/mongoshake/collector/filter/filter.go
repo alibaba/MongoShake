@@ -10,7 +10,6 @@ import (
 )
 
 var NsShouldBeIgnore = [...]string{
-	"admin.",
 	"local.",
 	"config.",
 
@@ -53,6 +52,13 @@ func (filter *AutologousFilter) Filter(log *oplog.PartialLog) bool {
 	// that are admin, local, mongoshake, mongoshake_conflict
 	for _, ignorePrefix := range NsShouldBeIgnore {
 		if strings.HasPrefix(log.Namespace, ignorePrefix) {
+			return true
+		}
+		// transaction namespace is "admin.$cmd"
+		if strings.HasPrefix(log.Namespace, "admin.") {
+			if log.Namespace ==  "admin.$cmd" && log.Lsid != nil {
+				return false
+			}
 			return true
 		}
 	}

@@ -53,3 +53,12 @@ func GetAndCompareVersion(session *mgo.Session, threshold string) bool {
 func IsNotFound(err error) bool {
 	return err.Error() == mgo.ErrNotFound.Error()
 }
+
+func ApplyOpsFilter(key string) bool {
+	// convert to map if has more later
+	if strings.TrimSpace(key) == "$db" {
+		// 40621, $db is not allowed in OP_QUERY requests
+		return true
+	}
+	return false
+}

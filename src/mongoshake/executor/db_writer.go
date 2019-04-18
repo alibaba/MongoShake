@@ -15,6 +15,7 @@ import(
 
 const (
 	versionMark = "$v"
+	uuidMark    = "ui"
 )
 
 type BasicWriter interface {
@@ -563,8 +564,6 @@ func runCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 		fallthrough
 	case "renameCollection":
 		fallthrough
-	case "applyOps":
-		fallthrough
 	case "emptycapped":
 		// convert bson.M to bson.D
 		var store bson.D
@@ -577,6 +576,24 @@ func runCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 		} else {
 			err = session.DB("admin").Run(store, nil)
 		}
+	case "applyOps":
+		var store bson.D
+		for key, value := range log.Object {
+			if utils.ApplyOpsFilter(key) {
+				continue
+			}
+			if key == "applyOps" {
+				arr := value.([]interface{})
+				for _, ele := range arr {
+					doc := ele.(bson.M)
+					if _, ok := doc[uuidMark]; ok {
+						delete(doc, uuidMark)
+					}
+				}
+			}
+			store = append(store, bson.DocElem{Name: key, Value: value})
+		}
+		err = dbHandler.Run(store, nil)
 	default:
 		LOG.Warn("runCommand meets type[%s] which is not implemented, ignore!", operation)
 	}
