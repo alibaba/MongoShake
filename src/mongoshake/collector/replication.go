@@ -133,15 +133,18 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 }
 
 func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
-	var wg sync.WaitGroup
+	if conf.Options.Tunnel != "direct" {
+		return errors.New("document replication only support direct tunnel type")
+	}
 
+	var wg sync.WaitGroup
 	var replError error
 	for _, src := range coordinator.Sources {
 		docSyncer := docsyncer.NewDocumentSyncer(src.URL, conf.Options.TunnelAddress[0])
 		wg.Add(1)
 		nimo.GoRoutine(func() {
 			if err := docSyncer.Start(); err != nil {
-				LOG.Critical("Document Replication for url=%v failed. %v", src.URL, err)
+				LOG.Critical("document replication for url=%v failed. %v", src.URL, err)
 				replError = err
 			}
 			wg.Done()
