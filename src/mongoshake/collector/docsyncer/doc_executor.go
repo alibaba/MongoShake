@@ -41,7 +41,7 @@ func NewCollectionExecutor(ReplayerId uint32, mongoUrl string, ns dbpool.NS) *Co
 }
 
 func (batchExecutor *CollectionExecutor) Start() {
-	parallel := conf.Options.ReplayerExecutor
+	parallel := conf.Options.ReplayerDocumentParallel
 	batchExecutor.docBatch = make(chan []*bson.Raw, parallel)
 
 	executors := make([]*DocExecutor, parallel)
@@ -115,7 +115,7 @@ func (exec *DocExecutor) start() {
 
 	exec.dropConnection()
 
-	LOG.Info("doc executor Replayer-%d Executor-%d end",
+	LOG.Info("document replayer-%d executor-%d end",
 		exec.batchExecutor.replayerId, exec.id)
 }
 

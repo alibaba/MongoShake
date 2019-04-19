@@ -27,7 +27,6 @@ type Configuration struct {
 	FilterNamespaceBlack    []string `config:"filter.namespace.black"`
 	FilterNamespaceWhite    []string `config:"filter.namespace.white"`
 	SyncMode                string   `config:"sync_mode"`
-	CollectionRename        bool     `config:"collection_rename"`
 
 	ReplayerDMLOnly                   bool   `config:"replayer.dml_only"`
 	ReplayerExecutor                  int    `config:"replayer.executor"`
@@ -36,6 +35,11 @@ type Configuration struct {
 	ReplayerCollisionEnable           bool   `config:"replayer.collision_detection"`
 	ReplayerConflictWriteTo           string `config:"replayer.conflict_write_to"`
 	ReplayerDurable                   bool   `config:"replayer.durable"`
+
+	ReplayerCollectionRename   bool `config:"replayer.collection_rename"`
+	ReplayerCollectionParallel int  `config:"replayer.collection_parallel"`
+	ReplayerDocumentParallel   int  `config:"replayer.document_parallel"`
+	ReplayerDocumentBatchSize  int  `config:"replayer.document_batch_size"`
 }
 
 func (configuration *Configuration) IsShardCluster() bool {

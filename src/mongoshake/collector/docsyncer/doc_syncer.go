@@ -14,9 +14,6 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
-const (
-	DocBufferCapacity = 1000
-)
 
 type DocumentSyncer struct {
 	// source mongodb url
@@ -27,8 +24,6 @@ type DocumentSyncer struct {
 	namespaces 		chan dbpool.NS
 	// start time of sync
 	startTime 		time.Time
-	// destination mongodb connection
-	toMongoConn		*dbpool.MongoConn
 
 	replMetric 		*utils.ReplicationMetric
 }
@@ -40,7 +35,7 @@ func NewDocumentSyncer(
 	syncer := &DocumentSyncer{
 		fromMongoUrl: fromMongoUrl,
 		toMongoUrl:   toMongoUrl,
-		namespaces:   make(chan dbpool.NS, conf.Options.WorkerNum),
+		namespaces:   make(chan dbpool.NS, conf.Options.ReplayerCollectionParallel),
 	}
 
 	return syncer
@@ -55,7 +50,7 @@ func (syncer *DocumentSyncer) Start() error {
 	}
 
 	var syncError error
-	for i := 0; i < conf.Options.WorkerNum; i++ {
+	for i := 0; i < conf.Options.ReplayerCollectionParallel; i++ {
 		ind := i
 		nimo.GoRoutine(func() {
 			for {
@@ -64,44 +59,46 @@ func (syncer *DocumentSyncer) Start() error {
 					break
 				}
 
-				LOG.Info("Replayer-%v sync ns %v begin", ind, ns)
+				LOG.Info("document replayer-%v sync ns %v begin", ind, ns)
 				if err := syncer.collectionSync(uint32(ind), ns); err != nil {
-					LOG.Critical("Replayer-%v sync ns %v failed. %v", ind, ns, err)
+					LOG.Critical("document replayer-%v sync ns %v failed. %v", ind, ns, err)
 					syncError = errors.New(fmt.Sprintf("document syncer sync ns %v failed. %v", ns, err))
 				} else {
-					LOG.Info("Replayer-%v sync ns %v successful", ind, ns)
+					LOG.Info("document replayer-%v sync ns %v successful", ind, ns)
 				}
 
 				wg.Done()
 			}
-			LOG.Info("Replayer-%v finish", ind)
+			LOG.Info("document replayer-%v finish", ind)
 		})
 	}
 
 	wg.Wait()
 	close(syncer.namespaces)
 
-	if syncer.toMongoConn != nil {
-		syncer.toMongoConn.Close()
-	}
-
 	return syncError
 }
 
-func (syncer *DocumentSyncer) prepare(wg *sync.WaitGroup) (err error) {
-	var nslist []dbpool.NS
-	if nslist, err = GetAllNamespace(syncer.fromMongoUrl); err != nil {
+func (syncer *DocumentSyncer) prepare(wg *sync.WaitGroup) error {
+	var nsList []dbpool.NS
+	var err error
+	if nsList, err = GetAllNamespace(syncer.fromMongoUrl); err != nil {
 		return err
 	}
 
-	if syncer.toMongoConn, err = dbpool.NewMongoConn(syncer.toMongoUrl,true); err != nil {
+	var conn *dbpool.MongoConn
+	if conn, err = dbpool.NewMongoConn(syncer.toMongoUrl,true); err != nil {
 		return errors.New(fmt.Sprintf("Connect to dest mongo failed. %v", err))
 	}
 
-	wg.Add(len(nslist))
+	if conn != nil {
+		conn.Close()
+	}
+
+	wg.Add(len(nsList))
 
 	nimo.GoRoutine(func() {
-		for _, ns := range nslist {
+		for _, ns := range nsList {
 			syncer.namespaces <- ns
 		}
 	})
@@ -112,15 +109,22 @@ func (syncer *DocumentSyncer) collectionSync(replayerId uint32, ns dbpool.NS) er
 	reader := NewDocumentReader(syncer.fromMongoUrl, ns)
 
 	toColName := fmt.Sprintf("%s_%s", ns.Collection, utils.APPNAME)
-
 	toNS := dbpool.NS{Database:ns.Database, Collection:toColName}
+
+	var conn *dbpool.MongoConn
+	var err error
+	if conn, err = dbpool.NewMongoConn(syncer.toMongoUrl,true); err != nil {
+		return errors.New(fmt.Sprintf("Connect to dest mongo failed. %v", err))
+	}
+
+	_ = conn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
 
 	batchExecutor := NewCollectionExecutor(replayerId, syncer.toMongoUrl, toNS)
 	batchExecutor.Start()
 
-	buffer := make([]*bson.Raw, 0, DocBufferCapacity)
+	bufferSize := conf.Options.ReplayerDocumentBatchSize
+	buffer := make([]*bson.Raw, 0, bufferSize)
 
-	var err error
 	for {
 		var doc *bson.Raw
 		if doc, err = reader.NextDoc(); err != nil {
@@ -133,36 +137,40 @@ func (syncer *DocumentSyncer) collectionSync(replayerId uint32, ns dbpool.NS) er
 			break
 		}
 		buffer = append(buffer, doc)
-		if len(buffer) >= DocBufferCapacity {
+		if len(buffer) >= bufferSize {
 			batchExecutor.Sync(buffer)
-			buffer = make([]*bson.Raw, 0, DocBufferCapacity)
+			buffer = make([]*bson.Raw, 0, bufferSize)
 		}
 	}
 
-	LOG.Info("Replayer-%v sync index ns %v begin", replayerId, ns)
+	LOG.Info("document replayer-%v sync index ns %v begin", replayerId, ns)
 
 	if indexes, err := reader.GetIndexes(); err != nil {
 		return errors.New(fmt.Sprintf("Get indexes from ns %v of src mongodb failed. %v", ns, err))
 	} else {
 		for _, index := range indexes {
 			index.Background = false
-			if err = syncer.toMongoConn.Session.DB(toNS.Database).C(toNS.Collection).EnsureIndex(index); err != nil {
+			if err = conn.Session.DB(toNS.Database).C(toNS.Collection).EnsureIndex(index); err != nil {
 				return errors.New(fmt.Sprintf("Create indexes for ns %v of dest mongodb failed. %v", ns, err))
 			}
 		}
 	}
 
 	reader.Close()
-	LOG.Info("Replayer-%v sync index for ns %v successful", replayerId, ns)
+	LOG.Info("document replayer-%v sync index for ns %v successful", replayerId, ns)
 
-	if conf.Options.CollectionRename {
-		err := syncer.toMongoConn.Session.DB("admin").
+	if conf.Options.ReplayerCollectionRename {
+		err := conn.Session.DB("admin").
 			Run(bson.D{{"renameCollection",toNS.Str()},{"to",ns.Str()}},nil)
 		if err != nil {
 			return errors.New(fmt.Sprintf("Rename Collection ns %v of dest mongodb to ns %v failed. %v",
 							toNS, ns, err))
 		}
 		LOG.Info("Rename collection ns %v of dest mongodb to ns %v successful", toNS, ns)
+	}
+
+	if conn != nil {
+		conn.Close()
 	}
 
 	return nil
