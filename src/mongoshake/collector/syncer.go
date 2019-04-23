@@ -193,7 +193,7 @@ func (sync *OplogSyncer) startBatcher() {
 		sync.checkpoint(barrier)
 
 		// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
-		if barrier && newestTs > 0 {
+		if barrier && newestTs > 0 && conf.Options.WorkerNum > 1 {
 			LOG.Info("find barrier")
 			for {
 				checkpointTs := sync.ckptManager.Get().Timestamp
