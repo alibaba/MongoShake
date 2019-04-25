@@ -14,6 +14,8 @@ import (
 	"github.com/vinllen/mgo"
 )
 
+var GlobalCollExecutorId int32 = -1
+
 var GlobalDocExecutorId int32 = -1
 
 
@@ -21,7 +23,7 @@ type CollectionExecutor struct {
 	// multi executor
 	executors []*DocExecutor
 	// worker id
-	replayerId uint32
+	id int
 	// mongo url
 	mongoUrl string
 
@@ -32,11 +34,16 @@ type CollectionExecutor struct {
 	docBatch chan []*bson.Raw
 }
 
-func NewCollectionExecutor(ReplayerId uint32, mongoUrl string, ns dbpool.NS) *CollectionExecutor {
+
+func GenerateCollExecutorId() int {
+	return int(atomic.AddInt32(&GlobalCollExecutorId, 1))
+}
+
+func NewCollectionExecutor(id int, mongoUrl string, ns dbpool.NS) *CollectionExecutor {
 	return &CollectionExecutor{
-		replayerId: ReplayerId,
-		mongoUrl:   mongoUrl,
-		ns:         ns,
+		id:       id,
+		mongoUrl: mongoUrl,
+		ns:       ns,
 	}
 }
 
@@ -68,7 +75,7 @@ func (batchExecutor *CollectionExecutor) Wait() error {
 
 	for _, exec := range batchExecutor.executors {
 		if exec.error != nil {
-			return errors.New(fmt.Sprintf("batch sync ns %v failed. %v", batchExecutor.ns, exec.error))
+			return errors.New(fmt.Sprintf("sync ns %v failed. %v", batchExecutor.ns, exec.error))
 		}
 	}
 	return nil
@@ -114,9 +121,6 @@ func (exec *DocExecutor) start() {
 	}
 
 	exec.dropConnection()
-
-	LOG.Info("document replayer-%d executor-%d end",
-		exec.batchExecutor.replayerId, exec.id)
 }
 
 func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
@@ -143,7 +147,7 @@ func (exec *DocExecutor) ensureConnection() bool {
 	// reconnect if necessary
 	if exec.session == nil {
 		if conn, err := dbpool.NewMongoConn(exec.batchExecutor.mongoUrl, true); err != nil {
-			LOG.Critical("Connect to mongo cluster failed. %v", err)
+			LOG.Critical("Connect to mongodb url=%s failed. %v", exec.batchExecutor.mongoUrl, err)
 			return false
 		} else {
 			exec.session = conn.Session

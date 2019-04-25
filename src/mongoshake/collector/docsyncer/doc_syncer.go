@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/gugemichael/nimo4go"
+	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
 	"mongoshake/collector/configure"
 	"mongoshake/common"
@@ -14,112 +15,262 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
+func StartDropDestCollection(nsSet map[dbpool.NS]bool, shardingSync bool) error {
+	var toConn *dbpool.MongoConn
+	var err error
+	url := conf.Options.TunnelAddress[0]
+	if toConn, err = dbpool.NewMongoConn(url, true); err != nil {
+		LOG.Critical("Connect to mongodb url=%s failed. %v", url, err)
+		return errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", url, err))
+	}
 
-type DocumentSyncer struct {
-	// source mongodb url
-	fromMongoUrl 	string
-	// destination mongodb url
-	toMongoUrl 		string
-	// namespace need to sync
-	namespaces 		chan dbpool.NS
-	// start time of sync
-	startTime 		time.Time
-
-	replMetric 		*utils.ReplicationMetric
+	for ns := range nsSet {
+		toNS := getToNs(ns, shardingSync)
+		_ = toConn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
+	}
+	return nil
 }
 
-func NewDocumentSyncer(
-	fromMongoUrl string,
-	toMongoUrl string) *DocumentSyncer {
+func StartNamespaceSpecSyncForSharding(csUrl string) error {
+	LOG.Info("document syncer namespace spec for sharding begin")
 
-	syncer := &DocumentSyncer{
-		fromMongoUrl: fromMongoUrl,
-		toMongoUrl:   toMongoUrl,
-		namespaces:   make(chan dbpool.NS, conf.Options.ReplayerCollectionParallel),
+	var fromConn *dbpool.MongoConn
+	var err error
+	if fromConn, err = dbpool.NewMongoConn(csUrl, true); err != nil {
+		LOG.Critical("Connect to mongodb url=%s failed. %v", csUrl, err)
+		return errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", csUrl, err))
+	}
+
+	toUrl := conf.Options.TunnelAddress[0]
+	var toConn *dbpool.MongoConn
+	if toConn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
+		LOG.Critical("Connect to mongodb url=%s failed. %v", toUrl, err)
+		return errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", toUrl, err))
+	}
+
+	type dbConfig struct {
+		Db          string `bson:"_id"`
+		Partitioned bool   `bson:"partitioned"`
+	}
+	var dbDoc dbConfig
+
+	dbIter := fromConn.Session.DB("config").C("databases").Find(bson.M{}).Iter()
+	for dbIter.Next(&dbDoc) {
+		if dbDoc.Partitioned {
+			var todbDoc dbConfig
+			err = toConn.Session.DB("config").C("databases").
+				Find(bson.D{{"_id", dbDoc.Db}}).One(&todbDoc)
+			if err == nil && todbDoc.Partitioned {
+				continue
+			}
+			err = toConn.Session.DB("admin").Run(bson.D{{"enablesharding", dbDoc.Db}}, nil)
+			if err != nil {
+				LOG.Critical("Enable sharding for db %v of dest mongodb failed. %v", dbDoc.Db, err)
+				return errors.New(fmt.Sprintf("Enable sharding for db %v of dest mongodb failed. %v",
+					dbDoc.Db, err))
+			}
+		}
+	}
+
+	if err := dbIter.Close(); err != nil {
+		LOG.Critical("Close iterator of config.database failed. %v", err)
+	}
+
+	type colConfig struct {
+		Ns      string    `bson:"_id"`
+		Key     *bson.Raw `bson:"key"`
+		Unique  bool      `bson:"unique"`
+		Dropped bool      `bson:"dropped"`
+	}
+	var colDoc colConfig
+	colIter := fromConn.Session.DB("config").C("collections").Find(bson.M{}).Iter()
+	for colIter.Next(&colDoc) {
+		if !colDoc.Dropped {
+			err = toConn.Session.DB("admin").Run(bson.D{{"shardCollection", colDoc.Ns},
+				{"key", bson.M{"a":1}}, {"unique", colDoc.Unique}}, nil)
+			if err != nil {
+				LOG.Critical("Shard collection for ns %v of dest mongodb failed. %v", colDoc.Ns, err)
+				return errors.New(fmt.Sprintf("Shard collection for ns %v of dest mongodb failed. %v",
+					colDoc.Ns, err))
+			}
+		}
+	}
+
+	if err = colIter.Close(); err != nil {
+		LOG.Critical("Close iterator of config.collections failed. %v", err)
+	}
+	if fromConn != nil {
+		fromConn.Close()
+	}
+	if toConn != nil {
+		toConn.Close()
+	}
+
+	LOG.Info("document syncer namespace spec for sharding successful")
+	return nil
+}
+
+func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, shardingSync bool) (syncError error) {
+	type IndexNS struct {
+		ns        dbpool.NS
+		indexList []mgo.Index
+	}
+
+	LOG.Info("document syncer sync index begin")
+	var wg sync.WaitGroup
+
+	collExecutorParallel := conf.Options.ReplayerCollectionParallel
+	namespaces := make(chan *IndexNS, collExecutorParallel)
+
+	wg.Add(len(indexMap))
+
+	nimo.GoRoutine(func() {
+		for ns, indexList := range indexMap {
+			namespaces <- &IndexNS{ns: ns, indexList: indexList}
+		}
+	})
+
+	for i := 0; i < collExecutorParallel; i++ {
+		nimo.GoRoutine(func() {
+			toUrl := conf.Options.TunnelAddress[0]
+			var conn *dbpool.MongoConn
+			var err error
+			if conn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
+				LOG.Critical("Connect to mongodb url=%s failed. %v", toUrl, err)
+				syncError = errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", toUrl, err))
+				return
+			}
+
+			for {
+				indexNs, ok := <-namespaces
+				if !ok {
+					break
+				}
+				ns := indexNs.ns
+				toNS := getToNs(ns, shardingSync)
+
+				for _, index := range indexNs.indexList {
+					index.Background = false
+					if err = conn.Session.DB(toNS.Database).C(toNS.Collection).EnsureIndex(index); err != nil {
+						LOG.Critical("Create indexes for ns %v of dest mongodb failed. %v", ns, err)
+						syncError = errors.New(fmt.Sprintf("Create indexes for ns %v of dest mongodb failed. %v", ns, err))
+					}
+				}
+				LOG.Info("Create indexes for ns %v of dest mongodb successful", toNS)
+
+				if !shardingSync && conf.Options.ReplayerCollectionRename {
+					err := conn.Session.DB("admin").
+						Run(bson.D{{"renameCollection", toNS.Str()}, {"to", ns.Str()}}, nil)
+					if err != nil {
+						LOG.Critical("Rename Collection ns %v of dest mongodb to ns %v failed. %v", toNS, ns, err)
+						syncError = errors.New(fmt.Sprintf("Rename Collection ns %v of dest mongodb to ns %v failed. %v",
+							toNS, ns, err))
+					}
+					LOG.Info("Rename collection ns %v of dest mongodb to ns %v successful", toNS, ns)
+				}
+				wg.Done()
+			}
+
+			if conn != nil {
+				conn.Close()
+			}
+		})
+	}
+
+	wg.Wait()
+	close(namespaces)
+	LOG.Info("document syncer sync index successful")
+	return nil
+}
+
+type DBSyncer struct {
+	// syncer id
+	id int
+	// source mongodb url
+	FromMongoUrl string
+	// destination mongodb url
+	ToMongoUrl string
+	// index of namespace
+	indexMap map[dbpool.NS][]mgo.Index
+	// start time of sync
+	startTime time.Time
+	// is sharding sync
+	shardingSync bool
+
+	replMetric *utils.ReplicationMetric
+}
+
+func NewDBSyncer(
+	id int,
+	fromMongoUrl string,
+	toMongoUrl string,
+	shardingSync bool) *DBSyncer {
+
+	syncer := &DBSyncer{
+		id:           id,
+		FromMongoUrl: fromMongoUrl,
+		ToMongoUrl:   toMongoUrl,
+		indexMap:     make(map[dbpool.NS][]mgo.Index),
+		shardingSync: shardingSync,
 	}
 
 	return syncer
 }
 
-func (syncer *DocumentSyncer) Start() error {
+func (syncer *DBSyncer) Start() (syncError error) {
 	syncer.startTime = time.Now()
 	var wg sync.WaitGroup
 
-	if err := syncer.prepare(&wg); err != nil {
-		return errors.New(fmt.Sprintf("document syncer init transfer error. %v", err))
-	}
-
-	var syncError error
-	for i := 0; i < conf.Options.ReplayerCollectionParallel; i++ {
-		ind := i
-		nimo.GoRoutine(func() {
-			for {
-				ns, ok := <- syncer.namespaces
-				if !ok {
-					break
-				}
-
-				LOG.Info("document replayer-%v sync ns %v begin", ind, ns)
-				if err := syncer.collectionSync(uint32(ind), ns); err != nil {
-					LOG.Critical("document replayer-%v sync ns %v failed. %v", ind, ns, err)
-					syncError = errors.New(fmt.Sprintf("document syncer sync ns %v failed. %v", ns, err))
-				} else {
-					LOG.Info("document replayer-%v sync ns %v successful", ind, ns)
-				}
-
-				wg.Done()
-			}
-			LOG.Info("document replayer-%v finish", ind)
-		})
-	}
-
-	wg.Wait()
-	close(syncer.namespaces)
-
-	return syncError
-}
-
-func (syncer *DocumentSyncer) prepare(wg *sync.WaitGroup) error {
-	var nsList []dbpool.NS
-	var err error
-	if nsList, err = GetAllNamespace(syncer.fromMongoUrl); err != nil {
+	nsList, err := GetAllNamespace(syncer.FromMongoUrl)
+	if err != nil {
 		return err
 	}
 
-	var conn *dbpool.MongoConn
-	if conn, err = dbpool.NewMongoConn(syncer.toMongoUrl,true); err != nil {
-		return errors.New(fmt.Sprintf("Connect to dest mongo failed. %v", err))
-	}
-
-	if conn != nil {
-		conn.Close()
-	}
+	collExecutorParallel := conf.Options.ReplayerCollectionParallel
+	namespaces := make(chan dbpool.NS, collExecutorParallel)
 
 	wg.Add(len(nsList))
 
 	nimo.GoRoutine(func() {
 		for _, ns := range nsList {
-			syncer.namespaces <- ns
+			namespaces <- ns
 		}
 	})
+
+	for i := 0; i < collExecutorParallel; i++ {
+		collExecutorId := GenerateCollExecutorId()
+		nimo.GoRoutine(func() {
+			for {
+				ns, ok := <-namespaces
+				if !ok {
+					break
+				}
+
+				LOG.Info("document syncer-%d collExecutor-%d sync ns %v begin", syncer.id, collExecutorId, ns)
+				if err := syncer.collectionSync(collExecutorId, ns); err != nil {
+					LOG.Critical("document syncer-%d collExecutor-%d sync ns %v failed. %v", syncer.id, collExecutorId, ns, err)
+					syncError = errors.New(fmt.Sprintf("document syncer sync ns %v failed. %v", ns, err))
+				} else {
+					LOG.Info("document syncer-%d collExecutor-%d sync ns %v successful", syncer.id, collExecutorId, ns)
+				}
+
+				wg.Done()
+			}
+			LOG.Info("document syncer-%d collExecutor-%d finish", syncer.id, collExecutorId)
+		})
+	}
+
+	wg.Wait()
+	close(namespaces)
 	return nil
 }
 
-func (syncer *DocumentSyncer) collectionSync(replayerId uint32, ns dbpool.NS) error {
-	reader := NewDocumentReader(syncer.fromMongoUrl, ns)
 
-	toColName := fmt.Sprintf("%s_%s", ns.Collection, utils.APPNAME)
-	toNS := dbpool.NS{Database:ns.Database, Collection:toColName}
+func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS) error {
+	reader := NewDocumentReader(syncer.FromMongoUrl, ns)
 
-	var conn *dbpool.MongoConn
-	var err error
-	if conn, err = dbpool.NewMongoConn(syncer.toMongoUrl,true); err != nil {
-		return errors.New(fmt.Sprintf("Connect to dest mongo failed. %v", err))
-	}
-
-	_ = conn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
-
-	batchExecutor := NewCollectionExecutor(replayerId, syncer.toMongoUrl, toNS)
+	toNS := getToNs(ns, syncer.shardingSync)
+	batchExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS)
 	batchExecutor.Start()
 
 	bufferSize := conf.Options.ReplayerDocumentBatchSize
@@ -127,6 +278,7 @@ func (syncer *DocumentSyncer) collectionSync(replayerId uint32, ns dbpool.NS) er
 
 	for {
 		var doc *bson.Raw
+		var err error
 		if doc, err = reader.NextDoc(); err != nil {
 			return errors.New(fmt.Sprintf("Get next document from ns %v of src mongodb failed. %v", ns, err))
 		} else if doc == nil {
@@ -143,35 +295,25 @@ func (syncer *DocumentSyncer) collectionSync(replayerId uint32, ns dbpool.NS) er
 		}
 	}
 
-	LOG.Info("document replayer-%v sync index ns %v begin", replayerId, ns)
-
 	if indexes, err := reader.GetIndexes(); err != nil {
 		return errors.New(fmt.Sprintf("Get indexes from ns %v of src mongodb failed. %v", ns, err))
 	} else {
-		for _, index := range indexes {
-			index.Background = false
-			if err = conn.Session.DB(toNS.Database).C(toNS.Collection).EnsureIndex(index); err != nil {
-				return errors.New(fmt.Sprintf("Create indexes for ns %v of dest mongodb failed. %v", ns, err))
-			}
-		}
+		syncer.indexMap[ns] = indexes
 	}
 
 	reader.Close()
-	LOG.Info("document replayer-%v sync index for ns %v successful", replayerId, ns)
-
-	if conf.Options.ReplayerCollectionRename {
-		err := conn.Session.DB("admin").
-			Run(bson.D{{"renameCollection",toNS.Str()},{"to",ns.Str()}},nil)
-		if err != nil {
-			return errors.New(fmt.Sprintf("Rename Collection ns %v of dest mongodb to ns %v failed. %v",
-							toNS, ns, err))
-		}
-		LOG.Info("Rename collection ns %v of dest mongodb to ns %v successful", toNS, ns)
-	}
-
-	if conn != nil {
-		conn.Close()
-	}
-
 	return nil
+}
+
+func (syncer *DBSyncer) GetIndexMap() map[dbpool.NS][]mgo.Index {
+	return syncer.indexMap
+}
+
+func getToNs(ns dbpool.NS, shardingSync bool) dbpool.NS {
+	if shardingSync {
+		return ns
+	} else {
+		toCollection := fmt.Sprintf("%s_%s", ns.Collection, utils.APPNAME)
+		return dbpool.NS{Database:ns.Database, Collection:toCollection}
+	}
 }

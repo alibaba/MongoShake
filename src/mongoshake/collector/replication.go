@@ -3,6 +3,7 @@ package collector
 import (
 	"encoding/json"
 	"errors"
+	"github.com/vinllen/mgo"
 	"mongoshake/collector/docsyncer"
 	"sync"
 	"time"
@@ -12,9 +13,9 @@ import (
 	"mongoshake/dbpool"
 	"mongoshake/oplog"
 
-	LOG "github.com/vinllen/log4go"
-	"github.com/gugemichael/nimo4go"
 	"fmt"
+	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 )
 
 // ReplicationCoordinator global coordinator instance. consist of
@@ -51,7 +52,6 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	coordinator.sentinel = &utils.Sentinel{}
 	coordinator.sentinel.Register()
 
-
 	switch conf.Options.SyncMode {
 	case "all":
 		oplogStartPosition := time.Now().Unix()
@@ -82,6 +82,14 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	var err error
 	var hasUniqIndex = false
 	rs := map[string]int{}
+	if len(coordinator.Sources) > 1 {
+		csUrl := conf.Options.ContextStorageUrl
+		if conn, err = dbpool.NewMongoConn(csUrl, false); conn == nil || !conn.IsGood() || err != nil {
+			LOG.Critical("Connect mongo server error. %v, url : %s", err, csUrl)
+			return err
+		}
+		conn.Close()
+	}
 	for i, src := range coordinator.Sources {
 		if conn, err = dbpool.NewMongoConn(src.URL, false); conn == nil || !conn.IsGood() || err != nil {
 			LOG.Critical("Connect mongo server error. %v, url : %s", err, src.URL)
@@ -99,8 +107,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		// rsName will be set to default if empty
 		if rsName == "" {
 			rsName = fmt.Sprintf("default-%d", i)
-			LOG.Warn("Source mongodb have empty replica set name, url[%s], change to default[%s]",
-				src.URL, rsName)
+			LOG.Warn("Source mongodb have empty replica set name, url[%s], change to default[%s]", src.URL, rsName)
 		}
 
 		if _, exist := rs[rsName]; exist {
@@ -137,20 +144,55 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		return errors.New("document replication only support direct tunnel type")
 	}
 
+	// get all namespace need to sync
+	nsSet := make(map[dbpool.NS]bool)
+	for _, src := range coordinator.Sources {
+		nsList, err := docsyncer.GetAllNamespace(src.URL)
+		if err != nil {
+			return err
+		}
+		for _, ns := range nsList {
+			nsSet[ns] = true
+		}
+	}
+
+	shardingSync := len(coordinator.Sources) > 1
+	if err := docsyncer.StartDropDestCollection(nsSet, shardingSync); err != nil {
+		return err
+	}
+	if shardingSync {
+		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.ContextStorageUrl); err != nil {
+			return err
+		}
+	}
+
 	var wg sync.WaitGroup
 	var replError error
-	for _, src := range coordinator.Sources {
-		docSyncer := docsyncer.NewDocumentSyncer(src.URL, conf.Options.TunnelAddress[0])
+	var mutex sync.Mutex
+	indexMap := make(map[dbpool.NS][]mgo.Index)
+
+	for i, src := range coordinator.Sources {
+		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, conf.Options.TunnelAddress[0], shardingSync)
+		LOG.Info("document syncer-%d do replication for url=%v", i, src.URL)
 		wg.Add(1)
 		nimo.GoRoutine(func() {
-			if err := docSyncer.Start(); err != nil {
+			if err := dbSyncer.Start(); err != nil {
 				LOG.Critical("document replication for url=%v failed. %v", src.URL, err)
 				replError = err
 			}
+			mutex.Lock()
+			for ns, indexList := range dbSyncer.GetIndexMap() {
+				indexMap[ns] = indexList
+			}
+			mutex.Unlock()
 			wg.Done()
 		})
 	}
 	wg.Wait()
+
+	if err := docsyncer.StartIndexSync(indexMap, shardingSync); err != nil {
+		return err
+	}
 
 	return replError
 }

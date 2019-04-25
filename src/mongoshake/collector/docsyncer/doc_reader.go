@@ -9,33 +9,33 @@ import (
 )
 
 
-func GetAllNamespace(src string) (allNs []dbpool.NS, err error) {
+func GetAllNamespace(url string) (nsList []dbpool.NS, err error) {
 	var conn *dbpool.MongoConn
-	if conn, err = dbpool.NewMongoConn(src, false); conn == nil || err != nil {
-		err = fmt.Errorf("connect mongodb instance [%s] error. %s", src, err.Error())
+	if conn, err = dbpool.NewMongoConn(url, false); conn == nil || err != nil {
+		err = fmt.Errorf("connect mongodb url=%s error. %v", url, err)
 		return nil, err
 	}
 	var dbNames []string
 	if dbNames, err = conn.Session.DatabaseNames(); err != nil {
-		err = fmt.Errorf("get database names of mongodb instance [%s] error. %s", src, err.Error())
+		err = fmt.Errorf("get database names of mongodb url=%s error. %v", url, err)
 		return nil, err
 	}
-	allNs = make([]dbpool.NS, 0, 128)
+	nsList = make([]dbpool.NS, 0, 128)
 	for _, db := range dbNames {
 		if db != "admin" && db != "local" && db != utils.AppDatabase {
 			colNames, err := conn.Session.DB(db).CollectionNames()
 			if err != nil {
-				err = fmt.Errorf("get collection names of mongodb instance [%s] error. %s", src, err.Error())
+				err = fmt.Errorf("get collection names of mongodb url=%s error. %v", url, err)
 				return nil, err
 			}
 			for _, col := range colNames {
 				if col != "system.profile" {
-					allNs = append(allNs, dbpool.NS{Database:db, Collection:col})
+					nsList = append(nsList, dbpool.NS{Database:db, Collection:col})
 				}
 			}
 		}
 	}
-	return allNs, nil
+	return nsList, nil
 }
 
 
@@ -70,7 +70,7 @@ func (reader *DocumentReader) NextDoc() (doc *bson.Raw, err error) {
 		if err := reader.docIterator.Err(); err != nil {
 			// some internal error. need rebuild the oplogsIterator
 			reader.releaseIterator()
-			return nil, fmt.Errorf("get next doc failed. release oplogsIterator, %s", err.Error())
+			return nil, fmt.Errorf("get next doc failed. release oplogsIterator, %v", err)
 		} else {
 			return nil, nil
 		}
@@ -94,7 +94,7 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 		}
 		// reconnect
 		if reader.conn, err = dbpool.NewMongoConn(reader.src, false); reader.conn == nil || err != nil {
-			err = fmt.Errorf("reconnect mongodb instance [%s] error. %s", reader.src, err.Error())
+			err = fmt.Errorf("reconnect mongodb url=%s error. %v", reader.src, err)
 			return err
 		}
 	}
@@ -110,7 +110,7 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 
 func (reader *DocumentReader) releaseIterator() {
 	if reader.docIterator != nil {
-		reader.docIterator.Close()
+		_ = reader.docIterator.Close()
 	}
 	reader.docIterator = nil
 }
