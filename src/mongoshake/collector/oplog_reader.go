@@ -3,13 +3,13 @@ package collector
 import (
 	"errors"
 	"fmt"
-	"time"
-	"sync"
 	"strings"
+	"sync"
+	"time"
 
+	"mongoshake/collector/configure"
 	"mongoshake/dbpool"
 	"mongoshake/oplog"
-	"mongoshake/collector/configure"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
@@ -177,11 +177,12 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 	var queryTs bson.MongoTimestamp
 	// the given oplog timestamp shouldn't bigger than the newest
 	if reader.firstRead == true {
-		// check whether the starting fetching timestamp is less than the oldest timestamp exist in the oplog
+		// check whether the starting fetching timestamp is less than the newest timestamp exist in the oplog
 		newestTs := reader.getNewestTimestamp()
 		queryTs = reader.query[QueryTs].(bson.M)[QueryOpGTE].(bson.MongoTimestamp)
 		if newestTs < queryTs {
-			return fmt.Errorf("current starting point[%v] is bigger than the newest timestamp[%v]", queryTs, newestTs)
+			LOG.Warn("current starting point[%v] is bigger than the newest timestamp[%v]", queryTs, newestTs)
+			queryTs = newestTs
 		}
 	}
 

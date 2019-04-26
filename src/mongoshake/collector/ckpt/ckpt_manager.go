@@ -43,7 +43,7 @@ type CheckpointManager struct {
 	delegate CheckpointOperation
 }
 
-func NewCheckpointManager(name string) *CheckpointManager {
+func NewCheckpointManager(name string, startPosition int64) *CheckpointManager {
 	newManager := &CheckpointManager{}
 
 	switch conf.Options.ContextStorage {
@@ -51,7 +51,7 @@ func NewCheckpointManager(name string) *CheckpointManager {
 		newManager.delegate = &HttpApiCheckpoint{
 			Checkpoint: Checkpoint{
 				Name:          name,
-				StartPosition: conf.Options.ContextStartPosition,
+				StartPosition: startPosition,
 			},
 			URL: conf.Options.ContextAddress,
 		}
@@ -60,7 +60,7 @@ func NewCheckpointManager(name string) *CheckpointManager {
 		newManager.delegate = &MongoCheckpoint{
 			Checkpoint: Checkpoint{
 				Name:          name,
-				StartPosition: conf.Options.ContextStartPosition,
+				StartPosition: startPosition,
 			},
 			DB:    db,
 			URL:   conf.Options.ContextStorageUrl,

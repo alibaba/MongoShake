@@ -1,6 +1,7 @@
 package dbpool
 
 import (
+	"fmt"
 	"time"
 
 	LOG "github.com/vinllen/log4go"
@@ -9,6 +10,15 @@ import (
 )
 
 const OplogNS = "oplog.rs"
+
+type NS struct {
+	Database   string
+	Collection string
+}
+
+func (ns NS) Str() string {
+	return fmt.Sprintf("%s.%s", ns.Database, ns.Collection)
+}
 
 type MongoConn struct {
 	Session *mgo.Session
@@ -77,11 +87,6 @@ func (conn *MongoConn) HasOplogNs() bool {
 }
 
 func (conn *MongoConn) HasUniqueIndex() bool {
-	type NS struct {
-		Database   string
-		Collection string
-	}
-
 	checkNs := make([]NS, 0, 128)
 	var databases []string
 	var err error

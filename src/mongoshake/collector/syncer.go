@@ -40,6 +40,8 @@ type OplogSyncer struct {
 	coordinator *ReplicationCoordinator
 	// source mongodb replica set name
 	replset string
+	// oplog start position of source mongodb
+	startPosition int64
 
 	ckptManager *ckpt.CheckpointManager
 
@@ -78,12 +80,14 @@ type OplogSyncer struct {
 func NewOplogSyncer(
 	coordinator *ReplicationCoordinator,
 	replset string,
+	startPosition int64,
 	mongoUrl string,
 	gid string) *OplogSyncer {
 
 	syncer := &OplogSyncer{
 		coordinator: coordinator,
 		replset:     replset,
+		startPosition:	startPosition,
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
 		reader: NewOplogReader(mongoUrl),
@@ -144,7 +148,7 @@ func (sync *OplogSyncer) start() {
 	// 1. create checkpoint manager
 	// 2. load existing ckpt from remote storage
 	// 3. start checkpoint persist routine
-	sync.newCheckpointManager(sync.replset)
+	sync.newCheckpointManager(sync.replset, sync.startPosition)
 
 	// start batcher and deserializer
 	sync.startDeserializer()
