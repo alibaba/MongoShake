@@ -78,8 +78,10 @@ add tag when releasing: "release-v{version}-{date}". for example: "release-v1.0.
 # Usage
 ---
 *  git clone https://github.com/aliyun/mongo-shake.git
-*  cd mongo-shake/src/vendor
-*  GOPATH=\`pwd\`/../..; govendor sync     #please note: must install govendor first and then pull all dependencies
+*  cd mongo-shake
+*  export GOPATH=\`pwd\`/../..
+*  cd src/vendor
+*  govendor sync     #please note: must install govendor first. we have this binary in `tools` directory.
 *  cd ../../ && ./build.sh
 *  ./bin/collector -conf=conf/collector.conf #please note: user must modify collector.conf first to match needs. You can also use \"start.sh\" script which supports hypervisor mechanism in Linux OS only.
 

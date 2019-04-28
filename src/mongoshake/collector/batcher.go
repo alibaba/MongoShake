@@ -9,6 +9,10 @@ import (
 	"github.com/gugemichael/nimo4go"
 )
 
+var(
+	moveChunkFilter filter.MigrateFilter
+)
+
 /*
  * as we mentioned in syncer.go, Batcher is used to batch oplog before sending in order to
  * improve performance.
@@ -63,6 +67,11 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 		LOG.Debug("Oplog is filtered. %v", log)
 		batcher.syncer.replMetric.AddFilter(1)
 		return true
+	}
+
+	if moveChunkFilter.Filter(log) {
+		LOG.Crashf("move chunk oplog found[%v]", log)
+		return false
 	}
 	return false
 }
