@@ -77,11 +77,13 @@ add tag when releasing: "release-v{version}-{date}". for example: "release-v1.0.
 
 # Usage
 ---
-*  git clone https://github.com/aliyun/mongo-shake.git
-*  cd mongo-shake
+Run `./bin/collector.darwin64` or `collector.linux64` which is built in OSX and Linux respectively.<br>
+Or you can build mongo-shake yourself according to the following steps:
+*  git clone https://github.com/alibaba/MongoShake.git
+*  cd MongoShake
 *  export GOPATH=\`pwd\`/../..
 *  cd src/vendor
-*  govendor sync     #please note: must install govendor first. we have this binary in `tools` directory.
+*  govendor sync    #please note: must install govendor first and then pull all dependencies: `go get -u github.com/kardianos/govendor`
 *  cd ../../ && ./build.sh
 *  ./bin/collector -conf=conf/collector.conf #please note: user must modify collector.conf first to match needs. You can also use \"start.sh\" script which supports hypervisor mechanism in Linux OS only.
 
