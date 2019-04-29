@@ -15,6 +15,8 @@ func GetAllNamespace(url string) (nsList []dbpool.NS, err error) {
 		err = fmt.Errorf("connect mongodb url=%s error. %v", url, err)
 		return nil, err
 	}
+	defer conn.Close()
+
 	var dbNames []string
 	if dbNames, err = conn.Session.DatabaseNames(); err != nil {
 		err = fmt.Errorf("get database names of mongodb url=%s error. %v", url, err)
@@ -35,6 +37,7 @@ func GetAllNamespace(url string) (nsList []dbpool.NS, err error) {
 			}
 		}
 	}
+
 	return nsList, nil
 }
 

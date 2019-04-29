@@ -15,23 +15,57 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
-func StartDropDestCollection(nsSet map[dbpool.NS]bool, shardingSync bool) error {
+func IsShardingToSharding(fromIsSharding bool, toUrl string) (bool, error) {
 	var toConn *dbpool.MongoConn
 	var err error
-	url := conf.Options.TunnelAddress[0]
-	if toConn, err = dbpool.NewMongoConn(url, true); err != nil {
-		LOG.Critical("Connect to mongodb url=%s failed. %v", url, err)
-		return errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", url, err))
+	if toConn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
+		LOG.Critical("Connect to mongodb url=%s failed. %v", toUrl, err)
+		return false, errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", toUrl, err))
 	}
+	defer toConn.Close()
+
+	var toIsSharding bool
+	var result interface{}
+	err = toConn.Session.DB("config").C("version").Find(bson.M{}).One(&result)
+	if err != nil {
+		toIsSharding = false
+	} else {
+		toIsSharding = true
+	}
+
+	if fromIsSharding && toIsSharding {
+		LOG.Warn("replication from sharding to sharding")
+		return true, nil
+	} else if fromIsSharding && !toIsSharding {
+		LOG.Warn("replication from sharding to replica")
+		return false, nil
+	} else if !fromIsSharding && toIsSharding {
+		LOG.Warn("replication from replica to sharding")
+		return false, nil
+	} else {
+		LOG.Warn("replication from replica to replica")
+		return false, nil
+	}
+}
+
+func StartDropDestCollection(nsSet map[dbpool.NS]bool, toUrl string, shardingSync bool) error {
+	var toConn *dbpool.MongoConn
+	var err error
+	if toConn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
+		LOG.Critical("Connect to mongodb url=%s failed. %v", toUrl, err)
+		return errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", toUrl, err))
+	}
+	defer toConn.Close()
 
 	for ns := range nsSet {
 		toNS := getToNs(ns, shardingSync)
 		_ = toConn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
 	}
+
 	return nil
 }
 
-func StartNamespaceSpecSyncForSharding(csUrl string) error {
+func StartNamespaceSpecSyncForSharding(csUrl string, toUrl string) error {
 	LOG.Info("document syncer namespace spec for sharding begin")
 
 	var fromConn *dbpool.MongoConn
@@ -40,13 +74,14 @@ func StartNamespaceSpecSyncForSharding(csUrl string) error {
 		LOG.Critical("Connect to mongodb url=%s failed. %v", csUrl, err)
 		return errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", csUrl, err))
 	}
+	defer fromConn.Close()
 
-	toUrl := conf.Options.TunnelAddress[0]
 	var toConn *dbpool.MongoConn
 	if toConn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
 		LOG.Critical("Connect to mongodb url=%s failed. %v", toUrl, err)
 		return errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", toUrl, err))
 	}
+	defer toConn.Close()
 
 	type dbConfig struct {
 		Db          string `bson:"_id"`
@@ -99,18 +134,12 @@ func StartNamespaceSpecSyncForSharding(csUrl string) error {
 	if err = colIter.Close(); err != nil {
 		LOG.Critical("Close iterator of config.collections failed. %v", err)
 	}
-	if fromConn != nil {
-		fromConn.Close()
-	}
-	if toConn != nil {
-		toConn.Close()
-	}
 
 	LOG.Info("document syncer namespace spec for sharding successful")
 	return nil
 }
 
-func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, shardingSync bool) (syncError error) {
+func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string, shardingSync bool) (syncError error) {
 	type IndexNS struct {
 		ns        dbpool.NS
 		indexList []mgo.Index
@@ -132,7 +161,6 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, shardingSync bool) (sync
 
 	for i := 0; i < collExecutorParallel; i++ {
 		nimo.GoRoutine(func() {
-			toUrl := conf.Options.TunnelAddress[0]
 			var conn *dbpool.MongoConn
 			var err error
 			if conn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
@@ -140,6 +168,7 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, shardingSync bool) (sync
 				syncError = errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", toUrl, err))
 				return
 			}
+			defer conn.Close()
 
 			for {
 				indexNs, ok := <-namespaces
@@ -170,10 +199,6 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, shardingSync bool) (sync
 				}
 				wg.Done()
 			}
-
-			if conn != nil {
-				conn.Close()
-			}
 		})
 	}
 
@@ -196,6 +221,8 @@ type DBSyncer struct {
 	startTime time.Time
 	// is sharding sync
 	shardingSync bool
+
+	mutex sync.Mutex
 
 	replMetric *utils.ReplicationMetric
 }
@@ -298,6 +325,8 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS) error {
 	if indexes, err := reader.GetIndexes(); err != nil {
 		return errors.New(fmt.Sprintf("Get indexes from ns %v of src mongodb failed. %v", ns, err))
 	} else {
+		syncer.mutex.Lock()
+		defer syncer.mutex.Unlock()
 		syncer.indexMap[ns] = indexes
 	}
 

@@ -156,12 +156,18 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		}
 	}
 
-	shardingSync := len(coordinator.Sources) > 1
-	if err := docsyncer.StartDropDestCollection(nsSet, shardingSync); err != nil {
+	fromIsSharding := len(coordinator.Sources) > 1
+	toUrl := conf.Options.TunnelAddress[0]
+	shardingSync, err := docsyncer.IsShardingToSharding(fromIsSharding, toUrl)
+	if err != nil {
+		return err
+	}
+
+	if err := docsyncer.StartDropDestCollection(nsSet, toUrl, shardingSync); err != nil {
 		return err
 	}
 	if shardingSync {
-		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.ContextStorageUrl); err != nil {
+		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.ContextStorageUrl, toUrl); err != nil {
 			return err
 		}
 	}
@@ -172,25 +178,25 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	indexMap := make(map[dbpool.NS][]mgo.Index)
 
 	for i, src := range coordinator.Sources {
-		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, conf.Options.TunnelAddress[0], shardingSync)
+		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl, shardingSync)
 		LOG.Info("document syncer-%d do replication for url=%v", i, src.URL)
 		wg.Add(1)
 		nimo.GoRoutine(func() {
+			defer wg.Done()
 			if err := dbSyncer.Start(); err != nil {
 				LOG.Critical("document replication for url=%v failed. %v", src.URL, err)
 				replError = err
 			}
 			mutex.Lock()
+			defer mutex.Unlock()
 			for ns, indexList := range dbSyncer.GetIndexMap() {
 				indexMap[ns] = indexList
 			}
-			mutex.Unlock()
-			wg.Done()
 		})
 	}
 	wg.Wait()
 
-	if err := docsyncer.StartIndexSync(indexMap, shardingSync); err != nil {
+	if err := docsyncer.StartIndexSync(indexMap, toUrl, shardingSync); err != nil {
 		return err
 	}
 

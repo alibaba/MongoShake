@@ -11,7 +11,6 @@ import (
 	"mongoshake/collector/configure"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
 )
 
 var GlobalCollExecutorId int32 = -1
@@ -89,8 +88,6 @@ type DocExecutor struct {
 	batchExecutor *CollectionExecutor
 
 	error error
-	// mongo connection
-	session *mgo.Session
 }
 
 func GenerateDocExecutorId() int {
@@ -105,6 +102,14 @@ func NewDocExecutor(id int, batchExecutor *CollectionExecutor) *DocExecutor {
 }
 
 func (exec *DocExecutor) start() {
+	var conn *dbpool.MongoConn
+	var err error
+	if conn, err = dbpool.NewMongoConn(exec.batchExecutor.mongoUrl, true); err != nil {
+		LOG.Critical("Connect to mongodb url=%s failed. %v", exec.batchExecutor.mongoUrl, err)
+		exec.error = errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", exec.batchExecutor.mongoUrl, err))
+	}
+	defer conn.Close()
+
 	for {
 		docs, ok := <- exec.batchExecutor.docBatch
 		if !ok {
@@ -112,22 +117,16 @@ func (exec *DocExecutor) start() {
 		}
 
 		if exec.error == nil {
-			if err := exec.doSync(docs); err != nil {
+			if err := exec.doSync(conn, docs); err != nil {
 				exec.error = err
 			}
 		}
-
 		exec.batchExecutor.wg.Done()
 	}
 
-	exec.dropConnection()
 }
 
-func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
-	if !exec.ensureConnection() {
-		return errors.New("network connection lost. we would retry for next connecting")
-	}
-
+func (exec *DocExecutor) doSync(conn *dbpool.MongoConn ,docs []*bson.Raw) error {
 	ns := exec.batchExecutor.ns
 
 	var idocs []interface{}
@@ -135,31 +134,9 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 		idocs = append(idocs, doc)
 	}
 
-	if err := exec.session.DB(ns.Database).C(ns.Collection).Insert(idocs...); err != nil {
+	if err := conn.Session.DB(ns.Database).C(ns.Collection).Insert(idocs...); err != nil {
 		return fmt.Errorf("Insert docs [%v] into ns %v of dest mongo failed. %v", docs, ns, err)
 	}
 
 	return nil
-}
-
-
-func (exec *DocExecutor) ensureConnection() bool {
-	// reconnect if necessary
-	if exec.session == nil {
-		if conn, err := dbpool.NewMongoConn(exec.batchExecutor.mongoUrl, true); err != nil {
-			LOG.Critical("Connect to mongodb url=%s failed. %v", exec.batchExecutor.mongoUrl, err)
-			return false
-		} else {
-			exec.session = conn.Session
-		}
-	}
-
-	return true
-}
-
-func (exec *DocExecutor) dropConnection() {
-	if exec.session != nil {
-		exec.session.Close()
-		exec.session = nil
-	}
 }
