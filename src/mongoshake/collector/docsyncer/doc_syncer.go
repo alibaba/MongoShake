@@ -15,18 +15,10 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
-func IsShardingToSharding(fromIsSharding bool, toUrl string) (bool, error) {
-	var toConn *dbpool.MongoConn
-	var err error
-	if toConn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
-		LOG.Critical("Connect to mongodb url=%s failed. %v", toUrl, err)
-		return false, errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", toUrl, err))
-	}
-	defer toConn.Close()
-
+func IsShardingToSharding(fromIsSharding bool, toConn *dbpool.MongoConn) (bool, error) {
 	var toIsSharding bool
 	var result interface{}
-	err = toConn.Session.DB("config").C("version").Find(bson.M{}).One(&result)
+	err := toConn.Session.DB("config").C("version").Find(bson.M{}).One(&result)
 	if err != nil {
 		toIsSharding = false
 	} else {
@@ -48,15 +40,7 @@ func IsShardingToSharding(fromIsSharding bool, toUrl string) (bool, error) {
 	}
 }
 
-func StartDropDestCollection(nsSet map[dbpool.NS]bool, toUrl string, shardingSync bool) error {
-	var toConn *dbpool.MongoConn
-	var err error
-	if toConn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
-		LOG.Critical("Connect to mongodb url=%s failed. %v", toUrl, err)
-		return errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", toUrl, err))
-	}
-	defer toConn.Close()
-
+func StartDropDestCollection(nsSet map[dbpool.NS]bool, toConn *dbpool.MongoConn, shardingSync bool) error {
 	for ns := range nsSet {
 		toNS := getToNs(ns, shardingSync)
 		_ = toConn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
@@ -65,7 +49,7 @@ func StartDropDestCollection(nsSet map[dbpool.NS]bool, toUrl string, shardingSyn
 	return nil
 }
 
-func StartNamespaceSpecSyncForSharding(csUrl string, toUrl string) error {
+func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn) error {
 	LOG.Info("document syncer namespace spec for sharding begin")
 
 	var fromConn *dbpool.MongoConn
@@ -75,13 +59,6 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toUrl string) error {
 		return errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", csUrl, err))
 	}
 	defer fromConn.Close()
-
-	var toConn *dbpool.MongoConn
-	if toConn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
-		LOG.Critical("Connect to mongodb url=%s failed. %v", toUrl, err)
-		return errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", toUrl, err))
-	}
-	defer toConn.Close()
 
 	type dbConfig struct {
 		Db          string `bson:"_id"`
@@ -159,16 +136,19 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string, shardingSy
 		}
 	})
 
+	var conn *dbpool.MongoConn
+	var err error
+	if conn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
+		LOG.Critical("Connect to mongodb url=%s failed. %v", toUrl, err)
+		syncError = errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", toUrl, err))
+		return
+	}
+	defer conn.Close()
+
 	for i := 0; i < collExecutorParallel; i++ {
 		nimo.GoRoutine(func() {
-			var conn *dbpool.MongoConn
-			var err error
-			if conn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
-				LOG.Critical("Connect to mongodb url=%s failed. %v", toUrl, err)
-				syncError = errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", toUrl, err))
-				return
-			}
-			defer conn.Close()
+			session := conn.Session.Clone()
+			defer session.Close()
 
 			for {
 				indexNs, ok := <-namespaces
@@ -178,24 +158,29 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string, shardingSy
 				ns := indexNs.ns
 				toNS := getToNs(ns, shardingSync)
 
-				for _, index := range indexNs.indexList {
-					index.Background = false
-					if err = conn.Session.DB(toNS.Database).C(toNS.Collection).EnsureIndex(index); err != nil {
-						LOG.Warn("Create indexes for ns %v of dest mongodb failed. %v", ns, err)
-					}
-				}
-				LOG.Info("Create indexes for ns %v of dest mongodb successful", toNS)
-
 				if !shardingSync && conf.Options.ReplayerCollectionRename {
-					err := conn.Session.DB("admin").
+					// rename collection before create index, because the collection name of dest mongodb maybe too long
+					// namespace.indexName cannot exceed 127 byte
+					err := session.DB("admin").
 						Run(bson.D{{"renameCollection", toNS.Str()}, {"to", ns.Str()}}, nil)
-					if err != nil {
+					if err != nil && err.Error() != "source namespace does not exist" {
 						LOG.Critical("Rename Collection ns %v of dest mongodb to ns %v failed. %v", toNS, ns, err)
 						syncError = errors.New(fmt.Sprintf("Rename Collection ns %v of dest mongodb to ns %v failed. %v",
 							toNS, ns, err))
+					} else {
+						LOG.Info("Rename collection ns %v of dest mongodb to ns %v successful", toNS, ns)
 					}
-					LOG.Info("Rename collection ns %v of dest mongodb to ns %v successful", toNS, ns)
+					toNS = ns
 				}
+
+				for _, index := range indexNs.indexList {
+					index.Background = false
+					if err = session.DB(toNS.Database).C(toNS.Collection).EnsureIndex(index); err != nil {
+						LOG.Warn("Create indexes for ns %v of dest mongodb failed. %v", ns, err)
+					}
+				}
+				LOG.Info("Create indexes for ns %v of dest mongodb finish", toNS)
+
 				wg.Done()
 			}
 		})
@@ -203,7 +188,7 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string, shardingSy
 
 	wg.Wait()
 	close(namespaces)
-	LOG.Info("document syncer sync index successful")
+	LOG.Info("document syncer sync index finish")
 	return syncError
 }
 
@@ -297,7 +282,9 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS) error {
 
 	toNS := getToNs(ns, syncer.shardingSync)
 	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS)
-	colExecutor.Start()
+	if err := colExecutor.Start(); err != nil {
+		return err
+	}
 
 	bufferSize := conf.Options.ReplayerDocumentBatchSize
 	buffer := make([]*bson.Raw, 0, bufferSize)

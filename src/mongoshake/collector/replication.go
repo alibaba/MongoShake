@@ -158,16 +158,24 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 
 	fromIsSharding := len(coordinator.Sources) > 1
 	toUrl := conf.Options.TunnelAddress[0]
-	shardingSync, err := docsyncer.IsShardingToSharding(fromIsSharding, toUrl)
+	var toConn *dbpool.MongoConn
+	var err error
+	if toConn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
+		LOG.Critical("Connect to mongodb url=%s failed. %v", toUrl, err)
+		return errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", toUrl, err))
+	}
+	defer toConn.Close()
+
+	shardingSync, err := docsyncer.IsShardingToSharding(fromIsSharding, toConn)
 	if err != nil {
 		return err
 	}
 
-	if err := docsyncer.StartDropDestCollection(nsSet, toUrl, shardingSync); err != nil {
+	if err := docsyncer.StartDropDestCollection(nsSet, toConn, shardingSync); err != nil {
 		return err
 	}
 	if shardingSync {
-		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.ContextStorageUrl, toUrl); err != nil {
+		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.ContextStorageUrl, toConn); err != nil {
 			return err
 		}
 	}
