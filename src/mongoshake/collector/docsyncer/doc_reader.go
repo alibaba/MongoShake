@@ -24,7 +24,7 @@ func GetAllNamespace(url string) (nsList []dbpool.NS, err error) {
 	}
 	nsList = make([]dbpool.NS, 0, 128)
 	for _, db := range dbNames {
-		if db != "admin" && db != "local" && db != utils.AppDatabase {
+		if db != "admin" && db != "local" && db != "config" && db != utils.AppDatabase {
 			colNames, err := conn.Session.DB(db).CollectionNames()
 			if err != nil {
 				err = fmt.Errorf("get collection names of mongodb url=%s error. %v", url, err)

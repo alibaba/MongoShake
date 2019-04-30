@@ -195,12 +195,17 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		})
 	}
 	wg.Wait()
+	if replError != nil {
+		return replError
+	}
 
 	if err := docsyncer.StartIndexSync(indexMap, toUrl, shardingSync); err != nil {
 		return err
 	}
 
-	return replError
+	LOG.Info("document syncer sync finish")
+
+	return nil
 }
 
 func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition int64) error {

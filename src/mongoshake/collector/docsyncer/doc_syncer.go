@@ -181,8 +181,7 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string, shardingSy
 				for _, index := range indexNs.indexList {
 					index.Background = false
 					if err = conn.Session.DB(toNS.Database).C(toNS.Collection).EnsureIndex(index); err != nil {
-						LOG.Critical("Create indexes for ns %v of dest mongodb failed. %v", ns, err)
-						syncError = errors.New(fmt.Sprintf("Create indexes for ns %v of dest mongodb failed. %v", ns, err))
+						LOG.Warn("Create indexes for ns %v of dest mongodb failed. %v", ns, err)
 					}
 				}
 				LOG.Info("Create indexes for ns %v of dest mongodb successful", toNS)
@@ -205,7 +204,7 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string, shardingSy
 	wg.Wait()
 	close(namespaces)
 	LOG.Info("document syncer sync index successful")
-	return nil
+	return syncError
 }
 
 type DBSyncer struct {
@@ -297,8 +296,8 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS) error {
 	reader := NewDocumentReader(syncer.FromMongoUrl, ns)
 
 	toNS := getToNs(ns, syncer.shardingSync)
-	batchExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS)
-	batchExecutor.Start()
+	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS)
+	colExecutor.Start()
 
 	bufferSize := conf.Options.ReplayerDocumentBatchSize
 	buffer := make([]*bson.Raw, 0, bufferSize)
@@ -309,15 +308,15 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS) error {
 		if doc, err = reader.NextDoc(); err != nil {
 			return errors.New(fmt.Sprintf("Get next document from ns %v of src mongodb failed. %v", ns, err))
 		} else if doc == nil {
-			batchExecutor.Sync(buffer)
-			if err := batchExecutor.Wait(); err != nil {
+			colExecutor.Sync(buffer)
+			if err := colExecutor.Wait(); err != nil {
 				return err
 			}
 			break
 		}
 		buffer = append(buffer, doc)
 		if len(buffer) >= bufferSize {
-			batchExecutor.Sync(buffer)
+			colExecutor.Sync(buffer)
 			buffer = make([]*bson.Raw, 0, bufferSize)
 		}
 	}

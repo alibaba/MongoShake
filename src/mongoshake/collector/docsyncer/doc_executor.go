@@ -46,35 +46,35 @@ func NewCollectionExecutor(id int, mongoUrl string, ns dbpool.NS) *CollectionExe
 	}
 }
 
-func (batchExecutor *CollectionExecutor) Start() {
+func (colExecutor *CollectionExecutor) Start() {
 	parallel := conf.Options.ReplayerDocumentParallel
-	batchExecutor.docBatch = make(chan []*bson.Raw, parallel)
+	colExecutor.docBatch = make(chan []*bson.Raw, parallel)
 
 	executors := make([]*DocExecutor, parallel)
 	for i := 0; i != len(executors); i++ {
-		executors[i] = NewDocExecutor(GenerateDocExecutorId(), batchExecutor)
+		executors[i] = NewDocExecutor(GenerateDocExecutorId(), colExecutor)
 		go executors[i].start()
 	}
-	batchExecutor.executors = executors
+	colExecutor.executors = executors
 }
 
-func (batchExecutor *CollectionExecutor) Sync(docs []*bson.Raw) {
+func (colExecutor *CollectionExecutor) Sync(docs []*bson.Raw) {
 	count := uint64(len(docs))
 	if count == 0 {
 		return
 	}
 
-	batchExecutor.wg.Add(1)
-	batchExecutor.docBatch <- docs
+	colExecutor.wg.Add(1)
+	colExecutor.docBatch <- docs
 }
 
-func (batchExecutor *CollectionExecutor) Wait() error {
-	batchExecutor.wg.Wait()
-	close(batchExecutor.docBatch)
+func (colExecutor *CollectionExecutor) Wait() error {
+	colExecutor.wg.Wait()
+	close(colExecutor.docBatch)
 
-	for _, exec := range batchExecutor.executors {
+	for _, exec := range colExecutor.executors {
 		if exec.error != nil {
-			return errors.New(fmt.Sprintf("sync ns %v failed. %v", batchExecutor.ns, exec.error))
+			return errors.New(fmt.Sprintf("sync ns %v failed. %v", colExecutor.ns, exec.error))
 		}
 	}
 	return nil
@@ -84,8 +84,8 @@ func (batchExecutor *CollectionExecutor) Wait() error {
 type DocExecutor struct {
 	// sequence index id in each replayer
 	id int
-	// batchExecutor, not owned
-	batchExecutor *CollectionExecutor
+	// colExecutor, not owned
+	colExecutor *CollectionExecutor
 
 	error error
 }
@@ -94,24 +94,24 @@ func GenerateDocExecutorId() int {
 	return int(atomic.AddInt32(&GlobalDocExecutorId, 1))
 }
 
-func NewDocExecutor(id int, batchExecutor *CollectionExecutor) *DocExecutor {
+func NewDocExecutor(id int, colExecutor *CollectionExecutor) *DocExecutor {
 	return &DocExecutor{
 		id:            	id,
-		batchExecutor: 	batchExecutor,
+		colExecutor: 	colExecutor,
 	}
 }
 
 func (exec *DocExecutor) start() {
 	var conn *dbpool.MongoConn
 	var err error
-	if conn, err = dbpool.NewMongoConn(exec.batchExecutor.mongoUrl, true); err != nil {
-		LOG.Critical("Connect to mongodb url=%s failed. %v", exec.batchExecutor.mongoUrl, err)
-		exec.error = errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", exec.batchExecutor.mongoUrl, err))
+	if conn, err = dbpool.NewMongoConn(exec.colExecutor.mongoUrl, true); err != nil {
+		LOG.Critical("Connect to mongodb url=%s failed. %v", exec.colExecutor.mongoUrl, err)
+		exec.error = errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", exec.colExecutor.mongoUrl, err))
 	}
 	defer conn.Close()
 
 	for {
-		docs, ok := <- exec.batchExecutor.docBatch
+		docs, ok := <- exec.colExecutor.docBatch
 		if !ok {
 			break
 		}
@@ -121,13 +121,13 @@ func (exec *DocExecutor) start() {
 				exec.error = err
 			}
 		}
-		exec.batchExecutor.wg.Done()
+		exec.colExecutor.wg.Done()
 	}
 
 }
 
 func (exec *DocExecutor) doSync(conn *dbpool.MongoConn ,docs []*bson.Raw) error {
-	ns := exec.batchExecutor.ns
+	ns := exec.colExecutor.ns
 
 	var idocs []interface{}
 	for _, doc := range docs {
