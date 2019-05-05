@@ -61,6 +61,11 @@ func (exec *Executor) dropConnection() {
 
 func (exec *Executor) execute(group *OplogsGroup) error {
 	count := uint64(len(group.oplogRecords))
+	if count == 0 {
+		// probe
+		return nil
+	}
+
 	lastOne := group.oplogRecords[count-1]
 
 	if conf.Options.ReplayerDurable {

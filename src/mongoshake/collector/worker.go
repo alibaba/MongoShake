@@ -11,6 +11,7 @@ import (
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	"time"
 )
 
 const MaxUnAckListLength = 128 * 256
@@ -96,8 +97,14 @@ func (worker *Worker) shouldStall() bool {
 }
 
 func (worker *Worker) findFirstAvailableBatch() []*oplog.GenericOplog {
+	var batch []*oplog.GenericOplog
 	for {
-		batch := <-worker.queue
+		select {
+		case batch = <-worker.queue:
+		case <-time.After(DDLCheckpointInterval * time.Millisecond): // timeout, add probe message here
+			return nil
+		}
+
 		// if we got empty (nil) batch. check the queue still has more
 		// oplogs. That will merge continuous nil batch to single one
 		if batch != nil || len(worker.queue) == 0 {

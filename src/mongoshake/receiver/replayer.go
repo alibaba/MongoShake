@@ -115,12 +115,16 @@ func (er *ExampleReplayer) handler() {
 		}
 
 		// parse batched message
-		oplogs := make([]*oplog.PartialLog, len(msg.message.RawLogs), len(msg.message.RawLogs))
+		oplogs := make([]*oplog.PartialLog, len(msg.message.RawLogs))
 		for i, raw := range msg.message.RawLogs {
 			oplogs[i] = &oplog.PartialLog{}
-			bson.Unmarshal(raw, &oplogs[i])
+			if err := bson.Unmarshal(raw, &oplogs[i]); err != nil {
+				// impossible switch, need panic and exit
+				LOG.Crashf("unmarshal oplog[%v] failed[%v]", raw, err)
+				return
+			}
 			oplogs[i].RawSize = len(raw)
-			LOG.Info(oplogs[i]) // just print for test
+			LOG.Info(oplogs[i]) // just print for test, users can modify to fulfill different needs
 		}
 
 		if callback := msg.completion; callback != nil {
@@ -131,6 +135,8 @@ func (er *ExampleReplayer) handler() {
 		n := len(oplogs)
 		lastTs := utils.TimestampToInt64(oplogs[n - 1].Timestamp)
 		er.Ack = lastTs
+
+		LOG.Debug("handle ack[%v]", er.Ack)
 
 		// add logical code below
 	}
