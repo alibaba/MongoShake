@@ -27,10 +27,15 @@ Hypervisor mechanism is also supported so that it will restart immediately when 
 ---
 Support filtering database and collection namespace with whitelist and blacklist.
 
+# DDL Syncing
+---
+Starting with version 1.5, MongoShake supports syncing DDL by using global barrier. Once fetching DDL oplog, MongoShake adds a barrier so that all the belowing oplogs waitting in the queue until this oplog is written into the target MongoDB or tunnel and the checkpoint is updated.<br>
+![ddl](resources/ddl_support.png)<br>
+
 # Global ID
 ---
-In Aliyun internal version, global id(also called gid) is supported which marks the id of the database. It can be used to avoid loop when two databases become backup of each other. Mongo-Shake only fetches the oplogs equal to source database id, all the oplogs are be fetched when no gid gave. For current opensource version, it's not supported limited by the modification of MongoDB kernel.
-If you want to build active-active replication without `gid` supported, please visit [FAQ document](https://github.com/alibaba/MongoShake/wiki/FAQ) to see more details.
+In Aliyun internal version, global id(also called gid) is supported which marks the id of the database. It can be used to avoid loop when two databases become backup of each other. Mongo-Shake only fetches the oplogs equal to source database id, all the oplogs are be fetched when no gid gave. For current opensource version, it's not supported limited by the modification of MongoDB kernel.<br>
+If you want to build active-active replication without `gid` supported, please visit [FAQ document](https://github.com/alibaba/MongoShake/wiki/FAQ) to see more details.<br>
 
 # Tunnel
 ---
@@ -72,9 +77,13 @@ add tag when releasing: "release-v{version}-{date}". for example: "release-v1.0.
 
 # Usage
 ---
-*  git clone https://github.com/aliyun/mongo-shake.git
-*  cd mongo-shake/src/vendor
-*  GOPATH=\`pwd\`/../..; govendor sync     #please note: must install govendor first and then pull all dependencies
+Run `./bin/collector.darwin64` or `collector.linux64` which is built in OSX and Linux respectively.<br>
+Or you can build mongo-shake yourself according to the following steps:
+*  git clone https://github.com/alibaba/MongoShake.git
+*  cd MongoShake
+*  export GOPATH=\`pwd\`/../..
+*  cd src/vendor
+*  govendor sync    #please note: must install govendor first and then pull all dependencies: `go get -u github.com/kardianos/govendor`
 *  cd ../../ && ./build.sh
 *  ./bin/collector -conf=conf/collector.conf #please note: user must modify collector.conf first to match needs. You can also use \"start.sh\" script which supports hypervisor mechanism in Linux OS only.
 

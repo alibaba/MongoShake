@@ -17,6 +17,8 @@ type PartialLog struct {
 	Object        bson.M              `bson:"o"`
 	Query         bson.M              `bson:"o2"`
 	UniqueIndexes bson.M              `bson:"uk"`
+	Lsid          interface{}         `bson:"lsid"`        // mark the session id, used in transaction
+	FromMigrate   bool                `bson:"fromMigrate"` // move chunk
 
 	/*
 	 * Every field subsequent declared is NEVER persistent or

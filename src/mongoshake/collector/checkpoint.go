@@ -21,22 +21,25 @@ func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int64) 
 	sync.ckptManager = ckpt.NewCheckpointManager(name, startPosition)
 }
 
-func (sync *OplogSyncer) checkpoint() {
+/*
+ * calculate and update current checkpoint value. `flush` means whether force calculate & update checkpoint
+ */
+func (sync *OplogSyncer) checkpoint(flush bool) {
 	now := time.Now()
 
 	// do checkpoint every once in a while
-	if sync.ckptTime.Add(time.Duration(conf.Options.CheckpointInterval) * time.Millisecond).After(now) {
+	if !flush && sync.ckptTime.Add(time.Duration(conf.Options.CheckpointInterval) * time.Millisecond).After(now) {
 		return
 	}
 	// we force update the ckpt time even failed
 	sync.ckptTime = now
 
-	// TODO: we delayed a few minutes to tolerate the receiver's flush buffer
+	// we delayed a few minutes to tolerate the receiver's flush buffer
 	// in AckRequired() tunnel. such as "rpc". While collector is restarted,
 	// we can't get the correct worker ack offset since collector have lost
 	// the unack offset...
-	if now.Before(sync.startTime.Add(3 * time.Minute)) {
-		//LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
+	if !flush && conf.Options.Tunnel != "direct" && now.Before(sync.startTime.Add(3 * time.Minute)) {
+		// LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
 		return
 	}
 
@@ -61,15 +64,17 @@ func (sync *OplogSyncer) checkpoint() {
 			return
 		}
 	}
+
+	// this log will be print if no ack calculated
 	LOG.Warn("CheckpointOperation updated is not suitable. lowest [%d]. current [%d]. reason : %v",
 		lowest, utils.TimestampToInt64(inMemoryTs), err)
 }
 
 func (sync *OplogSyncer) calculateWorkerLowestCheckpoint() (v int64, err error) {
-	// don't need to lock and eventually consistence is acceptable
+	// no need to lock and eventually consistence is acceptable
 	allAcked := true
-	candidates := make([]int64, 0, 128)
-	allAckValues := make([]int64, 0, 128)
+	candidates := make([]int64, 0, len(sync.batcher.workerGroup))
+	allAckValues := make([]int64, 0, len(sync.batcher.workerGroup))
 	for _, worker := range sync.batcher.workerGroup {
 		// read ack value first because of we don't wanna
 		// a result of ack > unack. There wouldn't be cpu
@@ -94,7 +99,7 @@ func (sync *OplogSyncer) calculateWorkerLowestCheckpoint() (v int64, err error) 
 		} else if unack < ack && unack != 0 {
 			// we should wait the bigger unack follows up the ack
 			// they (unack and ack) will be equivalent soon !
-			return 0, fmt.Errorf("cadidates should follow up unack[%d] ack[%d]", unack, ack)
+			return 0, fmt.Errorf("candidates should follow up unack[%d] ack[%d]", unack, ack)
 		}
 	}
 	if allAcked && len(allAckValues) != 0 {
