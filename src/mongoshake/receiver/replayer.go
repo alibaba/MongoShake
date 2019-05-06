@@ -24,6 +24,8 @@ type ExampleReplayer struct {
 
 	// pending queue, use to pass message
 	pendingQueue chan *MessageWithCallback
+
+	id int // current replayer id
 }
 
 type MessageWithCallback struct {
@@ -31,10 +33,11 @@ type MessageWithCallback struct {
 	completion func()
 }
 
-func NewExampleReplayer() *ExampleReplayer {
+func NewExampleReplayer(id int) *ExampleReplayer {
 	LOG.Info("ExampleReplayer start. pending queue capacity %d", PendingQueueCapacity)
-	er := &ExampleReplayer {
+	er := &ExampleReplayer{
 		pendingQueue: make(chan *MessageWithCallback, PendingQueueCapacity),
+		id:           id,
 	}
 	go er.handler()
 	return er
@@ -110,7 +113,7 @@ func (er *ExampleReplayer) handler() {
 	for msg := range er.pendingQueue {
 		count := uint64(len(msg.message.RawLogs))
 		if count == 0 {
-			// may be probe request
+			// probe request
 			continue
 		}
 
