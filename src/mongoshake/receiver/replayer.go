@@ -117,8 +117,8 @@ func (er *ExampleReplayer) handler() {
 		// parse batched message
 		oplogs := make([]*oplog.PartialLog, len(msg.message.RawLogs))
 		for i, raw := range msg.message.RawLogs {
-			oplogs[i] = &oplog.PartialLog{}
-			if err := bson.Unmarshal(raw, &oplogs[i]); err != nil {
+			oplogs[i] = new(oplog.PartialLog)
+			if err := bson.Unmarshal(raw, oplogs[i]); err != nil {
 				// impossible switch, need panic and exit
 				LOG.Crashf("unmarshal oplog[%v] failed[%v]", raw, err)
 				return
