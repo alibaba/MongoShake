@@ -3,15 +3,19 @@ package collector
 import (
 	"encoding/json"
 	"errors"
+	"github.com/vinllen/mgo"
+	"mongoshake/collector/docsyncer"
+	"sync"
+	"time"
 
 	"mongoshake/collector/configure"
 	"mongoshake/common"
 	"mongoshake/dbpool"
 	"mongoshake/oplog"
 
-	LOG "github.com/vinllen/log4go"
-	"github.com/gugemichael/nimo4go"
 	"fmt"
+	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 )
 
 // ReplicationCoordinator global coordinator instance. consist of
@@ -48,8 +52,29 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	coordinator.sentinel = &utils.Sentinel{}
 	coordinator.sentinel.Register()
 
-	// startup collector
-	return coordinator.startReplication()
+	switch conf.Options.SyncMode {
+	case "all":
+		oplogStartPosition := time.Now().Unix()
+		if err := coordinator.startDocumentReplication(); err != nil {
+			return err
+		}
+		if err := coordinator.startOplogReplication(oplogStartPosition); err != nil {
+			return err
+		}
+	case "document":
+		if err := coordinator.startDocumentReplication(); err != nil {
+			return err
+		}
+	case "oplog":
+		if err := coordinator.startOplogReplication(conf.Options.ContextStartPosition); err != nil {
+			return err
+		}
+	default:
+		LOG.Critical("unknown sync mode %v", conf.Options.SyncMode)
+		return errors.New("unknown sync mode " + conf.Options.SyncMode)
+	}
+
+	return nil
 }
 
 func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
@@ -57,6 +82,14 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	var err error
 	var hasUniqIndex = false
 	rs := map[string]int{}
+	if len(coordinator.Sources) > 1 {
+		csUrl := conf.Options.ContextStorageUrl
+		if conn, err = dbpool.NewMongoConn(csUrl, false); conn == nil || !conn.IsGood() || err != nil {
+			LOG.Critical("Connect mongo server error. %v, url : %s", err, csUrl)
+			return err
+		}
+		conn.Close()
+	}
 	for i, src := range coordinator.Sources {
 		if conn, err = dbpool.NewMongoConn(src.URL, false); conn == nil || !conn.IsGood() || err != nil {
 			LOG.Critical("Connect mongo server error. %v, url : %s", err, src.URL)
@@ -74,8 +107,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		// rsName will be set to default if empty
 		if rsName == "" {
 			rsName = fmt.Sprintf("default-%d", i)
-			LOG.Warn("Source mongodb have empty replica set name, url[%s], change to default[%s]",
-				src.URL, rsName)
+			LOG.Warn("Source mongodb have empty replica set name, url[%s], change to default[%s]", src.URL, rsName)
 		}
 
 		if _, exist := rs[rsName]; exist {
@@ -107,14 +139,91 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	return nil
 }
 
-func (coordinator *ReplicationCoordinator) startReplication() error {
+func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
+	if conf.Options.Tunnel != "direct" {
+		return errors.New("document replication only support direct tunnel type")
+	}
+
+	// get all namespace need to sync
+	nsSet := make(map[dbpool.NS]bool)
+	for _, src := range coordinator.Sources {
+		nsList, err := docsyncer.GetAllNamespace(src.URL)
+		if err != nil {
+			return err
+		}
+		for _, ns := range nsList {
+			nsSet[ns] = true
+		}
+	}
+
+	fromIsSharding := len(coordinator.Sources) > 1
+	toUrl := conf.Options.TunnelAddress[0]
+	var toConn *dbpool.MongoConn
+	var err error
+	if toConn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
+		LOG.Critical("Connect to mongodb url=%s failed. %v", toUrl, err)
+		return errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", toUrl, err))
+	}
+	defer toConn.Close()
+
+	shardingSync, err := docsyncer.IsShardingToSharding(fromIsSharding, toConn)
+	if err != nil {
+		return err
+	}
+
+	if err := docsyncer.StartDropDestCollection(nsSet, toConn, shardingSync); err != nil {
+		return err
+	}
+	if shardingSync {
+		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.ContextStorageUrl, toConn); err != nil {
+			return err
+		}
+	}
+
+	var wg sync.WaitGroup
+	var replError error
+	var mutex sync.Mutex
+	indexMap := make(map[dbpool.NS][]mgo.Index)
+
+	for i, src := range coordinator.Sources {
+		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl, shardingSync)
+		LOG.Info("document syncer-%d do replication for url=%v", i, src.URL)
+		wg.Add(1)
+		nimo.GoRoutine(func() {
+			defer wg.Done()
+			if err := dbSyncer.Start(); err != nil {
+				LOG.Critical("document replication for url=%v failed. %v", src.URL, err)
+				replError = err
+			}
+			mutex.Lock()
+			defer mutex.Unlock()
+			for ns, indexList := range dbSyncer.GetIndexMap() {
+				indexMap[ns] = indexList
+			}
+		})
+	}
+	wg.Wait()
+	if replError != nil {
+		return replError
+	}
+
+	if err := docsyncer.StartIndexSync(indexMap, toUrl, shardingSync); err != nil {
+		return err
+	}
+
+	LOG.Info("document syncer sync finish")
+
+	return nil
+}
+
+func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition int64) error {
 	// replicate speed limit on all syncer
 	coordinator.rateController = nimo.NewSimpleRateController()
 
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
 	for _, src := range coordinator.Sources {
-		syncer := NewOplogSyncer(coordinator, src.ReplicaName, src.URL, src.Gid)
+		syncer := NewOplogSyncer(coordinator, src.ReplicaName, oplogStartPosition, src.URL, src.Gid)
 		// syncerGroup http api registry
 		syncer.init()
 		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)
