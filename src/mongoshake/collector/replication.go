@@ -140,10 +140,6 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 }
 
 func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
-	if conf.Options.Tunnel != "direct" {
-		return errors.New("document replication only support direct tunnel type")
-	}
-
 	// get all namespace need to sync
 	nsSet := make(map[dbpool.NS]bool)
 	for _, src := range coordinator.Sources {
