@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-	"mongoshake/common"
+	"mongoshake/collector/configure"
+	"mongoshake/collector/filter"
 	"mongoshake/dbpool"
+	LOG "github.com/vinllen/log4go"
 )
 
 
@@ -22,19 +24,31 @@ func GetAllNamespace(url string) (nsList []dbpool.NS, err error) {
 		err = fmt.Errorf("get database names of mongodb url=%s error. %v", url, err)
 		return nil, err
 	}
+
+	filterList := filter.DocFilterChain{new(filter.AutologousFilter)}
+	if len(conf.Options.FilterNamespaceWhite) != 0 || len(conf.Options.FilterNamespaceBlack) != 0 {
+		namespaceFilter := filter.NewNamespaceFilter(conf.Options.FilterNamespaceWhite,
+			conf.Options.FilterNamespaceBlack)
+		filterList = append(filterList, namespaceFilter)
+	}
+
 	nsList = make([]dbpool.NS, 0, 128)
 	for _, db := range dbNames {
-		if db != "admin" && db != "local" && db != "config" && db != utils.AppDatabase {
-			colNames, err := conn.Session.DB(db).CollectionNames()
-			if err != nil {
-				err = fmt.Errorf("get collection names of mongodb url=%s error. %v", url, err)
-				return nil, err
+		colNames, err := conn.Session.DB(db).CollectionNames()
+		if err != nil {
+			err = fmt.Errorf("get collection names of mongodb url=%s error. %v", url, err)
+			return nil, err
+		}
+		for _, col := range colNames {
+			ns := dbpool.NS{Database:db, Collection:col}
+			if col == "system.profile" {
+				continue
 			}
-			for _, col := range colNames {
-				if col != "system.profile" {
-					nsList = append(nsList, dbpool.NS{Database:db, Collection:col})
-				}
+			if filterList.IterateFilter(ns.Str()) {
+				LOG.Debug("Namespace is filtered. %v", ns.Str())
+				continue
 			}
+			nsList = append(nsList, ns)
 		}
 	}
 

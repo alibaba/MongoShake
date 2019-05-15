@@ -1,26 +1,12 @@
-package collector
+package filter
 
 import (
-	"strings"
 	"fmt"
-	"regexp"
-
-	"mongoshake/common"
 	"mongoshake/oplog"
+	"strings"
 )
 
-var NsShouldBeIgnore = [...]string{
-	"admin.",
-	"local.",
-	"config.",
-
-	// oplogs belong to this app. AppDatabase and
-	// APPConflictDatabase should be initialized already
-	// by const expression. so it is safe
-	utils.AppDatabase + ".",
-	utils.APPConflictDatabase + ".",
-}
-
+// OplogFilter: AutologousFilter, NamespaceFilter, GidFilter, NoopFilter, DDLFilter
 type OplogFilter interface {
 	Filter(log *oplog.PartialLog) bool
 }
@@ -35,6 +21,7 @@ func (chain OplogFilterChain) IterateFilter(log *oplog.PartialLog) bool {
 	}
 	return false
 }
+
 
 type GidFilter struct {
 	Gid string
@@ -51,12 +38,7 @@ type AutologousFilter struct {
 func (filter *AutologousFilter) Filter(log *oplog.PartialLog) bool {
 	// for namespace. we filter noop operation and collection name
 	// that are admin, local, mongoshake, mongoshake_conflict
-	for _, ignorePrefix := range NsShouldBeIgnore {
-		if strings.HasPrefix(log.Namespace, ignorePrefix) {
-			return true
-		}
-	}
-	return false
+	return filter.FilterNs(log.Namespace)
 }
 
 type NoopFilter struct {
@@ -113,17 +95,5 @@ func NewNamespaceFilter(white, black []string) *NamespaceFilter {
 }
 
 func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
-	if filter.whiteRule != "" {
-		if match, _ := regexp.MatchString(filter.whiteRule, log.Namespace); !match {
-			// filter
-			return true
-		}
-	}
-	if filter.blackRule != "" {
-		if match, _ := regexp.MatchString(filter.blackRule, log.Namespace); match {
-			// filter
-			return true
-		}
-	}
-	return false
+	return filter.FilterNs(log.Namespace)
 }

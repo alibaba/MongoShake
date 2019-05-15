@@ -43,7 +43,11 @@ func IsShardingToSharding(fromIsSharding bool, toConn *dbpool.MongoConn) (bool, 
 func StartDropDestCollection(nsSet map[dbpool.NS]bool, toConn *dbpool.MongoConn, shardingSync bool) error {
 	for ns := range nsSet {
 		toNS := getToNs(ns, shardingSync)
-		_ = toConn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
+		err := toConn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
+		if err != nil && err.Error() != "ns not found"{
+			LOG.Critical("Drop Collection ns %v of dest mongodb failed. %v", toNS, err)
+			return errors.New(fmt.Sprintf("Drop Collection ns %v of dest mongodb failed. %v", toNS, err))
+		}
 	}
 
 	return nil

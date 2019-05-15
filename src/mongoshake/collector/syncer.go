@@ -2,6 +2,7 @@ package collector
 
 import (
 	"fmt"
+	"mongoshake/collector/filter"
 	"time"
 
 	"mongoshake/collector/ckpt"
@@ -10,8 +11,8 @@ import (
 	"mongoshake/oplog"
 	"mongoshake/quorum"
 
-	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
 )
 
@@ -101,12 +102,12 @@ func NewOplogSyncer(
 		syncer.hasher = &oplog.PrimaryKeyHasher{}
 	}
 
-	filterList := OplogFilterChain{new(AutologousFilter), new(NoopFilter)}
+	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
 	if gid != "" {
-		filterList = append(filterList, &GidFilter{Gid: gid})
+		filterList = append(filterList, &filter.GidFilter{Gid: gid})
 	}
 	if len(conf.Options.FilterNamespaceWhite) != 0 || len(conf.Options.FilterNamespaceBlack) != 0 {
-		namespaceFilter := NewNamespaceFilter(conf.Options.FilterNamespaceWhite,
+		namespaceFilter := filter.NewNamespaceFilter(conf.Options.FilterNamespaceWhite,
 			conf.Options.FilterNamespaceBlack)
 		filterList = append(filterList, namespaceFilter)
 	}
@@ -368,7 +369,7 @@ type Batcher struct {
 	syncer *OplogSyncer
 
 	// filter functionality by gid
-	filterList OplogFilterChain
+	filterList filter.OplogFilterChain
 	// oplog handler
 	handler OplogHandler
 
