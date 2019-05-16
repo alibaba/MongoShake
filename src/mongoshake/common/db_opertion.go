@@ -2,12 +2,25 @@ package utils
 
 import (
 	"fmt"
-	"strings"
+	"mongoshake/dbpool"
 	"strconv"
+	"strings"
 
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
 )
+
+var (
+	QueryTs = "ts"
+	localDB = "local"
+)
+
+type MongoSource struct {
+	URL         string
+	ReplicaName string
+	Gid         string
+}
+
 
 // get db version, return string with format like "3.0.1"
 func GetDBVersion(session *mgo.Session) (string, error) {
@@ -48,4 +61,24 @@ func GetAndCompareVersion(session *mgo.Session, threshold string) bool {
 		}
 	}
 	return true
+}
+
+// get newest oplog
+func GetNewestTimestamp(session *mgo.Session) (bson.MongoTimestamp, error) {
+	var retMap map[string]interface{}
+	err := session.DB(localDB).C(dbpool.OplogNS).Find(bson.M{}).Sort("-$natural").Limit(1).One(&retMap)
+	if err != nil {
+		return 0, err
+	}
+	return retMap[QueryTs].(bson.MongoTimestamp), nil
+}
+
+// get oldest oplog
+func GetOldestTimestamp(session *mgo.Session) (bson.MongoTimestamp, error) {
+	var retMap map[string]interface{}
+	err := session.DB(localDB).C(dbpool.OplogNS).Find(bson.M{}).Limit(1).One(&retMap)
+	if err != nil {
+		return 0, err
+	}
+	return retMap[QueryTs].(bson.MongoTimestamp), nil
 }

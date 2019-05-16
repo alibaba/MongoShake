@@ -76,7 +76,7 @@ func startup() {
 	// initialize http api
 	utils.InitHttpApi(conf.Options.HTTPListenPort)
 	coordinator := &collector.ReplicationCoordinator{
-		Sources: make([]*collector.MongoSource, len(conf.Options.MongoUrls)),
+		Sources: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
 	}
 
 	utils.HttpApi.RegisterAPI("/conf", nimo.HttpGet, func([]byte) interface{} {
@@ -84,7 +84,7 @@ func startup() {
 	})
 
 	for i, src := range conf.Options.MongoUrls {
-		coordinator.Sources[i] = new(collector.MongoSource)
+		coordinator.Sources[i] = new(utils.MongoSource)
 		coordinator.Sources[i].URL = src
 		if len(conf.Options.OplogGIDS) != 0 {
 			coordinator.Sources[i].Gid = conf.Options.OplogGIDS

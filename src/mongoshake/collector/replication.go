@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/vinllen/mgo"
+	"mongoshake/collector/ckpt"
 	"mongoshake/collector/docsyncer"
 	"sync"
 	"time"
@@ -18,10 +19,16 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
+const (
+	SYNCMODE_ALL = "all"
+	SYNCMODE_DOCUMENT = "document"
+	SYNCMODE_OPLOG = "oplog"
+)
+
 // ReplicationCoordinator global coordinator instance. consist of
 // one syncerGroup and a number of workers
 type ReplicationCoordinator struct {
-	Sources []*MongoSource
+	Sources []*utils.MongoSource
 	// Sentinel listener
 	sentinel *utils.Sentinel
 
@@ -32,11 +39,6 @@ type ReplicationCoordinator struct {
 	rateController *nimo.SimpleRateController
 }
 
-type MongoSource struct {
-	URL         string
-	ReplicaName string
-	Gid         string
-}
 
 func (coordinator *ReplicationCoordinator) Run() error {
 	// check all mongodb deployment and fetch the instance info
@@ -52,8 +54,13 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	coordinator.sentinel = &utils.Sentinel{}
 	coordinator.sentinel.Register()
 
-	switch conf.Options.SyncMode {
-	case "all":
+	syncMode, err := coordinator.selectSyncMode(conf.Options.SyncMode)
+	if err != nil {
+		return err
+	}
+
+	switch syncMode {
+	case SYNCMODE_ALL:
 		oplogStartPosition := time.Now().Unix()
 		if err := coordinator.startDocumentReplication(); err != nil {
 			return err
@@ -61,11 +68,11 @@ func (coordinator *ReplicationCoordinator) Run() error {
 		if err := coordinator.startOplogReplication(oplogStartPosition); err != nil {
 			return err
 		}
-	case "document":
+	case SYNCMODE_DOCUMENT:
 		if err := coordinator.startDocumentReplication(); err != nil {
 			return err
 		}
-	case "oplog":
+	case SYNCMODE_OPLOG:
 		if err := coordinator.startOplogReplication(conf.Options.ContextStartPosition); err != nil {
 			return err
 		}
@@ -139,30 +146,46 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	return nil
 }
 
+func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, error) {
+	if syncMode != SYNCMODE_ALL {
+		return syncMode, nil
+	}
+	for _, src := range coordinator.Sources {
+		ckptManager := ckpt.NewCheckpointManager(src.ReplicaName, 0)
+		ckptTs := ckptManager.Get().Timestamp
+		oldestTs, err := docsyncer.GetDbOldestTimestamp(src.URL)
+		if err != nil {
+			return syncMode, err
+		}
+		if oldestTs > ckptTs {
+			return syncMode, nil
+		}
+	}
+	LOG.Info("sync mode change from all to oplog")
+	return SYNCMODE_OPLOG, nil
+}
+
 func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	if conf.Options.Tunnel != "direct" {
 		return errors.New("document replication only support direct tunnel type")
 	}
 
 	// get all namespace need to sync
-	nsSet := make(map[dbpool.NS]bool)
-	for _, src := range coordinator.Sources {
-		nsList, err := docsyncer.GetAllNamespace(src.URL)
-		if err != nil {
-			return err
-		}
-		for _, ns := range nsList {
-			nsSet[ns] = true
-		}
+	nsSet, err := docsyncer.GetAllNamespace(coordinator.Sources)
+	if err != nil {
+		return err
+	}
+	// get all newest timestamp for each mongodb
+	ckptMap, err := docsyncer.GetAllTimestamp(coordinator.Sources)
+	if err != nil {
+		return err
 	}
 
 	fromIsSharding := len(coordinator.Sources) > 1
 	toUrl := conf.Options.TunnelAddress[0]
 	var toConn *dbpool.MongoConn
-	var err error
 	if toConn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
-		LOG.Critical("Connect to mongodb url=%s failed. %v", toUrl, err)
-		return errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", toUrl, err))
+		return err
 	}
 	defer toConn.Close()
 
@@ -170,7 +193,6 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	if err != nil {
 		return err
 	}
-
 	if err := docsyncer.StartDropDestCollection(nsSet, toConn, shardingSync); err != nil {
 		return err
 	}
@@ -210,9 +232,10 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	if err := docsyncer.StartIndexSync(indexMap, toUrl, shardingSync); err != nil {
 		return err
 	}
-
+	if err := docsyncer.Checkpoint(ckptMap); err != nil {
+		return err
+	}
 	LOG.Info("document syncer sync finish")
-
 	return nil
 }
 
