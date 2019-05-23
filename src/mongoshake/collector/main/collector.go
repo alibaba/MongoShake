@@ -201,6 +201,14 @@ func sanitizeOptions() error {
 			return errors.New("collision write strategy is neither db nor sdk nor none")
 		}
 		conf.Options.ReplayerCollisionEnable = conf.Options.ReplayerExecutor != 1
+	} else {
+		if conf.Options.SyncMode != "oplog" {
+			return errors.New("document replication only support direct tunnel type")
+		}
+	}
+
+	if conf.Options.SyncMode != "oplog" && conf.Options.SyncMode != "document" && conf.Options.SyncMode != "all" {
+		return fmt.Errorf("unknown sync_mode[%v]", conf.Options.SyncMode)
 	}
 
 	return nil

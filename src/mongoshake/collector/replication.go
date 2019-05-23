@@ -166,10 +166,6 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 }
 
 func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
-	if conf.Options.Tunnel != "direct" {
-		return errors.New("document replication only support direct tunnel type")
-	}
-
 	// get all namespace need to sync
 	nsSet, err := docsyncer.GetAllNamespace(coordinator.Sources)
 	if err != nil {

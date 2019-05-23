@@ -10,6 +10,7 @@ import (
 	"mongoshake/common"
 	"mongoshake/oplog"
 	"mongoshake/quorum"
+	"mongoshake/collector/filter"
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
@@ -25,7 +26,8 @@ const (
 	PipelineQueueMinNr = 1
 	PipelineQueueLen   = 64
 
-	DurationTime = 6000
+	DurationTime          = 6000 //ms
+	DDLCheckpointInterval = 300  // ms
 )
 
 type OplogHandler interface {
@@ -103,23 +105,25 @@ func NewOplogSyncer(
 	}
 
 	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+	// gid filter
 	if gid != "" {
 		filterList = append(filterList, &filter.GidFilter{Gid: gid})
 	}
+	// namespace filter
 	if len(conf.Options.FilterNamespaceWhite) != 0 || len(conf.Options.FilterNamespaceBlack) != 0 {
 		namespaceFilter := filter.NewNamespaceFilter(conf.Options.FilterNamespaceWhite,
 			conf.Options.FilterNamespaceBlack)
 		filterList = append(filterList, namespaceFilter)
 	}
+	// DDL filter
+	if conf.Options.ReplayerDMLOnly {
+		filterList = append(filterList, new(filter.DDLFilter))
+	}
 
 	// oplog filters. drop the oplog if any of the filter
-	// list returns true. The order of all filters is not significant
-	syncer.batcher = &Batcher{
-		syncer:      syncer,
-		filterList:  filterList,
-		handler:     syncer,
-		workerGroup: []*Worker{}, // assign later by syncer.bind()
-	}
+	// list returns true. The order of all filters is not significant.
+	// workerGroup is assigned later by syncer.bind()
+	syncer.batcher = NewBatcher(syncer, filterList, syncer, []*Worker{})
 	return syncer
 }
 
@@ -151,11 +155,12 @@ func (sync *OplogSyncer) start() {
 	// 3. start checkpoint persist routine
 	sync.newCheckpointManager(sync.replset, sync.startPosition)
 
-	// start batcher and deserializer
+	// start deserializer: parse data from pending queue, and then push into logs queue.
 	sync.startDeserializer()
+	// start batcher: pull oplog from logs queue and then batch together before adding into worker.
 	sync.startBatcher()
 
-	// for ever fetching next oplog entry
+	// forever fetching oplog from mongodb into oplog_reader
 	for {
 		sync.poll()
 
@@ -173,14 +178,41 @@ func (sync *OplogSyncer) startBatcher() {
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
 		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
-		if worked := batcher.dispatchBatches(batcher.batchMore()); worked {
-			sync.replMetric.SetLSN(utils.TimestampToInt64(batcher.getLastOplog().Timestamp))
+		batchedOplog, barrier := batcher.batchMore()
+
+		var newestTs bson.MongoTimestamp
+		if log := batcher.getLastOplog(); log != nil {
+			newestTs = log.Timestamp
+		} else {
+			// if log is nil, no need to run anymore.
+			return
+		}
+
+		if worked := batcher.dispatchBatches(batchedOplog); worked {
+			sync.replMetric.SetLSN(utils.TimestampToInt64(newestTs))
 			// update latest fetched timestamp in memory
-			sync.reader.UpdateQueryTimestamp(batcher.getLastOplog().Timestamp)
+			sync.reader.UpdateQueryTimestamp(newestTs)
 		}
 
 		// flush checkpoint value
-		sync.checkpoint()
+		sync.checkpoint(barrier)
+
+		// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
+		if barrier && newestTs > 0 && conf.Options.WorkerNum > 1 {
+			LOG.Info("find barrier")
+			for {
+				checkpointTs := sync.ckptManager.Get().Timestamp
+				LOG.Info("compare remote checkpoint[%v] to local newestTs[%v]", checkpointTs, newestTs)
+				if checkpointTs >= newestTs {
+					LOG.Info("barrier checkpoint updated")
+					break
+				}
+				utils.YieldInMs(DDLCheckpointInterval)
+
+				// re-flush
+				sync.checkpoint(true)
+			}
+		}
 	})
 }
 
@@ -223,8 +255,8 @@ func (sync *OplogSyncer) deserializer(index int) {
 // only master(maybe several mongo-shake starts) can poll oplog.
 func (sync *OplogSyncer) poll() {
 	// we should reload checkpoint. in case of other collector
-	// has fetched oplogs when master quorum leader election
-	//	happens frequently. so we simply reload.
+ 	// has fetched oplogs when master quorum leader election
+	// happens frequently. so we simply reload.
 	checkpoint := sync.ckptManager.Get()
 	if checkpoint == nil {
 		// we doesn't continue working on ckpt fetched failed. because we should
@@ -361,90 +393,4 @@ func (sync *OplogSyncer) RestAPI() {
 			Now: &Time{TimestampUnix: time.Now().Unix(), TimestampTime: utils.TimestampToString(time.Now().Unix())},
 		}
 	})
-}
-
-// as we mentioned before, Batcher is used to batch oplog before sending in order to improve performance.
-type Batcher struct {
-	// related oplog syncer. not owned
-	syncer *OplogSyncer
-
-	// filter functionality by gid
-	filterList filter.OplogFilterChain
-	// oplog handler
-	handler OplogHandler
-
-	// current queue cursor
-	nextQueue uint64
-	// related tunnel workerGroup. not owned
-	workerGroup []*Worker
-
-	lastOplog *oplog.PartialLog
-}
-
-func (batcher *Batcher) getLastOplog() *oplog.PartialLog {
-	return batcher.lastOplog
-}
-func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
-	// filter oplog suchlike Noop or Gid-filtered
-	if batcher.filterList.IterateFilter(log) {
-		LOG.Debug("Oplog is filtered. %v", log)
-		batcher.syncer.replMetric.AddFilter(1)
-		return true
-	}
-	return false
-}
-
-func (batcher *Batcher) dispatchBatches(batchGroup [][]*oplog.GenericOplog) (work bool) {
-	for i, batch := range batchGroup {
-		// we still push logs even if length is zero. so without length check
-		if batch != nil {
-			work = true
-			batcher.workerGroup[i].AllAcked(false)
-		}
-		batcher.workerGroup[i].Offer(batch)
-	}
-	return
-}
-
-func (batcher *Batcher) batchMore() [][]*oplog.GenericOplog {
-	// picked raw oplogs and batching in sequence
-	batchGroup := make([][]*oplog.GenericOplog, len(batcher.workerGroup))
-	syncer := batcher.syncer
-
-	// first part of merge batch is from current logs queue.
-	// It's allowed to be blocked !
-	mergeBatch := <-syncer.logsQueue[batcher.currentQueue()]
-	// move to next available logs queue
-	batcher.moveToNextQueue()
-	for len(mergeBatch) < conf.Options.AdaptiveBatchingMaxSize &&
-		len(syncer.logsQueue[batcher.currentQueue()]) > 0 {
-		// there has more pushed oplogs in next logs queue (read can't to be block)
-		// Hence, we fetch them by the way. and merge together
-		mergeBatch = append(mergeBatch, <-syncer.logsQueue[batcher.nextQueue]...)
-		batcher.moveToNextQueue()
-	}
-	nimo.AssertTrue(len(mergeBatch) != 0, "logs queue batch logs has zero length")
-
-	for _, genericLog := range mergeBatch {
-		// filter oplog such like Noop or Gid-filtered
-		if batcher.filter(genericLog.Parsed) {
-			// doesn't push to worker
-			continue
-		}
-		batcher.handler.Handle(genericLog.Parsed)
-
-		which := syncer.hasher.DistributeOplogByMod(genericLog.Parsed, len(batcher.workerGroup))
-		batchGroup[which] = append(batchGroup[which], genericLog)
-		batcher.lastOplog = genericLog.Parsed
-	}
-	return batchGroup
-}
-
-func (batcher *Batcher) moveToNextQueue() {
-	batcher.nextQueue++
-	batcher.nextQueue = batcher.nextQueue % uint64(len(batcher.syncer.logsQueue))
-}
-
-func (batcher *Batcher) currentQueue() uint64 {
-	return batcher.nextQueue
 }

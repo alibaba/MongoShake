@@ -2,11 +2,11 @@ package executor
 
 import (
 	"testing"
+	"fmt"
 
 	"mongoshake/oplog"
 
 	"github.com/stretchr/testify/assert"
-	"fmt"
 )
 
 func mockLogs(op, ns string, size int, cb bool) *OplogRecord {
