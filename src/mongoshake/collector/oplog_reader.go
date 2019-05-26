@@ -3,6 +3,7 @@ package collector
 import (
 	"errors"
 	"fmt"
+	utils "mongoshake/common"
 	"strings"
 	"sync"
 	"time"
@@ -211,16 +212,14 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 
 // get newest oplog
 func (reader *OplogReader) getNewestTimestamp() bson.MongoTimestamp {
-	var retMap map[string]interface{}
-	reader.conn.Session.DB(localDB).C(dbpool.OplogNS).Find(bson.M{}).Sort("-$natural").Limit(1).One(&retMap)
-	return retMap[QueryTs].(bson.MongoTimestamp)
+	ts, _ := utils.GetNewestTimestamp(reader.conn.Session)
+	return ts
 }
 
 // get oldest oplog
 func (reader *OplogReader) getOldestTimestamp() bson.MongoTimestamp {
-	var retMap map[string]interface{}
-	reader.conn.Session.DB(localDB).C(dbpool.OplogNS).Find(bson.M{}).Limit(1).One(&retMap)
-	return retMap[QueryTs].(bson.MongoTimestamp)
+	ts, _ := utils.GetOldestTimestamp(reader.conn.Session)
+	return ts
 }
 
 func (reader *OplogReader) releaseIterator() {

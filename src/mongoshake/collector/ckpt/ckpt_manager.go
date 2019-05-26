@@ -21,6 +21,7 @@ const (
 	StorageTypeAPI            = "api"
 	StorageTypeDB             = "database"
 	CheckpointDefaultDatabase = utils.AppDatabase
+	CheckpointAdminDatabase   = "admin"
 	CheckpointName            = "name"
 
 	MajorityWriteConcern = "majority"
@@ -57,6 +58,9 @@ func NewCheckpointManager(name string, startPosition int64) *CheckpointManager {
 		}
 	case StorageTypeDB:
 		db := CheckpointDefaultDatabase
+		if conf.Options.IsShardCluster() {
+			db = CheckpointAdminDatabase
+		}
 		newManager.delegate = &MongoCheckpoint{
 			Checkpoint: Checkpoint{
 				Name:          name,

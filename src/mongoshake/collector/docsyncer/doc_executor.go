@@ -10,8 +10,6 @@ import (
 	"sync/atomic"
 
 	"mongoshake/collector/configure"
-
-	LOG "github.com/vinllen/log4go"
 )
 
 var GlobalCollExecutorId int32 = -1
@@ -50,8 +48,7 @@ func NewCollectionExecutor(id int, mongoUrl string, ns dbpool.NS) *CollectionExe
 func (colExecutor *CollectionExecutor) Start() error {
 	var err error
 	if colExecutor.conn, err = dbpool.NewMongoConn(colExecutor.mongoUrl, true); err != nil {
-		LOG.Critical("Connect to mongodb url=%s failed. %v", colExecutor.mongoUrl, err)
-		return errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", colExecutor.mongoUrl, err))
+		return err
 	}
 
 	parallel := conf.Options.ReplayerDocumentParallel

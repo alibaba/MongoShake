@@ -6,6 +6,7 @@ import (
 	"github.com/gugemichael/nimo4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
+	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
 	"mongoshake/common"
 	"mongoshake/dbpool"
@@ -43,7 +44,11 @@ func IsShardingToSharding(fromIsSharding bool, toConn *dbpool.MongoConn) (bool, 
 func StartDropDestCollection(nsSet map[dbpool.NS]bool, toConn *dbpool.MongoConn, shardingSync bool) error {
 	for ns := range nsSet {
 		toNS := getToNs(ns, shardingSync)
-		_ = toConn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
+		err := toConn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
+		if err != nil && err.Error() != "ns not found"{
+			LOG.Critical("Drop Collection ns %v of dest mongodb failed. %v", toNS, err)
+			return errors.New(fmt.Sprintf("Drop Collection ns %v of dest mongodb failed. %v", toNS, err))
+		}
 	}
 
 	return nil
@@ -55,8 +60,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn) e
 	var fromConn *dbpool.MongoConn
 	var err error
 	if fromConn, err = dbpool.NewMongoConn(csUrl, true); err != nil {
-		LOG.Critical("Connect to mongodb url=%s failed. %v", csUrl, err)
-		return errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", csUrl, err))
+		return err
 	}
 	defer fromConn.Close()
 
@@ -139,9 +143,7 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string, shardingSy
 	var conn *dbpool.MongoConn
 	var err error
 	if conn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
-		LOG.Critical("Connect to mongodb url=%s failed. %v", toUrl, err)
-		syncError = errors.New(fmt.Sprintf("Connect to mongodb url=%s failed. %v", toUrl, err))
-		return
+		return err
 	}
 	defer conn.Close()
 
@@ -192,6 +194,17 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string, shardingSy
 	return syncError
 }
 
+func Checkpoint(ckptMap map[string]bson.MongoTimestamp) error {
+	for name, ts := range ckptMap {
+		ckptManager := ckpt.NewCheckpointManager(name, 0)
+		ckptManager.Get()
+		if err := ckptManager.Update(ts); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type DBSyncer struct {
 	// syncer id
 	id int
@@ -232,7 +245,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	syncer.startTime = time.Now()
 	var wg sync.WaitGroup
 
-	nsList, err := GetAllNamespace(syncer.FromMongoUrl)
+	nsList, err := getDbNamespace(syncer.FromMongoUrl)
 	if err != nil {
 		return err
 	}

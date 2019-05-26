@@ -2,12 +2,25 @@ package utils
 
 import (
 	"fmt"
-	"strings"
+	"mongoshake/dbpool"
 	"strconv"
+	"strings"
 
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
 )
+
+var (
+	QueryTs = "ts"
+	localDB = "local"
+)
+
+type MongoSource struct {
+	URL         string
+	ReplicaName string
+	Gid         string
+}
+
 
 // get db version, return string with format like "3.0.1"
 func GetDBVersion(session *mgo.Session) (string, error) {

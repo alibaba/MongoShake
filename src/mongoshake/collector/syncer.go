@@ -2,6 +2,7 @@ package collector
 
 import (
 	"fmt"
+	"mongoshake/collector/filter"
 	"time"
 
 	"mongoshake/collector/ckpt"
@@ -11,8 +12,8 @@ import (
 	"mongoshake/quorum"
 	"mongoshake/collector/filter"
 
-	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
 )
 
