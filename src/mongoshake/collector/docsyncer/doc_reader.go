@@ -38,12 +38,7 @@ func getDbNamespace(url string) (nsList []dbpool.NS, err error) {
 		return nil, err
 	}
 
-	filterList := filter.DocFilterChain{new(filter.AutologousFilter)}
-	if len(conf.Options.FilterNamespaceWhite) != 0 || len(conf.Options.FilterNamespaceBlack) != 0 {
-		namespaceFilter := filter.NewNamespaceFilter(conf.Options.FilterNamespaceWhite,
-			conf.Options.FilterNamespaceBlack)
-		filterList = append(filterList, namespaceFilter)
-	}
+	filterList := NewDocFilterList()
 
 	nsList = make([]dbpool.NS, 0, 128)
 	for _, db := range dbNames {
@@ -66,6 +61,16 @@ func getDbNamespace(url string) (nsList []dbpool.NS, err error) {
 	}
 
 	return nsList, nil
+}
+
+func NewDocFilterList() filter.DocFilterChain {
+	filterList := filter.DocFilterChain{new(filter.AutologousFilter)}
+	if len(conf.Options.FilterNamespaceWhite) != 0 || len(conf.Options.FilterNamespaceBlack) != 0 {
+		namespaceFilter := filter.NewNamespaceFilter(conf.Options.FilterNamespaceWhite,
+			conf.Options.FilterNamespaceBlack)
+		filterList = append(filterList, namespaceFilter)
+	}
+	return filterList
 }
 
 func GetAllTimestamp(sources []*utils.MongoSource) (map[string]bson.MongoTimestamp, error) {

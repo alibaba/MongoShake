@@ -92,6 +92,8 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn) e
 		LOG.Critical("Close iterator of config.database failed. %v", err)
 	}
 
+	filterList := NewDocFilterList()
+
 	type colConfig struct {
 		Ns      string    `bson:"_id"`
 		Key     *bson.Raw `bson:"key"`
@@ -102,8 +104,12 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn) e
 	colIter := fromConn.Session.DB("config").C("collections").Find(bson.M{}).Iter()
 	for colIter.Next(&colDoc) {
 		if !colDoc.Dropped {
+			if filterList.IterateFilter(colDoc.Ns) {
+				LOG.Debug("Namespace is filtered. %v", colDoc.Ns)
+				continue
+			}
 			err = toConn.Session.DB("admin").Run(bson.D{{"shardCollection", colDoc.Ns},
-				{"key", bson.M{"a":1}}, {"unique", colDoc.Unique}}, nil)
+				{"key", colDoc.Key}, {"unique", colDoc.Unique}}, nil)
 			if err != nil {
 				LOG.Critical("Shard collection for ns %v of dest mongodb failed. %v", colDoc.Ns, err)
 				return errors.New(fmt.Sprintf("Shard collection for ns %v of dest mongodb failed. %v",
@@ -286,7 +292,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 
 	wg.Wait()
 	close(namespaces)
-	return nil
+	return syncError
 }
 
 
