@@ -55,6 +55,13 @@ func (filter *DDLFilter) Filter(log *oplog.PartialLog) bool {
 	return log.Operation == "c" || strings.HasSuffix(log.Namespace, "system.indexes")
 }
 
+type MigrateFilter struct {
+}
+
+func (filter *MigrateFilter) Filter(log *oplog.PartialLog) bool {
+	return log.FromMigrate
+}
+
 // because regexp use the default perl engine which is not support inverse match, so
 // use two rules to match
 type NamespaceFilter struct {

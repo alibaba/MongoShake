@@ -2,7 +2,6 @@ package collector
 
 import (
 	"fmt"
-	"mongoshake/collector/filter"
 	"time"
 
 	"mongoshake/collector/ckpt"

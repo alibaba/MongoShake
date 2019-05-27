@@ -75,3 +75,23 @@ func ApplyOpsFilter(key string) bool {
 	}
 	return false
 }
+
+// get newest oplog
+func GetNewestTimestamp(session *mgo.Session) (bson.MongoTimestamp, error) {
+	var retMap map[string]interface{}
+	err := session.DB(localDB).C(dbpool.OplogNS).Find(bson.M{}).Sort("-$natural").Limit(1).One(&retMap)
+	if err != nil {
+		return 0, err
+	}
+	return retMap[QueryTs].(bson.MongoTimestamp), nil
+}
+
+// get oldest oplog
+func GetOldestTimestamp(session *mgo.Session) (bson.MongoTimestamp, error) {
+	var retMap map[string]interface{}
+	err := session.DB(localDB).C(dbpool.OplogNS).Find(bson.M{}).Limit(1).One(&retMap)
+	if err != nil {
+		return 0, err
+	}
+	return retMap[QueryTs].(bson.MongoTimestamp), nil
+}
