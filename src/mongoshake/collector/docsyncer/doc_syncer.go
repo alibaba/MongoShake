@@ -133,13 +133,16 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string, shardingSy
 	}
 
 	LOG.Info("document syncer sync index begin")
+	if len(indexMap) == 0 {
+		LOG.Info("document syncer sync index finish, but no data")
+		return nil
+	}
+
 	var wg sync.WaitGroup
+	wg.Add(len(indexMap))
 
 	collExecutorParallel := conf.Options.ReplayerCollectionParallel
 	namespaces := make(chan *IndexNS, collExecutorParallel)
-
-	wg.Add(len(indexMap))
-
 	nimo.GoRoutine(func() {
 		for ns, indexList := range indexMap {
 			namespaces <- &IndexNS{ns: ns, indexList: indexList}
@@ -254,6 +257,10 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	nsList, err := getDbNamespace(syncer.FromMongoUrl)
 	if err != nil {
 		return err
+	}
+
+	if len(nsList) == 0 {
+		LOG.Info("document syncer-%d finish, but no data", syncer.id)
 	}
 
 	collExecutorParallel := conf.Options.ReplayerCollectionParallel

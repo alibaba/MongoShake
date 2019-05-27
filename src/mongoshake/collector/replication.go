@@ -231,7 +231,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	if err := docsyncer.Checkpoint(ckptMap); err != nil {
 		return err
 	}
-	LOG.Info("document syncer sync finish")
+	LOG.Info("document syncer sync end")
 	return nil
 }
 
