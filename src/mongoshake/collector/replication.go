@@ -3,18 +3,18 @@ package collector
 import (
 	"encoding/json"
 	"errors"
-	"github.com/vinllen/mgo"
+	"math"
+	"fmt"
+	"sync"
+
 	"mongoshake/collector/ckpt"
 	"mongoshake/collector/docsyncer"
-	"sync"
-	"time"
-
 	"mongoshake/collector/configure"
 	"mongoshake/common"
 	"mongoshake/dbpool"
 	"mongoshake/oplog"
 
-	"fmt"
+	"github.com/vinllen/mgo"
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 )
@@ -54,18 +54,22 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	coordinator.sentinel = &utils.Sentinel{}
 	coordinator.sentinel.Register()
 
-	syncMode, err := coordinator.selectSyncMode(conf.Options.SyncMode)
+	syncMode, bridgeTs, err := coordinator.selectSyncMode(conf.Options.SyncMode)
 	if err != nil {
 		return err
 	}
 
+	/*
+	 * Generally speaking, it's better to use several bridge timestamp so that
+	 * each shard match one in sharding mode.
+	 * TODO
+	 */
 	switch syncMode {
 	case SYNCMODE_ALL:
-		oplogStartPosition := time.Now().Unix()
 		if err := coordinator.startDocumentReplication(); err != nil {
 			return err
 		}
-		if err := coordinator.startOplogReplication(oplogStartPosition); err != nil {
+		if err := coordinator.startOplogReplication(bridgeTs); err != nil {
 			return err
 		}
 	case SYNCMODE_DOCUMENT:
@@ -146,23 +150,40 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	return nil
 }
 
-func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, error) {
+func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, int64, error) {
 	if syncMode != SYNCMODE_ALL {
-		return syncMode, nil
+		return syncMode, 0, nil
 	}
+
+	// the bridge time between full sync('document') and incr('oplog') sync
+	bridgeTs := int64(math.MaxInt64)
+	needFull := false
 	for _, src := range coordinator.Sources {
 		ckptManager := ckpt.NewCheckpointManager(src.ReplicaName, 0)
 		ckptTs := ckptManager.Get().Timestamp
 		oldestTs, err := docsyncer.GetDbOldestTimestamp(src.URL)
 		if err != nil {
-			return syncMode, err
+			return SYNCMODE_ALL, 0, err
 		}
 		if oldestTs > ckptTs {
-			return syncMode, nil
+			// return SYNCMODE_ALL, 0, nil
+			needFull = true
+		}
+
+		if newestTs, err := docsyncer.GetDbNewstTimestamp(src.URL); err != nil {
+			return syncMode, 0, err
+		} else if utils.TimestampToInt64(newestTs) < bridgeTs {
+			// update the newest bridge time
+			bridgeTs = utils.TimestampToInt64(newestTs)
 		}
 	}
-	LOG.Info("sync mode change from all to oplog")
-	return SYNCMODE_OPLOG, nil
+
+	if needFull {
+		return SYNCMODE_ALL, bridgeTs, nil
+	} else {
+		LOG.Info("sync mode change from 'all' to 'oplog'")
+		return SYNCMODE_OPLOG, 0, nil
+	}
 }
 
 func (coordinator *ReplicationCoordinator) startDocumentReplication() error {

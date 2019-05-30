@@ -76,7 +76,7 @@ func NewDocFilterList() filter.DocFilterChain {
 func GetAllTimestamp(sources []*utils.MongoSource) (map[string]bson.MongoTimestamp, error) {
 	tsMap := make(map[string]bson.MongoTimestamp)
 	for _, src := range sources {
-		ts, err := getDbNestTimestamp(src.URL)
+		ts, err := GetDbNewstTimestamp(src.URL)
 		if err != nil {
 			return nil, err
 		}
@@ -85,7 +85,7 @@ func GetAllTimestamp(sources []*utils.MongoSource) (map[string]bson.MongoTimesta
 	return tsMap, nil
 }
 
-func getDbNestTimestamp(url string) (bson.MongoTimestamp, error) {
+func GetDbNewstTimestamp(url string) (bson.MongoTimestamp, error) {
 	var conn *dbpool.MongoConn
 	var err error
 	if conn, err = dbpool.NewMongoConn(url, false); conn == nil || err != nil {
