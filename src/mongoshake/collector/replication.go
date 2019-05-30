@@ -64,6 +64,8 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	 * each shard match one in sharding mode.
 	 * TODO
 	 */
+	LOG.Info("start running with mode[%v], bridgeTs[%v]", syncMode, bridgeTs)
+	
 	switch syncMode {
 	case SYNCMODE_ALL:
 		if err := coordinator.startDocumentReplication(); err != nil {
