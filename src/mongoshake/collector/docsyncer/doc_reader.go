@@ -27,7 +27,7 @@ func GetAllNamespace(sources []*utils.MongoSource) (map[dbpool.NS]bool, error) {
 
 func getDbNamespace(url string) (nsList []dbpool.NS, err error) {
 	var conn *dbpool.MongoConn
-	if conn, err = dbpool.NewMongoConn(url, false); conn == nil || err != nil {
+	if conn, err = dbpool.NewMongoConn(url, false, true); conn == nil || err != nil {
 		return nil, err
 	}
 	defer conn.Close()
@@ -88,7 +88,7 @@ func GetAllTimestamp(sources []*utils.MongoSource) (map[string]bson.MongoTimesta
 func GetDbNewstTimestamp(url string) (bson.MongoTimestamp, error) {
 	var conn *dbpool.MongoConn
 	var err error
-	if conn, err = dbpool.NewMongoConn(url, false); conn == nil || err != nil {
+	if conn, err = dbpool.NewMongoConn(url, false, true); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()
@@ -99,7 +99,7 @@ func GetDbNewstTimestamp(url string) (bson.MongoTimestamp, error) {
 func GetDbOldestTimestamp(url string) (bson.MongoTimestamp, error) {
 	var conn *dbpool.MongoConn
 	var err error
-	if conn, err = dbpool.NewMongoConn(url, false); conn == nil || err != nil {
+	if conn, err = dbpool.NewMongoConn(url, false, true); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()
@@ -161,7 +161,7 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 			reader.conn.Close()
 		}
 		// reconnect
-		if reader.conn, err = dbpool.NewMongoConn(reader.src, false); reader.conn == nil || err != nil {
+		if reader.conn, err = dbpool.NewMongoConn(reader.src, false, true); reader.conn == nil || err != nil {
 			return err
 		}
 	}

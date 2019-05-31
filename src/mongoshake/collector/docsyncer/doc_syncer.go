@@ -59,7 +59,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn) e
 
 	var fromConn *dbpool.MongoConn
 	var err error
-	if fromConn, err = dbpool.NewMongoConn(csUrl, true); err != nil {
+	if fromConn, err = dbpool.NewMongoConn(csUrl, true, true); err != nil {
 		return err
 	}
 	defer fromConn.Close()
@@ -151,7 +151,7 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string, shardingSy
 
 	var conn *dbpool.MongoConn
 	var err error
-	if conn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
+	if conn, err = dbpool.NewMongoConn(toUrl, true, false); err != nil {
 		return err
 	}
 	defer conn.Close()

@@ -25,7 +25,7 @@ type MongoConn struct {
 	URL     string
 }
 
-func NewMongoConn(url string, primaryRequired bool) (*MongoConn, error) {
+func NewMongoConn(url string, primaryRequired bool, timeout bool) (*MongoConn, error) {
 	session, err := mgo.Dial(url)
 	if err != nil {
 		LOG.Critical("Connect to %s failed. %v", url, err)
@@ -34,7 +34,11 @@ func NewMongoConn(url string, primaryRequired bool) (*MongoConn, error) {
 	// maximum pooled connections. the overall established sockets
 	// should be lower than this value(will block otherwise)
 	session.SetPoolLimit(256)
-	session.SetSocketTimeout(10 * time.Minute)
+	if timeout {
+		session.SetSocketTimeout(10 * time.Minute)
+	} else {
+		session.SetSocketTimeout(0)
+	}
 
 	if err := session.Ping(); err != nil {
 		LOG.Critical("Verify ping command to %s failed. %v", url, err)

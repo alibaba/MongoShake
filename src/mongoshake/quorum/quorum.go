@@ -175,7 +175,7 @@ func competeMaster(coll *mgo.Collection) bool {
 }
 
 func makeSession(uri string) (*dbpool.MongoConn, error) {
-	if conn, err := dbpool.NewMongoConn(uri, true); err == nil {
+	if conn, err := dbpool.NewMongoConn(uri, true, true); err == nil {
 		return conn, nil
 	} else {
 		return nil, err

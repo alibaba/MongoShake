@@ -97,14 +97,14 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	rs := map[string]int{}
 	if len(coordinator.Sources) > 1 {
 		csUrl := conf.Options.ContextStorageUrl
-		if conn, err = dbpool.NewMongoConn(csUrl, false); conn == nil || !conn.IsGood() || err != nil {
+		if conn, err = dbpool.NewMongoConn(csUrl, false, true); conn == nil || !conn.IsGood() || err != nil {
 			LOG.Critical("Connect mongo server error. %v, url : %s", err, csUrl)
 			return err
 		}
 		conn.Close()
 	}
 	for i, src := range coordinator.Sources {
-		if conn, err = dbpool.NewMongoConn(src.URL, false); conn == nil || !conn.IsGood() || err != nil {
+		if conn, err = dbpool.NewMongoConn(src.URL, false, true); conn == nil || !conn.IsGood() || err != nil {
 			LOG.Critical("Connect mongo server error. %v, url : %s", err, src.URL)
 			return err
 		}
@@ -203,7 +203,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	fromIsSharding := len(coordinator.Sources) > 1
 	toUrl := conf.Options.TunnelAddress[0]
 	var toConn *dbpool.MongoConn
-	if toConn, err = dbpool.NewMongoConn(toUrl, true); err != nil {
+	if toConn, err = dbpool.NewMongoConn(toUrl, true, true); err != nil {
 		return err
 	}
 	defer toConn.Close()

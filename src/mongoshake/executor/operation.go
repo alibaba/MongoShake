@@ -42,7 +42,7 @@ var opsMap = map[string]*CommandOperation{
 func (exec *Executor) ensureConnection() bool {
 	// reconnect if necessary
 	if exec.session == nil {
-		if conn, err := dbpool.NewMongoConn(exec.MongoUrl, true); err != nil {
+		if conn, err := dbpool.NewMongoConn(exec.MongoUrl, true, true); err != nil {
 			LOG.Critical("Connect to mongo cluster failed. %v", err)
 			return false
 		} else {

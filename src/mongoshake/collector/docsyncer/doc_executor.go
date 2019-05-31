@@ -47,7 +47,7 @@ func NewCollectionExecutor(id int, mongoUrl string, ns dbpool.NS) *CollectionExe
 
 func (colExecutor *CollectionExecutor) Start() error {
 	var err error
-	if colExecutor.conn, err = dbpool.NewMongoConn(colExecutor.mongoUrl, true); err != nil {
+	if colExecutor.conn, err = dbpool.NewMongoConn(colExecutor.mongoUrl, true, true); err != nil {
 		return err
 	}
 
