@@ -11,12 +11,13 @@ import (
 	"mongoshake/common"
 	"mongoshake/dbpool"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	LOG "github.com/vinllen/log4go"
 )
 
-func IsShardingToSharding(fromIsSharding bool, toConn *dbpool.MongoConn) (bool, error) {
+func IsShardingToSharding(fromIsSharding bool, toConn *dbpool.MongoConn) bool {
 	var toIsSharding bool
 	var result interface{}
 	err := toConn.Session.DB("config").C("version").Find(bson.M{}).One(&result)
@@ -27,27 +28,41 @@ func IsShardingToSharding(fromIsSharding bool, toConn *dbpool.MongoConn) (bool, 
 	}
 
 	if fromIsSharding && toIsSharding {
-		LOG.Warn("replication from sharding to sharding")
-		return true, nil
+		LOG.Info("replication from sharding to sharding")
+		return true
 	} else if fromIsSharding && !toIsSharding {
-		LOG.Warn("replication from sharding to replica")
-		return false, nil
+		LOG.Info("replication from sharding to replica")
+		return false
 	} else if !fromIsSharding && toIsSharding {
-		LOG.Warn("replication from replica to sharding")
-		return false, nil
+		LOG.Info("replication from replica to sharding")
+		return false
 	} else {
-		LOG.Warn("replication from replica to replica")
-		return false, nil
+		LOG.Info("replication from replica to replica")
+		return false
 	}
 }
 
-func StartDropDestCollection(nsSet map[dbpool.NS]bool, toConn *dbpool.MongoConn, shardingSync bool) error {
+func StartDropDestCollection(nsSet map[dbpool.NS]bool, toConn *dbpool.MongoConn) error {
 	for ns := range nsSet {
-		toNS := getToNs(ns, shardingSync)
+		toNS := getToNs(ns)
+		if !conf.Options.ReplayerCollectionDrop {
+			colNames, err := toConn.Session.DB(toNS.Database).CollectionNames()
+			if err != nil {
+				LOG.Critical("Get collection names of db %v of dest mongodb failed. %v", toNS.Database, err)
+				return err
+			}
+			for _, colName := range colNames {
+				if colName == ns.Collection {
+					LOG.Critical("ns %v to be synced already exists in dest mongodb", toNS)
+					return errors.New(fmt.Sprintf("ns %v to be synced already exists in dest mongodb", toNS))
+				}
+			}
+		}
+
 		err := toConn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
 		if err != nil && err.Error() != "ns not found"{
-			LOG.Critical("Drop Collection ns %v of dest mongodb failed. %v", toNS, err)
-			return errors.New(fmt.Sprintf("Drop Collection ns %v of dest mongodb failed. %v", toNS, err))
+			LOG.Critical("Drop collection ns %v of dest mongodb failed. %v", toNS, err)
+			return errors.New(fmt.Sprintf("Drop collection ns %v of dest mongodb failed. %v", toNS, err))
 		}
 	}
 
@@ -126,7 +141,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn) e
 	return nil
 }
 
-func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string, shardingSync bool) (syncError error) {
+func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string) (syncError error) {
 	type IndexNS struct {
 		ns        dbpool.NS
 		indexList []mgo.Index
@@ -167,22 +182,7 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string, shardingSy
 					break
 				}
 				ns := indexNs.ns
-				toNS := getToNs(ns, shardingSync)
-
-				if !shardingSync && conf.Options.ReplayerCollectionRename {
-					// rename collection before create index, because the collection name of dest mongodb maybe too long
-					// namespace.indexName cannot exceed 127 byte
-					err := session.DB("admin").
-						Run(bson.D{{"renameCollection", toNS.Str()}, {"to", ns.Str()}}, nil)
-					if err != nil && err.Error() != "source namespace does not exist" {
-						LOG.Critical("Rename Collection ns %v of dest mongodb to ns %v failed. %v", toNS, ns, err)
-						syncError = errors.New(fmt.Sprintf("Rename Collection ns %v of dest mongodb to ns %v failed. %v",
-							toNS, ns, err))
-					} else {
-						LOG.Info("Rename collection ns %v of dest mongodb to ns %v successful", toNS, ns)
-					}
-					toNS = ns
-				}
+				toNS := getToNs(ns)
 
 				for _, index := range indexNs.indexList {
 					index.Background = false
@@ -225,8 +225,6 @@ type DBSyncer struct {
 	indexMap map[dbpool.NS][]mgo.Index
 	// start time of sync
 	startTime time.Time
-	// is sharding sync
-	shardingSync bool
 
 	mutex sync.Mutex
 
@@ -236,15 +234,13 @@ type DBSyncer struct {
 func NewDBSyncer(
 	id int,
 	fromMongoUrl string,
-	toMongoUrl string,
-	shardingSync bool) *DBSyncer {
+	toMongoUrl string) *DBSyncer {
 
 	syncer := &DBSyncer{
 		id:           id,
 		FromMongoUrl: fromMongoUrl,
 		ToMongoUrl:   toMongoUrl,
 		indexMap:     make(map[dbpool.NS][]mgo.Index),
-		shardingSync: shardingSync,
 	}
 
 	return syncer
@@ -274,6 +270,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 		}
 	})
 
+	var nsDoneCount int32 = 0
 	for i := 0; i < collExecutorParallel; i++ {
 		collExecutorId := GenerateCollExecutorId()
 		nimo.GoRoutine(func() {
@@ -284,13 +281,17 @@ func (syncer *DBSyncer) Start() (syncError error) {
 				}
 
 				LOG.Info("document syncer-%d collExecutor-%d sync ns %v begin", syncer.id, collExecutorId, ns)
-				if err := syncer.collectionSync(collExecutorId, ns); err != nil {
+				err := syncer.collectionSync(collExecutorId, ns)
+				atomic.AddInt32(&nsDoneCount, 1)
+
+				if err != nil {
 					LOG.Critical("document syncer-%d collExecutor-%d sync ns %v failed. %v", syncer.id, collExecutorId, ns, err)
 					syncError = errors.New(fmt.Sprintf("document syncer sync ns %v failed. %v", ns, err))
 				} else {
-					LOG.Info("document syncer-%d collExecutor-%d sync ns %v successful", syncer.id, collExecutorId, ns)
+					process := int(atomic.LoadInt32(&nsDoneCount)) * 100 / len(nsList)
+					LOG.Info("document syncer-%d collExecutor-%d sync ns %v successful. db syncer-%d progress %v%%",
+							syncer.id, collExecutorId, ns, collExecutorId, process)
 				}
-
 				wg.Done()
 			}
 			LOG.Info("document syncer-%d collExecutor-%d finish", syncer.id, collExecutorId)
@@ -306,7 +307,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS) error {
 	reader := NewDocumentReader(syncer.FromMongoUrl, ns)
 
-	toNS := getToNs(ns, syncer.shardingSync)
+	toNS := getToNs(ns)
 	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS)
 	if err := colExecutor.Start(); err != nil {
 		return err
@@ -350,11 +351,7 @@ func (syncer *DBSyncer) GetIndexMap() map[dbpool.NS][]mgo.Index {
 	return syncer.indexMap
 }
 
-func getToNs(ns dbpool.NS, shardingSync bool) dbpool.NS {
-	if shardingSync {
-		return ns
-	} else {
-		toCollection := fmt.Sprintf("%s_%s", ns.Collection, utils.APPNAME)
-		return dbpool.NS{Database:ns.Database, Collection:toCollection}
-	}
+func getToNs(ns dbpool.NS) dbpool.NS {
+	//TODO map collection name of src mongodb to different collection name of dest mongodb
+	return ns
 }

@@ -208,11 +208,8 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 	defer toConn.Close()
 
-	shardingSync, err := docsyncer.IsShardingToSharding(fromIsSharding, toConn)
-	if err != nil {
-		return err
-	}
-	if err := docsyncer.StartDropDestCollection(nsSet, toConn, shardingSync); err != nil {
+	shardingSync := docsyncer.IsShardingToSharding(fromIsSharding, toConn)
+	if err := docsyncer.StartDropDestCollection(nsSet, toConn); err != nil {
 		return err
 	}
 	if shardingSync {
@@ -227,7 +224,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	indexMap := make(map[dbpool.NS][]mgo.Index)
 
 	for i, src := range coordinator.Sources {
-		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl, shardingSync)
+		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl)
 		LOG.Info("document syncer-%d do replication for url=%v", i, src.URL)
 		wg.Add(1)
 		nimo.GoRoutine(func() {
@@ -248,7 +245,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		return replError
 	}
 
-	if err := docsyncer.StartIndexSync(indexMap, toUrl, shardingSync); err != nil {
+	if err := docsyncer.StartIndexSync(indexMap, toUrl); err != nil {
 		return err
 	}
 	if err := docsyncer.Checkpoint(ckptMap); err != nil {

@@ -36,7 +36,7 @@ type Configuration struct {
 	ReplayerConflictWriteTo           string `config:"replayer.conflict_write_to"`
 	ReplayerDurable                   bool   `config:"replayer.durable"`
 
-	ReplayerCollectionRename   bool `config:"replayer.collection_rename"`
+	ReplayerCollectionDrop     bool `config:"replayer.collection_drop"`
 	ReplayerCollectionParallel int  `config:"replayer.collection_parallel"`
 	ReplayerDocumentParallel   int  `config:"replayer.document_parallel"`
 	ReplayerDocumentBatchSize  int  `config:"replayer.document_batch_size"`

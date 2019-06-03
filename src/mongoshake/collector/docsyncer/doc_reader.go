@@ -171,7 +171,7 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	reader.conn.Session.SetPrefetch(0.2)
 	reader.conn.Session.SetCursorTimeout(0)
 	reader.docIterator = reader.conn.Session.DB(reader.ns.Database).C(reader.ns.Collection).
-		Find(reader.query).Snapshot().Iter()
+		Find(reader.query).Iter()
 	return nil
 }
 
