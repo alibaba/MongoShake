@@ -1,15 +1,16 @@
 package collector
 
 import (
-	"mongoshake/oplog"
 	"mongoshake/collector/configure"
 	"mongoshake/collector/filter"
+	"mongoshake/collector/transform"
+	"mongoshake/oplog"
 
-	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 )
 
-var(
+var (
 	moveChunkFilter filter.MigrateFilter
 )
 
@@ -39,13 +40,17 @@ type Batcher struct {
 
 	// ddl chooser
 	ddlChooser *filter.DDLFilter
+
+	// tranform namespace
+	trans transform.Transform
 }
 
-func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain, handler OplogHandler,
-	workerGroup []*Worker) *Batcher {
+func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain, trans transform.Transform,
+	handler OplogHandler, workerGroup []*Worker) *Batcher {
 	return &Batcher{
 		syncer:      syncer,
 		filterList:  filterList,
+		trans:       trans,
 		handler:     handler,
 		workerGroup: workerGroup,
 		ddlChooser:  new(filter.DDLFilter),
@@ -137,6 +142,9 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool) {
 			barrier = false
 		}
 		batcher.handler.Handle(genericLog.Parsed)
+
+		// transform namespace for oplog
+		genericLog.Parsed.Namespace = batcher.trans.Transform(genericLog.Parsed.Namespace)
 
 		which := syncer.hasher.DistributeOplogByMod(genericLog.Parsed, len(batcher.workerGroup))
 		batchGroup[which] = append(batchGroup[which], genericLog)

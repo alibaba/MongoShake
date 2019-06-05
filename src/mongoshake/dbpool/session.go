@@ -2,6 +2,7 @@ package dbpool
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	LOG "github.com/vinllen/log4go"
@@ -18,6 +19,11 @@ type NS struct {
 
 func (ns NS) Str() string {
 	return fmt.Sprintf("%s.%s", ns.Database, ns.Collection)
+}
+
+func NewNS(namespace string) NS {
+	pair := strings.SplitN(namespace, ".", 2)
+	return NS{Database:pair[0], Collection:pair[1]}
 }
 
 type MongoConn struct {

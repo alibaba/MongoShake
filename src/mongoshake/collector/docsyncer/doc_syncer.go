@@ -8,6 +8,8 @@ import (
 	"github.com/vinllen/mgo/bson"
 	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
+	"mongoshake/collector/filter"
+	"mongoshake/collector/transform"
 	"mongoshake/common"
 	"mongoshake/dbpool"
 	"sync"
@@ -42,9 +44,9 @@ func IsShardingToSharding(fromIsSharding bool, toConn *dbpool.MongoConn) bool {
 	}
 }
 
-func StartDropDestCollection(nsSet map[dbpool.NS]bool, toConn *dbpool.MongoConn) error {
+func StartDropDestCollection(nsSet map[dbpool.NS]bool, toConn *dbpool.MongoConn, trans transform.Transform) error {
 	for ns := range nsSet {
-		toNS := getToNs(ns)
+		toNS := dbpool.NewNS(trans.Transform(ns.Str()))
 		if !conf.Options.ReplayerCollectionDrop {
 			colNames, err := toConn.Session.DB(toNS.Database).CollectionNames()
 			if err != nil {
@@ -58,18 +60,16 @@ func StartDropDestCollection(nsSet map[dbpool.NS]bool, toConn *dbpool.MongoConn)
 				}
 			}
 		}
-
 		err := toConn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
-		if err != nil && err.Error() != "ns not found"{
+		if err != nil && err.Error() != "ns not found" {
 			LOG.Critical("Drop collection ns %v of dest mongodb failed. %v", toNS, err)
 			return errors.New(fmt.Sprintf("Drop collection ns %v of dest mongodb failed. %v", toNS, err))
 		}
 	}
-
 	return nil
 }
 
-func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn) error {
+func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn, trans transform.Transform) error {
 	LOG.Info("document syncer namespace spec for sharding begin")
 
 	var fromConn *dbpool.MongoConn
@@ -79,61 +79,66 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn) e
 	}
 	defer fromConn.Close()
 
-	type dbConfig struct {
+	filterList := filter.NewDocFilterList()
+
+	type dbSpec struct {
 		Db          string `bson:"_id"`
 		Partitioned bool   `bson:"partitioned"`
 	}
-	var dbDoc dbConfig
-
-	dbIter := fromConn.Session.DB("config").C("databases").Find(bson.M{}).Iter()
-	for dbIter.Next(&dbDoc) {
-		if dbDoc.Partitioned {
-			var todbDoc dbConfig
-			err = toConn.Session.DB("config").C("databases").
-				Find(bson.D{{"_id", dbDoc.Db}}).One(&todbDoc)
-			if err == nil && todbDoc.Partitioned {
+	var dbSpecDoc dbSpec
+	// enable sharding for db
+	dbSpecIter := fromConn.Session.DB("config").C("databases").Find(bson.M{}).Iter()
+	for dbSpecIter.Next(&dbSpecDoc) {
+		if dbSpecDoc.Partitioned {
+			if filterList.IterateFilter(dbSpecDoc.Db) {
+				LOG.Debug("DB is filtered. %v", dbSpecDoc.Db)
 				continue
 			}
-			err = toConn.Session.DB("admin").Run(bson.D{{"enablesharding", dbDoc.Db}}, nil)
+			var todbSpecDoc dbSpec
+			todb := trans.Transform(dbSpecDoc.Db)
+			err = toConn.Session.DB("config").C("databases").
+				Find(bson.D{{"_id", todb}}).One(&todbSpecDoc)
+			if err == nil && todbSpecDoc.Partitioned {
+				continue
+			}
+			err = toConn.Session.DB("admin").Run(bson.D{{"enablesharding", todb}}, nil)
 			if err != nil {
-				LOG.Critical("Enable sharding for db %v of dest mongodb failed. %v", dbDoc.Db, err)
+				LOG.Critical("Enable sharding for db %v of dest mongodb failed. %v", todb, err)
 				return errors.New(fmt.Sprintf("Enable sharding for db %v of dest mongodb failed. %v",
-					dbDoc.Db, err))
+					todb, err))
 			}
 		}
 	}
-
-	if err := dbIter.Close(); err != nil {
+	if err := dbSpecIter.Close(); err != nil {
 		LOG.Critical("Close iterator of config.database failed. %v", err)
 	}
 
-	filterList := NewDocFilterList()
-
-	type colConfig struct {
+	type colSpec struct {
 		Ns      string    `bson:"_id"`
 		Key     *bson.Raw `bson:"key"`
 		Unique  bool      `bson:"unique"`
 		Dropped bool      `bson:"dropped"`
 	}
-	var colDoc colConfig
-	colIter := fromConn.Session.DB("config").C("collections").Find(bson.M{}).Iter()
-	for colIter.Next(&colDoc) {
-		if !colDoc.Dropped {
-			if filterList.IterateFilter(colDoc.Ns) {
-				LOG.Debug("Namespace is filtered. %v", colDoc.Ns)
+	var colSpecDoc colSpec
+	// enable sharding for db
+	colSpecIter := fromConn.Session.DB("config").C("collections").Find(bson.M{}).Iter()
+	for colSpecIter.Next(&colSpecDoc) {
+		if !colSpecDoc.Dropped {
+			if filterList.IterateFilter(colSpecDoc.Ns) {
+				LOG.Debug("Namespace is filtered. %v", colSpecDoc.Ns)
 				continue
 			}
-			err = toConn.Session.DB("admin").Run(bson.D{{"shardCollection", colDoc.Ns},
-				{"key", colDoc.Key}, {"unique", colDoc.Unique}}, nil)
+			toNs := trans.Transform(colSpecDoc.Ns)
+			err = toConn.Session.DB("admin").Run(bson.D{{"shardCollection", toNs},
+				{"key", colSpecDoc.Key}, {"unique", colSpecDoc.Unique}}, nil)
 			if err != nil {
-				LOG.Critical("Shard collection for ns %v of dest mongodb failed. %v", colDoc.Ns, err)
+				LOG.Critical("Shard collection for ns %v of dest mongodb failed. %v", toNs, err)
 				return errors.New(fmt.Sprintf("Shard collection for ns %v of dest mongodb failed. %v",
-					colDoc.Ns, err))
+					toNs, err))
 			}
 		}
 	}
-
-	if err = colIter.Close(); err != nil {
+	if err = colSpecIter.Close(); err != nil {
 		LOG.Critical("Close iterator of config.collections failed. %v", err)
 	}
 
@@ -141,7 +146,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn) e
 	return nil
 }
 
-func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string) (syncError error) {
+func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string, trans transform.Transform) (syncError error) {
 	type IndexNS struct {
 		ns        dbpool.NS
 		indexList []mgo.Index
@@ -182,7 +187,7 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string) (syncError
 					break
 				}
 				ns := indexNs.ns
-				toNS := getToNs(ns)
+				toNS := dbpool.NewNS(trans.Transform(ns.Str()))
 
 				for _, index := range indexNs.indexList {
 					index.Background = false
@@ -226,6 +231,8 @@ type DBSyncer struct {
 	// start time of sync
 	startTime time.Time
 
+	trans transform.Transform
+
 	mutex sync.Mutex
 
 	replMetric *utils.ReplicationMetric
@@ -234,13 +241,15 @@ type DBSyncer struct {
 func NewDBSyncer(
 	id int,
 	fromMongoUrl string,
-	toMongoUrl string) *DBSyncer {
+	toMongoUrl string,
+	trans transform.Transform) *DBSyncer {
 
 	syncer := &DBSyncer{
 		id:           id,
 		FromMongoUrl: fromMongoUrl,
 		ToMongoUrl:   toMongoUrl,
 		indexMap:     make(map[dbpool.NS][]mgo.Index),
+		trans:        trans,
 	}
 
 	return syncer
@@ -281,7 +290,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 				}
 
 				LOG.Info("document syncer-%d collExecutor-%d sync ns %v begin", syncer.id, collExecutorId, ns)
-				err := syncer.collectionSync(collExecutorId, ns)
+				err := syncer.collectionSync(collExecutorId, ns, syncer.trans)
 				atomic.AddInt32(&nsDoneCount, 1)
 
 				if err != nil {
@@ -290,7 +299,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 				} else {
 					process := int(atomic.LoadInt32(&nsDoneCount)) * 100 / len(nsList)
 					LOG.Info("document syncer-%d collExecutor-%d sync ns %v successful. db syncer-%d progress %v%%",
-							syncer.id, collExecutorId, ns, collExecutorId, process)
+						syncer.id, collExecutorId, ns, syncer.id, process)
 				}
 				wg.Done()
 			}
@@ -303,11 +312,10 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	return syncError
 }
 
-
-func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS) error {
+func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS, trans transform.Transform) error {
 	reader := NewDocumentReader(syncer.FromMongoUrl, ns)
 
-	toNS := getToNs(ns)
+	toNS := dbpool.NewNS(trans.Transform(ns.Str()))
 	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS)
 	if err := colExecutor.Start(); err != nil {
 		return err
@@ -349,9 +357,4 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS) error {
 
 func (syncer *DBSyncer) GetIndexMap() map[dbpool.NS][]mgo.Index {
 	return syncer.indexMap
-}
-
-func getToNs(ns dbpool.NS) dbpool.NS {
-	//TODO map collection name of src mongodb to different collection name of dest mongodb
-	return ns
 }

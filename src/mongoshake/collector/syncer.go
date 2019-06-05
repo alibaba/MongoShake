@@ -2,6 +2,7 @@ package collector
 
 import (
 	"fmt"
+	"mongoshake/collector/transform"
 	"time"
 
 	"mongoshake/collector/ckpt"
@@ -119,10 +120,13 @@ func NewOplogSyncer(
 		filterList = append(filterList, new(filter.DDLFilter))
 	}
 
+	// namespace transform
+	trans := transform.NewNamespaceTransform(conf.Options.TransformNamespace)
+
 	// oplog filters. drop the oplog if any of the filter
 	// list returns true. The order of all filters is not significant.
 	// workerGroup is assigned later by syncer.bind()
-	syncer.batcher = NewBatcher(syncer, filterList, syncer, []*Worker{})
+	syncer.batcher = NewBatcher(syncer, filterList, trans, syncer, []*Worker{})
 	return syncer
 }
 

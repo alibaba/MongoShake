@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-	"mongoshake/collector/configure"
 	"mongoshake/collector/filter"
 	utils "mongoshake/common"
 	"mongoshake/dbpool"
@@ -38,7 +37,7 @@ func getDbNamespace(url string) (nsList []dbpool.NS, err error) {
 		return nil, err
 	}
 
-	filterList := NewDocFilterList()
+	filterList := filter.NewDocFilterList()
 
 	nsList = make([]dbpool.NS, 0, 128)
 	for _, db := range dbNames {
@@ -61,16 +60,6 @@ func getDbNamespace(url string) (nsList []dbpool.NS, err error) {
 	}
 
 	return nsList, nil
-}
-
-func NewDocFilterList() filter.DocFilterChain {
-	filterList := filter.DocFilterChain{new(filter.AutologousFilter)}
-	if len(conf.Options.FilterNamespaceWhite) != 0 || len(conf.Options.FilterNamespaceBlack) != 0 {
-		namespaceFilter := filter.NewNamespaceFilter(conf.Options.FilterNamespaceWhite,
-			conf.Options.FilterNamespaceBlack)
-		filterList = append(filterList, namespaceFilter)
-	}
-	return filterList
 }
 
 func GetAllTimestamp(sources []*utils.MongoSource) (map[string]bson.MongoTimestamp, error) {
