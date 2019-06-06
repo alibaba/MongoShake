@@ -42,15 +42,15 @@ type Batcher struct {
 	ddlChooser *filter.DDLFilter
 
 	// tranform namespace
-	trans transform.Transform
+	nsTrans *transform.NamespaceTransform
 }
 
-func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain, trans transform.Transform,
+func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain, nsTrans *transform.NamespaceTransform,
 	handler OplogHandler, workerGroup []*Worker) *Batcher {
 	return &Batcher{
 		syncer:      syncer,
 		filterList:  filterList,
-		trans:       trans,
+		nsTrans:     nsTrans,
 		handler:     handler,
 		workerGroup: workerGroup,
 		ddlChooser:  new(filter.DDLFilter),
@@ -144,7 +144,7 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool) {
 		batcher.handler.Handle(genericLog.Parsed)
 
 		// transform namespace for oplog
-		genericLog.Parsed.Namespace = batcher.trans.Transform(genericLog.Parsed.Namespace)
+		genericLog.Parsed.Namespace = batcher.nsTrans.Transform(genericLog.Parsed.Namespace)
 
 		which := syncer.hasher.DistributeOplogByMod(genericLog.Parsed, len(batcher.workerGroup))
 		batchGroup[which] = append(batchGroup[which], genericLog)

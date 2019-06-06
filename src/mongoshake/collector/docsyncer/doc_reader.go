@@ -8,6 +8,7 @@ import (
 	utils "mongoshake/common"
 	"mongoshake/dbpool"
 	LOG "github.com/vinllen/log4go"
+	"strings"
 )
 
 func GetAllNamespace(sources []*utils.MongoSource) (map[dbpool.NS]bool, error) {
@@ -48,7 +49,7 @@ func getDbNamespace(url string) (nsList []dbpool.NS, err error) {
 		}
 		for _, col := range colNames {
 			ns := dbpool.NS{Database:db, Collection:col}
-			if col == "system.profile" {
+			if strings.HasPrefix(col, "system.") {
 				continue
 			}
 			if filterList.IterateFilter(ns.Str()) {

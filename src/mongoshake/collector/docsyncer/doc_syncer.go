@@ -44,9 +44,10 @@ func IsShardingToSharding(fromIsSharding bool, toConn *dbpool.MongoConn) bool {
 	}
 }
 
-func StartDropDestCollection(nsSet map[dbpool.NS]bool, toConn *dbpool.MongoConn, trans transform.Transform) error {
+func StartDropDestCollection(nsSet map[dbpool.NS]bool, toConn *dbpool.MongoConn,
+	nsTrans *transform.NamespaceTransform) error {
 	for ns := range nsSet {
-		toNS := dbpool.NewNS(trans.Transform(ns.Str()))
+		toNS := dbpool.NewNS(nsTrans.Transform(ns.Str()))
 		if !conf.Options.ReplayerCollectionDrop {
 			colNames, err := toConn.Session.DB(toNS.Database).CollectionNames()
 			if err != nil {
@@ -69,7 +70,8 @@ func StartDropDestCollection(nsSet map[dbpool.NS]bool, toConn *dbpool.MongoConn,
 	return nil
 }
 
-func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn, trans transform.Transform) error {
+func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn,
+	nsTrans *transform.NamespaceTransform) error {
 	LOG.Info("document syncer namespace spec for sharding begin")
 
 	var fromConn *dbpool.MongoConn
@@ -80,6 +82,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn, t
 	defer fromConn.Close()
 
 	filterList := filter.NewDocFilterList()
+	dbTrans := transform.NewDBTransform(conf.Options.TransformNamespace)
 
 	type dbSpec struct {
 		Db          string `bson:"_id"`
@@ -95,17 +98,20 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn, t
 				continue
 			}
 			var todbSpecDoc dbSpec
-			todb := trans.Transform(dbSpecDoc.Db)
-			err = toConn.Session.DB("config").C("databases").
-				Find(bson.D{{"_id", todb}}).One(&todbSpecDoc)
-			if err == nil && todbSpecDoc.Partitioned {
-				continue
-			}
-			err = toConn.Session.DB("admin").Run(bson.D{{"enablesharding", todb}}, nil)
-			if err != nil {
-				LOG.Critical("Enable sharding for db %v of dest mongodb failed. %v", todb, err)
-				return errors.New(fmt.Sprintf("Enable sharding for db %v of dest mongodb failed. %v",
-					todb, err))
+			todbList := dbTrans.Transform(dbSpecDoc.Db)
+			for _, todb := range todbList {
+				err = toConn.Session.DB("config").C("databases").
+					Find(bson.D{{"_id", todb}}).One(&todbSpecDoc)
+				if err == nil && todbSpecDoc.Partitioned {
+					continue
+				}
+				err = toConn.Session.DB("admin").Run(bson.D{{"enablesharding", todb}}, nil)
+				if err != nil {
+					LOG.Critical("Enable sharding for db %v of dest mongodb failed. %v", todb, err)
+					return errors.New(fmt.Sprintf("Enable sharding for db %v of dest mongodb failed. %v",
+						todb, err))
+				}
+				LOG.Info("Enable sharding for db %v of dest mongodb successful", todb)
 			}
 		}
 	}
@@ -128,7 +134,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn, t
 				LOG.Debug("Namespace is filtered. %v", colSpecDoc.Ns)
 				continue
 			}
-			toNs := trans.Transform(colSpecDoc.Ns)
+			toNs := nsTrans.Transform(colSpecDoc.Ns)
 			err = toConn.Session.DB("admin").Run(bson.D{{"shardCollection", toNs},
 				{"key", colSpecDoc.Key}, {"unique", colSpecDoc.Unique}}, nil)
 			if err != nil {
@@ -136,6 +142,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn, t
 				return errors.New(fmt.Sprintf("Shard collection for ns %v of dest mongodb failed. %v",
 					toNs, err))
 			}
+			LOG.Info("Shard collection for ns %v of dest mongodb successful", toNs)
 		}
 	}
 	if err = colSpecIter.Close(); err != nil {
@@ -146,7 +153,8 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn, t
 	return nil
 }
 
-func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string, trans transform.Transform) (syncError error) {
+func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string,
+	nsTrans *transform.NamespaceTransform) (syncError error) {
 	type IndexNS struct {
 		ns        dbpool.NS
 		indexList []mgo.Index
@@ -187,7 +195,7 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string, trans tran
 					break
 				}
 				ns := indexNs.ns
-				toNS := dbpool.NewNS(trans.Transform(ns.Str()))
+				toNS := dbpool.NewNS(nsTrans.Transform(ns.Str()))
 
 				for _, index := range indexNs.indexList {
 					index.Background = false
@@ -231,7 +239,7 @@ type DBSyncer struct {
 	// start time of sync
 	startTime time.Time
 
-	trans transform.Transform
+	nsTrans *transform.NamespaceTransform
 
 	mutex sync.Mutex
 
@@ -242,14 +250,14 @@ func NewDBSyncer(
 	id int,
 	fromMongoUrl string,
 	toMongoUrl string,
-	trans transform.Transform) *DBSyncer {
+	nsTrans *transform.NamespaceTransform) *DBSyncer {
 
 	syncer := &DBSyncer{
 		id:           id,
 		FromMongoUrl: fromMongoUrl,
 		ToMongoUrl:   toMongoUrl,
 		indexMap:     make(map[dbpool.NS][]mgo.Index),
-		trans:        trans,
+		nsTrans:      nsTrans,
 	}
 
 	return syncer
@@ -289,17 +297,22 @@ func (syncer *DBSyncer) Start() (syncError error) {
 					break
 				}
 
-				LOG.Info("document syncer-%d collExecutor-%d sync ns %v begin", syncer.id, collExecutorId, ns)
-				err := syncer.collectionSync(collExecutorId, ns, syncer.trans)
+				toNS := dbpool.NewNS(syncer.nsTrans.Transform(ns.Str()))
+
+				LOG.Info("document syncer-%d collExecutor-%d sync ns %v to %v begin",
+					syncer.id, collExecutorId, ns, toNS)
+				err := syncer.collectionSync(collExecutorId, ns, toNS)
 				atomic.AddInt32(&nsDoneCount, 1)
 
 				if err != nil {
-					LOG.Critical("document syncer-%d collExecutor-%d sync ns %v failed. %v", syncer.id, collExecutorId, ns, err)
-					syncError = errors.New(fmt.Sprintf("document syncer sync ns %v failed. %v", ns, err))
+					LOG.Critical("document syncer-%d collExecutor-%d sync ns %v to %v failed. %v",
+						syncer.id, collExecutorId, ns, toNS, err)
+					syncError = errors.New(fmt.Sprintf("document syncer sync ns %v to %vfailed. %v",
+						ns, toNS, err))
 				} else {
 					process := int(atomic.LoadInt32(&nsDoneCount)) * 100 / len(nsList)
-					LOG.Info("document syncer-%d collExecutor-%d sync ns %v successful. db syncer-%d progress %v%%",
-						syncer.id, collExecutorId, ns, syncer.id, process)
+					LOG.Info("document syncer-%d collExecutor-%d sync ns %v to %v successful. db syncer-%d progress %v%%",
+						syncer.id, collExecutorId, ns, toNS, syncer.id, process)
 				}
 				wg.Done()
 			}
@@ -312,10 +325,10 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	return syncError
 }
 
-func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS, trans transform.Transform) error {
+func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS,
+	toNS dbpool.NS) error {
 	reader := NewDocumentReader(syncer.FromMongoUrl, ns)
 
-	toNS := dbpool.NewNS(trans.Transform(ns.Str()))
 	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS)
 	if err := colExecutor.Start(); err != nil {
 		return err
