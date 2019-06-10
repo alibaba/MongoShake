@@ -19,6 +19,10 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
+const (
+	MAX_BUFFER_BYTE_SIZE = 16*1024*1024
+)
+
 func IsShardingToSharding(fromIsSharding bool, toConn *dbpool.MongoConn) bool {
 	var toIsSharding bool
 	var result interface{}
@@ -336,6 +340,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS,
 
 	bufferSize := conf.Options.ReplayerDocumentBatchSize
 	buffer := make([]*bson.Raw, 0, bufferSize)
+	bufferByteSize := 0
 
 	for {
 		var doc *bson.Raw
@@ -349,11 +354,13 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS,
 			}
 			break
 		}
-		buffer = append(buffer, doc)
-		if len(buffer) >= bufferSize {
+		if bufferByteSize + len(doc.Data) > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
 			colExecutor.Sync(buffer)
 			buffer = make([]*bson.Raw, 0, bufferSize)
+			bufferByteSize = 0
 		}
+		buffer = append(buffer, doc)
+		bufferByteSize += len(doc.Data)
 	}
 
 	if indexes, err := reader.GetIndexes(); err != nil {
