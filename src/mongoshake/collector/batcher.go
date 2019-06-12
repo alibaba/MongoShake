@@ -3,7 +3,6 @@ package collector
 import (
 	"mongoshake/collector/configure"
 	"mongoshake/collector/filter"
-	"mongoshake/collector/transform"
 	"mongoshake/oplog"
 
 	"github.com/gugemichael/nimo4go"
@@ -41,16 +40,13 @@ type Batcher struct {
 	// ddl chooser
 	ddlChooser *filter.DDLFilter
 
-	// tranform namespace
-	nsTrans *transform.NamespaceTransform
 }
 
-func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain, nsTrans *transform.NamespaceTransform,
+func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
 	handler OplogHandler, workerGroup []*Worker) *Batcher {
 	return &Batcher{
 		syncer:      syncer,
 		filterList:  filterList,
-		nsTrans:     nsTrans,
 		handler:     handler,
 		workerGroup: workerGroup,
 		ddlChooser:  new(filter.DDLFilter),
@@ -142,9 +138,6 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool) {
 			barrier = false
 		}
 		batcher.handler.Handle(genericLog.Parsed)
-
-		// transform namespace for oplog
-		genericLog.Parsed.Namespace = batcher.nsTrans.Transform(genericLog.Parsed.Namespace)
 
 		which := syncer.hasher.DistributeOplogByMod(genericLog.Parsed, len(batcher.workerGroup))
 		batchGroup[which] = append(batchGroup[which], genericLog)

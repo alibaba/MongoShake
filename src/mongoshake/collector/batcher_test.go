@@ -1,13 +1,12 @@
 package collector
 
 import (
-	"mongoshake/collector/transform"
-	"testing"
 	"fmt"
+	"testing"
 
-	"mongoshake/oplog"
-	"mongoshake/collector/filter"
 	"mongoshake/collector/configure"
+	"mongoshake/collector/filter"
+	"mongoshake/oplog"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -55,8 +54,7 @@ func TestBatchMore(t *testing.T) {
 
 		syncer := mockSyncer()
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
-		trans := transform.NewNamespaceTransform([]string{})
-		batcher := NewBatcher(syncer, filterList, trans, syncer, []*Worker{new(Worker)})
+		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 100
 		conf.Options.ReplayerDMLOnly = true
@@ -77,8 +75,7 @@ func TestBatchMore(t *testing.T) {
 
 		syncer := mockSyncer()
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
-		trans := transform.NewNamespaceTransform([]string{})
-		batcher := NewBatcher(syncer, filterList, trans, syncer, []*Worker{new(Worker)})
+		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 10
 		conf.Options.ReplayerDMLOnly = true
@@ -102,8 +99,7 @@ func TestBatchMore(t *testing.T) {
 
 		syncer := mockSyncer()
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
-		trans := transform.NewNamespaceTransform([]string{})
-		batcher := NewBatcher(syncer, filterList, trans, syncer, []*Worker{new(Worker)})
+		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 100
 		conf.Options.ReplayerDMLOnly = false
@@ -132,8 +128,7 @@ func TestBatchMore(t *testing.T) {
 
 		syncer := mockSyncer()
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
-		trans := transform.NewNamespaceTransform([]string{})
-		batcher := NewBatcher(syncer, filterList, trans, syncer, []*Worker{new(Worker)})
+		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 100
 		conf.Options.ReplayerDMLOnly = false
@@ -186,8 +181,7 @@ func TestBatchMore(t *testing.T) {
 
 		syncer := mockSyncer()
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
-		trans := transform.NewNamespaceTransform([]string{})
-		batcher := NewBatcher(syncer, filterList, trans, syncer, []*Worker{new(Worker)})
+		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 100
 		conf.Options.ReplayerDMLOnly = false
@@ -233,8 +227,7 @@ func TestBatchMore(t *testing.T) {
 
 		syncer := mockSyncer()
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
-		trans := transform.NewNamespaceTransform([]string{})
-		batcher := NewBatcher(syncer, filterList, trans, syncer, []*Worker{new(Worker)})
+		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 100
 		conf.Options.ReplayerDMLOnly = false
@@ -296,8 +289,7 @@ func TestBatchMore(t *testing.T) {
 
 		syncer := mockSyncer()
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
-		trans := transform.NewNamespaceTransform([]string{})
-		batcher := NewBatcher(syncer, filterList, trans, syncer, []*Worker{new(Worker)})
+		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 8
 		conf.Options.ReplayerDMLOnly = false

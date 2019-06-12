@@ -2,6 +2,7 @@ package oplog
 
 import (
 	"github.com/vinllen/mgo/bson"
+	"reflect"
 )
 
 type GenericOplog struct {
@@ -45,4 +46,27 @@ func LogParsed(logs []*GenericOplog) []*PartialLog {
 		parsedLogs[i] = log.Parsed
 	}
 	return parsedLogs
+}
+
+func NewPartialLog(data bson.M) *PartialLog {
+	partialLog := new(PartialLog)
+	logType := reflect.TypeOf(*partialLog)
+	for i:=0; i < logType.NumField(); i++ {
+		tagName := logType.Field(i).Tag.Get("bson")
+		if v, ok := data[tagName]; ok {
+			reflect.ValueOf(partialLog).Elem().Field(i).Set(reflect.ValueOf(v))
+		}
+	}
+	return partialLog
+}
+
+func (partialLog *PartialLog) Dump() bson.M {
+	out := bson.M{}
+	logType := reflect.TypeOf(*partialLog)
+	for i:=0; i < logType.NumField(); i++ {
+		if tagName, ok := logType.Field(i).Tag.Lookup("bson"); ok {
+			out[tagName] = reflect.ValueOf(partialLog).Elem().Field(i).Interface()
+		}
+	}
+	return out
 }

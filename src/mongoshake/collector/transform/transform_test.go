@@ -22,9 +22,9 @@ func TestTransform(t *testing.T) {
 		fmt.Printf("TestTransform case %d.\n", nr)
 		nr++
 		transRule := []string{"fromDB1.fromCol2:toDB2.toCol2", "fromDB1:toDB1"}
-		trans2 := NewNamespaceTransform(transRule)
-		assert.Equal(t,"toDB1.fromCol1", trans2.Transform("fromDB1.fromCol1"), "should be equal")
-		assert.Equal(t,"toDB2.toCol2", trans2.Transform("fromDB1.fromCol2"), "should be equal")
+		trans := NewNamespaceTransform(transRule)
+		assert.Equal(t,"toDB1.fromCol1", trans.Transform("fromDB1.fromCol1"), "should be equal")
+		assert.Equal(t,"toDB2.toCol2", trans.Transform("fromDB1.fromCol2"), "should be equal")
 	}
 	{
 		fmt.Printf("TestTransform case %d.\n", nr)

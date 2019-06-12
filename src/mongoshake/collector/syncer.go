@@ -2,15 +2,14 @@ package collector
 
 import (
 	"fmt"
-	"mongoshake/collector/transform"
 	"time"
 
 	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
+	"mongoshake/collector/filter"
 	"mongoshake/common"
 	"mongoshake/oplog"
 	"mongoshake/quorum"
-	"mongoshake/collector/filter"
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
@@ -120,13 +119,10 @@ func NewOplogSyncer(
 		filterList = append(filterList, new(filter.DDLFilter))
 	}
 
-	// namespace transform
-	trans := transform.NewNamespaceTransform(conf.Options.TransformNamespace)
-
 	// oplog filters. drop the oplog if any of the filter
 	// list returns true. The order of all filters is not significant.
 	// workerGroup is assigned later by syncer.bind()
-	syncer.batcher = NewBatcher(syncer, filterList, trans, syncer, []*Worker{})
+	syncer.batcher = NewBatcher(syncer, filterList, syncer, []*Worker{})
 	return syncer
 }
 
