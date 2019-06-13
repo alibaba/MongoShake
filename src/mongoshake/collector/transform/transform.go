@@ -3,6 +3,8 @@ package transform
 import (
 	"fmt"
 	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/mgo"
+	"github.com/vinllen/mgo/bson"
 	"regexp"
 	"strings"
 )
@@ -34,9 +36,8 @@ func NewNamespaceTransform(transRule []string) *NamespaceTransform {
 		fromPattern := fmt.Sprintf("^%s$|^%s(\\..*)$", fromRule, fromRule)
 		ruleList = append(ruleList, [2]string{fromPattern, rulePair[1]})
 	}
-	return &NamespaceTransform{ruleList:ruleList}
+	return &NamespaceTransform{ruleList: ruleList}
 }
-
 
 type DBTransform struct {
 	ruleMap map[string][]string
@@ -65,5 +66,42 @@ func NewDBTransform(transRule []string) *DBTransform {
 			ruleMap[fromDB] = []string{toDB}
 		}
 	}
-	return &DBTransform{ruleMap:ruleMap}
+	return &DBTransform{ruleMap: ruleMap}
+}
+
+func TransformDBRef(logObject bson.M, db string, nsTrans *NamespaceTransform) bson.M {
+	for k, v := range logObject {
+		switch vr := v.(type) {
+		case bson.M:
+			if isDBRef(vr) {
+				var ns string
+				if _, ok := vr["$db"]; ok {
+					ns = fmt.Sprintf("%s.%s", vr["$db"], vr["$ref"])
+				} else {
+					ns = fmt.Sprintf("%s.%s", db, vr["$ref"])
+				}
+				transformNs := nsTrans.Transform(ns)
+				tuple := strings.SplitN(transformNs, ".", 2)
+				logObject[k] = mgo.DBRef{
+					Collection:tuple[1],
+					Id:vr["$id"],
+					Database: tuple[0],
+				}
+			} else {
+				logObject[k] = TransformDBRef(vr, db, nsTrans)
+			}
+		default:
+			logObject[k] = vr
+		}
+	}
+	return logObject
+}
+
+func isDBRef(object bson.M) bool {
+	_, hasRef := object["$ref"]
+	_, hasId := object["$id"]
+	if hasRef && hasId {
+		return true
+	}
+	return false
 }

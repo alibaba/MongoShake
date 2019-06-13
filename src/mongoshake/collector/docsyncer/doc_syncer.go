@@ -359,6 +359,26 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS,
 			buffer = make([]*bson.Raw, 0, bufferSize)
 			bufferByteSize = 0
 		}
+		// transform dbref for document
+		if len(conf.Options.TransformNamespace) > 0 && conf.Options.TransformDBRef {
+			docData := bson.M{}
+			if err := bson.Unmarshal(doc.Data, docData); err != nil {
+				LOG.Warn("collectionSync do bson unmarshal %v failed. %v", doc.Data, err)
+			} else {
+				if ns.Collection == "tt" {
+					LOG.Info("test docData %v", docData)
+				}
+				docData = transform.TransformDBRef(docData, ns.Database, syncer.nsTrans)
+				if ns.Collection == "tt" {
+					LOG.Info("test docData2 %v", docData)
+				}
+				if v, err := bson.Marshal(docData); err != nil {
+					LOG.Warn("collectionSync do bson marshal %v failed. %v", docData, err)
+				} else {
+					doc.Data = v
+				}
+			}
+		}
 		buffer = append(buffer, doc)
 		bufferByteSize += len(doc.Data)
 	}

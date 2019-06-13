@@ -257,7 +257,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		}
 		partialLog.Namespace = nsTrans.Transform(partialLog.Namespace)
 		if transformRef {
-			partialLog.Object = transformDBRef(partialLog.Object, db, nsTrans)
+			partialLog.Object = transform.TransformDBRef(partialLog.Object, db, nsTrans)
 		}
 	} else {
 		operation, found := extraCommandName(partialLog.Object)
@@ -336,26 +336,3 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 	return partialLog
 }
 
-func transformDBRef(logObject bson.M, db string, nsTrans *transform.NamespaceTransform) bson.M {
-	for k, v := range logObject {
-		switch vr := v.(type) {
-		case bson.M:
-			logObject[k] = transformDBRef(vr, db, nsTrans)
-		case mgo.DBRef:
-			var ns string
-			if vr.Database == "" {
-				ns = fmt.Sprintf("%s.%s", db, vr.Collection)
-			} else {
-				ns = fmt.Sprintf("%s.%s", vr.Database, vr.Collection)
-			}
-			transformNs := nsTrans.Transform(ns)
-			tuple := strings.SplitN(transformNs, ".", 2)
-			vr.Database = tuple[0]
-			vr.Collection = tuple[1]
-			logObject[k] = vr
-		default:
-			logObject[k] = vr
-		}
-	}
-	return logObject
-}
