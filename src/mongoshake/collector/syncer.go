@@ -6,10 +6,10 @@ import (
 
 	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
+	"mongoshake/collector/filter"
 	"mongoshake/common"
 	"mongoshake/oplog"
 	"mongoshake/quorum"
-	"mongoshake/collector/filter"
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"

@@ -3,20 +3,21 @@ package collector
 import (
 	"encoding/json"
 	"errors"
-	"math"
 	"fmt"
+	"math"
+	"mongoshake/collector/transform"
 	"sync"
 
 	"mongoshake/collector/ckpt"
-	"mongoshake/collector/docsyncer"
 	"mongoshake/collector/configure"
+	"mongoshake/collector/docsyncer"
 	"mongoshake/common"
 	"mongoshake/dbpool"
 	"mongoshake/oplog"
 
-	"github.com/vinllen/mgo"
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/mgo"
 )
 
 const (
@@ -152,6 +153,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	return nil
 }
 
+// if the oplog of checkpoint timestamp exist in all source db, then only do oplog replication instead of document replication
 func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, int64, error) {
 	if syncMode != SYNCMODE_ALL {
 		return syncMode, 0, nil
@@ -208,12 +210,14 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 	defer toConn.Close()
 
+	trans := transform.NewNamespaceTransform(conf.Options.TransformNamespace)
+
 	shardingSync := docsyncer.IsShardingToSharding(fromIsSharding, toConn)
-	if err := docsyncer.StartDropDestCollection(nsSet, toConn); err != nil {
+	if err := docsyncer.StartDropDestCollection(nsSet, toConn, trans); err != nil {
 		return err
 	}
 	if shardingSync {
-		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.ContextStorageUrl, toConn); err != nil {
+		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.ContextStorageUrl, toConn, trans); err != nil {
 			return err
 		}
 	}
@@ -224,7 +228,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	indexMap := make(map[dbpool.NS][]mgo.Index)
 
 	for i, src := range coordinator.Sources {
-		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl)
+		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl, trans)
 		LOG.Info("document syncer-%d do replication for url=%v", i, src.URL)
 		wg.Add(1)
 		nimo.GoRoutine(func() {
@@ -245,7 +249,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		return replError
 	}
 
-	if err := docsyncer.StartIndexSync(indexMap, toUrl); err != nil {
+	if err := docsyncer.StartIndexSync(indexMap, toUrl, trans); err != nil {
 		return err
 	}
 	if err := docsyncer.Checkpoint(ckptMap); err != nil {

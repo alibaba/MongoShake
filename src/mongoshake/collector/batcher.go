@@ -1,15 +1,15 @@
 package collector
 
 import (
-	"mongoshake/oplog"
 	"mongoshake/collector/configure"
 	"mongoshake/collector/filter"
+	"mongoshake/oplog"
 
-	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 )
 
-var(
+var (
 	moveChunkFilter filter.MigrateFilter
 )
 
@@ -39,10 +39,11 @@ type Batcher struct {
 
 	// ddl chooser
 	ddlChooser *filter.DDLFilter
+
 }
 
-func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain, handler OplogHandler,
-	workerGroup []*Worker) *Batcher {
+func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
+	handler OplogHandler, workerGroup []*Worker) *Batcher {
 	return &Batcher{
 		syncer:      syncer,
 		filterList:  filterList,

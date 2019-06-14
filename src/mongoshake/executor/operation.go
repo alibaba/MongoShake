@@ -5,14 +5,14 @@ import (
 	"reflect"
 	"strings"
 
-	"mongoshake/dbpool"
-	"mongoshake/oplog"
 	"mongoshake/collector/configure"
 	"mongoshake/common"
+	"mongoshake/dbpool"
+	"mongoshake/oplog"
 
+	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-	LOG "github.com/vinllen/log4go"
 )
 
 var ErrorsShouldSkip = map[int]string{

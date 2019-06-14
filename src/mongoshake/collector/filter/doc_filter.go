@@ -1,6 +1,7 @@
 package filter
 
 import (
+	conf "mongoshake/collector/configure"
 	utils "mongoshake/common"
 	"regexp"
 	"strings"
@@ -62,4 +63,15 @@ func (filter *NamespaceFilter) FilterNs(namespace string) bool {
 		}
 	}
 	return false
+}
+
+
+func NewDocFilterList() DocFilterChain {
+	filterList := DocFilterChain{new(AutologousFilter)}
+	if len(conf.Options.FilterNamespaceWhite) != 0 || len(conf.Options.FilterNamespaceBlack) != 0 {
+		namespaceFilter := NewNamespaceFilter(conf.Options.FilterNamespaceWhite,
+			conf.Options.FilterNamespaceBlack)
+		filterList = append(filterList, namespaceFilter)
+	}
+	return filterList
 }

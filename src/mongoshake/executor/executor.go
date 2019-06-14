@@ -2,6 +2,9 @@ package executor
 
 import (
 	"fmt"
+	"github.com/vinllen/mgo/bson"
+	"mongoshake/collector/transform"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -9,8 +12,8 @@ import (
 	"mongoshake/common"
 	"mongoshake/oplog"
 
-	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 )
 
@@ -29,7 +32,7 @@ const (
 )
 
 var (
-	GlobalExecutorId int32 = -1
+	GlobalExecutorId int32  = -1
 	ThresholdVersion string = "3.2.0"
 )
 
@@ -45,6 +48,8 @@ type BatchGroupExecutor struct {
 	ReplayerId uint32
 	// mongo url
 	MongoUrl string
+	// tranform namespace
+	NsTrans *transform.NamespaceTransform
 }
 
 func (batchExecutor *BatchGroupExecutor) Start() {
@@ -53,6 +58,9 @@ func (batchExecutor *BatchGroupExecutor) Start() {
 	// is 64. if collector hashed oplogRecords by _id and the number of collector
 	// is bigger we will use single executer in respective batchExecutor
 	parallel := conf.Options.ReplayerExecutor
+	if len(conf.Options.TransformNamespace) > 0 {
+		batchExecutor.NsTrans = transform.NewNamespaceTransform(conf.Options.TransformNamespace)
+	}
 	executors := make([]*Executor, parallel)
 	for i := 0; i != len(executors); i++ {
 		executors[i] = NewExecutor(GenerateExecutorId(), batchExecutor, batchExecutor.MongoUrl)
@@ -205,11 +213,13 @@ func (exec *Executor) start() {
 func (exec *Executor) doSync(logs []*OplogRecord) error {
 	count := len(logs)
 
+	transLogs := transformLogs(logs, exec.batchExecutor.NsTrans, conf.Options.TransformDBRef)
+
 	// split batched oplogRecords into (ns, op) groups. individual group
 	// can be accomplished in single MongoDB request. groups
 	// in this executor will be sequential
 	oplogGroups := LogsGroupCombiner{maxGroupNr: OplogsMaxGroupNum,
-		maxGroupSize: OplogsMaxGroupSize}.mergeToGroups(logs)
+		maxGroupSize: OplogsMaxGroupSize}.mergeToGroups(transLogs)
 	for _, group := range oplogGroups {
 		if err := exec.execute(group); err != nil {
 			return err
@@ -220,3 +230,109 @@ func (exec *Executor) doSync(logs []*OplogRecord) error {
 		exec.batchExecutor.ReplayerId, exec.id, count, len(oplogGroups), float32(len(oplogGroups))*100.00/float32(count))
 	return nil
 }
+
+// if no need to transform namespace, return original logs
+// for no command log, transform namespace in DBRef by conf.Options.TransformDBRef
+// for command log, need transform namespace/collection in object of oplog
+func transformLogs(logs []*OplogRecord, nsTrans *transform.NamespaceTransform, transformRef bool) []*OplogRecord {
+	if nsTrans == nil {
+		return logs
+	}
+	for _, log := range logs {
+		partialLog := log.original.partialLog
+		transPartialLog := transformPartialLog(partialLog, nsTrans, transformRef)
+		log.original.partialLog = transPartialLog
+	}
+	return logs
+}
+
+func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.NamespaceTransform, transformRef bool) *oplog.PartialLog {
+	db := strings.SplitN(partialLog.Namespace, ".", 2)[0]
+	if partialLog.Operation != "c" {
+		// {"op" : "i", "ns" : "my.system.indexes", "o" : { "v" : 2, "key" : { "date" : 1 }, "name" : "date_1", "ns" : "my.tbl", "expireAfterSeconds" : 3600 }
+		if strings.HasSuffix(partialLog.Namespace, "system.indexes") {
+			if ns, ok := partialLog.Object["ns"].(string); ok {
+				partialLog.Object["ns"] = nsTrans.Transform(ns)
+			}
+		}
+		partialLog.Namespace = nsTrans.Transform(partialLog.Namespace)
+		if transformRef {
+			partialLog.Object = transform.TransformDBRef(partialLog.Object, db, nsTrans)
+		}
+	} else {
+		operation, found := extraCommandName(partialLog.Object)
+		if !found {
+			LOG.Warn("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
+			return nil
+		}
+		switch operation {
+		case "create":
+			// { "create" : "my", "idIndex" : { "v" : 2, "key" : { "_id" : 1 }, "name" : "_id_", "ns" : "my.my" }
+			if idIndex, ok := partialLog.Object["idIndex"].(bson.M); ok {
+				if ns, ok := idIndex["ns"].(string); ok {
+					idIndex["ns"] = nsTrans.Transform(ns)
+				}
+			} else {
+				LOG.Warn("transformLogs meet unknown create command: %v", partialLog.Object)
+			}
+			fallthrough
+		case "collMod":
+			fallthrough
+		case "drop":
+			fallthrough
+		case "deleteIndex":
+			fallthrough
+		case "deleteIndexes":
+			fallthrough
+		case "dropIndex":
+			fallthrough
+		case "dropIndexes":
+			fallthrough
+		case "convertToCapped":
+			fallthrough
+		case "emptycapped":
+			col, ok := partialLog.Object[operation].(string)
+			if !ok {
+				LOG.Warn("extraCommandName meets {%v: %v} value is not string, ignore!",
+					operation, partialLog.Object[operation])
+				return nil
+			}
+			partialLog.Namespace = nsTrans.Transform(fmt.Sprintf("%s.%s", db, col))
+			partialLog.Object[operation] = strings.SplitN(partialLog.Namespace, ".", 2)[1]
+		case "renameCollection":
+			// { "renameCollection" : "my.tbl", "to" : "my.my", "stayTemp" : false, "dropTarget" : false }
+			fromNs, ok := partialLog.Object[operation].(string)
+			if !ok {
+				LOG.Warn("extraCommandName meets {%v: %v} value is not string, ignore!",
+					operation, partialLog.Object[operation])
+				return nil
+			}
+			toNs, ok := partialLog.Object["to"].(string)
+			if !ok {
+				LOG.Warn("extraCommandName meets {to: %v} value is not string, ignore!", partialLog.Object["to"])
+				return nil
+			}
+			partialLog.Namespace = nsTrans.Transform(fromNs)
+			partialLog.Object[operation] = partialLog.Namespace
+			partialLog.Object["to"] = nsTrans.Transform(toNs)
+		case "applyOps":
+			if ops, ok := partialLog.Object["applyOps"].([]interface{}); ok {
+				transOps := make([]interface{}, 0)
+				for _, op := range ops {
+					subLog := oplog.NewPartialLog(op.(bson.M))
+					transSubLog := transformPartialLog(subLog, nsTrans, transformRef)
+					if transSubLog == nil {
+						LOG.Warn("transformPartialLog sublog %v return nil, ignore!", subLog)
+						return nil
+					}
+					transOps = append(transOps, transSubLog.Dump())
+				}
+				partialLog.Object["applyOps"] = transOps
+			}
+		default:
+			partialLog.Namespace = nsTrans.Transform(partialLog.Namespace)
+		}
+	}
+	return partialLog
+}
+

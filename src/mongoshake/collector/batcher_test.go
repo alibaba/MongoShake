@@ -1,12 +1,12 @@
 package collector
 
 import (
-	"testing"
 	"fmt"
+	"testing"
 
-	"mongoshake/oplog"
-	"mongoshake/collector/filter"
 	"mongoshake/collector/configure"
+	"mongoshake/collector/filter"
+	"mongoshake/oplog"
 
 	"github.com/stretchr/testify/assert"
 )
