@@ -220,11 +220,11 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string,
 	return syncError
 }
 
-func Checkpoint(ckptMap map[string]bson.MongoTimestamp) error {
+func Checkpoint(ckptMap map[string]utils.TimestampNode) error {
 	for name, ts := range ckptMap {
 		ckptManager := ckpt.NewCheckpointManager(name, 0)
 		ckptManager.Get()
-		if err := ckptManager.Update(ts); err != nil {
+		if err := ckptManager.Update(ts.Newest); err != nil {
 			return err
 		}
 	}
@@ -360,7 +360,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS,
 			bufferByteSize = 0
 		}
 		// transform dbref for document
-		if len(conf.Options.TransformNamespace) > 0 && conf.Options.TransformDBRef {
+		if len(conf.Options.TransformNamespace) > 0 && conf.Options.DBRef {
 			docData := bson.M{}
 			if err := bson.Unmarshal(doc.Data, docData); err != nil {
 				LOG.Warn("collectionSync do bson unmarshal %v failed. %v", doc.Data, err)

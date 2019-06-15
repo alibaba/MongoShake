@@ -2,13 +2,15 @@ package docsyncer
 
 import (
 	"fmt"
+	"strings"
+
+	"mongoshake/dbpool"
+	"mongoshake/collector/filter"
+	"mongoshake/common"
+
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-	"mongoshake/collector/filter"
-	utils "mongoshake/common"
-	"mongoshake/dbpool"
 	LOG "github.com/vinllen/log4go"
-	"strings"
 )
 
 func GetAllNamespace(sources []*utils.MongoSource) (map[dbpool.NS]bool, error) {
@@ -61,40 +63,6 @@ func getDbNamespace(url string) (nsList []dbpool.NS, err error) {
 	}
 
 	return nsList, nil
-}
-
-func GetAllTimestamp(sources []*utils.MongoSource) (map[string]bson.MongoTimestamp, error) {
-	tsMap := make(map[string]bson.MongoTimestamp)
-	for _, src := range sources {
-		ts, err := GetDbNewstTimestamp(src.URL)
-		if err != nil {
-			return nil, err
-		}
-		tsMap[src.ReplicaName] = ts
-	}
-	return tsMap, nil
-}
-
-func GetDbNewstTimestamp(url string) (bson.MongoTimestamp, error) {
-	var conn *dbpool.MongoConn
-	var err error
-	if conn, err = dbpool.NewMongoConn(url, false, true); conn == nil || err != nil {
-		return 0, err
-	}
-	defer conn.Close()
-
-	return utils.GetNewestTimestamp(conn.Session)
-}
-
-func GetDbOldestTimestamp(url string) (bson.MongoTimestamp, error) {
-	var conn *dbpool.MongoConn
-	var err error
-	if conn, err = dbpool.NewMongoConn(url, false, true); conn == nil || err != nil {
-		return 0, err
-	}
-	defer conn.Close()
-
-	return utils.GetOldestTimestamp(conn.Session)
 }
 
 type DocumentReader struct {

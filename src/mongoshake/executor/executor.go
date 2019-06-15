@@ -213,7 +213,7 @@ func (exec *Executor) start() {
 func (exec *Executor) doSync(logs []*OplogRecord) error {
 	count := len(logs)
 
-	transLogs := transformLogs(logs, exec.batchExecutor.NsTrans, conf.Options.TransformDBRef)
+	transLogs := transformLogs(logs, exec.batchExecutor.NsTrans, conf.Options.DBRef)
 
 	// split batched oplogRecords into (ns, op) groups. individual group
 	// can be accomplished in single MongoDB request. groups

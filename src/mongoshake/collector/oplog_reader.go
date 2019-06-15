@@ -212,13 +212,13 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 
 // get newest oplog
 func (reader *OplogReader) getNewestTimestamp() bson.MongoTimestamp {
-	ts, _ := utils.GetNewestTimestamp(reader.conn.Session)
+	ts, _ := utils.GetNewestTimestampBySession(reader.conn.Session)
 	return ts
 }
 
 // get oldest oplog
 func (reader *OplogReader) getOldestTimestamp() bson.MongoTimestamp {
-	ts, _ := utils.GetOldestTimestamp(reader.conn.Session)
+	ts, _ := utils.GetOldestTimestampBySession(reader.conn.Session)
 	return ts
 }
 

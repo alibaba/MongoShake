@@ -2,11 +2,14 @@ package transform
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
+
+	"mongoshake/common"
+
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-	"regexp"
-	"strings"
 )
 
 type NamespaceTransform struct {
@@ -73,7 +76,7 @@ func TransformDBRef(logObject bson.M, db string, nsTrans *NamespaceTransform) bs
 	for k, v := range logObject {
 		switch vr := v.(type) {
 		case bson.M:
-			if isDBRef(vr) {
+			if utils.HasDBRef(vr) {
 				var ns string
 				if _, ok := vr["$db"]; ok {
 					ns = fmt.Sprintf("%s.%s", vr["$db"], vr["$ref"])
@@ -95,13 +98,4 @@ func TransformDBRef(logObject bson.M, db string, nsTrans *NamespaceTransform) bs
 		}
 	}
 	return logObject
-}
-
-func isDBRef(object bson.M) bool {
-	_, hasRef := object["$ref"]
-	_, hasId := object["$id"]
-	if hasRef && hasId {
-		return true
-	}
-	return false
 }

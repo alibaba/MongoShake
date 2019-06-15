@@ -7,10 +7,12 @@ import (
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
+	"mongoshake/common"
 )
 
 var (
 	moveChunkFilter filter.MigrateFilter
+	ddlFilter       filter.DDLFilter
 )
 
 /*
@@ -36,10 +38,6 @@ type Batcher struct {
 
 	// remainLogs store the logs that split by barrier and haven't been consumed yet.
 	remainLogs []*oplog.GenericOplog
-
-	// ddl chooser
-	ddlChooser *filter.DDLFilter
-
 }
 
 func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
@@ -49,7 +47,6 @@ func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
 		filterList:  filterList,
 		handler:     handler,
 		workerGroup: workerGroup,
-		ddlChooser:  new(filter.DDLFilter),
 	}
 }
 
@@ -72,6 +69,13 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 
 	if moveChunkFilter.Filter(log) {
 		LOG.Crashf("move chunk oplog found[%v]", log)
+		return false
+	}
+
+	// DDL is disable when timestamp <= fullSyncFinishPosition
+	if ddlFilter.Filter(log) && utils.TimestampToInt64(log.Timestamp) <= batcher.syncer.fullSyncFinishPosition {
+		LOG.Crashf("ddl oplog found[%v] when oplog timestamp[%v] less than fullSyncFinishPosition[%v]",
+			log, log.Timestamp, batcher.syncer.fullSyncFinishPosition)
 		return false
 	}
 	return false
@@ -120,6 +124,7 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool) {
 
 	nimo.AssertTrue(len(mergeBatch) != 0, "logs queue batch logs has zero length")
 
+	// split batch if has DDL
 	for i, genericLog := range mergeBatch {
 		// filter oplog such like Noop or Gid-filtered
 		if batcher.filter(genericLog.Parsed) {
@@ -128,13 +133,13 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool) {
 		}
 
 		// current is ddl and barrier == false
-		if !conf.Options.ReplayerDMLOnly && batcher.ddlChooser.Filter(genericLog.Parsed) && !barrier {
+		if !conf.Options.ReplayerDMLOnly && ddlFilter.Filter(genericLog.Parsed) && !barrier {
 			batcher.remainLogs = mergeBatch[i:]
 			barrier = true
 			break
 		}
 		// current is not ddl but barrier == true
-		if !batcher.ddlChooser.Filter(genericLog.Parsed) && barrier {
+		if !ddlFilter.Filter(genericLog.Parsed) && barrier {
 			barrier = false
 		}
 		batcher.handler.Handle(genericLog.Parsed)

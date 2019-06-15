@@ -32,9 +32,10 @@ func main() {
 	// argument options
 	configuration := flag.String("conf", "", "configure file absolute path")
 	verbose := flag.Bool("verbose", false, "show logs on console")
+	version := flag.Bool("version", false, "show version")
 	flag.Parse()
 
-	if *configuration == "" {
+	if *configuration == "" || *version == true {
 		fmt.Println(utils.BRANCH)
 		panic(Exit{0})
 	}
@@ -187,6 +188,10 @@ func sanitizeOptions() error {
 	if len(conf.Options.TunnelAddress) == 0 && conf.Options.Tunnel != "mock" {
 		return errors.New("tunnel address is illegal")
 	}
+	if conf.Options.SyncMode == "" {
+		conf.Options.SyncMode = "oplog" // default
+	}
+
 	// judge the replayer configuration when tunnel type is "direct"
 	if conf.Options.Tunnel == "direct" {
 		if len(conf.Options.TunnelAddress) > conf.Options.WorkerNum {

@@ -28,7 +28,7 @@ type Configuration struct {
 	FilterNamespaceWhite    []string `config:"filter.namespace.white"`
 	SyncMode                string   `config:"sync_mode"`
 	TransformNamespace      []string `config:"transform.namespace"`
-	TransformDBRef          bool     `config:"transform.dbref"`
+	DBRef                   bool     `config:"dbref"`
 
 	ReplayerDMLOnly                   bool   `config:"replayer.dml_only"`
 	ReplayerExecutor                  int    `config:"replayer.executor"`
