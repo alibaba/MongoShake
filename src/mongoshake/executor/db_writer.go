@@ -137,15 +137,14 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.M,
 	var updates []bson.M
 	for _, log := range oplogs {
 		newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-		oFiled := newObject
 		// we should handle the special case: "o" field may include "$v" in mongo-3.6 which is not support in mgo.v2 library
-		if _, ok := oFiled[versionMark]; ok {
-			delete(oFiled, versionMark)
+		if _, ok := newObject[versionMark]; ok {
+			delete(newObject, versionMark)
 		}
 
 		updates = append(updates, bson.M{
 			"q":      log.original.partialLog.Query,
-			"u":      oFiled,
+			"u":      newObject,
 			"upsert": upsert,
 			"multi":  false})
 	}
@@ -312,12 +311,11 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 	var update []interface{}
 	for _, log := range oplogs {
 		newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-		oFiled := newObject
 		// we should handle the special case: "o" field may include "$v" in mongo-3.6 which is not support in mgo.v2 library
-		if _, ok := oFiled[versionMark]; ok {
-			delete(oFiled, versionMark)
+		if _, ok := newObject[versionMark]; ok {
+			delete(newObject, versionMark)
 		}
-		update = append(update, log.original.partialLog.Query, oFiled)
+		update = append(update, log.original.partialLog.Query, newObject)
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
@@ -463,12 +461,11 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 	if upsert {
 		for _, log := range oplogs {
 			newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-			oFiled := newObject
 			// we should handle the special case: "o" filed may include "$v" in mongo-3.6 which is not support in mgo.v2 library
-			if _, ok := oFiled[versionMark]; ok {
-				delete(oFiled, versionMark)
+			if _, ok := newObject[versionMark]; ok {
+				delete(newObject, versionMark)
 			}
-			_, err := collectionHandle.Upsert(log.original.partialLog.Query, oFiled)
+			_, err := collectionHandle.Upsert(log.original.partialLog.Query, newObject)
 			if err != nil {
 				if mgo.IsDup(err) {
 					HandleDuplicated(collectionHandle, oplogs, OpUpdate)
@@ -482,12 +479,11 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 	} else {
 		for _, log := range oplogs {
 			newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-			oFiled := newObject
 			// we should handle the special case: "o" filed may include "$v" in mongo-3.6 which is not support in mgo.v2 library
-			if _, ok := oFiled[versionMark]; ok {
-				delete(oFiled, versionMark)
+			if _, ok := newObject[versionMark]; ok {
+				delete(newObject, versionMark)
 			}
-			err := collectionHandle.Update(log.original.partialLog.Query, oFiled)
+			err := collectionHandle.Update(log.original.partialLog.Query, newObject)
 			if err != nil {
 				if utils.IsNotFound(err) {
 					LOG.Warn("doUpdate[update] data[%v] not found", log.original.partialLog.Query)
