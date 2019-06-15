@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"mongoshake/collector/transform"
 	"sync"
 
@@ -55,7 +54,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	coordinator.sentinel = &utils.Sentinel{}
 	coordinator.sentinel.Register()
 
-	syncMode, bridgeTs, err := coordinator.selectSyncMode(conf.Options.SyncMode)
+	syncMode, fullBeginTs, err := coordinator.selectSyncMode(conf.Options.SyncMode)
 	if err != nil {
 		return err
 	}
@@ -65,22 +64,33 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	 * each shard match one in sharding mode.
 	 * TODO
 	 */
-	LOG.Info("start running with mode[%v], bridgeTs[%v]", syncMode, bridgeTs)
+	LOG.Info("start running with mode[%v], fullBeginTs[%v]", syncMode, fullBeginTs)
 	
 	switch syncMode {
 	case SYNCMODE_ALL:
 		if err := coordinator.startDocumentReplication(); err != nil {
 			return err
 		}
-		if err := coordinator.startOplogReplication(bridgeTs); err != nil {
+
+		// get current newest timestamp
+		_, fullFinishTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
+		if err != nil {
+			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
+		}
+		LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
+			fullBeginTs, fullFinishTs)
+
+		if err := coordinator.startOplogReplication(fullBeginTs, utils.TimestampToInt64(fullFinishTs)); err != nil {
 			return err
 		}
 	case SYNCMODE_DOCUMENT:
+
 		if err := coordinator.startDocumentReplication(); err != nil {
 			return err
 		}
 	case SYNCMODE_OPLOG:
-		if err := coordinator.startOplogReplication(conf.Options.ContextStartPosition); err != nil {
+		if err := coordinator.startOplogReplication(conf.Options.ContextStartPosition,
+				conf.Options.ContextStartPosition); err != nil {
 			return err
 		}
 	default:
@@ -153,37 +163,32 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	return nil
 }
 
+// TODO, add UT
 // if the oplog of checkpoint timestamp exist in all source db, then only do oplog replication instead of document replication
 func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, int64, error) {
 	if syncMode != SYNCMODE_ALL {
 		return syncMode, 0, nil
 	}
 
-	// the bridge time between full sync('document') and incr('oplog') sync
-	bridgeTs := int64(math.MaxInt64)
-	needFull := false
-	for _, src := range coordinator.Sources {
-		ckptManager := ckpt.NewCheckpointManager(src.ReplicaName, 0)
-		ckptTs := ckptManager.Get().Timestamp
-		oldestTs, err := docsyncer.GetDbOldestTimestamp(src.URL)
-		if err != nil {
-			return SYNCMODE_ALL, 0, err
-		}
-		if oldestTs > ckptTs {
-			// return SYNCMODE_ALL, 0, nil
-			needFull = true
-		}
+	// oldestTs is the smallest of the all newest timestamp
+	tsMap, _, oldestTs, err := utils.GetAllTimestamp(coordinator.Sources)
+	if err != nil {
+		return syncMode, 0, nil
+	}
 
-		if newestTs, err := docsyncer.GetDbNewstTimestamp(src.URL); err != nil {
-			return syncMode, 0, err
-		} else if utils.TimestampToInt64(newestTs) < bridgeTs {
-			// update the newest bridge time
-			bridgeTs = utils.TimestampToInt64(newestTs)
+	needFull := false
+	for replName, ts := range tsMap {
+		ckptManager := ckpt.NewCheckpointManager(replName, 0)
+		ckptTs := ckptManager.Get().Timestamp
+		if ts.Oldest >= ckptTs {
+			// checkpoint less than the oldest timestamp
+			needFull = true
+			break
 		}
 	}
 
 	if needFull {
-		return SYNCMODE_ALL, bridgeTs, nil
+		return SYNCMODE_ALL, utils.TimestampToInt64(oldestTs), nil
 	} else {
 		LOG.Info("sync mode change from 'all' to 'oplog'")
 		return SYNCMODE_OPLOG, 0, nil
@@ -197,7 +202,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		return err
 	}
 	// get all newest timestamp for each mongodb
-	ckptMap, err := docsyncer.GetAllTimestamp(coordinator.Sources)
+	ckptMap, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
 	if err != nil {
 		return err
 	}
@@ -259,14 +264,15 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	return nil
 }
 
-func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition int64) error {
+func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition, fullSyncFinishPosition int64) error {
 	// replicate speed limit on all syncer
 	coordinator.rateController = nimo.NewSimpleRateController()
 
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
 	for _, src := range coordinator.Sources {
-		syncer := NewOplogSyncer(coordinator, src.ReplicaName, oplogStartPosition, src.URL, src.Gid)
+		syncer := NewOplogSyncer(coordinator, src.ReplicaName, oplogStartPosition, fullSyncFinishPosition, src.URL,
+			src.Gid)
 		// syncerGroup http api registry
 		syncer.init()
 		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)

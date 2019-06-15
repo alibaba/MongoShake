@@ -44,6 +44,8 @@ type OplogSyncer struct {
 	replset string
 	// oplog start position of source mongodb
 	startPosition int64
+	// full sync finish position, used to check DDL between full sync and incr sync
+	fullSyncFinishPosition int64
 
 	ckptManager *ckpt.CheckpointManager
 
@@ -80,16 +82,17 @@ type OplogSyncer struct {
  * The reason we split pending queue and logs queue is to improve the performance.
  */
 func NewOplogSyncer(
-	coordinator *ReplicationCoordinator,
-	replset string,
-	startPosition int64,
-	mongoUrl string,
-	gid string) *OplogSyncer {
-
+		coordinator *ReplicationCoordinator,
+		replset string,
+		startPosition int64,
+		fullSyncFinishPosition int64,
+		mongoUrl string,
+		gid string) *OplogSyncer {
 	syncer := &OplogSyncer{
-		coordinator: coordinator,
-		replset:     replset,
-		startPosition:	startPosition,
+		coordinator:            coordinator,
+		replset:                replset,
+		startPosition:          startPosition,
+		fullSyncFinishPosition: fullSyncFinishPosition,
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
 		reader: NewOplogReader(mongoUrl),

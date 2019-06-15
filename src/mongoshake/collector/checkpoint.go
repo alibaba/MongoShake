@@ -51,7 +51,8 @@ func (sync *OplogSyncer) checkpoint(flush bool) {
 		switch {
 		case bson.MongoTimestamp(lowest) > inMemoryTs:
 			if err = sync.ckptManager.Update(bson.MongoTimestamp(lowest)); err == nil {
-				LOG.Info("CheckpointOperation write success. updated from %d to %d", inMemoryTs, lowest)
+				LOG.Info("CheckpointOperation write success. updated from %d(%v) to %d(%v)",
+					inMemoryTs, utils.ExtractMongoTimestamp(inMemoryTs), lowest, utils.ExtractMongoTimestamp(lowest))
 				sync.replMetric.AddCheckpoint(1)
 				sync.replMetric.SetLSNCheckpoint(lowest)
 				return

@@ -47,7 +47,9 @@ func (exec *Executor) ensureConnection() bool {
 			return false
 		} else {
 			exec.session = conn.Session
-			exec.bulkInsert = utils.GetAndCompareVersion(exec.session, ThresholdVersion)
+			if exec.bulkInsert, err = utils.GetAndCompareVersion(exec.session, ThresholdVersion); err != nil {
+				LOG.Info("compare version with return[%v], bulkInsert disable", err)
+			}
 		}
 	}
 
@@ -108,12 +110,13 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 		// a few known error we can skip !! such as "ShardKeyNotFound" returned
 		// if mongoshake connected to MongoS
 		if exec.errorIgnore(err) {
-			LOG.Info("Discard known error %v, It's acceptable", err)
+			LOG.Info("Discard known error[%v], It's acceptable", err)
 			err = nil
 		}
 
 		if err != nil {
-			LOG.Critical("Replayer-%d, executor-%d, oplog for [%s] op[%s] failed. (%v) [%v], logs %d. firstLog %v",
+			LOG.Critical("Replayer-%d, executor-%d, oplog for namespace[%s] op[%s] failed. error type[%v]" +
+				" error[%v], logs number[%d], firstLog: %v",
 				exec.batchExecutor.ReplayerId, exec.id, group.ns, group.op, reflect.TypeOf(err), err.Error(), count,
 				group.oplogRecords[0].original.partialLog)
 			exec.dropConnection()
