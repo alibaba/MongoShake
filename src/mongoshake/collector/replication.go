@@ -78,7 +78,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
 		}
 		LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
-			fullBeginTs, fullFinishTs)
+			utils.ExtractMongoTimestamp(fullBeginTs), utils.ExtractMongoTimestamp(fullFinishTs))
 
 		if err := coordinator.startOplogReplication(fullBeginTs, utils.TimestampToInt64(fullFinishTs)); err != nil {
 			return err
