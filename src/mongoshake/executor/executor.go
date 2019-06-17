@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"mongoshake/collector/configure"
 	"mongoshake/common"
@@ -191,6 +192,7 @@ func (exec *Executor) start() {
 	for toBeExecuted := range exec.batchBlock {
 		nimo.AssertTrue(len(toBeExecuted) != 0, "the size of being executed batch oplogRecords could not be zero")
 		for exec.doSync(toBeExecuted) != nil {
+			time.Sleep(time.Second)
 		}
 		// acknowledge all oplogRecords have been successfully executed
 		exec.finisher.Add(-len(toBeExecuted))
