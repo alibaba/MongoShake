@@ -106,8 +106,8 @@ Plus, we have a WeChat group so that users can join and discuss, but the group u
 | Username | Mail |
 | :------: | :------: |
 | lydarkforest | linyunads1379@163.com |
-| cocoakekeyu | cocoakekeyu@gmail.com |
 | diggzhang | diggzhang@gmail.com |
 | ManleyLiu |  |
 | hustchensi | chensi_04@126.com |
 | HelloCodeMing | huanmingwong@163.com |
+| cocoakekeyu | cocoakekeyu@gmail.com |
