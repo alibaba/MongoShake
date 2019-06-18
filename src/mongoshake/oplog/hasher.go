@@ -41,12 +41,12 @@ func (collectionHasher *TableHasher) DistributeOplogByMod(log *PartialLog, mod i
 func GetIdOrNSFromOplog(log *PartialLog) interface{} {
 	switch log.Operation {
 	case "i", "d":
-		return log.Object["_id"]
+		return GetKey(log.Object, "")
 	case "u":
 		if id, ok := log.Query["_id"]; ok {
 			return id
 		} else {
-			return log.Object["_id"]
+			return GetKey(log.Object, "")
 		}
 	case "c":
 		return log.Namespace

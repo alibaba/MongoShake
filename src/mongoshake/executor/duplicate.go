@@ -43,7 +43,7 @@ func (s SnapshotDiffer) dump(coll *mgo.Collection) {
 	if s.op == OpUpdate {
 		coll.Find(s.log.Query).One(s.foundInDB)
 	} else {
-		coll.Find(bson.M{"_id": s.log.Object["_id"]}).One(s.foundInDB)
+		coll.Find(bson.M{"_id": oplog.GetKey(s.log.Object, "")}).One(s.foundInDB)
 	}
 	s.write2Log()
 }

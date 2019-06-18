@@ -153,10 +153,16 @@ func buildMetadata(oplog *oplog.PartialLog) bson.M {
 	return bson.M{}
 }
 
-func extraCommandName(o bson.M) (string, bool) {
-	for key := range o {
-		if _, exist := opsMap[key]; exist {
-			return key, true
+func extraCommandName(o bson.D) (string, bool) {
+	//for key := range o {
+	//	if _, exist := opsMap[key]; exist {
+	//		return key, true
+	//	}
+	//}
+
+	for _, ele := range o {
+		if _, exist := opsMap[ele.Name]; exist {
+			return ele.Name, true
 		}
 	}
 

@@ -361,7 +361,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS,
 		}
 		// transform dbref for document
 		if len(conf.Options.TransformNamespace) > 0 && conf.Options.DBRef {
-			docData := bson.M{}
+			var docData bson.D
 			if err := bson.Unmarshal(doc.Data, docData); err != nil {
 				LOG.Warn("collectionSync do bson unmarshal %v failed. %v", doc.Data, err)
 			} else {

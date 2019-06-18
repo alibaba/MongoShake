@@ -5,10 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"mongoshake/common"
-
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
 )
 
@@ -72,30 +69,31 @@ func NewDBTransform(transRule []string) *DBTransform {
 	return &DBTransform{ruleMap: ruleMap}
 }
 
-func TransformDBRef(logObject bson.M, db string, nsTrans *NamespaceTransform) bson.M {
-	for k, v := range logObject {
-		switch vr := v.(type) {
-		case bson.M:
-			if utils.HasDBRef(vr) {
-				var ns string
-				if _, ok := vr["$db"]; ok {
-					ns = fmt.Sprintf("%s.%s", vr["$db"], vr["$ref"])
-				} else {
-					ns = fmt.Sprintf("%s.%s", db, vr["$ref"])
-				}
-				transformNs := nsTrans.Transform(ns)
-				tuple := strings.SplitN(transformNs, ".", 2)
-				logObject[k] = mgo.DBRef{
-					Collection:tuple[1],
-					Id:vr["$id"],
-					Database: tuple[0],
-				}
-			} else {
-				logObject[k] = TransformDBRef(vr, db, nsTrans)
+func TransformDBRef(logObject bson.D, db string, nsTrans *NamespaceTransform) bson.D {
+	for _, ele := range logObject {
+		if logObject[0].Name == "$ref" {
+			// if has DBRef, [0] must be "$ref"
+			collection := logObject[0].Value.(string)
+			var db string
+			if len(logObject) > 2 && logObject[2].Name == "$db" {
+				db = logObject[2].Value.(string)
 			}
-		default:
-			logObject[k] = vr
+
+			ns := fmt.Sprintf("%s.%s", db, collection)
+			transformNs := nsTrans.Transform(ns)
+			tuple := strings.SplitN(transformNs, ".", 2)
+			logObject[0].Value = tuple[0]
+			logObject[2].Value = tuple[1]
+			break
+		} else {
+			switch v := ele.Value.(type) {
+			case bson.D:
+				ele.Value = TransformDBRef(v, db, nsTrans)
+			default:
+				// do nothing
+			}
 		}
 	}
+
 	return logObject
 }

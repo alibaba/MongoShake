@@ -3,6 +3,11 @@ package oplog
 import (
 	"github.com/vinllen/mgo/bson"
 	"reflect"
+	"github.com/gugemichael/nimo4go"
+)
+
+const (
+	PrimayKey = "_id"
 )
 
 type GenericOplog struct {
@@ -15,7 +20,7 @@ type PartialLog struct {
 	Operation     string              `bson:"op"`
 	Gid           string              `bson:"g"`
 	Namespace     string              `bson:"ns"`
-	Object        bson.M              `bson:"o"`
+	Object        bson.D              `bson:"o"`
 	Query         bson.M              `bson:"o2"`
 	UniqueIndexes bson.M              `bson:"uk"`
 	Lsid          interface{}         `bson:"lsid"`        // mark the session id, used in transaction
@@ -69,4 +74,52 @@ func (partialLog *PartialLog) Dump() bson.M {
 		}
 	}
 	return out
+}
+
+func GetKey(log bson.D, wanted string) interface{} {
+	if wanted == "" {
+		wanted = PrimayKey
+	}
+
+	// "_id" is always the first field
+	for _, ele := range log {
+		if ele.Name == wanted {
+			return ele.Value
+		}
+	}
+
+	nimo.Assert("you can't see me")
+	return nil
+}
+
+// convert bson.D to bson.M
+func ConvertBsonD2M(input bson.D) bson.M {
+	var m bson.M
+	for _, ele := range input {
+		m[ele.Name] = ele.Value
+	}
+
+	return m
+}
+
+func RemoveFiled(input bson.D, key string) bson.D {
+	var id int
+	for id = range input {
+		if input[id].Name == key {
+			break
+		}
+	}
+
+	if id < len(input) {
+		input = append(input[: id], input[id + 1:]...)
+	}
+	return input
+}
+
+func SetFiled(input bson.D, key string, value interface{}) {
+	for _, ele := range input {
+		if ele.Name == key {
+			ele.Value = value
+		}
+	}
 }
