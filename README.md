@@ -100,3 +100,14 @@ We also provide some tools for synchronization in Shake series.<br>
 * [RedisFullCheck](https://github.com/aliyun/RedisFullCheck): redis data synchronization verification tool.
 
 Plus, we have a WeChat group so that users can join and discuss, but the group user number is limited. So please add my WeChat number: `vinllen_xingge` first, and I will add you to this group.<br>
+
+# Contributor
+---
+| Username | Mail |
+| :------: | :------: |
+| lydarkforest | linyunads1379@163.com |
+| cocoakekeyu | cocoakekeyu@gmail.com |
+| diggzhang | diggzhang@gmail.com |
+| ManleyLiu |  |
+| hustchensi | chensi_04@126.com |
+| HelloCodeMing | huanmingwong@163.com |
