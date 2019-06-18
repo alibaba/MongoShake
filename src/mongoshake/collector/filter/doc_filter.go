@@ -65,7 +65,6 @@ func (filter *NamespaceFilter) FilterNs(namespace string) bool {
 	return false
 }
 
-
 func NewDocFilterList() DocFilterChain {
 	filterList := DocFilterChain{new(AutologousFilter)}
 	if len(conf.Options.FilterNamespaceWhite) != 0 || len(conf.Options.FilterNamespaceBlack) != 0 {
