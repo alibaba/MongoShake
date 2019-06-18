@@ -2,8 +2,9 @@ package transform
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestTransform(t *testing.T) {

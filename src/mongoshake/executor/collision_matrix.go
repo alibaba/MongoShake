@@ -77,7 +77,7 @@ func fillupOperationValues(log *PartialLogWithCallbak) {
 		// every index value should be fetched respectively from oplog.o
 		for _, singleIndex := range strings.Split(k, MultiColumnIndexSplitter) {
 			// single index may be "aaa" or "aaa.bbb.ccc"
-			parent := o
+			parent, _ := oplog.ConvertBsonD2M(o)
 			// all types of $inc, $mul, $rename, $unset, $set change to $set,$unset in oplog
 			// $set looks like o:{$set:{a:{b:1}}} or o:{$set:{"a.b":1}}
 			if m, exist := parent["$set"]; exist {

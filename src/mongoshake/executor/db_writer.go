@@ -64,9 +64,10 @@ type CommandWriter struct {
 
 func (cw *CommandWriter) doInsert(database, collection string, metadata bson.M, oplogs []*OplogRecord,
 		dupUpdate bool) error {
-	var inserts []bson.M
+	var inserts []bson.D
 	for _, log := range oplogs {
-		newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		newObject := log.original.partialLog.Object
 		inserts = append(inserts, newObject)
 	}
 	dbHandle := cw.session.DB(database)
@@ -100,11 +101,11 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 	var updates []bson.M
 	for _, log := range oplogs {
 		// insert must have _id
-		if id, exist := log.original.partialLog.Object["_id"]; exist {
-			newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
+			// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
 			updates = append(updates, bson.M{
 				"q":      bson.M{"_id": id},
-				"u":      newObject,
+				"u":      log.original.partialLog.Object,
 				"upsert": upsert,
 				"multi":  false,
 			})
@@ -136,12 +137,12 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.M,
 		oplogs []*OplogRecord, upsert bool) error {
 	var updates []bson.M
 	for _, log := range oplogs {
-		newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
 		// we should handle the special case: "o" field may include "$v" in mongo-3.6 which is not support in mgo.v2 library
-		if _, ok := newObject[versionMark]; ok {
-			delete(newObject, versionMark)
-		}
-
+		//if _, ok := newObject[versionMark]; ok {
+		//	delete(newObject, versionMark)
+		//}
+		newObject := oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
 		updates = append(updates, bson.M{
 			"q":      log.original.partialLog.Query,
 			"u":      newObject,
@@ -195,8 +196,8 @@ func (cw *CommandWriter) doDelete(database, collection string, metadata bson.M,
 func (cw *CommandWriter) doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error {
 	var err error
 	for _, log := range oplogs {
-		newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-		operation, found := extraCommandName(newObject)
+		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		operation, found := extraCommandName(log.original.partialLog.Object)
 		if !conf.Options.ReplayerDMLOnly || (found && isSyncDataCommand(operation)) {
 			// execute one by one with sequence order
 			if err = cw.applyOps(database, metadata, []*oplog.PartialLog{log.original.
@@ -254,7 +255,8 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, opl
 		dupUpdate bool) error {
 	var inserts []interface{}
 	for _, log := range oplogs {
-		newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		newObject := log.original.partialLog.Object
 		inserts = append(inserts, newObject)
 	}
 	// collectionHandle := bw.session.DB(database).C(collection)
@@ -282,8 +284,10 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 	var update []interface{}
 	for _, log := range oplogs {
 		// insert must have _id
-		if id, exist := log.original.partialLog.Object["_id"]; exist {
-			newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		// if id, exist := log.original.partialLog.Object["_id"]; exist {
+		if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
+			// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+			newObject := log.original.partialLog.Object
 			update = append(update, bson.M{"_id": id}, newObject)
 		} else {
 			LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
@@ -310,11 +314,12 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 		oplogs []*OplogRecord, upsert bool) error {
 	var update []interface{}
 	for _, log := range oplogs {
-		newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
 		// we should handle the special case: "o" field may include "$v" in mongo-3.6 which is not support in mgo.v2 library
-		if _, ok := newObject[versionMark]; ok {
-			delete(newObject, versionMark)
-		}
+		//if _, ok := newObject[versionMark]; ok {
+		//	delete(newObject, versionMark)
+		//}
+		newObject := oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
 		update = append(update, log.original.partialLog.Query, newObject)
 	}
 
@@ -355,7 +360,8 @@ func (bw *BulkWriter) doDelete(database, collection string, metadata bson.M,
 func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error {
 	var err error
 	for _, log := range oplogs {
-		newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		newObject := log.original.partialLog.Object
 		operation, found := extraCommandName(newObject)
 		if !conf.Options.ReplayerDMLOnly || (found && isSyncDataCommand(operation)) {
 			// execute one by one with sequence order
@@ -384,7 +390,8 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.M, o
 	var upserts []*OplogRecord
 	var errMsgs []string
 	for _, log := range oplogs {
-		newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		newObject := log.original.partialLog.Object
 		if err := collectionHandle.Insert(newObject); err != nil {
 			if mgo.IsDup(err) {
 				upserts = append(upserts, log)
@@ -420,8 +427,10 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 	var updates []*pair
 	for _, log := range oplogs {
 		// insert must have _id
-		if id, exist := log.original.partialLog.Object["_id"]; exist {
-			newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		// if id, exist := log.original.partialLog.Object["_id"]; exist {
+		if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
+			// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+			newObject := log.original.partialLog.Object
 			updates = append(updates, &pair{id: id, data: newObject})
 		} else {
 			LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
@@ -460,11 +469,12 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 	var errMsgs []string
 	if upsert {
 		for _, log := range oplogs {
-			newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-			// we should handle the special case: "o" filed may include "$v" in mongo-3.6 which is not support in mgo.v2 library
-			if _, ok := newObject[versionMark]; ok {
-				delete(newObject, versionMark)
-			}
+			//newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+			//// we should handle the special case: "o" filed may include "$v" in mongo-3.6 which is not support in mgo.v2 library
+			//if _, ok := newObject[versionMark]; ok {
+			//	delete(newObject, versionMark)
+			//}
+			newObject := oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
 			_, err := collectionHandle.Upsert(log.original.partialLog.Query, newObject)
 			if err != nil {
 				if mgo.IsDup(err) {
@@ -478,11 +488,12 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 		}
 	} else {
 		for _, log := range oplogs {
-			newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-			// we should handle the special case: "o" filed may include "$v" in mongo-3.6 which is not support in mgo.v2 library
-			if _, ok := newObject[versionMark]; ok {
-				delete(newObject, versionMark)
-			}
+			//newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+			//// we should handle the special case: "o" filed may include "$v" in mongo-3.6 which is not support in mgo.v2 library
+			//if _, ok := newObject[versionMark]; ok {
+			//	delete(newObject, versionMark)
+			//}
+			newObject := oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
 			err := collectionHandle.Update(log.original.partialLog.Query, newObject)
 			if err != nil {
 				if utils.IsNotFound(err) {
@@ -511,7 +522,8 @@ func (sw *SingleWriter) doDelete(database, collection string, metadata bson.M,
 	var errMsgs []string
 	for _, log := range oplogs {
 		// ignore ErrNotFound
-		if err := collectionHandle.RemoveId(log.original.partialLog.Object["_id"]); err != nil {
+		id := oplog.GetKey(log.original.partialLog.Object, "")
+		if err := collectionHandle.RemoveId(id); err != nil {
 			if utils.IsNotFound(err) {
 				LOG.Warn("doDelete data[%v] not found", log.original.partialLog.Query)
 			} else {
@@ -531,7 +543,8 @@ func (sw *SingleWriter) doDelete(database, collection string, metadata bson.M,
 func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error {
 	var err error
 	for _, log := range oplogs {
-		newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		newObject := log.original.partialLog.Object
 		operation, found := extraCommandName(newObject)
 		if !conf.Options.ReplayerDMLOnly || (found && isSyncDataCommand(operation)) {
 			// execute one by one with sequence order
@@ -574,32 +587,33 @@ func runCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 		fallthrough
 	case "emptycapped":
 		// convert bson.M to bson.D
-		var store bson.D
-		for key, value := range log.Object {
-			store = append(store, bson.DocElem{Name: key, Value: value})
-		}
+		//var store bson.D
+		//for key, value := range log.Object {
+		//	store = append(store, bson.DocElem{Name: key, Value: value})
+		//}
 		// call Run()
 		if !isRunOnAdminCommand(operation) {
-			err = dbHandler.Run(store, nil)
+			err = dbHandler.Run(log.Object, nil)
 		} else {
-			err = session.DB("admin").Run(store, nil)
+			err = session.DB("admin").Run(log.Object, nil)
 		}
 	case "applyOps":
 		var store bson.D
-		for key, value := range log.Object {
-			if utils.ApplyOpsFilter(key) {
+		for _, ele := range log.Object {
+			if utils.ApplyOpsFilter(ele.Name) {
 				continue
 			}
-			if key == "applyOps" {
-				arr := value.([]interface{})
+			if ele.Name == "applyOps" {
+				arr := ele.Value.([]interface{})
 				for _, ele := range arr {
-					doc := ele.(bson.M)
-					if _, ok := doc[uuidMark]; ok {
-						delete(doc, uuidMark)
-					}
+					doc := ele.(bson.D)
+					//if _, ok := doc[uuidMark]; ok {
+					//	delete(doc, uuidMark)
+					//}
+					oplog.RemoveFiled(doc, uuidMark)
 				}
 			}
-			store = append(store, bson.DocElem{Name: key, Value: value})
+			store = append(store, ele)
 		}
 		err = dbHandler.Run(store, nil)
 	default:

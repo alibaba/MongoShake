@@ -2,19 +2,19 @@ package executor
 
 import (
 	"fmt"
-	"github.com/vinllen/mgo/bson"
-	"mongoshake/collector/transform"
-	"strings"
 	"sync"
 	"sync/atomic"
+	"strings"
 
 	"mongoshake/collector/configure"
 	"mongoshake/common"
 	"mongoshake/oplog"
+	"mongoshake/collector/transform"
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
+	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -251,9 +251,8 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 	if partialLog.Operation != "c" {
 		// {"op" : "i", "ns" : "my.system.indexes", "o" : { "v" : 2, "key" : { "date" : 1 }, "name" : "date_1", "ns" : "my.tbl", "expireAfterSeconds" : 3600 }
 		if strings.HasSuffix(partialLog.Namespace, "system.indexes") {
-			if ns, ok := partialLog.Object["ns"].(string); ok {
-				partialLog.Object["ns"] = nsTrans.Transform(ns)
-			}
+			value := oplog.GetKey(partialLog.Object, "ns")
+			oplog.SetFiled(partialLog.Object, "ns", nsTrans.Transform(value.(string)))
 		}
 		partialLog.Namespace = nsTrans.Transform(partialLog.Namespace)
 		if transformRef {
@@ -268,10 +267,10 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		switch operation {
 		case "create":
 			// { "create" : "my", "idIndex" : { "v" : 2, "key" : { "_id" : 1 }, "name" : "_id_", "ns" : "my.my" }
-			if idIndex, ok := partialLog.Object["idIndex"].(bson.M); ok {
-				if ns, ok := idIndex["ns"].(string); ok {
-					idIndex["ns"] = nsTrans.Transform(ns)
-				}
+			if idIndex, _ := oplog.GetKeyWithIndex(partialLog.Object, "idIndex"); idIndex != nil {
+				ns := oplog.GetKey(idIndex.(bson.D), "ns")
+				oplog.SetFiled(idIndex.(bson.D), "ns", nsTrans.Transform(ns.(string)))
+				// partialLog.Object[id].Value = idIndex
 			} else {
 				LOG.Warn("transformLogs meet unknown create command: %v", partialLog.Object)
 			}
@@ -291,43 +290,58 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		case "convertToCapped":
 			fallthrough
 		case "emptycapped":
-			col, ok := partialLog.Object[operation].(string)
-			if !ok {
+			col := oplog.GetKey(partialLog.Object, operation)
+			colS, ok := col.(string)
+			if col == nil || !ok {
 				LOG.Warn("extraCommandName meets {%v: %v} value is not string, ignore!",
-					operation, partialLog.Object[operation])
+					operation, colS)
 				return nil
 			}
-			partialLog.Namespace = nsTrans.Transform(fmt.Sprintf("%s.%s", db, col))
-			partialLog.Object[operation] = strings.SplitN(partialLog.Namespace, ".", 2)[1]
+			partialLog.Namespace = nsTrans.Transform(fmt.Sprintf("%s.%s", db, colS))
+			// partialLog.Object[operation] = strings.SplitN(partialLog.Namespace, ".", 2)[1]
+			oplog.SetFiled(partialLog.Object, operation, strings.SplitN(partialLog.Namespace, ".", 2)[1])
 		case "renameCollection":
 			// { "renameCollection" : "my.tbl", "to" : "my.my", "stayTemp" : false, "dropTarget" : false }
-			fromNs, ok := partialLog.Object[operation].(string)
+			fromNs, ok := oplog.GetKey(partialLog.Object, operation).(string)
 			if !ok {
 				LOG.Warn("extraCommandName meets {%v: %v} value is not string, ignore!",
-					operation, partialLog.Object[operation])
+					operation, oplog.GetKey(partialLog.Object, operation))
 				return nil
 			}
-			toNs, ok := partialLog.Object["to"].(string)
+			toNs, ok := oplog.GetKey(partialLog.Object, "to").(string)
 			if !ok {
-				LOG.Warn("extraCommandName meets {to: %v} value is not string, ignore!", partialLog.Object["to"])
+				LOG.Warn("extraCommandName meets {to: %v} value is not string, ignore!",
+					oplog.GetKey(partialLog.Object, "to"))
 				return nil
 			}
 			partialLog.Namespace = nsTrans.Transform(fromNs)
-			partialLog.Object[operation] = partialLog.Namespace
-			partialLog.Object["to"] = nsTrans.Transform(toNs)
+			//partialLog.Object[operation] = partialLog.Namespace
+			//partialLog.Object["to"] = nsTrans.Transform(toNs)
+			oplog.SetFiled(partialLog.Object, operation, partialLog.Namespace)
+			oplog.SetFiled(partialLog.Object, "to", nsTrans.Transform(toNs))
 		case "applyOps":
-			if ops, ok := partialLog.Object["applyOps"].([]interface{}); ok {
-				transOps := make([]interface{}, 0)
-				for _, op := range ops {
-					subLog := oplog.NewPartialLog(op.(bson.M))
+			if ops := oplog.GetKey(partialLog.Object, "applyOps").([]bson.D); ops != nil {
+				//transOps := make([]interface{}, 0)
+				//for _, op := range ops {
+				//	subLog := oplog.NewPartialLog(op.(bson.M))
+				//	transSubLog := transformPartialLog(subLog, nsTrans, transformRef)
+				//	if transSubLog == nil {
+				//		LOG.Warn("transformPartialLog sublog %v return nil, ignore!", subLog)
+				//		return nil
+				//	}
+				//	transOps = append(transOps, transSubLog.Dump())
+				//}
+				//partialLog.Object["applyOps"] = transOps
+				for i, ele := range ops {
+					m, keys := oplog.ConvertBsonD2M(ele)
+					subLog := oplog.NewPartialLog(m)
 					transSubLog := transformPartialLog(subLog, nsTrans, transformRef)
 					if transSubLog == nil {
 						LOG.Warn("transformPartialLog sublog %v return nil, ignore!", subLog)
 						return nil
 					}
-					transOps = append(transOps, transSubLog.Dump())
+					ops[i] = transSubLog.Dump(keys)
 				}
-				partialLog.Object["applyOps"] = transOps
 			}
 		default:
 			partialLog.Namespace = nsTrans.Transform(partialLog.Namespace)
@@ -335,4 +349,3 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 	}
 	return partialLog
 }
-
