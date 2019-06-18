@@ -267,9 +267,10 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		switch operation {
 		case "create":
 			// { "create" : "my", "idIndex" : { "v" : 2, "key" : { "_id" : 1 }, "name" : "_id_", "ns" : "my.my" }
-			if idIndex := oplog.GetKey(partialLog.Object, "idIndex"); idIndex != nil {
+			if idIndex, _ := oplog.GetKeyWithIndex(partialLog.Object, "idIndex"); idIndex != nil {
 				ns := oplog.GetKey(idIndex.(bson.D), "ns")
-				oplog.SetFiled(partialLog.Object, "ns", nsTrans.Transform(ns.(string)))
+				oplog.SetFiled(idIndex.(bson.D), "ns", nsTrans.Transform(ns.(string)))
+				// partialLog.Object[id].Value = idIndex
 			} else {
 				LOG.Warn("transformLogs meet unknown create command: %v", partialLog.Object)
 			}
@@ -296,7 +297,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 					operation, colS)
 				return nil
 			}
-			partialLog.Namespace = nsTrans.Transform(fmt.Sprintf("%s.%s", db, col))
+			partialLog.Namespace = nsTrans.Transform(fmt.Sprintf("%s.%s", db, colS))
 			// partialLog.Object[operation] = strings.SplitN(partialLog.Namespace, ".", 2)[1]
 			oplog.SetFiled(partialLog.Object, operation, strings.SplitN(partialLog.Namespace, ".", 2)[1])
 		case "renameCollection":
@@ -319,7 +320,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			oplog.SetFiled(partialLog.Object, operation, partialLog.Namespace)
 			oplog.SetFiled(partialLog.Object, "to", nsTrans.Transform(toNs))
 		case "applyOps":
-			if ops, ok := oplog.GetKey(partialLog.Object, "applyOps").(bson.D); ok {
+			if ops := oplog.GetKey(partialLog.Object, "applyOps").([]bson.D); ops != nil {
 				//transOps := make([]interface{}, 0)
 				//for _, op := range ops {
 				//	subLog := oplog.NewPartialLog(op.(bson.M))
@@ -331,22 +332,15 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 				//	transOps = append(transOps, transSubLog.Dump())
 				//}
 				//partialLog.Object["applyOps"] = transOps
-				for _, ele := range ops {
-					var m bson.M
-					switch v := ele.Value.(type) {
-					case bson.D:
-						m = oplog.ConvertBsonD2M(v)
-					case bson.M:
-					default:
-						continue
-					}
+				for i, ele := range ops {
+					m, keys := oplog.ConvertBsonD2M(ele)
 					subLog := oplog.NewPartialLog(m)
 					transSubLog := transformPartialLog(subLog, nsTrans, transformRef)
 					if transSubLog == nil {
 						LOG.Warn("transformPartialLog sublog %v return nil, ignore!", subLog)
 						return nil
 					}
-					ele.Value = transSubLog
+					ops[i] = transSubLog.Dump(keys)
 				}
 			}
 		default:

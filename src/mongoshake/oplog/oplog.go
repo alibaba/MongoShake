@@ -56,7 +56,7 @@ func LogParsed(logs []*GenericOplog) []*PartialLog {
 func NewPartialLog(data bson.M) *PartialLog {
 	partialLog := new(PartialLog)
 	logType := reflect.TypeOf(*partialLog)
-	for i:=0; i < logType.NumField(); i++ {
+	for i := 0; i < logType.NumField(); i++ {
 		tagName := logType.Field(i).Tag.Get("bson")
 		if v, ok := data[tagName]; ok {
 			reflect.ValueOf(partialLog).Elem().Field(i).Set(reflect.ValueOf(v))
@@ -65,41 +65,55 @@ func NewPartialLog(data bson.M) *PartialLog {
 	return partialLog
 }
 
-func (partialLog *PartialLog) Dump() bson.M {
-	out := bson.M{}
+// dump according to the given keys
+func (partialLog *PartialLog) Dump(keys map[string]struct{}) bson.D {
+	var out bson.D
 	logType := reflect.TypeOf(*partialLog)
-	for i:=0; i < logType.NumField(); i++ {
+	for i := 0; i < logType.NumField(); i++ {
 		if tagName, ok := logType.Field(i).Tag.Lookup("bson"); ok {
-			out[tagName] = reflect.ValueOf(partialLog).Elem().Field(i).Interface()
+			// out[tagName] = reflect.ValueOf(partialLog).Elem().Field(i).Interface()
+			value := reflect.ValueOf(partialLog).Elem().Field(i).Interface()
+			if _, ok := keys[tagName]; !ok {
+				continue
+			}
+			out = append(out, bson.DocElem{tagName, value})
 		}
 	}
+
 	return out
 }
 
 func GetKey(log bson.D, wanted string) interface{} {
+	ret, _ := GetKeyWithIndex(log, wanted)
+	return ret
+}
+
+func GetKeyWithIndex(log bson.D, wanted string) (interface{}, int) {
 	if wanted == "" {
 		wanted = PrimayKey
 	}
 
 	// "_id" is always the first field
-	for _, ele := range log {
+	for id, ele := range log {
 		if ele.Name == wanted {
-			return ele.Value
+			return ele.Value, id
 		}
 	}
 
 	nimo.Assert("you can't see me")
-	return nil
+	return nil, 0
 }
 
 // convert bson.D to bson.M
-func ConvertBsonD2M(input bson.D) bson.M {
-	var m bson.M
+func ConvertBsonD2M(input bson.D) (bson.M, map[string]struct{}) {
+	m := bson.M{}
+	keys := make(map[string]struct{}, len(input))
 	for _, ele := range input {
 		m[ele.Name] = ele.Value
+		keys[ele.Name] = struct{}{}
 	}
 
-	return m
+	return m, keys
 }
 
 func RemoveFiled(input bson.D, key string) bson.D {
@@ -117,9 +131,9 @@ func RemoveFiled(input bson.D, key string) bson.D {
 }
 
 func SetFiled(input bson.D, key string, value interface{}) {
-	for _, ele := range input {
+	for i, ele := range input {
 		if ele.Name == key {
-			ele.Value = value
+			input[i].Value = value
 		}
 	}
 }
