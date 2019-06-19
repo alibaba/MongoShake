@@ -243,7 +243,9 @@ func transformLogs(logs []*OplogRecord, nsTrans *transform.NamespaceTransform, t
 	for _, log := range logs {
 		partialLog := log.original.partialLog
 		transPartialLog := transformPartialLog(partialLog, nsTrans, transformRef)
-		log.original.partialLog = transPartialLog
+		if transPartialLog != nil {
+			log.original.partialLog = transPartialLog
+		}
 	}
 	return logs
 }
