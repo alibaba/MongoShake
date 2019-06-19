@@ -21,6 +21,7 @@ const (
 	StorageTypeAPI            = "api"
 	StorageTypeDB             = "database"
 	CheckpointDefaultDatabase = utils.AppDatabase
+	CheckpointAdminDatabase   = "admin"
 	CheckpointName            = "name"
 
 	MajorityWriteConcern = "majority"
@@ -43,7 +44,7 @@ type CheckpointManager struct {
 	delegate CheckpointOperation
 }
 
-func NewCheckpointManager(name string) *CheckpointManager {
+func NewCheckpointManager(name string, startPosition int64) *CheckpointManager {
 	newManager := &CheckpointManager{}
 
 	switch conf.Options.ContextStorage {
@@ -51,16 +52,19 @@ func NewCheckpointManager(name string) *CheckpointManager {
 		newManager.delegate = &HttpApiCheckpoint{
 			Checkpoint: Checkpoint{
 				Name:          name,
-				StartPosition: conf.Options.ContextStartPosition,
+				StartPosition: startPosition,
 			},
 			URL: conf.Options.ContextAddress,
 		}
 	case StorageTypeDB:
 		db := CheckpointDefaultDatabase
+		if conf.Options.IsShardCluster() {
+			db = CheckpointAdminDatabase
+		}
 		newManager.delegate = &MongoCheckpoint{
 			Checkpoint: Checkpoint{
 				Name:          name,
-				StartPosition: conf.Options.ContextStartPosition,
+				StartPosition: startPosition,
 			},
 			DB:    db,
 			URL:   conf.Options.ContextStorageUrl,
@@ -111,7 +115,7 @@ type MongoCheckpoint struct {
 func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 	// make connection if we don't already established
 	if ckpt.Conn == nil {
-		if conn, err := dbpool.NewMongoConn(ckpt.URL, true); err == nil {
+		if conn, err := dbpool.NewMongoConn(ckpt.URL, true, true); err == nil {
 			ckpt.Conn = conn
 			ckpt.QueryHandle = conn.Session.DB(ckpt.DB).C(ckpt.Table)
 		} else {

@@ -3,13 +3,14 @@ package collector
 import (
 	"errors"
 	"fmt"
-	"time"
-	"sync"
+	utils "mongoshake/common"
 	"strings"
+	"sync"
+	"time"
 
+	"mongoshake/collector/configure"
 	"mongoshake/dbpool"
 	"mongoshake/oplog"
-	"mongoshake/collector/configure"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
@@ -82,7 +83,11 @@ func (reader *OplogReader) SetQueryTimestampOnEmpty(ts bson.MongoTimestamp) {
 }
 
 func (reader *OplogReader) UpdateQueryTimestamp(ts bson.MongoTimestamp) {
-	reader.query[QueryTs] = bson.M{QueryOpGTE: ts}
+	reader.query[QueryTs] = bson.M{QueryOpGT: ts}
+}
+
+func (reader *OplogReader) getQueryTimestamp() bson.MongoTimestamp {
+	return reader.query[QueryTs].(bson.M)[QueryOpGT].(bson.MongoTimestamp)
 }
 
 // Next returns an oplog by raw bytes which is []byte
@@ -168,7 +173,7 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 			reader.conn.Close()
 		}
 		// reconnect
-		if reader.conn, err = dbpool.NewMongoConn(reader.src, false); reader.conn == nil || err != nil {
+		if reader.conn, err = dbpool.NewMongoConn(reader.src, false, true); reader.conn == nil || err != nil {
 			err = fmt.Errorf("reconnect mongo instance [%s] error. %s", reader.src, err.Error())
 			return err
 		}
@@ -177,11 +182,12 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 	var queryTs bson.MongoTimestamp
 	// the given oplog timestamp shouldn't bigger than the newest
 	if reader.firstRead == true {
-		// check whether the starting fetching timestamp is less than the oldest timestamp exist in the oplog
+		// check whether the starting fetching timestamp is less than the newest timestamp exist in the oplog
 		newestTs := reader.getNewestTimestamp()
-		queryTs = reader.query[QueryTs].(bson.M)[QueryOpGTE].(bson.MongoTimestamp)
+		queryTs = reader.getQueryTimestamp()
 		if newestTs < queryTs {
-			return fmt.Errorf("current starting point[%v] is bigger than the newest timestamp[%v]", queryTs, newestTs)
+			LOG.Warn("current starting point[%v] is bigger than the newest timestamp[%v]", queryTs, newestTs)
+			queryTs = newestTs
 		}
 	}
 
@@ -190,7 +196,7 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 	 * this may happen when collection capped.
 	 */
 	oldestTs := reader.getOldestTimestamp()
-	queryTs = reader.query[QueryTs].(bson.M)[QueryOpGTE].(bson.MongoTimestamp)
+	queryTs = reader.getQueryTimestamp()
 	if oldestTs > queryTs && !reader.firstRead {
 		return CollectionCappedError
 	}
@@ -206,16 +212,14 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 
 // get newest oplog
 func (reader *OplogReader) getNewestTimestamp() bson.MongoTimestamp {
-	var retMap map[string]interface{}
-	reader.conn.Session.DB(localDB).C(dbpool.OplogNS).Find(bson.M{}).Sort("-$natural").Limit(1).One(&retMap)
-	return retMap[QueryTs].(bson.MongoTimestamp)
+	ts, _ := utils.GetNewestTimestampBySession(reader.conn.Session)
+	return ts
 }
 
 // get oldest oplog
 func (reader *OplogReader) getOldestTimestamp() bson.MongoTimestamp {
-	var retMap map[string]interface{}
-	reader.conn.Session.DB(localDB).C(dbpool.OplogNS).Find(bson.M{}).Limit(1).One(&retMap)
-	return retMap[QueryTs].(bson.MongoTimestamp)
+	ts, _ := utils.GetOldestTimestampBySession(reader.conn.Session)
+	return ts
 }
 
 func (reader *OplogReader) releaseIterator() {

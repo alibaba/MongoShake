@@ -56,13 +56,13 @@ func (generator *FakeGenerator) start() {
 				// noop 0.1%
 				partialLog.Operation = "n"
 				partialLog.Gid = "mock-noop"
-				partialLog.Object = bson.M{"mongoshake-mock": "ApsaraDB"}
+				partialLog.Object = bson.D{bson.DocElem{"mongoshake-mock", "ApsaraDB"}}
 			case nr%100 == 0:
 				// delete 1%
 				for k, oid := range existIds {
 					partialLog.Operation = "d"
 					partialLog.Gid = "mock-delete"
-					partialLog.Object = bson.M{"_id": oid}
+					partialLog.Object =bson.D{bson.DocElem{"_id", oid}}
 					delete(existIds, k)
 					break
 				}
@@ -71,7 +71,15 @@ func (generator *FakeGenerator) start() {
 				for _, oid := range existIds {
 					partialLog.Operation = "u"
 					partialLog.Gid = "mock-update"
-					partialLog.Object = bson.M{"$set": bson.M{"updates": nr}}
+					// partialLog.Object = bson.M{"$set": bson.M{"updates": nr}}
+					partialLog.Object = bson.D{
+						bson.DocElem{
+							Name: "$set",
+							Value: bson.D{
+								bson.DocElem{"updates", nr},
+							},
+						},
+					}
 					partialLog.Query = bson.M{"_id": oid}
 					break
 				}
@@ -80,7 +88,11 @@ func (generator *FakeGenerator) start() {
 				oid := bson.NewObjectId()
 				partialLog.Operation = "i"
 				partialLog.Gid = "mock-insert"
-				partialLog.Object = bson.M{"_id": oid, "test": "1", "abc": nr}
+				partialLog.Object = bson.D{
+					bson.DocElem{"_id", oid},
+					bson.DocElem{"test", "1"},
+					bson.DocElem{"abc", nr},
+				}
 				existIds[oid.Hex()] = oid
 			}
 			bytes, _ := bson.Marshal(partialLog)

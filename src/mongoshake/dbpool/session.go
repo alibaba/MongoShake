@@ -1,6 +1,8 @@
 package dbpool
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	LOG "github.com/vinllen/log4go"
@@ -10,12 +12,26 @@ import (
 
 const OplogNS = "oplog.rs"
 
+type NS struct {
+	Database   string
+	Collection string
+}
+
+func (ns NS) Str() string {
+	return fmt.Sprintf("%s.%s", ns.Database, ns.Collection)
+}
+
+func NewNS(namespace string) NS {
+	pair := strings.SplitN(namespace, ".", 2)
+	return NS{Database:pair[0], Collection:pair[1]}
+}
+
 type MongoConn struct {
 	Session *mgo.Session
 	URL     string
 }
 
-func NewMongoConn(url string, primaryRequired bool) (*MongoConn, error) {
+func NewMongoConn(url string, primaryRequired bool, timeout bool) (*MongoConn, error) {
 	session, err := mgo.Dial(url)
 	if err != nil {
 		LOG.Critical("Connect to %s failed. %v", url, err)
@@ -24,7 +40,11 @@ func NewMongoConn(url string, primaryRequired bool) (*MongoConn, error) {
 	// maximum pooled connections. the overall established sockets
 	// should be lower than this value(will block otherwise)
 	session.SetPoolLimit(256)
-	session.SetSocketTimeout(10 * time.Minute)
+	if timeout {
+		session.SetSocketTimeout(10 * time.Minute)
+	} else {
+		session.SetSocketTimeout(0)
+	}
 
 	if err := session.Ping(); err != nil {
 		LOG.Critical("Verify ping command to %s failed. %v", url, err)
@@ -77,11 +97,6 @@ func (conn *MongoConn) HasOplogNs() bool {
 }
 
 func (conn *MongoConn) HasUniqueIndex() bool {
-	type NS struct {
-		Database   string
-		Collection string
-	}
-
 	checkNs := make([]NS, 0, 128)
 	var databases []string
 	var err error

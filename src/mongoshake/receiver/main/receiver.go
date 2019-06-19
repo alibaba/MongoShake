@@ -87,7 +87,7 @@ func startup() {
 	 */
 	repList := make([]tunnel.Replayer, conf.Options.ReplayerNum)
 	for i := range repList {
-		repList[i] = replayer.NewExampleReplayer()
+		repList[i] = replayer.NewExampleReplayer(i)
 	}
 
 	LOG.Info("receiver is starting...")

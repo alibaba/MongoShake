@@ -32,9 +32,10 @@ func main() {
 	// argument options
 	configuration := flag.String("conf", "", "configure file absolute path")
 	verbose := flag.Bool("verbose", false, "show logs on console")
+	version := flag.Bool("version", false, "show version")
 	flag.Parse()
 
-	if *configuration == "" {
+	if *configuration == "" || *version == true {
 		fmt.Println(utils.BRANCH)
 		panic(Exit{0})
 	}
@@ -76,7 +77,7 @@ func startup() {
 	// initialize http api
 	utils.InitHttpApi(conf.Options.HTTPListenPort)
 	coordinator := &collector.ReplicationCoordinator{
-		Sources: make([]*collector.MongoSource, len(conf.Options.MongoUrls)),
+		Sources: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
 	}
 
 	utils.HttpApi.RegisterAPI("/conf", nimo.HttpGet, func([]byte) interface{} {
@@ -84,7 +85,7 @@ func startup() {
 	})
 
 	for i, src := range conf.Options.MongoUrls {
-		coordinator.Sources[i] = new(collector.MongoSource)
+		coordinator.Sources[i] = new(utils.MongoSource)
 		coordinator.Sources[i].URL = src
 		if len(conf.Options.OplogGIDS) != 0 {
 			coordinator.Sources[i].Gid = conf.Options.OplogGIDS
@@ -152,7 +153,7 @@ func sanitizeOptions() error {
 		return errors.New("shard key type is unknown")
 	}
 	if conf.Options.SyncerReaderBufferTime == 0 {
-		return errors.New("syncer buffer time can't be 0")
+		conf.Options.SyncerReaderBufferTime = 1
 	}
 	if conf.Options.WorkerNum <= 0 || conf.Options.WorkerNum > 256 {
 		return errors.New("worker numeric is not valid")
@@ -187,6 +188,10 @@ func sanitizeOptions() error {
 	if len(conf.Options.TunnelAddress) == 0 && conf.Options.Tunnel != "mock" {
 		return errors.New("tunnel address is illegal")
 	}
+	if conf.Options.SyncMode == "" {
+		conf.Options.SyncMode = "oplog" // default
+	}
+
 	// judge the replayer configuration when tunnel type is "direct"
 	if conf.Options.Tunnel == "direct" {
 		if len(conf.Options.TunnelAddress) > conf.Options.WorkerNum {
@@ -201,6 +206,14 @@ func sanitizeOptions() error {
 			return errors.New("collision write strategy is neither db nor sdk nor none")
 		}
 		conf.Options.ReplayerCollisionEnable = conf.Options.ReplayerExecutor != 1
+	} else {
+		if conf.Options.SyncMode != "oplog" {
+			return errors.New("document replication only support direct tunnel type")
+		}
+	}
+
+	if conf.Options.SyncMode != "oplog" && conf.Options.SyncMode != "document" && conf.Options.SyncMode != "all" {
+		return fmt.Errorf("unknown sync_mode[%v]", conf.Options.SyncMode)
 	}
 
 	return nil
