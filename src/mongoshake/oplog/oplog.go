@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	PrimayKey = "_id"
+	PrimaryKey = "_id"
 )
 
 type GenericOplog struct {
@@ -90,7 +90,7 @@ func GetKey(log bson.D, wanted string) interface{} {
 
 func GetKeyWithIndex(log bson.D, wanted string) (interface{}, int) {
 	if wanted == "" {
-		wanted = PrimayKey
+		wanted = PrimaryKey
 	}
 
 	// "_id" is always the first field
