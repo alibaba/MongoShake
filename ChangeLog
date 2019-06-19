@@ -1,3 +1,9 @@
+2019-06-20 Alibaba Cloud.
+	* version: 2.0.1
+	* IMPROVE: add `mongo_connect_mode` in conf.
+	* IMPROVE: support writing into different mongodb when source mongo is
+	replica set.
+
 2019-06-19 Alibaba Cloud.
 	* version: 2.0.0
 	* Feature: support full synchronization.

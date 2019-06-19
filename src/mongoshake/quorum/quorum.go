@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"mongoshake/dbpool"
+	"mongoshake/common"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
@@ -174,8 +174,8 @@ func competeMaster(coll *mgo.Collection) bool {
 	return false
 }
 
-func makeSession(uri string) (*dbpool.MongoConn, error) {
-	if conn, err := dbpool.NewMongoConn(uri, true, true); err == nil {
+func makeSession(uri string) (*utils.MongoConn, error) {
+	if conn, err := utils.NewMongoConn(uri, utils.ConnectModePrimary, true); err == nil {
 		return conn, nil
 	} else {
 		return nil, err

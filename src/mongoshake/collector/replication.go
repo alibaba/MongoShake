@@ -4,14 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"mongoshake/collector/transform"
 	"sync"
 
+	"mongoshake/collector/transform"
 	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
 	"mongoshake/collector/docsyncer"
 	"mongoshake/common"
-	"mongoshake/dbpool"
 	"mongoshake/oplog"
 
 	"github.com/gugemichael/nimo4go"
@@ -102,20 +101,22 @@ func (coordinator *ReplicationCoordinator) Run() error {
 }
 
 func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
-	var conn *dbpool.MongoConn
+	var conn *utils.MongoConn
 	var err error
 	var hasUniqIndex = false
 	rs := map[string]int{}
-	if len(coordinator.Sources) > 1 {
-		csUrl := conf.Options.ContextStorageUrl
-		if conn, err = dbpool.NewMongoConn(csUrl, false, true); conn == nil || !conn.IsGood() || err != nil {
-			LOG.Critical("Connect mongo server error. %v, url : %s", err, csUrl)
-			return err
-		}
-		conn.Close()
+
+	// try to connect ContextStorageUrl
+	storageUrl := conf.Options.ContextStorageUrl
+	if conn, err = utils.NewMongoConn(storageUrl, utils.ConnectModePrimary, true);
+			conn == nil || !conn.IsGood() || err != nil {
+		LOG.Critical("Connect storageUrl[%v] error[%v].", storageUrl, err)
+		return err
 	}
+	conn.Close()
+
 	for i, src := range coordinator.Sources {
-		if conn, err = dbpool.NewMongoConn(src.URL, false, true); conn == nil || !conn.IsGood() || err != nil {
+		if conn, err = utils.NewMongoConn(src.URL, conf.Options.MongoConnectMode, true); conn == nil || !conn.IsGood() || err != nil {
 			LOG.Critical("Connect mongo server error. %v, url : %s", err, src.URL)
 			return err
 		}
@@ -209,8 +210,8 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 
 	fromIsSharding := len(coordinator.Sources) > 1
 	toUrl := conf.Options.TunnelAddress[0]
-	var toConn *dbpool.MongoConn
-	if toConn, err = dbpool.NewMongoConn(toUrl, true, true); err != nil {
+	var toConn *utils.MongoConn
+	if toConn, err = utils.NewMongoConn(toUrl, utils.ConnectModePrimary, true); err != nil {
 		return err
 	}
 	defer toConn.Close()
@@ -230,7 +231,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	var wg sync.WaitGroup
 	var replError error
 	var mutex sync.Mutex
-	indexMap := make(map[dbpool.NS][]mgo.Index)
+	indexMap := make(map[utils.NS][]mgo.Index)
 
 	for i, src := range coordinator.Sources {
 		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl, trans)

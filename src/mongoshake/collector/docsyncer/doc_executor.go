@@ -3,13 +3,14 @@ package docsyncer
 import (
 	"errors"
 	"fmt"
-	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
-	"mongoshake/dbpool"
 	"sync"
 	"sync/atomic"
 
 	"mongoshake/collector/configure"
+	"mongoshake/common"
+
+	"github.com/vinllen/mgo"
+	"github.com/vinllen/mgo/bson"
 )
 
 var GlobalCollExecutorId int32 = -1
@@ -24,11 +25,11 @@ type CollectionExecutor struct {
 	// mongo url
 	mongoUrl string
 
-	ns dbpool.NS
+	ns utils.NS
 
 	wg sync.WaitGroup
 
-	conn *dbpool.MongoConn
+	conn *utils.MongoConn
 
 	docBatch chan []*bson.Raw
 }
@@ -37,7 +38,7 @@ func GenerateCollExecutorId() int {
 	return int(atomic.AddInt32(&GlobalCollExecutorId, 1))
 }
 
-func NewCollectionExecutor(id int, mongoUrl string, ns dbpool.NS) *CollectionExecutor {
+func NewCollectionExecutor(id int, mongoUrl string, ns utils.NS) *CollectionExecutor {
 	return &CollectionExecutor{
 		id:       id,
 		mongoUrl: mongoUrl,
@@ -47,7 +48,7 @@ func NewCollectionExecutor(id int, mongoUrl string, ns dbpool.NS) *CollectionExe
 
 func (colExecutor *CollectionExecutor) Start() error {
 	var err error
-	if colExecutor.conn, err = dbpool.NewMongoConn(colExecutor.mongoUrl, true, true); err != nil {
+	if colExecutor.conn, err = utils.NewMongoConn(colExecutor.mongoUrl, utils.ConnectModePrimary, true); err != nil {
 		return err
 	}
 

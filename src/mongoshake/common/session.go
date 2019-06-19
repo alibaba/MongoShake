@@ -1,4 +1,4 @@
-package dbpool
+package utils
 
 import (
 	"fmt"
@@ -31,7 +31,11 @@ type MongoConn struct {
 	URL     string
 }
 
-func NewMongoConn(url string, primaryRequired bool, timeout bool) (*MongoConn, error) {
+func NewMongoConn(url string, connectMode string, timeout bool) (*MongoConn, error) {
+	if connectMode == ConnectModeStandalone {
+		url += "?connect=direct"
+	}
+
 	session, err := mgo.Dial(url)
 	if err != nil {
 		LOG.Critical("Connect to %s failed. %v", url, err)
@@ -46,18 +50,26 @@ func NewMongoConn(url string, primaryRequired bool, timeout bool) (*MongoConn, e
 		session.SetSocketTimeout(0)
 	}
 
-	if err := session.Ping(); err != nil {
+	// already ping in the session
+	/*if err := session.Ping(); err != nil {
 		LOG.Critical("Verify ping command to %s failed. %v", url, err)
 		return nil, err
-	}
+	}*/
 
 	// Switch the session to a eventually behavior. In that case session
 	// may read for any secondary node. default mode is mgo.Strong
-	if primaryRequired {
+	switch connectMode {
+	case ConnectModePrimary:
 		session.SetMode(mgo.Primary, true)
-	} else {
+	case ConnectModeSecondaryPreferred:
 		session.SetMode(mgo.SecondaryPreferred, true)
+	case ConnectModeStandalone:
+		session.SetMode(mgo.Monotonic, true)
+	default:
+		err = fmt.Errorf("unknown connect mode[%v]", connectMode)
+		return nil, err
 	}
+
 	LOG.Info("New session to %s successfully", url)
 	return &MongoConn{Session: session, URL: url}, nil
 }

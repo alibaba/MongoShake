@@ -3,27 +3,27 @@ package docsyncer
 import (
 	"errors"
 	"fmt"
-	"github.com/gugemichael/nimo4go"
-	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
 	"mongoshake/collector/filter"
 	"mongoshake/collector/transform"
 	"mongoshake/common"
-	"mongoshake/dbpool"
-	"sync"
-	"sync/atomic"
-	"time"
 
 	LOG "github.com/vinllen/log4go"
+	"github.com/gugemichael/nimo4go"
+	"github.com/vinllen/mgo"
+	"github.com/vinllen/mgo/bson"
 )
 
 const (
 	MAX_BUFFER_BYTE_SIZE = 16*1024*1024
 )
 
-func IsShardingToSharding(fromIsSharding bool, toConn *dbpool.MongoConn) bool {
+func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
 	var toIsSharding bool
 	var result interface{}
 	err := toConn.Session.DB("config").C("version").Find(bson.M{}).One(&result)
@@ -48,10 +48,10 @@ func IsShardingToSharding(fromIsSharding bool, toConn *dbpool.MongoConn) bool {
 	}
 }
 
-func StartDropDestCollection(nsSet map[dbpool.NS]bool, toConn *dbpool.MongoConn,
+func StartDropDestCollection(nsSet map[utils.NS]bool, toConn *utils.MongoConn,
 	nsTrans *transform.NamespaceTransform) error {
 	for ns := range nsSet {
-		toNS := dbpool.NewNS(nsTrans.Transform(ns.Str()))
+		toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
 		if !conf.Options.ReplayerCollectionDrop {
 			colNames, err := toConn.Session.DB(toNS.Database).CollectionNames()
 			if err != nil {
@@ -74,13 +74,13 @@ func StartDropDestCollection(nsSet map[dbpool.NS]bool, toConn *dbpool.MongoConn,
 	return nil
 }
 
-func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn,
+func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 	nsTrans *transform.NamespaceTransform) error {
 	LOG.Info("document syncer namespace spec for sharding begin")
 
-	var fromConn *dbpool.MongoConn
+	var fromConn *utils.MongoConn
 	var err error
-	if fromConn, err = dbpool.NewMongoConn(csUrl, true, true); err != nil {
+	if fromConn, err = utils.NewMongoConn(csUrl, utils.ConnectModePrimary, true); err != nil {
 		return err
 	}
 	defer fromConn.Close()
@@ -157,10 +157,10 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *dbpool.MongoConn,
 	return nil
 }
 
-func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string,
+func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 	nsTrans *transform.NamespaceTransform) (syncError error) {
 	type IndexNS struct {
-		ns        dbpool.NS
+		ns        utils.NS
 		indexList []mgo.Index
 	}
 
@@ -181,9 +181,9 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string,
 		}
 	})
 
-	var conn *dbpool.MongoConn
+	var conn *utils.MongoConn
 	var err error
-	if conn, err = dbpool.NewMongoConn(toUrl, true, false); err != nil {
+	if conn, err = utils.NewMongoConn(toUrl, utils.ConnectModePrimary, false); err != nil {
 		return err
 	}
 	defer conn.Close()
@@ -199,7 +199,7 @@ func StartIndexSync(indexMap map[dbpool.NS][]mgo.Index, toUrl string,
 					break
 				}
 				ns := indexNs.ns
-				toNS := dbpool.NewNS(nsTrans.Transform(ns.Str()))
+				toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
 
 				for _, index := range indexNs.indexList {
 					index.Background = false
@@ -239,7 +239,7 @@ type DBSyncer struct {
 	// destination mongodb url
 	ToMongoUrl string
 	// index of namespace
-	indexMap map[dbpool.NS][]mgo.Index
+	indexMap map[utils.NS][]mgo.Index
 	// start time of sync
 	startTime time.Time
 
@@ -260,7 +260,7 @@ func NewDBSyncer(
 		id:           id,
 		FromMongoUrl: fromMongoUrl,
 		ToMongoUrl:   toMongoUrl,
-		indexMap:     make(map[dbpool.NS][]mgo.Index),
+		indexMap:     make(map[utils.NS][]mgo.Index),
 		nsTrans:      nsTrans,
 	}
 
@@ -281,7 +281,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	}
 
 	collExecutorParallel := conf.Options.ReplayerCollectionParallel
-	namespaces := make(chan dbpool.NS, collExecutorParallel)
+	namespaces := make(chan utils.NS, collExecutorParallel)
 
 	wg.Add(len(nsList))
 
@@ -301,7 +301,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 					break
 				}
 
-				toNS := dbpool.NewNS(syncer.nsTrans.Transform(ns.Str()))
+				toNS := utils.NewNS(syncer.nsTrans.Transform(ns.Str()))
 
 				LOG.Info("document syncer-%d collExecutor-%d sync ns %v to %v begin",
 					syncer.id, collExecutorId, ns, toNS)
@@ -329,8 +329,8 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	return syncError
 }
 
-func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS,
-	toNS dbpool.NS) error {
+func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
+	toNS utils.NS) error {
 	reader := NewDocumentReader(syncer.FromMongoUrl, ns)
 
 	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS)
@@ -389,6 +389,6 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns dbpool.NS,
 	return nil
 }
 
-func (syncer *DBSyncer) GetIndexMap() map[dbpool.NS][]mgo.Index {
+func (syncer *DBSyncer) GetIndexMap() map[utils.NS][]mgo.Index {
 	return syncer.indexMap
 }
