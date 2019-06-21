@@ -399,6 +399,5 @@ func TestFilterPartialLog(t *testing.T) {
 			}},
 		})
 		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
-		fmt.Println(log)
 	}
 }
