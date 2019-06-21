@@ -380,6 +380,10 @@ func TestFilterPartialLog(t *testing.T) {
 			}},
 		})
 		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		log = mockFilterPartialLog("c", "fdb1.$cmd", bson.D{
+			bson.DocElem{"renameCollection", "fdb1.fcol1"},
+			bson.DocElem{"to", "fdb2.fcol2"}})
+		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
 	}
 
 	{
@@ -398,6 +402,10 @@ func TestFilterPartialLog(t *testing.T) {
 				bson.DocElem{"ns", "fdb1.fcol1"},
 			}},
 		})
+		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		log = mockFilterPartialLog("c", "fdb1.$cmd", bson.D{
+			bson.DocElem{"renameCollection", "fdb1.fcol1"},
+			bson.DocElem{"to", "fdb2.fcol2"}})
 		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
 	}
 }
