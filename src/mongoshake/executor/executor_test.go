@@ -220,9 +220,11 @@ func TestTransformLog(t *testing.T) {
 
 		logs := []*OplogRecord{
 			mockTransLogs("i", "fdb1.tc1", bson.D{bson.DocElem{"a", 1}}),
+			mockTransLogs("c", "fdb1", bson.D{bson.DocElem{"dropDatabase", 1}}),
 		}
 		logs = transformLogs(logs, nsTrans, false)
 		assert.Equal(t, mockTransLogs("i", "fdb2.tc1", bson.D{bson.DocElem{"a", 1}}), logs[0], "should be equal")
+		assert.Equal(t, mockTransLogs("c", "fdb2", bson.D{bson.DocElem{"dropDatabase", 1}}), logs[1], "should be equal")
 	}
 
 	{

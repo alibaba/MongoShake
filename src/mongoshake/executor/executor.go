@@ -263,7 +263,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			partialLog.Object = transform.TransformDBRef(partialLog.Object, db, nsTrans)
 		}
 	} else {
-		operation, found := extraCommandName(partialLog.Object)
+		operation, found := oplog.ExtraCommandName(partialLog.Object)
 		if !found {
 			LOG.Warn("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
 			return nil
@@ -271,13 +271,15 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		switch operation {
 		case "create":
 			// { "create" : "my", "idIndex" : { "v" : 2, "key" : { "_id" : 1 }, "name" : "_id_", "ns" : "my.my" }
-			if idIndex, _ := oplog.GetKeyWithIndex(partialLog.Object, "idIndex"); idIndex != nil {
-				ns := oplog.GetKey(idIndex.(bson.D), "ns")
-				oplog.SetFiled(idIndex.(bson.D), "ns", nsTrans.Transform(ns.(string)))
-				// partialLog.Object[id].Value = idIndex
+			if idIndex := oplog.GetKey(partialLog.Object, "idIndex"); idIndex != nil {
+				if ns := oplog.GetKey(idIndex.(bson.D), "ns"); ns != nil {
+					oplog.SetFiled(idIndex.(bson.D), "ns", nsTrans.Transform(ns.(string)))
+				}
 			} else {
 				LOG.Warn("transformLogs meet unknown create command: %v", partialLog.Object)
 			}
+			fallthrough
+		case "createIndexes":
 			fallthrough
 		case "collMod":
 			fallthrough
@@ -294,48 +296,30 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		case "convertToCapped":
 			fallthrough
 		case "emptycapped":
-			col := oplog.GetKey(partialLog.Object, operation)
-			colS, ok := col.(string)
-			if col == nil || !ok {
-				LOG.Warn("extraCommandName meets {%v: %v} value is not string, ignore!",
-					operation, colS)
+			col, ok := oplog.GetKey(partialLog.Object, operation).(string)
+			if !ok {
+				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
 				return nil
 			}
-			partialLog.Namespace = nsTrans.Transform(fmt.Sprintf("%s.%s", db, colS))
-			// partialLog.Object[operation] = strings.SplitN(partialLog.Namespace, ".", 2)[1]
+			partialLog.Namespace = nsTrans.Transform(fmt.Sprintf("%s.%s", db, col))
 			oplog.SetFiled(partialLog.Object, operation, strings.SplitN(partialLog.Namespace, ".", 2)[1])
 		case "renameCollection":
 			// { "renameCollection" : "my.tbl", "to" : "my.my", "stayTemp" : false, "dropTarget" : false }
 			fromNs, ok := oplog.GetKey(partialLog.Object, operation).(string)
 			if !ok {
-				LOG.Warn("extraCommandName meets {%v: %v} value is not string, ignore!",
-					operation, oplog.GetKey(partialLog.Object, operation))
+				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
 				return nil
 			}
 			toNs, ok := oplog.GetKey(partialLog.Object, "to").(string)
 			if !ok {
-				LOG.Warn("extraCommandName meets {to: %v} value is not string, ignore!",
-					oplog.GetKey(partialLog.Object, "to"))
+				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
 				return nil
 			}
 			partialLog.Namespace = nsTrans.Transform(fromNs)
-			//partialLog.Object[operation] = partialLog.Namespace
-			//partialLog.Object["to"] = nsTrans.Transform(toNs)
 			oplog.SetFiled(partialLog.Object, operation, partialLog.Namespace)
 			oplog.SetFiled(partialLog.Object, "to", nsTrans.Transform(toNs))
 		case "applyOps":
 			if ops := oplog.GetKey(partialLog.Object, "applyOps").([]bson.D); ops != nil {
-				//transOps := make([]interface{}, 0)
-				//for _, op := range ops {
-				//	subLog := oplog.NewPartialLog(op.(bson.M))
-				//	transSubLog := transformPartialLog(subLog, nsTrans, transformRef)
-				//	if transSubLog == nil {
-				//		LOG.Warn("transformPartialLog sublog %v return nil, ignore!", subLog)
-				//		return nil
-				//	}
-				//	transOps = append(transOps, transSubLog.Dump())
-				//}
-				//partialLog.Object["applyOps"] = transOps
 				for i, ele := range ops {
 					m, keys := oplog.ConvertBsonD2M(ele)
 					subLog := oplog.NewPartialLog(m)
@@ -348,6 +332,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 				}
 			}
 		default:
+			// such as: dropDatabase
 			partialLog.Namespace = nsTrans.Transform(partialLog.Namespace)
 		}
 	}
