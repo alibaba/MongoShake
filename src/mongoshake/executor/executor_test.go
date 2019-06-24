@@ -438,6 +438,23 @@ func TestTransformLog(t *testing.T) {
 	{
 		fmt.Printf("TestTransformLog case %d.\n", nr)
 		nr++
+		nsTrans := transform.NewNamespaceTransform([]string{"fdb1.fcol1:tdb1.tcol1", "fdb2.fcol2:tdb2.tcol2"})
+
+		logs := []*OplogRecord{
+			mockTransLogs("c", "fdb1.$cmd", bson.D{
+				bson.DocElem{"renameCollection", "fdb1.fcol1"},
+				bson.DocElem{"to", "fdb2.fcol2"}}),
+		}
+		logs = transformLogs(logs, nsTrans, true)
+		assert.Equal(t,
+			mockTransLogs("c", "tdb1.tcol1", bson.D{
+				bson.DocElem{"renameCollection", "tdb1.tcol1"},
+				bson.DocElem{"to", "tdb2.tcol2"}}), logs[0], "should be equal")
+	}
+
+	{
+		fmt.Printf("TestTransformLog case %d.\n", nr)
+		nr++
 		nsTrans := transform.NewNamespaceTransform([]string{"a.b:c.d", "a:fff"})
 
 		logs := []*OplogRecord{
