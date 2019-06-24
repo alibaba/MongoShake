@@ -121,11 +121,12 @@ func sanitizeOptions() error {
 	if len(conf.Options.MongoUrls) == 0 {
 		return errors.New("mongo_urls were empty")
 	}
-	if len(conf.Options.MongoUrls) == 1 && conf.Options.ContextStorageUrl != "" {
-		return errors.New("storage server should not be configured while single mongo server")
-	}
-	if len(conf.Options.MongoUrls) > 1 && conf.Options.ContextStorageUrl == "" {
-		return errors.New("storage server should be configured while mongo shard servers")
+	if conf.Options.ContextStorageUrl == "" {
+		if len(conf.Options.MongoUrls) == 1 {
+			conf.Options.ContextStorageUrl = conf.Options.MongoUrls[0]
+		} else if len(conf.Options.MongoUrls) > 1 {
+			return errors.New("storage server should be configured while using mongo shard servers")
+		}
 	}
 	if len(conf.Options.MongoUrls) > 1 && conf.Options.WorkerNum != len(conf.Options.MongoUrls) {
 		return errors.New("replication worker should be equal to count of mongo_urls while multi sources (shard)")
@@ -133,10 +134,6 @@ func sanitizeOptions() error {
 	// avoid the typo of mongo urls
 	if utils.HasDuplicated(conf.Options.MongoUrls) {
 		return errors.New("mongo urls were duplicated")
-	}
-	if len(conf.Options.MongoUrls) == 1 {
-		// use current mongo source server as context storage server
-		conf.Options.ContextStorageUrl = conf.Options.MongoUrls[0]
 	}
 	if conf.Options.CollectorId == "" {
 		return errors.New("collector id should not be empty")
@@ -214,6 +211,12 @@ func sanitizeOptions() error {
 
 	if conf.Options.SyncMode != "oplog" && conf.Options.SyncMode != "document" && conf.Options.SyncMode != "all" {
 		return fmt.Errorf("unknown sync_mode[%v]", conf.Options.SyncMode)
+	}
+
+	if conf.Options.MongoConnectMode != utils.ConnectModePrimary &&
+			conf.Options.MongoConnectMode != utils.ConnectModeSecondaryPreferred &&
+			conf.Options.MongoConnectMode != utils.ConnectModeStandalone {
+		return fmt.Errorf("unknown mongo_connect_mode[%v]", conf.Options.MongoConnectMode)
 	}
 
 	return nil

@@ -2,6 +2,7 @@ package collector
 
 import (
 	"fmt"
+	"github.com/vinllen/mgo/bson"
 	"testing"
 
 	"mongoshake/collector/configure"
@@ -327,5 +328,84 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, 3, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, uint64(0), batcher.currentQueue(), "should be equal")
+	}
+}
+
+
+func mockBatcher(nsWhite []string, nsBlack []string) *Batcher {
+	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+	// namespace filter
+	if len(nsWhite) != 0 || len(nsBlack) != 0 {
+		namespaceFilter := filter.NewNamespaceFilter(nsWhite, nsBlack)
+		filterList = append(filterList, namespaceFilter)
+	}
+	return &Batcher{
+		syncer:      &OplogSyncer{
+			fullSyncFinishPosition: 0,
+		},
+		filterList:  filterList,
+	}
+}
+
+func mockFilterPartialLog(op, ns string, logObject bson.D) *oplog.PartialLog {
+	// log.Timestamp > fullSyncFinishPosition
+	return &oplog.PartialLog{
+				Timestamp: bson.MongoTimestamp(1),
+				Namespace: ns,
+				Operation: op,
+				RawSize:   1,
+				Object:    logObject,
+			}
+}
+
+func TestFilterPartialLog(t *testing.T) {
+	// test filterPartialLog
+
+	var nr int
+	// normal
+	{
+		fmt.Printf("TestFilterPartialLog case %d.\n", nr)
+		nr++
+
+		batcher := mockBatcher([]string{"fdb1"}, []string{})
+		log := mockFilterPartialLog("i", "fdb1.fcol1", bson.D{bson.DocElem{"a", 1}})
+		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		log = mockFilterPartialLog("c", "fdb1.$cmd", bson.D{bson.DocElem{"dropDatabase", 1}})
+		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		log = mockFilterPartialLog("c", "fdb1.$cmd", bson.D{
+			bson.DocElem{"create", "fcol1"},
+			bson.DocElem{"idIndex", bson.D{
+				bson.DocElem{"key", bson.D{bson.DocElem{"a", 1}}},
+				bson.DocElem{"ns", "fdb1.fcol1"},
+			}},
+		})
+		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		log = mockFilterPartialLog("c", "fdb1.$cmd", bson.D{
+			bson.DocElem{"renameCollection", "fdb1.fcol1"},
+			bson.DocElem{"to", "fdb2.fcol2"}})
+		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestFilterPartialLog case %d.\n", nr)
+		nr++
+
+		batcher := mockBatcher([]string{"fdb1.fcol1"}, []string{})
+		log := mockFilterPartialLog("i", "fdb1.fcol1", bson.D{bson.DocElem{"a", 1}})
+		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		log = mockFilterPartialLog("c", "fdb1.$cmd", bson.D{bson.DocElem{"dropDatabase", 1}})
+		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		log = mockFilterPartialLog("c", "fdb1.$cmd", bson.D{
+			bson.DocElem{"create", "fcol1"},
+			bson.DocElem{"idIndex", bson.D{
+				bson.DocElem{"key", bson.D{bson.DocElem{"a", 1}}},
+				bson.DocElem{"ns", "fdb1.fcol1"},
+			}},
+		})
+		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		log = mockFilterPartialLog("c", "fdb1.$cmd", bson.D{
+			bson.DocElem{"renameCollection", "fdb1.fcol1"},
+			bson.DocElem{"to", "fdb2.fcol2"}})
+		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
 	}
 }

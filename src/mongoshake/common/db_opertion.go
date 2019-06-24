@@ -2,13 +2,12 @@ package utils
 
 import (
 	"fmt"
-	"mongoshake/dbpool"
 	"strconv"
 	"strings"
+	"math"
 
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-	"math"
 )
 
 var (
@@ -91,7 +90,7 @@ func ApplyOpsFilter(key string) bool {
 // get newest oplog
 func GetNewestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, error) {
 	var retMap map[string]interface{}
-	err := session.DB(localDB).C(dbpool.OplogNS).Find(bson.M{}).Sort("-$natural").Limit(1).One(&retMap)
+	err := session.DB(localDB).C(OplogNS).Find(bson.M{}).Sort("-$natural").Limit(1).One(&retMap)
 	if err != nil {
 		return 0, err
 	}
@@ -101,7 +100,7 @@ func GetNewestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, err
 // get oldest oplog
 func GetOldestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, error) {
 	var retMap map[string]interface{}
-	err := session.DB(localDB).C(dbpool.OplogNS).Find(bson.M{}).Limit(1).One(&retMap)
+	err := session.DB(localDB).C(OplogNS).Find(bson.M{}).Limit(1).One(&retMap)
 	if err != nil {
 		return 0, err
 	}
@@ -109,9 +108,9 @@ func GetOldestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, err
 }
 
 func GetNewestTimestampByUrl(url string) (bson.MongoTimestamp, error) {
-	var conn *dbpool.MongoConn
+	var conn *MongoConn
 	var err error
-	if conn, err = dbpool.NewMongoConn(url, false, true); conn == nil || err != nil {
+	if conn, err = NewMongoConn(url, ConnectModeSecondaryPreferred, true); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()
@@ -120,9 +119,9 @@ func GetNewestTimestampByUrl(url string) (bson.MongoTimestamp, error) {
 }
 
 func GetOldestTimestampByUrl(url string) (bson.MongoTimestamp, error) {
-	var conn *dbpool.MongoConn
+	var conn *MongoConn
 	var err error
-	if conn, err = dbpool.NewMongoConn(url, false, true); conn == nil || err != nil {
+	if conn, err = NewMongoConn(url, ConnectModeSecondaryPreferred, true); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()

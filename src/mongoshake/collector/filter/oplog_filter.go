@@ -22,7 +22,6 @@ func (chain OplogFilterChain) IterateFilter(log *oplog.PartialLog) bool {
 	return false
 }
 
-
 type GidFilter struct {
 	Gid string
 }
@@ -65,8 +64,9 @@ func (filter *MigrateFilter) Filter(log *oplog.PartialLog) bool {
 // because regexp use the default perl engine which is not support inverse match, so
 // use two rules to match
 type NamespaceFilter struct {
-	whiteRule string
-	blackRule string
+	whiteRule      string
+	blackRule      string
+	whileDBRuleMap map[string]bool
 }
 
 // convert input namespace filter to regex string
@@ -91,16 +91,34 @@ func convertToRule(input []string) string {
 	return fmt.Sprintf("^(%s)$|^(%s).*$", rule1R, rule2R)
 }
 
+func covertToWhileDBRule(input []string) map[string]bool {
+	whileDBRuleMap := map[string]bool{}
+	for _, ns := range input {
+		db := strings.SplitN(ns, ".", 2)[0]
+		whileDBRuleMap[db] = true
+	}
+	return whileDBRuleMap
+}
+
 func NewNamespaceFilter(white, black []string) *NamespaceFilter {
 	whiteRule := convertToRule(white)
 	blackRule := convertToRule(black)
+	whileDBRuleMap := covertToWhileDBRule(white)
 
 	return &NamespaceFilter{
-		whiteRule: whiteRule,
-		blackRule: blackRule,
+		whiteRule:      whiteRule,
+		blackRule:      blackRule,
+		whileDBRuleMap: whileDBRuleMap,
 	}
 }
 
 func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
+	// if whiteRule is db.col, then db.$cmd command will not be filtered
+	if strings.HasSuffix(log.Namespace, ".$cmd") {
+		db := strings.SplitN(log.Namespace, ".", 2)[0]
+		if _, ok := filter.whileDBRuleMap[db]; ok {
+			return false
+		}
+	}
 	return filter.FilterNs(log.Namespace)
 }

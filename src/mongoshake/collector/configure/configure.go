@@ -2,6 +2,7 @@ package conf
 
 type Configuration struct {
 	MongoUrls               []string `config:"mongo_urls"`
+	MongoConnectMode        string   `config:"mongo_connect_mode"`
 	CollectorId             string   `config:"collector.id"`
 	CheckpointInterval      int64    `config:"checkpoint.interval"`
 	HTTPListenPort          int      `config:"http_profile"`

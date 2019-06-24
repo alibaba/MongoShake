@@ -70,33 +70,32 @@ func NewDBTransform(transRule []string) *DBTransform {
 }
 
 func TransformDBRef(logObject bson.D, db string, nsTrans *NamespaceTransform) bson.D {
-	for _, ele := range logObject {
-		if logObject[0].Name == "$ref" {
-			// if has DBRef, [0] must be "$ref"
-			collection := logObject[0].Value.(string)
-			if len(logObject) > 2 && logObject[2].Name == "$db" {
-				db = logObject[2].Value.(string)
-			}
-
-			ns := fmt.Sprintf("%s.%s", db, collection)
-			transformNs := nsTrans.Transform(ns)
-			tuple := strings.SplitN(transformNs, ".", 2)
-			logObject[0].Value = tuple[1]
-			if len(logObject) > 2 {
-				logObject[2].Value = tuple[0]
-			} else {
-				logObject = append(logObject, bson.DocElem{"$db", tuple[0]})
-			}
-			break
-		} else {
-			switch v := ele.Value.(type) {
-			case bson.D:
-				ele.Value = TransformDBRef(v, db, nsTrans)
-			default:
-				// do nothing
-			}
+	if logObject[0].Name == "$ref" {
+		// if has DBRef, [0] must be "$ref"
+		collection := logObject[0].Value.(string)
+		if len(logObject) > 2 && logObject[2].Name == "$db" {
+			db = logObject[2].Value.(string)
 		}
+
+		ns := fmt.Sprintf("%s.%s", db, collection)
+		transformNs := nsTrans.Transform(ns)
+		tuple := strings.SplitN(transformNs, ".", 2)
+		logObject[0].Value = tuple[1]
+		if len(logObject) > 2 {
+			logObject[2].Value = tuple[0]
+		} else {
+			logObject = append(logObject, bson.DocElem{"$db", tuple[0]})
+		}
+		return logObject
 	}
 
+	for _, ele := range logObject {
+		switch v := ele.Value.(type) {
+		case bson.D:
+			ele.Value = TransformDBRef(v, db, nsTrans)
+		default:
+			// do nothing
+		}
+	}
 	return logObject
 }

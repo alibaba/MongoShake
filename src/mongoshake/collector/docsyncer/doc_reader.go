@@ -4,17 +4,17 @@ import (
 	"fmt"
 	"strings"
 
-	"mongoshake/dbpool"
 	"mongoshake/collector/filter"
 	"mongoshake/common"
 
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
+	"mongoshake/collector/configure"
 )
 
-func GetAllNamespace(sources []*utils.MongoSource) (map[dbpool.NS]bool, error) {
-	nsSet := make(map[dbpool.NS]bool)
+func GetAllNamespace(sources []*utils.MongoSource) (map[utils.NS]bool, error) {
+	nsSet := make(map[utils.NS]bool)
 	for _, src := range sources {
 		nsList, err := getDbNamespace(src.URL)
 		if err != nil {
@@ -27,9 +27,9 @@ func GetAllNamespace(sources []*utils.MongoSource) (map[dbpool.NS]bool, error) {
 	return nsSet, nil
 }
 
-func getDbNamespace(url string) (nsList []dbpool.NS, err error) {
-	var conn *dbpool.MongoConn
-	if conn, err = dbpool.NewMongoConn(url, false, true); conn == nil || err != nil {
+func getDbNamespace(url string) (nsList []utils.NS, err error) {
+	var conn *utils.MongoConn
+	if conn, err = utils.NewMongoConn(url, utils.ConnectModeSecondaryPreferred, true); conn == nil || err != nil {
 		return nil, err
 	}
 	defer conn.Close()
@@ -42,7 +42,7 @@ func getDbNamespace(url string) (nsList []dbpool.NS, err error) {
 
 	filterList := filter.NewDocFilterList()
 
-	nsList = make([]dbpool.NS, 0, 128)
+	nsList = make([]utils.NS, 0, 128)
 	for _, db := range dbNames {
 		colNames, err := conn.Session.DB(db).CollectionNames()
 		if err != nil {
@@ -50,7 +50,7 @@ func getDbNamespace(url string) (nsList []dbpool.NS, err error) {
 			return nil, err
 		}
 		for _, col := range colNames {
-			ns := dbpool.NS{Database:db, Collection:col}
+			ns := utils.NS{Database:db, Collection:col}
 			if strings.HasPrefix(col, "system.") {
 				continue
 			}
@@ -68,10 +68,10 @@ func getDbNamespace(url string) (nsList []dbpool.NS, err error) {
 type DocumentReader struct {
 	// source mongo address url
 	src string
-	ns dbpool.NS
+	ns utils.NS
 
 	// mongo document reader
-	conn          	*dbpool.MongoConn
+	conn          	*utils.MongoConn
 	docIterator 	*mgo.Iter
 
 	// query statement and current max cursor
@@ -79,7 +79,7 @@ type DocumentReader struct {
 }
 
 // NewDocumentReader creates reader with mongodb url
-func NewDocumentReader(src string, ns dbpool.NS) *DocumentReader {
+func NewDocumentReader(src string, ns utils.NS) *DocumentReader {
 	return &DocumentReader{src: src, ns: ns, query: bson.M{}}
 }
 
@@ -119,7 +119,7 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 			reader.conn.Close()
 		}
 		// reconnect
-		if reader.conn, err = dbpool.NewMongoConn(reader.src, false, true); reader.conn == nil || err != nil {
+		if reader.conn, err = utils.NewMongoConn(reader.src, conf.Options.MongoConnectMode, true); reader.conn == nil || err != nil {
 			return err
 		}
 	}
