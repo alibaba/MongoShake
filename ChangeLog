@@ -3,13 +3,14 @@
 	* IMPROVE: add `mongo_connect_mode` in conf.
 	* IMPROVE: support writing into different mongodb when source mongo is
 	replica set.
+	* BUG FIX: optimize namespace filter for DDL.
 
 2019-06-19 Alibaba Cloud.
 	* version: 2.0.0
 	* Feature: support full synchronization.
 	* Feature: support DDL synchronization including index and transaction.
 	* Feature: support namespace rename.
-	* BUGFIX: fix bug of dbref order.
+	* BUG FIX: fix bug of dbref order.
 
 2019-04-20 Alibaba Cloud.
 	* version: 1.5.0-unstable
@@ -18,7 +19,7 @@
 
 2019-04-12 Alibaba Cloud.
 	* version: 1.4.6
-	* BUGFIX: fix bug of batched oplog size exceeding 16MB.
+	* BUG FIX: fix bug of batched oplog size exceeding 16MB.
 
 2018-12-20 Alibaba Cloud.
 	* version: 1.4.5
