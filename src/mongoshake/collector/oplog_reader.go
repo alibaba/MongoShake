@@ -3,13 +3,12 @@ package collector
 import (
 	"errors"
 	"fmt"
-	utils "mongoshake/common"
 	"strings"
 	"sync"
 	"time"
 
+	"mongoshake/common"
 	"mongoshake/collector/configure"
-	"mongoshake/dbpool"
 	"mongoshake/oplog"
 
 	LOG "github.com/vinllen/log4go"
@@ -50,7 +49,7 @@ type OplogReader struct {
 	// source mongo address url
 	src string
 	// mongo oplog reader
-	conn           *dbpool.MongoConn
+	conn           *utils.MongoConn
 	oplogsIterator *mgo.Iter
 
 	// query statement and current max cursor
@@ -173,7 +172,8 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 			reader.conn.Close()
 		}
 		// reconnect
-		if reader.conn, err = dbpool.NewMongoConn(reader.src, false, true); reader.conn == nil || err != nil {
+		if reader.conn, err = utils.NewMongoConn(reader.src, conf.Options.MongoConnectMode, true);
+				reader.conn == nil || err != nil {
 			err = fmt.Errorf("reconnect mongo instance [%s] error. %s", reader.src, err.Error())
 			return err
 		}
@@ -205,7 +205,7 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 	// rebuild syncerGroup condition statement with current checkpoint timestamp
 	reader.conn.Session.SetBatch(8192) //
 	reader.conn.Session.SetPrefetch(0.2)
-	reader.oplogsIterator = reader.conn.Session.DB(localDB).C(dbpool.OplogNS).
+	reader.oplogsIterator = reader.conn.Session.DB(localDB).C(utils.OplogNS).
 		Find(reader.query).LogReplay().Tail(time.Second * tailTimeout) // this timeout is useless
 	return
 }

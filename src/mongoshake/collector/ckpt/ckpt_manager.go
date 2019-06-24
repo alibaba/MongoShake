@@ -10,7 +10,6 @@ import (
 
 	"mongoshake/collector/configure"
 	"mongoshake/common"
-	"mongoshake/dbpool"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
@@ -104,7 +103,7 @@ type CheckpointOperation interface {
 type MongoCheckpoint struct {
 	Checkpoint
 
-	Conn        *dbpool.MongoConn
+	Conn        *utils.MongoConn
 	QueryHandle *mgo.Collection
 
 	// connection info
@@ -115,7 +114,7 @@ type MongoCheckpoint struct {
 func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 	// make connection if we don't already established
 	if ckpt.Conn == nil {
-		if conn, err := dbpool.NewMongoConn(ckpt.URL, true, true); err == nil {
+		if conn, err := utils.NewMongoConn(ckpt.URL, utils.ConnectModePrimary, true); err == nil {
 			ckpt.Conn = conn
 			ckpt.QueryHandle = conn.Session.DB(ckpt.DB).C(ckpt.Table)
 		} else {

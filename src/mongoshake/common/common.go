@@ -16,6 +16,10 @@ const (
 	TunnelSendBad  uint64 = 4
 	TunnelSyncBad  uint64 = 8
 	ReplicaExecBad uint64 = 16
+
+	ConnectModePrimary            = "primary"
+	ConnectModeSecondaryPreferred = "secondaryPreferred"
+	ConnectModeStandalone         = "standalone"
 )
 
 // Build info

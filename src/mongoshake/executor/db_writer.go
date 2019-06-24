@@ -197,8 +197,8 @@ func (cw *CommandWriter) doCommand(database string, metadata bson.M, oplogs []*O
 	var err error
 	for _, log := range oplogs {
 		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-		operation, found := extraCommandName(log.original.partialLog.Object)
-		if !conf.Options.ReplayerDMLOnly || (found && isSyncDataCommand(operation)) {
+		operation, found := oplog.ExtraCommandName(log.original.partialLog.Object)
+		if !conf.Options.ReplayerDMLOnly || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
 			if err = cw.applyOps(database, metadata, []*oplog.PartialLog{log.original.
 				partialLog}); err == nil {
@@ -362,8 +362,8 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*Oplo
 	for _, log := range oplogs {
 		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
 		newObject := log.original.partialLog.Object
-		operation, found := extraCommandName(newObject)
-		if !conf.Options.ReplayerDMLOnly || (found && isSyncDataCommand(operation)) {
+		operation, found := oplog.ExtraCommandName(newObject)
+		if !conf.Options.ReplayerDMLOnly || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
 			if err = runCommand(database, operation, log.original.partialLog, bw.session); err == nil {
 				LOG.Info("Execute command (op==c) oplog dml_only mode [%t], operation [%s]",
@@ -545,8 +545,8 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*Op
 	for _, log := range oplogs {
 		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
 		newObject := log.original.partialLog.Object
-		operation, found := extraCommandName(newObject)
-		if !conf.Options.ReplayerDMLOnly || (found && isSyncDataCommand(operation)) {
+		operation, found := oplog.ExtraCommandName(newObject)
+		if !conf.Options.ReplayerDMLOnly || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
 			if err = runCommand(database, operation, log.original.partialLog, sw.session); err == nil {
 				LOG.Info("Execute command (op==c) oplog dml_only mode [%t], operation [%s]",
@@ -568,6 +568,8 @@ func runCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 	case "dropDatabase":
 		err = dbHandler.DropDatabase()
 	case "create":
+		fallthrough
+	case "createIndexes":
 		fallthrough
 	case "collMod":
 		fallthrough
@@ -592,7 +594,7 @@ func runCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 		//	store = append(store, bson.DocElem{Name: key, Value: value})
 		//}
 		// call Run()
-		if !isRunOnAdminCommand(operation) {
+		if !oplog.IsRunOnAdminCommand(operation) {
 			err = dbHandler.Run(log.Object, nil)
 		} else {
 			err = session.DB("admin").Run(log.Object, nil)

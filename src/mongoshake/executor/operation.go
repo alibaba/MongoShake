@@ -7,7 +7,6 @@ import (
 
 	"mongoshake/collector/configure"
 	"mongoshake/common"
-	"mongoshake/dbpool"
 	"mongoshake/oplog"
 
 	LOG "github.com/vinllen/log4go"
@@ -19,30 +18,10 @@ var ErrorsShouldSkip = map[int]string{
 	61: "ShardKeyNotFound",
 }
 
-type CommandOperation struct {
-	concernSyncData bool
-	runOnAdmin      bool // some commands like `renameCollection` need run on admin database
-}
-
-var opsMap = map[string]*CommandOperation{
-	"create":           {concernSyncData: false, runOnAdmin: false},
-	"collMod":          {concernSyncData: false, runOnAdmin: false},
-	"dropDatabase":     {concernSyncData: false, runOnAdmin: false},
-	"drop":             {concernSyncData: false, runOnAdmin: false},
-	"deleteIndex":      {concernSyncData: false, runOnAdmin: false},
-	"deleteIndexes":    {concernSyncData: false, runOnAdmin: false},
-	"dropIndex":        {concernSyncData: false, runOnAdmin: false},
-	"dropIndexes":      {concernSyncData: false, runOnAdmin: false},
-	"renameCollection": {concernSyncData: false, runOnAdmin: true},
-	"convertToCapped":  {concernSyncData: false, runOnAdmin: false},
-	"emptycapped":      {concernSyncData: false, runOnAdmin: false},
-	"applyOps":         {concernSyncData: true, runOnAdmin: false},
-}
-
 func (exec *Executor) ensureConnection() bool {
 	// reconnect if necessary
 	if exec.session == nil {
-		if conn, err := dbpool.NewMongoConn(exec.MongoUrl, true, true); err != nil {
+		if conn, err := utils.NewMongoConn(exec.MongoUrl, utils.ConnectModePrimary, true); err != nil {
 			LOG.Critical("Connect to mongo cluster failed. %v", err)
 			return false
 		} else {
@@ -115,7 +94,7 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 		}
 
 		if err != nil {
-			LOG.Critical("Replayer-%d, executor-%d, oplog for namespace[%s] op[%s] failed. error type[%v]" +
+			LOG.Critical("Replayer-%d, executor-%d, oplog for namespace[%s] op[%s] failed. error type[%v]"+
 				" error[%v], logs number[%d], firstLog: %v",
 				exec.batchExecutor.ReplayerId, exec.id, group.ns, group.op, reflect.TypeOf(err), err.Error(), count,
 				group.oplogRecords[0].original.partialLog)
@@ -151,36 +130,6 @@ func buildMetadata(oplog *oplog.PartialLog) bson.M {
 		return bson.M{"g": oplog.Gid}
 	}
 	return bson.M{}
-}
-
-func extraCommandName(o bson.D) (string, bool) {
-	//for key := range o {
-	//	if _, exist := opsMap[key]; exist {
-	//		return key, true
-	//	}
-	//}
-
-	for _, ele := range o {
-		if _, exist := opsMap[ele.Name]; exist {
-			return ele.Name, true
-		}
-	}
-
-	return "", false
-}
-
-func isSyncDataCommand(operation string) bool {
-	if op, ok := opsMap[strings.TrimSpace(operation)]; ok {
-		return op.concernSyncData
-	}
-	return false
-}
-
-func isRunOnAdminCommand(operation string) bool {
-	if op, ok := opsMap[strings.TrimSpace(operation)]; ok {
-		return op.runOnAdmin
-	}
-	return false
 }
 
 func lookupOpName(op string) string {
