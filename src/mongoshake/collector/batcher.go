@@ -237,13 +237,15 @@ func filterPartialLog(partialLog *oplog.PartialLog, batcher *Batcher) bool {
 				for _, ele := range ops {
 					m, _ := oplog.ConvertBsonD2M(ele)
 					subLog := oplog.NewPartialLog(m)
+
 					if ok := filterPartialLog(subLog, batcher); !ok {
 						filterOps = append(filterOps, ele)
 					}
 				}
 				oplog.SetFiled(partialLog.Object, "applyOps", filterOps)
 			}
-			return len(filterOps) > 0
+			// if length of filterOps is zero, then the oplog is filtered
+			return len(filterOps) == 0
 		default:
 			// such as: dropDatabase
 			return batcher.filter(partialLog)

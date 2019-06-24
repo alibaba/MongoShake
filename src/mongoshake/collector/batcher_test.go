@@ -408,4 +408,85 @@ func TestFilterPartialLog(t *testing.T) {
 			bson.DocElem{"to", "fdb2.fcol2"}})
 		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
 	}
+
+	{
+		fmt.Printf("TestFilterPartialLog case %d.\n", nr)
+		nr++
+		batcher := mockBatcher([]string{"fdb1.fcol1"}, []string{})
+		log := mockFilterPartialLog("c", "admin.$cmd", bson.D{
+			bson.DocElem{
+				Name: "applyOps",
+				Value: []bson.D{
+					{
+						bson.DocElem{"op", "i"},
+						bson.DocElem{"ns", "fdb1.fcol1"},
+						bson.DocElem{"o", bson.D{
+							bson.DocElem{"$ref", "fdb2"},
+							bson.DocElem{"$id", "id2"},
+						}},
+					},
+					{
+						bson.DocElem{"op", "i"},
+						bson.DocElem{"ns", "fdb1.fcol2"},
+						bson.DocElem{"o", bson.D{
+							bson.DocElem{"$ref", "fdb2"},
+							bson.DocElem{"$id", "id2"},
+						}},
+					},
+				},
+			},
+		})
+		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		assert.Equal(t, mockFilterPartialLog("c", "admin.$cmd", bson.D{
+			bson.DocElem{
+				Name: "applyOps",
+				Value: []bson.D{
+					{
+						bson.DocElem{"op", "i"},
+						bson.DocElem{"ns", "fdb1.fcol1"},
+						bson.DocElem{"o", bson.D{
+							bson.DocElem{"$ref", "fdb2"},
+							bson.DocElem{"$id", "id2"},
+						}},
+					},
+				},
+			},
+		}), log, "should be equal")
+	}
+
+	{
+		fmt.Printf("TestFilterPartialLog case %d.\n", nr)
+		nr++
+		batcher := mockBatcher([]string{"fdb2"}, []string{})
+		log := mockFilterPartialLog("c", "admin.$cmd", bson.D{
+			bson.DocElem{
+				Name: "applyOps",
+				Value: []bson.D{
+					{
+						bson.DocElem{"op", "i"},
+						bson.DocElem{"ns", "fdb1.fcol1"},
+						bson.DocElem{"o", bson.D{
+							bson.DocElem{"$ref", "fdb2"},
+							bson.DocElem{"$id", "id2"},
+						}},
+					},
+					{
+						bson.DocElem{"op", "i"},
+						bson.DocElem{"ns", "fdb1.fcol2"},
+						bson.DocElem{"o", bson.D{
+							bson.DocElem{"$ref", "fdb2"},
+							bson.DocElem{"$id", "id2"},
+						}},
+					},
+				},
+			},
+		})
+		assert.Equal(t, true, filterPartialLog(log, batcher), "should be equal")
+		assert.Equal(t, mockFilterPartialLog("c", "admin.$cmd", bson.D{
+			bson.DocElem{
+				Name: "applyOps",
+				Value: []bson.D(nil),
+			},
+		}), log, "should be equal")
+	}
 }
