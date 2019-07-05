@@ -2,8 +2,12 @@ package filter
 
 import (
 	"fmt"
-	"mongoshake/oplog"
 	"strings"
+
+	"mongoshake/oplog"
+
+	"github.com/vinllen/mgo/bson"
+	LOG "github.com/vinllen/log4go"
 )
 
 // OplogFilter: AutologousFilter, NamespaceFilter, GidFilter, NoopFilter, DDLFilter
@@ -66,7 +70,7 @@ func (filter *MigrateFilter) Filter(log *oplog.PartialLog) bool {
 type NamespaceFilter struct {
 	whiteRule      string
 	blackRule      string
-	whileDBRuleMap map[string]bool
+	whiteDBRuleMap map[string]bool
 }
 
 // convert input namespace filter to regex string
@@ -91,32 +95,112 @@ func convertToRule(input []string) string {
 	return fmt.Sprintf("^(%s)$|^(%s).*$", rule1R, rule2R)
 }
 
-func covertToWhileDBRule(input []string) map[string]bool {
-	whileDBRuleMap := map[string]bool{}
+func covertToWhiteDBRule(input []string) map[string]bool {
+	whiteDBRuleMap := map[string]bool{}
 	for _, ns := range input {
 		db := strings.SplitN(ns, ".", 2)[0]
-		whileDBRuleMap[db] = true
+		whiteDBRuleMap[db] = true
 	}
-	return whileDBRuleMap
+	return whiteDBRuleMap
 }
 
 func NewNamespaceFilter(white, black []string) *NamespaceFilter {
 	whiteRule := convertToRule(white)
 	blackRule := convertToRule(black)
-	whileDBRuleMap := covertToWhileDBRule(white)
+	whiteDBRuleMap := covertToWhiteDBRule(white)
 
 	return &NamespaceFilter{
 		whiteRule:      whiteRule,
 		blackRule:      blackRule,
-		whileDBRuleMap: whileDBRuleMap,
+		whiteDBRuleMap: whiteDBRuleMap,
 	}
 }
 
 func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
+	var result bool
+	db := strings.SplitN(log.Namespace, ".", 2)[0]
+	if log.Operation != "c" {
+		// DML
+		// {"op" : "i", "ns" : "my.system.indexes", "o" : { "v" : 2, "key" : { "date" : 1 }, "name" : "date_1", "ns" : "my.tbl", "expireAfterSeconds" : 3600 }
+		if strings.HasSuffix(log.Namespace, "system.indexes") {
+			// DDL: change log.Namespace to ns of object, in order to do filter with real namespace
+			ns := log.Namespace
+			log.Namespace = oplog.GetKey(log.Object, "ns").(string)
+			result = filter.filter(log)
+			log.Namespace = ns
+		} else {
+			result = filter.filter(log)
+		}
+		return result
+	} else {
+		// DDL
+		operation, found := oplog.ExtraCommandName(log.Object)
+		if !found {
+			LOG.Warn("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
+			return false
+		}
+		switch operation {
+		case "create":
+			fallthrough
+		case "createIndexes":
+			fallthrough
+		case "collMod":
+			fallthrough
+		case "drop":
+			fallthrough
+		case "deleteIndex":
+			fallthrough
+		case "deleteIndexes":
+			fallthrough
+		case "dropIndex":
+			fallthrough
+		case "dropIndexes":
+			fallthrough
+		case "convertToCapped":
+			fallthrough
+		case "emptycapped":
+			col, ok := oplog.GetKey(log.Object, operation).(string)
+			if !ok {
+				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, log.Object)
+				return false
+			}
+			log.Namespace = fmt.Sprintf("%s.%s", db, col)
+			return filter.filter(log)
+		case "renameCollection":
+			// { "renameCollection" : "my.tbl", "to" : "my.my", "stayTemp" : false, "dropTarget" : false }
+			ns, ok := oplog.GetKey(log.Object, operation).(string)
+			if !ok {
+				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, log.Object)
+				return false
+			}
+			log.Namespace = ns
+			return filter.filter(log)
+		case "applyOps":
+			var filterOps []bson.D
+			if ops := oplog.GetKey(log.Object, "applyOps").([]interface{}); ops != nil {
+				for _, ele := range ops {
+					eleD := ele.(bson.D)
+					m, _ := oplog.ConvertBsonD2M(eleD)
+					subLog := oplog.NewPartialLog(m)
+					if ok := filter.Filter(subLog); !ok {
+						filterOps = append(filterOps, eleD)
+					}
+				}
+				oplog.SetFiled(log.Object, "applyOps", filterOps)
+			}
+			return len(filterOps) > 0
+		default:
+			// such as: dropDatabase
+			return filter.filter(log)
+		}
+	}
+}
+
+func (filter *NamespaceFilter) filter(log *oplog.PartialLog) bool {
 	// if whiteRule is db.col, then db.$cmd command will not be filtered
 	if strings.HasSuffix(log.Namespace, ".$cmd") {
 		db := strings.SplitN(log.Namespace, ".", 2)[0]
-		if _, ok := filter.whileDBRuleMap[db]; ok {
+		if _, ok := filter.whiteDBRuleMap[db]; ok {
 			return false
 		}
 	}
