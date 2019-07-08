@@ -38,6 +38,8 @@ type OplogHandler interface {
 type OplogSyncer struct {
 	OplogHandler
 
+	id int
+
 	// global replicate coordinator
 	coordinator *ReplicationCoordinator
 	// source mongodb replica set name
@@ -71,6 +73,8 @@ type OplogSyncer struct {
 	startTime time.Time
 	ckptTime  time.Time
 
+	manager *MoveChunkManager
+
 	replMetric *utils.ReplicationMetric
 }
 
@@ -82,13 +86,16 @@ type OplogSyncer struct {
  * The reason we split pending queue and logs queue is to improve the performance.
  */
 func NewOplogSyncer(
-		coordinator *ReplicationCoordinator,
-		replset string,
-		startPosition int64,
-		fullSyncFinishPosition int64,
-		mongoUrl string,
-		gid string) *OplogSyncer {
+	id int,
+	coordinator *ReplicationCoordinator,
+	replset string,
+	startPosition int64,
+	fullSyncFinishPosition int64,
+	mongoUrl string,
+	gid string,
+	manager *MoveChunkManager) *OplogSyncer {
 	syncer := &OplogSyncer{
+		id:                     id,
 		coordinator:            coordinator,
 		replset:                replset,
 		startPosition:          startPosition,
@@ -96,6 +103,7 @@ func NewOplogSyncer(
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
 		reader: NewOplogReader(mongoUrl),
+		manager: manager,
 	}
 
 	// concurrent level hasher
@@ -257,7 +265,7 @@ func (sync *OplogSyncer) deserializer(index int) {
 // only master(maybe several mongo-shake starts) can poll oplog.
 func (sync *OplogSyncer) poll() {
 	// we should reload checkpoint. in case of other collector
- 	// has fetched oplogs when master quorum leader election
+	// has fetched oplogs when master quorum leader election
 	// happens frequently. so we simply reload.
 	checkpoint := sync.ckptManager.Get()
 	if checkpoint == nil {

@@ -73,8 +73,7 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 	}
 
 	if moveChunkFilter.Filter(log) {
-		LOG.Crashf("move chunk oplog found[%v]", log)
-		return false
+		return true
 	}
 
 	// DDL is disable when timestamp <= fullSyncFinishPosition
@@ -131,6 +130,9 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool) {
 
 	// split batch if has DDL
 	for i, genericLog := range mergeBatch {
+		// ensure the oplog order when moveChunk occurs
+		blockMoveChunk(genericLog.Parsed, batcher.syncer)
+
 		// filter oplog such like Noop or Gid-filtered
 		if filterPartialLog(genericLog.Parsed, batcher) {
 			// doesn't push to worker
@@ -173,6 +175,19 @@ func (batcher *Batcher) currentQueue() uint64 {
 	return batcher.nextQueue
 }
 
+// operations for _id record before migrate delete at node A must start ahead of operations after migrate insert at B
+func blockMoveChunk(partialLog *oplog.PartialLog, syncer *OplogSyncer) {
+	if ddlFilter.Filter(partialLog) || partialLog.Operation == "n" {
+		return
+	}
+
+	if moveChunkFilter.Filter(partialLog) && utils.TimestampToInt64(partialLog.Timestamp) <= syncer.fullSyncFinishPosition {
+		LOG.Crashf("move chunk oplog found[%v] when oplog timestamp[%v] less than fullSyncFinishPosition[%v]",
+			partialLog, partialLog.Timestamp, syncer.fullSyncFinishPosition)
+	}
+
+	syncer.manager.barrierBlock(syncer.id, partialLog)
+}
 
 func filterPartialLog(partialLog *oplog.PartialLog, batcher *Batcher) bool {
 	var result bool

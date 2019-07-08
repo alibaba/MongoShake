@@ -362,12 +362,12 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
 		// transform dbref for document
 		if len(conf.Options.TransformNamespace) > 0 && conf.Options.DBRef {
 			var docData bson.D
-			if err := bson.Unmarshal(doc.Data, docData); err != nil {
-				LOG.Warn("collectionSync do bson unmarshal %v failed. %v", doc.Data, err)
+			if err := bson.Unmarshal(doc.Data, &docData); err != nil {
+				LOG.Warn("collectionSync do bson unmarshal %v from ns %v failed. %v", doc.Data, ns, err)
 			} else {
 				docData = transform.TransformDBRef(docData, ns.Database, syncer.nsTrans)
 				if v, err := bson.Marshal(docData); err != nil {
-					LOG.Warn("collectionSync do bson marshal %v failed. %v", docData, err)
+					LOG.Warn("collectionSync do bson marshal %v from ns %v failed. %v", docData, ns, err)
 				} else {
 					doc.Data = v
 				}
