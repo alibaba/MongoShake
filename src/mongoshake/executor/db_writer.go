@@ -11,6 +11,7 @@ import(
 	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
 	"mongoshake/common"
+	"github.com/gugemichael/nimo4go"
 )
 
 const (
@@ -562,14 +563,56 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*Op
 }
 
 func runCommand(database, operation string, log *oplog.PartialLog, session *mgo.Session) error {
+	defer LOG.Debug("runCommand run DDL: %v", log.Dump(nil, true))
 	dbHandler := session.DB(database)
+	LOG.Info("runCommand run DDL with type[%s]", operation)
 	var err error
 	switch operation {
-	case "dropDatabase":
-		err = dbHandler.DropDatabase()
-	case "create":
-		fallthrough
 	case "createIndexes":
+		/*
+		 * after v3.6, the given oplog should have uuid when run applyOps with createIndexes.
+		 * so we modify oplog base this ref:
+		 * https://docs.mongodb.com/manual/reference/command/createIndexes/#dbcmd.createIndexes
+		 */
+		var innerBsonD, indexes bson.D
+		for i, ele := range log.Object {
+			if i == 0 {
+				nimo.AssertTrue(ele.Name == "createIndexes", "should panic when ele.Name != 'createIndexes'")
+			} else {
+				innerBsonD = append(innerBsonD, ele)
+			}
+		}
+		indexes = append(indexes, log.Object[0]) // createIndexes
+		indexes = append(indexes, bson.DocElem{
+			Name: "indexes",
+			Value: []bson.D { // only has 1 bson.D
+				innerBsonD,
+			},
+		})
+		err = dbHandler.Run(indexes, nil)
+	case "applyOps":
+		/*
+		 * Strictly speaking, we should handle applysOps nested case, but it is
+		 * complicate to fulfill, so we just use "applyOps" to run the command directly.
+		 */
+		var store bson.D
+		for _, ele := range log.Object {
+			if utils.ApplyOpsFilter(ele.Name) {
+				continue
+			}
+			if ele.Name == "applyOps" {
+				arr := ele.Value.([]interface{})
+				for i, ele := range arr {
+					doc := ele.(bson.D)
+					arr[i] = oplog.RemoveFiled(doc, uuidMark)
+				}
+			}
+			store = append(store, ele)
+		}
+		err = dbHandler.Run(store, nil)
+	case "dropDatabase":
+		fallthrough
+	case "create":
 		fallthrough
 	case "collMod":
 		fallthrough
@@ -588,38 +631,27 @@ func runCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 	case "renameCollection":
 		fallthrough
 	case "emptycapped":
-		// convert bson.M to bson.D
-		//var store bson.D
-		//for key, value := range log.Object {
-		//	store = append(store, bson.DocElem{Name: key, Value: value})
-		//}
-		// call Run()
-		if !oplog.IsRunOnAdminCommand(operation) {
-			err = dbHandler.Run(log.Object, nil)
-		} else {
-			err = session.DB("admin").Run(log.Object, nil)
-		}
-	case "applyOps":
-		var store bson.D
+		fallthrough
+	default:
+		// filter log.Object
+		var rec bson.D
 		for _, ele := range log.Object {
 			if utils.ApplyOpsFilter(ele.Name) {
 				continue
 			}
-			if ele.Name == "applyOps" {
-				arr := ele.Value.([]interface{})
-				for _, ele := range arr {
-					doc := ele.(bson.D)
-					//if _, ok := doc[uuidMark]; ok {
-					//	delete(doc, uuidMark)
-					//}
-					oplog.RemoveFiled(doc, uuidMark)
-				}
-			}
-			store = append(store, ele)
+
+			rec = append(rec, ele)
 		}
+		log.Object = rec // reset log.Object
+
+		var store bson.D
+		store = append(store, bson.DocElem{
+			Name: "applyOps",
+			Value: []bson.D {
+				log.Dump(nil, true),
+			},
+		})
 		err = dbHandler.Run(store, nil)
-	default:
-		LOG.Warn("runCommand meets type[%s] which is not implemented, ignore!", operation)
 	}
 
 	return err
