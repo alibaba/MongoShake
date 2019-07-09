@@ -71,6 +71,11 @@ func TimestampToString(ts int64) string {
 	return time.Unix(ts, 0).Format(TimeFormat)
 }
 
+func TimestampToOplogString(ts bson.MongoTimestamp) string {
+	v := uint64(ts)
+	return fmt.Sprintf("Timestamp(%d, %d)", v>>32, uint32(v))
+}
+
 func ExtractMongoTimestamp(ts interface{}) int64 {
 	switch src := ts.(type) {
 	case bson.MongoTimestamp:

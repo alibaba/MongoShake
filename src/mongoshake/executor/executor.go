@@ -215,6 +215,11 @@ func (exec *Executor) start() {
 func (exec *Executor) doSync(logs []*OplogRecord) error {
 	count := len(logs)
 
+	//for _, log := range logs {
+	//	partialLog := log.original.partialLog
+	//	LOG.Info(partialLog)
+	//}
+
 	transLogs := transformLogs(logs, exec.batchExecutor.NsTrans, conf.Options.DBRef)
 
 	// split batched oplogRecords into (ns, op) groups. individual group
