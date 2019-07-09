@@ -78,6 +78,7 @@ done
 cp scripts/start.sh ${output}/
 cp scripts/stop.sh ${output}/
 cp scripts/mongoshake-stat ${output}/
+cp scripts/comparision.py ${output}/
 
 
 if [ "Linux" == "$(uname -s)" ];then

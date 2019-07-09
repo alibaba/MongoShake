@@ -80,10 +80,14 @@ func IsNotFound(err error) bool {
 
 func ApplyOpsFilter(key string) bool {
 	// convert to map if has more later
-	if strings.TrimSpace(key) == "$db" {
+	k := strings.TrimSpace(key)
+	if k == "$db" {
 		// 40621, $db is not allowed in OP_QUERY requests
 		return true
+	} else if k == "ui" {
+		return true
 	}
+
 	return false
 }
 
