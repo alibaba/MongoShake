@@ -62,12 +62,6 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 		LOG.Debug("Replay-%d oplog collection ns [%s] with command [%s] batch count %d, metadata %v",
 			exec.batchExecutor.ReplayerId, group.ns, strings.ToUpper(lookupOpName(group.op)), count, metadata)
 
-		LOG.Info("group op[%v] ns[%v]", group.op, group.ns)
-		for _, log := range group.oplogRecords {
-			partialLog := log.original.partialLog
-			LOG.Info(partialLog)
-		}
-
 		/*
 		 * in the former version, we filter DDL here. But in current version, all messages that need filter
 		 * have already removed in the collector(syncer). So here, we only need to write all oplogs.
