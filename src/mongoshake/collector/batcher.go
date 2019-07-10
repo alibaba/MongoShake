@@ -138,7 +138,11 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool) {
 		}
 
 		// ensure the oplog order when moveChunk occurs
-		moveChunkBarrier(batcher.syncer, genericLog.Parsed)
+		if moveChunkBarrier(batcher.syncer, genericLog.Parsed) {
+			batcher.remainLogs = mergeBatch[i:]
+			barrier = true
+			break
+		}
 
 		if moveChunkFilter.Filter(genericLog.Parsed) {
 			continue
@@ -181,12 +185,12 @@ func (batcher *Batcher) currentQueue() uint64 {
 }
 
 // operations for _id record before migrate delete at node A must start ahead of operations after migrate insert at B
-func moveChunkBarrier(syncer *OplogSyncer, partialLog *oplog.PartialLog) {
+func moveChunkBarrier(syncer *OplogSyncer, partialLog *oplog.PartialLog) bool {
 	if ddlFilter.Filter(partialLog) {
-		return
+		return false
 	}
 
-	syncer.manager.barrierBlock(syncer.id, partialLog)
+	return syncer.manager.barrierBlock(syncer.id, partialLog)
 }
 
 func filterPartialLog(partialLog *oplog.PartialLog, batcher *Batcher) bool {

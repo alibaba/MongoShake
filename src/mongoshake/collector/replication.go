@@ -267,7 +267,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	// replicate speed limit on all syncer
 	coordinator.rateController = nimo.NewSimpleRateController()
 
-	manager := NewMoveChunkManager(len(coordinator.Sources))
+	manager := NewMoveChunkManager()
 
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
@@ -276,6 +276,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 			src.URL, src.Gid, manager)
 		// syncerGroup http api registry
 		syncer.init()
+		manager.addOplogSyncer(syncer)
 		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)
 	}
 
@@ -294,6 +295,8 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		syncer.bind(w)
 		go w.startWorker()
 	}
+
+	manager.start()
 
 	for _, syncer := range coordinator.syncerGroup {
 		go syncer.start()
