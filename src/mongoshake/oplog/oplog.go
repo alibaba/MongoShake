@@ -119,15 +119,16 @@ func ConvertBsonD2M(input bson.D) (bson.M, map[string]struct{}) {
 }
 
 func RemoveFiled(input bson.D, key string) bson.D {
-	var id int
-	for id = range input {
+	flag := -1
+	for id := range input {
 		if input[id].Name == key {
+			flag = id
 			break
 		}
 	}
 
-	if id < len(input) {
-		input = append(input[: id], input[id + 1:]...)
+	if flag != -1 {
+		input = append(input[: flag], input[flag + 1:]...)
 	}
 	return input
 }
