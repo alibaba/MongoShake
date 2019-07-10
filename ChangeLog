@@ -1,3 +1,8 @@
+2019-07-10 Alibaba Cloud.
+	* version: 2.0.3
+	* BUG FIX: update sentence incurs some fields lost.
+	* BUG FIX: modify start.sh
+
 2019-07-09 Alibaba Cloud.
 	* version: 2.0.2
 	* BUG FIX: DDL createIndexes fail. Using `applyOps` in DDL replay. see
