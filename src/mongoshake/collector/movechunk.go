@@ -35,17 +35,27 @@ func (manager *MoveChunkManager) start() {
 	nimo.GoRoutineInLoop(manager.eliminateBarrier)
 }
 
-func (manager *MoveChunkManager) workerAckProbe(syncId int, timestamp bson.MongoTimestamp) bool {
-	syncer := manager.syncInfoMap[syncId].syncer
-	// worker ack must exceed timestamp of insert/delete move chunk oplog
-	for _, worker := range syncer.batcher.workerGroup {
-		unack := atomic.LoadInt64(&worker.unack)
-		ack := atomic.LoadInt64(&worker.ack)
-		if ack < unack {
+func (manager *MoveChunkManager) workerAckProbe(timestamp bson.MongoTimestamp) bool {
+	result := true
+	for _, syncInfo := range manager.syncInfoMap {
+		// worker ack must exceed timestamp of insert/delete move chunk oplog
+		syncInfo.mutex.Lock()
+		for _, worker := range syncInfo.syncer.batcher.workerGroup {
+			unack := atomic.LoadInt64(&worker.unack)
+			ack := atomic.LoadInt64(&worker.ack)
+			if syncInfo.barrierChan != nil && ack < unack {
+				result = false
+			}
+			if syncInfo.barrierChan == nil && ack < int64(timestamp) {
+				result = false
+			}
+		}
+		syncInfo.mutex.Unlock()
+		if !result {
 			return false
 		}
 	}
-	return true
+	return result
 }
 
 type SyncInfo struct {
@@ -65,7 +75,7 @@ func (syncInfo *SyncInfo) BlockOplog(syncId int, partialLog *oplog.PartialLog) {
 	syncInfo.mutex.Lock()
 	barrierChan = syncInfo.barrierChan
 	syncInfo.mutex.Unlock()
-	// wait barrier channel must out of mutex, because eliminateBarrier need to access timestamp of syncInfo
+	// wait for barrier channel must be out of mutex, because eliminateBarrier need to delete barrier
 	if barrierChan != nil {
 		LOG.Info("syncer %v wait barrier", syncId)
 		<-barrierChan
@@ -87,7 +97,7 @@ func (key MoveChunkKey) String() string {
 }
 
 type MoveChunkInfo struct {
-	insertMap map[int]bson.MongoTimestamp
+	insertMap  map[int]bson.MongoTimestamp
 	// the size of deleteMap will not more than 1
 	deleteItem *MCIItem
 	barrierMap map[int]chan interface{}
@@ -139,27 +149,26 @@ func (manager *MoveChunkManager) eliminateBarrier() {
 	LOG.Info("move chunk map len=%v", len(manager.moveChunkMap))
 	for syncId, syncInfo := range manager.syncInfoMap {
 		for _, worker := range syncInfo.syncer.batcher.workerGroup {
+			ack := bson.MongoTimestamp(atomic.LoadInt64(&worker.ack))
+			unack := bson.MongoTimestamp(atomic.LoadInt64(&worker.unack))
 			LOG.Info("syncer %v worker ack[%v] unack[%v]", syncId,
-				atomic.LoadInt64(&worker.ack), atomic.LoadInt64(&worker.unack))
+				utils.TimestampToOplogString(ack), utils.TimestampToOplogString(unack))
 		}
 	}
 
 	for key, info := range manager.moveChunkMap {
 		if info.deleteItem != nil {
 			deleteSyncerId := info.deleteItem.syncId
-			if !manager.workerAckProbe(deleteSyncerId, info.deleteItem.timestamp) {
+			if !manager.workerAckProbe(info.deleteItem.timestamp) {
 				continue
 			}
 
 			minInsertTsSyncerId := -1
 			var minInsertTs bson.MongoTimestamp
 			for syncerId, insertTs := range info.insertMap {
-				// if worker ack < insertTs, cannot remove insert move chunk
-				if manager.workerAckProbe(syncerId, insertTs) {
-					if minInsertTsSyncerId == -1 || minInsertTs > insertTs {
-						minInsertTsSyncerId = syncerId
-						minInsertTs = insertTs
-					}
+				if minInsertTsSyncerId == -1 || minInsertTs > insertTs {
+					minInsertTsSyncerId = syncerId
+					minInsertTs = insertTs
 				}
 			}
 			if minInsertTsSyncerId != -1 {
@@ -208,26 +217,25 @@ func (manager *MoveChunkManager) barrierBlock(syncId int, partialLog *oplog.Part
 	barrier := false
 	manager.moveChunkLock.Lock()
 	if moveChunkFilter.Filter(partialLog) {
+		// barrier == true if the syncer already has a insert/delete move chunk oplog before
 		if oplogId := oplog.GetKey(partialLog.Object, ""); oplogId != nil {
 			key := MoveChunkKey{id: oplogId, namespace: partialLog.Namespace}
 			info, ok := manager.moveChunkMap[key]
 			if ok {
 				if ts, ok := info.insertMap[syncId]; ok {
-					// migrate insert at the same syncer
 					LOG.Info("syncer %v meet insert barrier ts[%v] when %v move chunk oplog found[%v %v]",
 						syncId, utils.TimestampToOplogString(ts), partialLog.Operation,
 						key.String(), utils.TimestampToOplogString(partialLog.Timestamp))
 					info.Barrier(syncId, syncInfo, key, partialLog)
 					barrier = true
 				} else if info.deleteItem != nil && info.deleteItem.syncId == syncId {
-					// migrate delete at the same syncer
 					LOG.Info("syncer %v meet delete barrier ts[%v] when %v move chunk oplog found[%v %v]",
 						syncId, utils.TimestampToOplogString(info.deleteItem.timestamp), partialLog.Operation,
 						key.String(), utils.TimestampToOplogString(partialLog.Timestamp))
 					info.Barrier(syncId, syncInfo, key, partialLog)
 					barrier = true
 				} else {
-					// migrate insert/delete at the different syncer
+					// find a insert/delete move chunk firstly
 					info.AddMoveChunk(syncId, key, partialLog)
 				}
 			} else {
@@ -256,7 +264,7 @@ func (manager *MoveChunkManager) barrierBlock(syncId int, partialLog *oplog.Part
 			info, ok := manager.moveChunkMap[key]
 			if ok {
 				if ts, ok := info.insertMap[syncId]; ok {
-					// migrate insert at the same syncer
+					// barrier == true if the syncer already has a insert move chunk oplog before
 					LOG.Info("syncer %v meet insert barrier ts[%v] when operation oplog found[%v %v]",
 						syncId, utils.TimestampToOplogString(ts), key.String(), utils.TimestampToOplogString(partialLog.Timestamp))
 					info.Barrier(syncId, manager.syncInfoMap[syncId], key, partialLog)

@@ -68,6 +68,7 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 		return true
 	}
 
+	// move chunk is disable when timestamp <= fullSyncFinishPosition
 	if moveChunkFilter.Filter(log) && utils.TimestampToInt64(log.Timestamp) <= batcher.syncer.fullSyncFinishPosition {
 		LOG.Crashf("move chunk oplog found[%v] when oplog timestamp[%v] less than fullSyncFinishPosition[%v]",
 			log, log.Timestamp, batcher.syncer.fullSyncFinishPosition)
