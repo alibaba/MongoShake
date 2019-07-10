@@ -1,3 +1,17 @@
+2019-07-10 Alibaba Cloud.
+	* version: 2.0.3
+	* BUG FIX: update sentence incurs some fields lost.
+	* BUG FIX: modify start.sh
+
+2019-07-09 Alibaba Cloud.
+	* version: 2.0.2
+	* BUG FIX: DDL createIndexes fail. Using `applyOps` in DDL replay. see
+	issue #176.
+	* BUG FIX: DDL filter applyOps command panic.
+	* IMPROVE: improve comparision script.
+	* IMRPOVE: update vinllen/mgo library to solve the problem that using too
+	many mgo connections.
+
 2019-06-24 Alibaba Cloud.
 	* version: 2.0.1
 	* IMPROVE: add `mongo_connect_mode` in conf.

@@ -2,13 +2,13 @@ package executor
 
 import (
 	"fmt"
-	"github.com/vinllen/mgo/bson"
 	"testing"
 
 	"mongoshake/oplog"
+	"mongoshake/collector/transform"
 
 	"github.com/stretchr/testify/assert"
-	"mongoshake/collector/transform"
+	"github.com/vinllen/mgo/bson"
 )
 
 func mockLogs(op, ns string, size int, cb bool) *OplogRecord {

@@ -13,7 +13,7 @@ COMPARISION_COUNT = "comparision_count"
 EXCLUDE_DBS = "excludeDbs"
 EXCLUDE_COLLS = "excludeColls"
 SAMPLE = "sample"
-
+CheckList = {"db": 1, "collections": 1, "objects": 1, "numExtents": 1, "indexes": 1, "ok": 1}
 configure = {}
 
 def log_info(message):
@@ -40,16 +40,11 @@ class MongoCluster:
         self.conn.close()
 
 
-def removeUncheck(m):
-    del m["collections"]
-    del m["avgObjSize"]
-    del m["storageSize"]
-    del m["indexes"]
-    del m["indexSize"]
-    del m["objects"]
-    del m["dataSize"]
-
-
+def filter_check(m):
+    new_m = {}
+    for k in CheckList:
+        new_m[k] = m[k]
+    return new_m
 
 """
     check meta data. include db.collection names and stats()
@@ -85,8 +80,8 @@ def check(src, dst):
         srcStats = srcDb.command("dbstats") 
         dstStats = dstDb.command("dbstats")
 
-        removeUncheck(srcStats)
-        removeUncheck(dstStats)
+        srcStats = filter_check(srcStats)
+        dstStats = filter_check(dstStats)
 
         if srcStats != dstStats:
             log_error("DIFF => database [%s] stats not equals src[%s], dst[%s]" % (db, srcStats, dstStats))

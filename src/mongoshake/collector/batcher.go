@@ -1,13 +1,9 @@
 package collector
 
 import (
-	"fmt"
-	"github.com/vinllen/mgo/bson"
 	"mongoshake/collector/configure"
 	"mongoshake/collector/filter"
 	"mongoshake/oplog"
-	"strings"
-
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"mongoshake/common"
@@ -63,7 +59,7 @@ func (batcher *Batcher) getLastOplog() *oplog.PartialLog {
 }
 
 func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
-	// filter oplog suchlike Noop or Gid-filtered
+	// filter oplog such like Noop or Gid-filtered
 	if batcher.filterList.IterateFilter(log) {
 		LOG.Debug("Oplog is filtered. %v", log)
 		if batcher.syncer.replMetric != nil {
@@ -132,7 +128,7 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool) {
 	// split batch if has DDL
 	for i, genericLog := range mergeBatch {
 		// filter oplog such like Noop or Gid-filtered
-		if filterPartialLog(genericLog.Parsed, batcher) {
+		if batcher.filter(genericLog.Parsed) {
 			// doesn't push to worker
 			continue
 		}
@@ -191,83 +187,4 @@ func moveChunkBarrier(syncer *OplogSyncer, partialLog *oplog.PartialLog) bool {
 	}
 
 	return syncer.manager.barrierBlock(syncer.id, partialLog)
-}
-
-func filterPartialLog(partialLog *oplog.PartialLog, batcher *Batcher) bool {
-	var result bool
-	db := strings.SplitN(partialLog.Namespace, ".", 2)[0]
-	if partialLog.Operation != "c" {
-		// {"op" : "i", "ns" : "my.system.indexes", "o" : { "v" : 2, "key" : { "date" : 1 }, "name" : "date_1", "ns" : "my.tbl", "expireAfterSeconds" : 3600 }
-		if strings.HasSuffix(partialLog.Namespace, "system.indexes") {
-			// change partialLog.Namespace to ns of object, in order to do filter with real namespace
-			ns := partialLog.Namespace
-			partialLog.Namespace = oplog.GetKey(partialLog.Object, "ns").(string)
-			result = batcher.filter(partialLog)
-			partialLog.Namespace = ns
-		} else {
-			result = batcher.filter(partialLog)
-		}
-		return result
-	} else {
-		operation, found := oplog.ExtraCommandName(partialLog.Object)
-		if !found {
-			LOG.Warn("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
-			return false
-		}
-		switch operation {
-		case "create":
-			fallthrough
-		case "createIndexes":
-			fallthrough
-		case "collMod":
-			fallthrough
-		case "drop":
-			fallthrough
-		case "deleteIndex":
-			fallthrough
-		case "deleteIndexes":
-			fallthrough
-		case "dropIndex":
-			fallthrough
-		case "dropIndexes":
-			fallthrough
-		case "convertToCapped":
-			fallthrough
-		case "emptycapped":
-			col, ok := oplog.GetKey(partialLog.Object, operation).(string)
-			if !ok {
-				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
-				return false
-			}
-			partialLog.Namespace = fmt.Sprintf("%s.%s", db, col)
-			return batcher.filter(partialLog)
-		case "renameCollection":
-			// { "renameCollection" : "my.tbl", "to" : "my.my", "stayTemp" : false, "dropTarget" : false }
-			ns, ok := oplog.GetKey(partialLog.Object, operation).(string)
-			if !ok {
-				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
-				return false
-			}
-			partialLog.Namespace = ns
-			return batcher.filter(partialLog)
-		case "applyOps":
-			var filterOps []bson.D
-			if ops := oplog.GetKey(partialLog.Object, "applyOps").([]bson.D); ops != nil {
-				for _, ele := range ops {
-					m, _ := oplog.ConvertBsonD2M(ele)
-					subLog := oplog.NewPartialLog(m)
-
-					if ok := filterPartialLog(subLog, batcher); !ok {
-						filterOps = append(filterOps, ele)
-					}
-				}
-				oplog.SetFiled(partialLog.Object, "applyOps", filterOps)
-			}
-			// if length of filterOps is zero, then the oplog is filtered
-			return len(filterOps) == 0
-		default:
-			// such as: dropDatabase
-			return batcher.filter(partialLog)
-		}
-	}
 }

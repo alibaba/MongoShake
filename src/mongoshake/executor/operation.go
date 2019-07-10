@@ -103,7 +103,7 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 			LOG.Critical("Replayer-%d, executor-%d, oplog for namespace[%s] op[%s] failed. error type[%v]"+
 				" error[%v], logs number[%d], firstLog: %v",
 				exec.batchExecutor.ReplayerId, exec.id, group.ns, group.op, reflect.TypeOf(err), err.Error(), count,
-				group.oplogRecords[0].original.partialLog)
+				group.oplogRecords[0].original.partialLog.Dump(nil, true))
 			exec.dropConnection()
 
 			return err

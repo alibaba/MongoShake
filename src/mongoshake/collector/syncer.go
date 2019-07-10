@@ -119,15 +119,15 @@ func NewOplogSyncer(
 	if gid != "" {
 		filterList = append(filterList, &filter.GidFilter{Gid: gid})
 	}
-	// namespace filter
+	// DDL filter
+	if conf.Options.ReplayerDMLOnly {
+		filterList = append(filterList, new(filter.DDLFilter))
+	}
+	// namespace filter, heavy operation
 	if len(conf.Options.FilterNamespaceWhite) != 0 || len(conf.Options.FilterNamespaceBlack) != 0 {
 		namespaceFilter := filter.NewNamespaceFilter(conf.Options.FilterNamespaceWhite,
 			conf.Options.FilterNamespaceBlack)
 		filterList = append(filterList, namespaceFilter)
-	}
-	// DDL filter
-	if conf.Options.ReplayerDMLOnly {
-		filterList = append(filterList, new(filter.DDLFilter))
 	}
 
 	// oplog filters. drop the oplog if any of the filter
