@@ -1,3 +1,8 @@
+2019-07-11 Alibaba Cloud.
+	* version: 2.0.4
+	* BUG FIX: fix bug of batched oplog size exceeding 16MB, This bug was
+	not completely resolved in version v1.4.6. see #122 and #187.
+
 2019-07-10 Alibaba Cloud.
 	* version: 2.0.3
 	* BUG FIX: update sentence incurs some fields lost.
