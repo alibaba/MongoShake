@@ -24,5 +24,7 @@ diagnostic/
 *.pid
 src/vendor/
 !vendor.json
-bin/collector
-bin/receiver
+bin/
+conf/
+!conf/collector.conf
+!conf/receiver.conf
