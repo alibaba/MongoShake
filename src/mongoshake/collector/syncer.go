@@ -248,6 +248,7 @@ func (sync *OplogSyncer) deserializer(index int) {
 		for _, rawLog := range batchRawLogs {
 			log := new(oplog.PartialLog)
 			bson.Unmarshal(rawLog.Data, log)
+			log.RawSize = len(rawLog.Data)
 			deserializeLogs = append(deserializeLogs, &oplog.GenericOplog{Raw: rawLog.Data, Parsed: log})
 		}
 		sync.logsQueue[index] <- deserializeLogs

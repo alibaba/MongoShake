@@ -1,5 +1,9 @@
 package executor
 
+import(
+	LOG "github.com/vinllen/log4go"
+)
+
 type OplogsGroup struct {
 	ns           string
 	op           string
@@ -42,6 +46,8 @@ func (combiner LogsGroupCombiner) mergeToGroups(logs []*OplogRecord) (groups []*
 			groups = append(groups, combiner.startNewGroup(log))
 			sizeInGroup = log.original.partialLog.RawSize
 		}
+
+		LOG.Info("mergeToGroups merge log with raw size[%v]", log.original.partialLog.RawSize)
 
 		// can't be merge more oplogRecords further. this log should be the end in this group
 		forceSplit = log.wait != nil
