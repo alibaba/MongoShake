@@ -165,9 +165,9 @@ func (manager *MoveChunkManager) eliminateBarrier() {
 
 			minInsertTsSyncerId := -1
 			var minInsertTs bson.MongoTimestamp
-			for syncerId, insertTs := range info.insertMap {
+			for syncId, insertTs := range info.insertMap {
 				if minInsertTsSyncerId == -1 || minInsertTs > insertTs {
-					minInsertTsSyncerId = syncerId
+					minInsertTsSyncerId = syncId
 					minInsertTs = insertTs
 				}
 			}
