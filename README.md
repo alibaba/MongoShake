@@ -33,7 +33,7 @@ Support filtering database and collection namespace with whitelist and blacklist
 
 # DDL Syncing
 ---
-Starting with version 1.5, MongoShake supports syncing DDL by using global barrier. Once fetching DDL oplog, MongoShake adds a barrier so that all the belowing oplogs waitting in the queue until this oplog is written into the target MongoDB or tunnel and the checkpoint is updated.<br>
+Starting with version 1.5, MongoShake supports syncing DDL by using global barrier. Once fetching DDL oplog, MongoShake adds a barrier so that all the belowing oplogs waitting in the queue until this oplog is written into the target MongoDB or tunnel and the checkpoint is updated. Currently, DDL is only support for ReplicaSet on the source side(target side can be RelicaSet or Sharding), we will support Sharding in the later version.<br>
 ![ddl](resources/ddl_support.png)<br>
 
 # Global ID
@@ -111,4 +111,5 @@ Plus, we have a WeChat group so that users can join and discuss, but the group u
 | hustchensi | chensi_04@126.com |
 | HelloCodeMing | huanmingwong@163.com |
 | cocoakekeyu | cocoakekeyu@gmail.com |
-|lixj1103 | 244769542@qq.com |
+| lixj1103 | 244769542@qq.com |
+| xzshinan | shinan@gongchang.com |

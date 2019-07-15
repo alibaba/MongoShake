@@ -1,3 +1,15 @@
+2019-07-11 Alibaba Cloud.
+	* version: 2.0.4
+	* BUG FIX: fix bug of batched oplog size exceeding 16MB, This bug was
+	not completely resolved in version v1.4.6. see #122 and #187.
+	* IMPROVE: add chinese comment in configuration.
+	* IMPROVE: print warning log when the oldest oplog is bigger than the
+	checkpoint timestamp, see #189.
+	* IMPROVE: flush heartbeat checkpoint with interval 180s. see #189.
+	* BUG FIX: use runCommand instead of applyOps to support sharding. see
+	#192.
+	* BUG FIX: partial log dump with parameter `all` equal to false.
+
 2019-07-10 Alibaba Cloud.
 	* version: 2.0.3
 	* BUG FIX: update sentence incurs some fields lost.

@@ -22,9 +22,10 @@ func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int64) 
 }
 
 /*
- * calculate and update current checkpoint value. `flush` means whether force calculate & update checkpoint
+ * calculate and update current checkpoint value. `flush` means whether force calculate & update checkpoint.
+ * if inputTs is given(> 0), use this value to update checkpoint, otherwise, calculate from workers.
  */
-func (sync *OplogSyncer) checkpoint(flush bool) {
+func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 	now := time.Now()
 
 	// do checkpoint every once in a while
@@ -47,19 +48,26 @@ func (sync *OplogSyncer) checkpoint(flush bool) {
 	inMemoryTs := sync.ckptManager.GetInMemory().Timestamp
 	var lowest int64 = 0
 	var err error
-	if lowest, err = sync.calculateWorkerLowestCheckpoint(); lowest > 0 && err == nil {
+	if inputTs > 0 {
+		// use inputTs if inputTs is > 0
+		lowest = utils.TimestampToInt64(inputTs)
+	} else {
+		lowest, err = sync.calculateWorkerLowestCheckpoint()
+	}
+
+	if lowest > 0 && err == nil {
 		switch {
 		case bson.MongoTimestamp(lowest) > inMemoryTs:
 			if err = sync.ckptManager.Update(bson.MongoTimestamp(lowest)); err == nil {
-				LOG.Info("CheckpointOperation write success. updated from %d(%v) to %d(%v)",
-					inMemoryTs, utils.ExtractMongoTimestamp(inMemoryTs), lowest, utils.ExtractMongoTimestamp(lowest))
+				LOG.Info("CheckpointOperation write success. updated from %v to %v",
+					utils.ExtractTimestampForLog(inMemoryTs), utils.ExtractTimestampForLog(lowest))
 				sync.replMetric.AddCheckpoint(1)
 				sync.replMetric.SetLSNCheckpoint(lowest)
 				return
 			}
 		case bson.MongoTimestamp(lowest) < inMemoryTs:
-			LOG.Info("CheckpointOperation calculated is smaller than value in memory. lowest %d current %d",
-				lowest, inMemoryTs)
+			LOG.Info("CheckpointOperation calculated is smaller than value in memory. lowest %v current %v",
+				utils.ExtractTimestampForLog(lowest), utils.ExtractTimestampForLog(inMemoryTs))
 			return
 		case bson.MongoTimestamp(lowest) == inMemoryTs:
 			return
@@ -67,8 +75,8 @@ func (sync *OplogSyncer) checkpoint(flush bool) {
 	}
 
 	// this log will be print if no ack calculated
-	LOG.Warn("CheckpointOperation updated is not suitable. lowest [%d]. current [%d]. reason : %v",
-		lowest, utils.TimestampToInt64(inMemoryTs), err)
+	LOG.Warn("CheckpointOperation updated is not suitable. lowest [%d]. current [%d]. inputTs [%v]. reason : %v",
+		lowest, utils.TimestampToInt64(inMemoryTs), inputTs, err)
 }
 
 func (sync *OplogSyncer) calculateWorkerLowestCheckpoint() (v int64, err error) {

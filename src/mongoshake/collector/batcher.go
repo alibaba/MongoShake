@@ -35,6 +35,9 @@ type Batcher struct {
 	// the last oplog in the batch
 	lastOplog *oplog.PartialLog
 
+	// the last filtered oplog in the batch
+	lastFilterOplog *oplog.PartialLog
+
 	// remainLogs store the logs that split by barrier and haven't been consumed yet.
 	remainLogs []*oplog.GenericOplog
 }
@@ -54,8 +57,8 @@ func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
  * just return the last oplog in the previous batch.
  * if just start, this is nil.
  */
-func (batcher *Batcher) getLastOplog() *oplog.PartialLog {
-	return batcher.lastOplog
+func (batcher *Batcher) getLastOplog() (*oplog.PartialLog, *oplog.PartialLog) {
+	return batcher.lastOplog, batcher.lastFilterOplog
 }
 
 func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
@@ -95,7 +98,7 @@ func (batcher *Batcher) dispatchBatches(batchGroup [][]*oplog.GenericOplog) (wor
 }
 
 // return batched oplogs and barrier flag
-func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool) {
+func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool) {
 	// picked raw oplogs and batching in sequence
 	batchGroup := make([][]*oplog.GenericOplog, len(batcher.workerGroup))
 	syncer := batcher.syncer
@@ -126,12 +129,16 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool) {
 	nimo.AssertTrue(len(mergeBatch) != 0, "logs queue batch logs has zero length")
 
 	// split batch if has DDL
+	allEmpty := true
 	for i, genericLog := range mergeBatch {
 		// filter oplog such like Noop or Gid-filtered
 		if batcher.filter(genericLog.Parsed) {
-			// doesn't push to worker
+			// doesn't push to worker, set lastFilterOplog
+			batcher.lastFilterOplog = genericLog.Parsed
 			continue
 		}
+
+		allEmpty = false
 
 		// current is ddl and barrier == false
 		if !conf.Options.ReplayerDMLOnly && ddlFilter.Filter(genericLog.Parsed) && !barrier {
@@ -157,7 +164,7 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool) {
 			break
 		}
 	}
-	return batchGroup, barrier
+	return batchGroup, barrier, allEmpty
 }
 
 func (batcher *Batcher) moveToNextQueue() {
