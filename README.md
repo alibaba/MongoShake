@@ -111,4 +111,5 @@ Plus, we have a WeChat group so that users can join and discuss, but the group u
 | hustchensi | chensi_04@126.com |
 | HelloCodeMing | huanmingwong@163.com |
 | cocoakekeyu | cocoakekeyu@gmail.com |
-|lixj1103 | 244769542@qq.com |
+| lixj1103 | 244769542@qq.com |
+| xzshinan | shinan@gongchang.com |
