@@ -5,8 +5,10 @@
 	* IMPROVE: add chinese comment in configuration.
 	* IMPROVE: print warning log when the oldest oplog is bigger than the
 	checkpoint timestamp, see #189.
+	* IMPROVE: flush heartbeat checkpoint with interval 180s.
 	* BUG FIX: use runCommand instead of applyOps to support sharding. see
 	#192.
+	* BUG FIX: partial log dump with parameter `all` equal to false.
 
 2019-07-10 Alibaba Cloud.
 	* version: 2.0.3
