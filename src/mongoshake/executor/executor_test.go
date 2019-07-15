@@ -394,6 +394,7 @@ func TestTransformLog(t *testing.T) {
 				},
 			}),
 		}
+
 		logs = transformLogs(logs, nsTrans, true)
 		assert.Equal(t, mockTransLogs("c", "admin.$cmd", bson.D{
 			bson.DocElem{
