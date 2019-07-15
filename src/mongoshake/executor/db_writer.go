@@ -611,7 +611,7 @@ func runCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 		}
 		err = dbHandler.Run(store, nil)
 	case "dropDatabase":
-		fallthrough
+		err = dbHandler.DropDatabase()
 	case "create":
 		fallthrough
 	case "collMod":
@@ -631,8 +631,14 @@ func runCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 	case "renameCollection":
 		fallthrough
 	case "emptycapped":
-		fallthrough
+		if !oplog.IsRunOnAdminCommand(operation) {
+			err = dbHandler.Run(log.Object, nil)
+		} else {
+			err = session.DB("admin").Run(log.Object, nil)
+		}
 	default:
+		LOG.Info("type[%s] not found, use applyOps", operation)
+
 		// filter log.Object
 		var rec bson.D
 		for _, ele := range log.Object {
