@@ -29,6 +29,7 @@ const (
 type CheckpointContext struct {
 	Name      string              `bson:"name" json:"name"`
 	Timestamp bson.MongoTimestamp `bson:"ckpt" json:"ckpt"`
+
 }
 
 type Checkpoint struct {

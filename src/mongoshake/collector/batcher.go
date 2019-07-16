@@ -134,8 +134,8 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool) {
 			continue
 		}
 
-		// ensure the oplog order when moveChunk occurs
-		if moveChunkBarrier(batcher.syncer, genericLog.Parsed) {
+		// ensure the oplog order when moveChunk occurs if enabled move chunk at source sharding db
+		if conf.Options.MoveChunkEnable && moveChunkBarrier(batcher.syncer, genericLog.Parsed) {
 			batcher.remainLogs = mergeBatch[i:]
 			barrier = true
 			break
@@ -187,5 +187,5 @@ func moveChunkBarrier(syncer *OplogSyncer, partialLog *oplog.PartialLog) bool {
 		return false
 	}
 
-	return syncer.manager.barrierBlock(syncer.id, partialLog)
+	return syncer.mvckManager.barrierBlock(syncer.replset, partialLog)
 }

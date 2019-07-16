@@ -30,6 +30,7 @@ type Configuration struct {
 	SyncMode                string   `config:"sync_mode"`
 	TransformNamespace      []string `config:"transform.namespace"`
 	DBRef                   bool     `config:"dbref"`
+	MoveChunkEnable         bool     `config:"movechunk_enable"`
 
 	ReplayerDMLOnly                   bool   `config:"replayer.dml_only"`
 	ReplayerExecutor                  int    `config:"replayer.executor"`

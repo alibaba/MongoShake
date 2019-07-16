@@ -271,8 +271,8 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
-	for i, src := range coordinator.Sources {
-		syncer := NewOplogSyncer(i, coordinator, src.ReplicaName, oplogStartPosition, fullSyncFinishPosition,
+	for _, src := range coordinator.Sources {
+		syncer := NewOplogSyncer(coordinator, src.ReplicaName, oplogStartPosition, fullSyncFinishPosition,
 			src.URL, src.Gid, manager)
 		// syncerGroup http api registry
 		syncer.init()
@@ -296,7 +296,9 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		go w.startWorker()
 	}
 
-	manager.start()
+	if conf.Options.MoveChunkEnable {
+		manager.start()
+	}
 
 	for _, syncer := range coordinator.syncerGroup {
 		go syncer.start()

@@ -38,8 +38,6 @@ type OplogHandler interface {
 type OplogSyncer struct {
 	OplogHandler
 
-	id int
-
 	// global replicate coordinator
 	coordinator *ReplicationCoordinator
 	// source mongodb replica set name
@@ -73,7 +71,7 @@ type OplogSyncer struct {
 	startTime time.Time
 	ckptTime  time.Time
 
-	manager *MoveChunkManager
+	mvckManager *MoveChunkManager
 
 	replMetric *utils.ReplicationMetric
 }
@@ -86,16 +84,14 @@ type OplogSyncer struct {
  * The reason we split pending queue and logs queue is to improve the performance.
  */
 func NewOplogSyncer(
-	id int,
 	coordinator *ReplicationCoordinator,
 	replset string,
 	startPosition int64,
 	fullSyncFinishPosition int64,
 	mongoUrl string,
 	gid string,
-	manager *MoveChunkManager) *OplogSyncer {
+	mvckManager *MoveChunkManager) *OplogSyncer {
 	syncer := &OplogSyncer{
-		id:                     id,
 		coordinator:            coordinator,
 		replset:                replset,
 		startPosition:          startPosition,
@@ -103,7 +99,7 @@ func NewOplogSyncer(
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
 		reader: NewOplogReader(mongoUrl),
-		manager: manager,
+		mvckManager: mvckManager,
 	}
 
 	// concurrent level hasher
