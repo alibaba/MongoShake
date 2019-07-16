@@ -167,59 +167,52 @@ func (manager *MoveChunkManager) eliminateBarrier() {
 		syncInfo.mutex.Unlock()
 	}
 
-	eliminateFound := true
-	for eliminateFound {
-		eliminateFound = false
-		var deleteKeyList []MoveChunkKey
-		for key, info := range manager.moveChunkMap {
-			if info.deleteItem != nil {
-				deleteReplset := info.deleteItem.replset
-				if !manager.barrierProbe(key, info.deleteItem.timestamp) {
-					continue
+	var deleteKeyList []MoveChunkKey
+	for key, info := range manager.moveChunkMap {
+		if info.deleteItem != nil {
+			deleteReplset := info.deleteItem.replset
+			if !manager.barrierProbe(key, info.deleteItem.timestamp) {
+				continue
+			}
+			minInsertReplset := ""
+			var minInsertTs bson.MongoTimestamp
+			for replset, insertTs := range info.insertMap {
+				if minInsertReplset == "" || minInsertTs > insertTs {
+					minInsertReplset = replset
+					minInsertTs = insertTs
 				}
-
-				minInsertReplset := ""
-				var minInsertTs bson.MongoTimestamp
-				for replset, insertTs := range info.insertMap {
-					if minInsertReplset == "" || minInsertTs > insertTs {
-						minInsertReplset = replset
-						minInsertTs = insertTs
-					}
-				}
-				if minInsertReplset != "" {
-					eliminateFound = true
-					if barrier, ok := info.barrierMap[minInsertReplset]; ok {
-						LOG.Info("syncer %v eliminate insert barrier[%v %v]", minInsertReplset,
-							key.String(), utils.TimestampToOplogString(info.insertMap[minInsertReplset]))
-						manager.syncInfoMap[minInsertReplset].DeleteBarrier()
-						delete(info.barrierMap, minInsertReplset)
-						close(barrier)
-					}
-					LOG.Info("syncer %v remove insert move chunk oplog[%v %v]", minInsertReplset,
+			}
+			if minInsertReplset != "" {
+				if barrier, ok := info.barrierMap[minInsertReplset]; ok {
+					LOG.Info("syncer %v eliminate insert barrier[%v %v]", minInsertReplset,
 						key.String(), utils.TimestampToOplogString(info.insertMap[minInsertReplset]))
-					delete(info.insertMap, minInsertReplset)
-					if barrier, ok := info.barrierMap[deleteReplset]; ok {
-						LOG.Info("syncer %v eliminate delete barrier[%v %v]", deleteReplset,
-							key.String(), utils.TimestampToOplogString(info.deleteItem.timestamp))
-						manager.syncInfoMap[deleteReplset].DeleteBarrier()
-						delete(info.barrierMap, deleteReplset)
-						close(barrier)
-					}
-					LOG.Info("syncer %v remove delete move chunk oplog[%v %v]", deleteReplset,
+					manager.syncInfoMap[minInsertReplset].DeleteBarrier()
+					delete(info.barrierMap, minInsertReplset)
+					close(barrier)
+				}
+				LOG.Info("syncer %v remove insert move chunk oplog[%v %v]", minInsertReplset,
+					key.String(), utils.TimestampToOplogString(info.insertMap[minInsertReplset]))
+				delete(info.insertMap, minInsertReplset)
+				if barrier, ok := info.barrierMap[deleteReplset]; ok {
+					LOG.Info("syncer %v eliminate delete barrier[%v %v]", deleteReplset,
 						key.String(), utils.TimestampToOplogString(info.deleteItem.timestamp))
-					info.deleteItem = nil
-					if len(info.insertMap) == 0 && len(info.barrierMap) == 0 {
-						LOG.Info("move chunk map remove move chunk key[%v]", key.String())
-						deleteKeyList = append(deleteKeyList, key)
-
-					}
+					manager.syncInfoMap[deleteReplset].DeleteBarrier()
+					delete(info.barrierMap, deleteReplset)
+					close(barrier)
+				}
+				LOG.Info("syncer %v remove delete move chunk oplog[%v %v]", deleteReplset,
+					key.String(), utils.TimestampToOplogString(info.deleteItem.timestamp))
+				info.deleteItem = nil
+				if len(info.insertMap) == 0 && len(info.barrierMap) == 0 {
+					LOG.Info("move chunk map remove move chunk key[%v]", key.String())
+					deleteKeyList = append(deleteKeyList, key)
 				}
 			}
 		}
-		if len(deleteKeyList) > 0 {
-			for _, key := range deleteKeyList {
-				delete(manager.moveChunkMap, key)
-			}
+	}
+	if len(deleteKeyList) > 0 {
+		for _, key := range deleteKeyList {
+			delete(manager.moveChunkMap, key)
 		}
 	}
 	manager.moveChunkLock.Unlock()
