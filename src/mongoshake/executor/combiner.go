@@ -1,5 +1,9 @@
 package executor
 
+import (
+	LOG "github.com/vinllen/log4go"
+)
+
 type OplogsGroup struct {
 	ns           string
 	op           string
@@ -38,6 +42,10 @@ func (combiner LogsGroupCombiner) mergeToGroups(logs []*OplogRecord) (groups []*
 			combiner.merge(groups[len(groups)-1], log)
 			sizeInGroup += log.original.partialLog.RawSize // add size
 		} else {
+			if sizeInGroup != 0 {
+				LOG.Debug("mergeToGroups merge log with total size[%v]", sizeInGroup)
+			}
+
 			// new start of a group
 			groups = append(groups, combiner.startNewGroup(log))
 			sizeInGroup = log.original.partialLog.RawSize
@@ -46,6 +54,9 @@ func (combiner LogsGroupCombiner) mergeToGroups(logs []*OplogRecord) (groups []*
 		// can't be merge more oplogRecords further. this log should be the end in this group
 		forceSplit = log.wait != nil
 	}
+
+	LOG.Debug("mergeToGroups merge group with total number[%v]", len(groups))
+
 	return
 }
 

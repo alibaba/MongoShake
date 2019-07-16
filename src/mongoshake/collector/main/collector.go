@@ -128,8 +128,13 @@ func sanitizeOptions() error {
 			return errors.New("storage server should be configured while using mongo shard servers")
 		}
 	}
-	if len(conf.Options.MongoUrls) > 1 && conf.Options.WorkerNum != len(conf.Options.MongoUrls) {
-		return errors.New("replication worker should be equal to count of mongo_urls while multi sources (shard)")
+	if len(conf.Options.MongoUrls) > 1 {
+		if conf.Options.WorkerNum != len(conf.Options.MongoUrls) {
+			return errors.New("replication worker should be equal to count of mongo_urls while multi sources (shard)")
+		}
+		if conf.Options.ReplayerDMLOnly == false {
+			return errors.New("DDL is not support for sharding, pleasing waiting")
+		}
 	}
 	// avoid the typo of mongo urls
 	if utils.HasDuplicated(conf.Options.MongoUrls) {

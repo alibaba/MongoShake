@@ -87,6 +87,10 @@ func ExtractMongoTimestamp(ts interface{}) int64 {
 	return 0
 }
 
+func ExtractTimestampForLog(ts interface{}) string {
+	return fmt.Sprintf("%v(%v)", ts, ExtractMongoTimestamp(ts))
+}
+
 func Int64ToString(v int64) string {
 	return strconv.FormatInt(v, 10)
 }

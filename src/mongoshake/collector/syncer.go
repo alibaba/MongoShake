@@ -25,8 +25,10 @@ const (
 	PipelineQueueMinNr = 1
 	PipelineQueueLen   = 64
 
-	DurationTime          = 6000 //ms
-	DDLCheckpointInterval = 300  // ms
+	DurationTime                  = 6000 // unit: ms.
+	DDLCheckpointInterval         = 300  // unit: ms.
+	FilterCheckpointGap           = 180  // unit: seconds. no checkpoint update, flush checkpoint mandatory
+	FilterCheckpointCheckInterval = 180  // unit: seconds.
 )
 
 type OplogHandler interface {
@@ -179,47 +181,109 @@ func (sync *OplogSyncer) start() {
 // fetch all oplog from logs queue, batched together and then send to different workers.
 func (sync *OplogSyncer) startBatcher() {
 	var batcher = sync.batcher
+	filterCheckTs := time.Now()
+	filterFlag := false // marks whether previous log is filter
 
 	nimo.GoRoutineInLoop(func() {
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
 		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
-		batchedOplog, barrier := batcher.batchMore()
+		batchedOplog, barrier, allEmpty := batcher.batchMore()
 
 		var newestTs bson.MongoTimestamp
-		if log := batcher.getLastOplog(); log != nil {
+		if log, filterLog := batcher.getLastOplog(); log != nil && !allEmpty {
 			newestTs = log.Timestamp
-		} else {
-			// if log is nil, no need to run anymore.
-			return
-		}
 
-		if worked := batcher.dispatchBatches(batchedOplog); worked {
-			sync.replMetric.SetLSN(utils.TimestampToInt64(newestTs))
+			// push to worker
+			if worked := batcher.dispatchBatches(batchedOplog); worked {
+				sync.replMetric.SetLSN(utils.TimestampToInt64(newestTs))
+				// update latest fetched timestamp in memory
+				sync.reader.UpdateQueryTimestamp(newestTs)
+			}
+
+			filterFlag = false
+
+			// flush checkpoint value
+			sync.checkpoint(barrier, 0)
+			sync.checkCheckpointUpdate(barrier, newestTs) // check if need
+		} else {
+			// if log is nil, check whether filterLog is empty
+			if filterLog == nil {
+				return
+			} else {
+				now := time.Now()
+
+				// return if filterFlag == false
+				if filterFlag == false {
+					filterFlag = true
+					filterCheckTs = now
+					return
+				}
+
+				// pass only if all received oplog are filtered for {FilterCheckpointCheckInterval} seconds.
+				if now.After(filterCheckTs.Add(FilterCheckpointCheckInterval * time.Second)) == false {
+					return
+				}
+
+				checkpointTs := utils.ExtractMongoTimestamp(sync.ckptManager.Get().Timestamp)
+				filterNewestTs := utils.ExtractMongoTimestamp(filterLog.Timestamp)
+				if filterNewestTs - FilterCheckpointGap > checkpointTs {
+					// if checkpoint has not been update for {FilterCheckpointGap} seconds, update
+					// checkpoint mandatory.
+					newestTs = filterLog.Timestamp
+					LOG.Info("try to update checkpoint mandatory from %v(%v) to %v(%v)", sync.ckptManager.Get().Timestamp,
+						checkpointTs, filterLog.Timestamp, filterNewestTs)
+				} else {
+					return
+				}
+			}
+
+			filterFlag = false
+
+			if log != nil {
+				newestTsLog := utils.ExtractTimestampForLog(newestTs)
+				if newestTs <= log.Timestamp {
+					LOG.Crashf("filter newestTs[%v] smaller than previous timestamp[%v]",
+						newestTsLog, utils.ExtractTimestampForLog(log.Timestamp))
+				}
+
+				LOG.Info("waiting last checkpoint[%v] updated", newestTsLog)
+				// check last checkpoint updated
+
+				sync.checkCheckpointUpdate(true, log.Timestamp)
+
+				LOG.Info("last checkpoint[%v] updated ok", newestTsLog)
+			} else {
+				LOG.Info("last log is empty, skip waiting checkpoint updated")
+			}
+
 			// update latest fetched timestamp in memory
 			sync.reader.UpdateQueryTimestamp(newestTs)
-		}
-
-		// flush checkpoint value
-		sync.checkpoint(barrier)
-
-		// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
-		if barrier && newestTs > 0 && conf.Options.WorkerNum > 1 {
-			LOG.Info("find barrier")
-			for {
-				checkpointTs := sync.ckptManager.Get().Timestamp
-				LOG.Info("compare remote checkpoint[%v] to local newestTs[%v]", checkpointTs, newestTs)
-				if checkpointTs >= newestTs {
-					LOG.Info("barrier checkpoint updated")
-					break
-				}
-				utils.YieldInMs(DDLCheckpointInterval)
-
-				// re-flush
-				sync.checkpoint(true)
-			}
+			// flush checkpoint by the newest filter oplog value
+			sync.checkpoint(false, newestTs)
+			return
 		}
 	})
+}
+
+func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.MongoTimestamp) {
+	// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
+	if barrier && newestTs > 0 && conf.Options.WorkerNum > 1 {
+		LOG.Info("find barrier")
+		for {
+			checkpointTs := sync.ckptManager.Get().Timestamp
+			LOG.Info("compare remote checkpoint[%v(%v)] to local newestTs[%v(%v)]",
+				checkpointTs, utils.ExtractMongoTimestamp(checkpointTs), newestTs, utils.ExtractMongoTimestamp(newestTs))
+			if checkpointTs >= newestTs {
+				LOG.Info("barrier checkpoint updated")
+				break
+			}
+			utils.YieldInMs(DDLCheckpointInterval)
+
+			// re-flush
+			sync.checkpoint(true, 0)
+		}
+	}
 }
 
 // how many pending queue we create
@@ -252,6 +316,7 @@ func (sync *OplogSyncer) deserializer(index int) {
 		for _, rawLog := range batchRawLogs {
 			log := new(oplog.PartialLog)
 			bson.Unmarshal(rawLog.Data, log)
+			log.RawSize = len(rawLog.Data)
 			deserializeLogs = append(deserializeLogs, &oplog.GenericOplog{Raw: rawLog.Data, Parsed: log})
 		}
 		sync.logsQueue[index] <- deserializeLogs

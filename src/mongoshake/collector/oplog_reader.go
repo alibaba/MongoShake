@@ -186,7 +186,8 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 		newestTs := reader.getNewestTimestamp()
 		queryTs = reader.getQueryTimestamp()
 		if newestTs < queryTs {
-			LOG.Warn("current starting point[%v] is bigger than the newest timestamp[%v]", queryTs, newestTs)
+			LOG.Warn("current starting point[%v] is bigger than the newest timestamp[%v]!",
+				utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(newestTs))
 			queryTs = newestTs
 		}
 	}
@@ -197,8 +198,13 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 	 */
 	oldestTs := reader.getOldestTimestamp()
 	queryTs = reader.getQueryTimestamp()
-	if oldestTs > queryTs && !reader.firstRead {
-		return CollectionCappedError
+	if oldestTs > queryTs {
+		if !reader.firstRead {
+			return CollectionCappedError
+		} else {
+			LOG.Warn("current starting point[%v] is smaller than the oldest timestamp[%v]!",
+				utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(oldestTs))
+		}
 	}
 	reader.firstRead = false
 
