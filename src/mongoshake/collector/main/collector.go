@@ -56,6 +56,8 @@ func main() {
 		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
 	}
 
+	conf.Options.Version = utils.BRANCH
+
 	utils.InitialLogger(conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogBuffer, *verbose)
 	nimo.Profiling(int(conf.Options.SystemProfile))
 	nimo.RegisterSignalForProfiling(syscall.SIGUSR2)

@@ -166,14 +166,14 @@ func Welcome() {
 		`______________________________
 \                             \           _         ______ |
  \                             \        /   \___-=O'/|O'/__|
-  \       Here we go !!!        \_______\          / | /    )
+  \ MongoShake, Here we go !!!  \_______\          / | /    )
   /                             /        '/-==__ _/__|/__=-|  -GM
- /                             /         *             \ | |
+ /           Aliyun            /         *             \ | |
 /                             /                        (o)
 ------------------------------
 `
-
-	LOG.Warn(fmt.Sprintf("\n%s", welcome))
+	startMsg := "if you have any problem, please visit https://github.com/alibaba/MongoShake/wiki/FAQ"
+	LOG.Warn(fmt.Sprintf("\n%s\n%s\n", welcome, startMsg))
 }
 
 func Goodbye() {
