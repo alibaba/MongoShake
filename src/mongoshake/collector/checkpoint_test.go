@@ -34,7 +34,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		nr++
 
 		syncer := mockCheckpointSyncer(8)
-		checkpoint, err = syncer.calculateWorkerLowestCheckpoint()
+		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, "no candidates ack values found", err.Error(), "should be equal")
 		assert.Equal(t, int64(0), checkpoint, "should be equal")
 	}
@@ -48,7 +48,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker3 := syncer.batcher.workerGroup[3]
 		worker3.ack = 10
 		worker3.unack = 10
-		checkpoint, err = syncer.calculateWorkerLowestCheckpoint()
+		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, int64(10), checkpoint, "should be equal")
 	}
@@ -65,7 +65,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker4 := syncer.batcher.workerGroup[4]
 		worker4.ack = 20
 		worker4.unack = 30
-		checkpoint, err = syncer.calculateWorkerLowestCheckpoint()
+		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, int64(20), checkpoint, "should be equal")
 	}
@@ -79,7 +79,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker3 := syncer.batcher.workerGroup[3]
 		worker3.ack = 0
 		worker3.unack = 10
-		checkpoint, err = syncer.calculateWorkerLowestCheckpoint()
+		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, "smallest candidates is zero", err.Error(), "should be equal")
 		assert.Equal(t, int64(0), checkpoint, "should be equal")
 	}
@@ -93,7 +93,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker3 := syncer.batcher.workerGroup[3]
 		worker3.ack = 5
 		worker3.unack = 10
-		checkpoint, err = syncer.calculateWorkerLowestCheckpoint()
+		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, int64(5), checkpoint, "should be equal")
 	}
@@ -113,7 +113,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker5 := syncer.batcher.workerGroup[5]
 		worker5.ack = 40
 		worker5.unack = 40
-		checkpoint, err = syncer.calculateWorkerLowestCheckpoint()
+		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, int64(20), checkpoint, "should be equal")
 	}
@@ -133,7 +133,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker1 := syncer.batcher.workerGroup[1]
 		worker1.ack = 40
 		worker1.unack = 40
-		checkpoint, err = syncer.calculateWorkerLowestCheckpoint()
+		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, int64(40), checkpoint, "should be equal")
 	}
@@ -153,7 +153,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker1 := syncer.batcher.workerGroup[1]
 		worker1.ack = 40
 		worker1.unack = 30
-		checkpoint, err = syncer.calculateWorkerLowestCheckpoint()
+		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, true, err != nil, "should be equal")
 		assert.Equal(t, int64(0), checkpoint, "should be equal")
 	}
@@ -173,7 +173,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker1 := syncer.batcher.workerGroup[1]
 		worker1.ack = 40
 		worker1.unack = 0
-		checkpoint, err = syncer.calculateWorkerLowestCheckpoint()
+		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, int64(20), checkpoint, "should be equal")
 	}
@@ -193,7 +193,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker1 := syncer.batcher.workerGroup[1]
 		worker1.ack = 40
 		worker1.unack = 0
-		checkpoint, err = syncer.calculateWorkerLowestCheckpoint()
+		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, "no candidates ack values found", err.Error(), "should be equal")
 		assert.Equal(t, int64(0), checkpoint, "should be equal")
 	}
