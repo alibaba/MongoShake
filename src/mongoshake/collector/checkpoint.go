@@ -3,83 +3,230 @@ package collector
 import (
 	"errors"
 	"fmt"
+	nimo "github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/mgo"
+	"github.com/vinllen/mgo/bson"
+	"math"
+	"mongoshake/collector/configure"
+	utils "mongoshake/common"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"time"
-
-	"mongoshake/collector/ckpt"
-	"mongoshake/collector/configure"
-	"mongoshake/common"
-
-	"github.com/vinllen/mgo/bson"
-	LOG "github.com/vinllen/log4go"
 )
 
-func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int64) {
-	LOG.Info("Oplog sync create checkpoint manager with [%s] [%s]",
-		conf.Options.ContextStorage, conf.Options.ContextAddress)
-	sync.ckptManager = ckpt.NewCheckpointManager(name, startPosition)
+const (
+	StorageTypeAPI            = "api"
+	StorageTypeDB             = "database"
+	CheckpointDefaultDatabase = utils.AppDatabase
+	CheckpointAdminDatabase   = "admin"
+	CheckpointName            = "name"
+	CheckpointTimestamp       = "ckpt"
+
+	MajorityWriteConcern = "majority"
+)
+
+type PersistObject interface {
+	Persist(conn *utils.MongoConn, db string, tablePrefix string) error
 }
 
-/*
- * calculate and update current checkpoint value. `flush` means whether force calculate & update checkpoint.
- * if inputTs is given(> 0), use this value to update checkpoint, otherwise, calculate from workers.
- */
-func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
-	now := time.Now()
+type SyncerCheckpoint struct {
+	syncer *OplogSyncer
+	ackTs  bson.MongoTimestamp
+}
 
-	// do checkpoint every once in a while
-	if !flush && sync.ckptTime.Add(time.Duration(conf.Options.CheckpointInterval) * time.Millisecond).After(now) {
-		return
+type CheckpointManager struct {
+	ckptMap map[string]*SyncerCheckpoint
+	mutex   sync.Mutex
+
+	url           string
+	db            string
+	table         string
+	startPosition int64
+	conn          *utils.MongoConn
+
+	persistList []PersistObject
+
+	//startTime   time.Time
+	//ckptTime    time.Time
+}
+
+func NewCheckpointManager(startPosition int64) *CheckpointManager {
+	db := CheckpointDefaultDatabase
+	if conf.Options.IsShardCluster() {
+		db = CheckpointAdminDatabase
 	}
-	// we force update the ckpt time even failed
-	sync.ckptTime = now
-
-	// we delayed a few minutes to tolerate the receiver's flush buffer
-	// in AckRequired() tunnel. such as "rpc". While collector is restarted,
-	// we can't get the correct worker ack offset since collector have lost
-	// the unack offset...
-	if !flush && conf.Options.Tunnel != "direct" && now.Before(sync.startTime.Add(3 * time.Minute)) {
-		// LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
-		return
+	// we can't insert Timestamp(0, 0) that will be treat as Now() inserted
+	// into mongo. so we use Timestamp(0, 1)
+	startPosition = int64(math.Max(float64(startPosition), 1))
+	manager := &CheckpointManager{
+		ckptMap:       make(map[string]*SyncerCheckpoint),
+		url:           conf.Options.ContextStorageUrl,
+		db:            db,
+		table:         conf.Options.ContextAddress,
+		startPosition: startPosition,
 	}
+	return manager
+}
 
-	// read all workerGroup self ckpt. get minimum of all updated checkpoint
-	inMemoryTs := sync.ckptManager.GetInMemory().Timestamp
-	var lowest int64 = 0
-	var err error
-	if inputTs > 0 {
-		// use inputTs if inputTs is > 0
-		lowest = utils.TimestampToInt64(inputTs)
-	} else {
-		lowest, err = sync.calculateWorkerLowestCheckpoint()
-	}
+func (manager *CheckpointManager) addOplogSyncer(syncer *OplogSyncer) {
+	manager.ckptMap[syncer.replset] = &SyncerCheckpoint{syncer: syncer, ackTs: 0}
+}
 
-	if lowest > 0 && err == nil {
-		switch {
-		case bson.MongoTimestamp(lowest) > inMemoryTs:
-			if err = sync.ckptManager.Update(bson.MongoTimestamp(lowest)); err == nil {
-				LOG.Info("CheckpointOperation write success. updated from %v to %v",
-					utils.ExtractTimestampForLog(inMemoryTs), utils.ExtractTimestampForLog(lowest))
-				sync.replMetric.AddCheckpoint(1)
-				sync.replMetric.SetLSNCheckpoint(lowest)
-				return
-			}
-		case bson.MongoTimestamp(lowest) < inMemoryTs:
-			LOG.Info("CheckpointOperation calculated is smaller than value in memory. lowest %v current %v",
-				utils.ExtractTimestampForLog(lowest), utils.ExtractTimestampForLog(inMemoryTs))
-			return
-		case bson.MongoTimestamp(lowest) == inMemoryTs:
+func (manager *CheckpointManager) registerPersis(persistObj PersistObject) {
+	manager.persistList = append(manager.persistList, persistObj)
+}
+
+func (manager *CheckpointManager) start() {
+	startTime := time.Now()
+	ckptTime := time.Now()
+
+	nimo.GoRoutineInLoop(func() {
+		now := time.Now()
+
+		// do checkpoint every once in a while
+		if ckptTime.Add(time.Duration(conf.Options.CheckpointInterval) * time.Millisecond).After(now) {
 			return
 		}
-	}
 
-	// this log will be print if no ack calculated
-	LOG.Warn("CheckpointOperation updated is not suitable. lowest [%d]. current [%d]. inputTs [%v]. reason : %v",
-		lowest, utils.TimestampToInt64(inMemoryTs), inputTs, err)
+		// we force update the ckpt time even failed
+		ckptTime = now
+
+		// we delayed a few minutes to tolerate the receiver's flush buffer
+		// in AckRequired() tunnel. such as "rpc". While collector is restarted,
+		// we can't get the correct worker ack offset since collector have lost
+		// the unack offset...
+		if conf.Options.Tunnel != "direct" && now.Before(startTime.Add(3*time.Minute)) {
+			return
+		}
+
+		manager.OplogCheckpoint()
+
+		time.Sleep(1 * time.Second)
+	})
 }
 
-func (sync *OplogSyncer) calculateWorkerLowestCheckpoint() (v int64, err error) {
+func (manager *CheckpointManager) Load() error {
+	if !manager.ensureNetwork() {
+		return fmt.Errorf("CheckpointManager connect to %v failed", manager.url)
+	}
+	manager.mutex.Lock()
+	iter := manager.conn.Session.DB(manager.db).C(manager.table).Find(bson.M{}).Iter()
+	var ckptDoc map[string]interface{}
+	for iter.Next(ckptDoc) {
+		if replset, ok := ckptDoc[CheckpointName].(string); ok {
+			if info, ok := manager.ckptMap[replset]; ok {
+				info.ackTs = ckptDoc[CheckpointTimestamp].(bson.MongoTimestamp)
+			} else {
+				LOG.Warn("CheckpointManager load checkpoint map with illegal record %v", ckptDoc)
+			}
+		} else {
+			LOG.Warn("CheckpointManager load checkpoint map with illegal record %v", ckptDoc)
+		}
+	}
+	for replset, info := range manager.ckptMap {
+		if info.ackTs == 0 {
+			info.ackTs = bson.MongoTimestamp(manager.startPosition << 32)
+			LOG.Info("CheckpointManager load checkpoint map set replset[%v] checkpoint to %v",
+				manager.ckptMap[replset])
+		}
+	}
+	manager.mutex.Unlock()
+
+	LOG.Info("CheckpointManager load %v", manager.ckptMap)
+	return nil
+}
+
+func (manager *CheckpointManager) Get(replset string) bson.MongoTimestamp {
+	if info, ok := manager.ckptMap[replset]; ok {
+		return info.ackTs
+	} else {
+		return 0
+	}
+}
+
+func (manager *CheckpointManager) Update(replset string, ts bson.MongoTimestamp) {
+	manager.mutex.Lock()
+	manager.ckptMap[replset].ackTs = ts
+	manager.mutex.Unlock()
+}
+
+func (manager *CheckpointManager) Flush() error {
+	if !manager.ensureNetwork() {
+		return fmt.Errorf("CheckpointManager connect to %v failed", manager.url)
+	}
+	manager.mutex.Lock()
+	for replset, info := range manager.ckptMap {
+		ckptDoc := map[string]interface{}{
+			CheckpointName:      replset,
+			CheckpointTimestamp: info.ackTs,
+		}
+		if _, err := manager.conn.Session.DB(manager.db).C(manager.table).
+			Upsert(bson.M{CheckpointName: replset}, ckptDoc); err != nil {
+			LOG.Critical("CheckpointManager flush checkpoint %v upsert error %v", ckptDoc, err)
+			manager.conn.Close()
+			return err
+		}
+	}
+	for _, persistObj := range manager.persistList {
+		if err := persistObj.Persist(manager.conn, manager.db, manager.table); err != nil {
+			LOG.Critical("CheckpointManager flush persist object error %v", err)
+			manager.conn.Close()
+			return err
+		}
+	}
+	manager.mutex.Unlock()
+	return nil
+}
+
+func (manager *CheckpointManager) OplogCheckpoint() {
+	for replset, info := range manager.ckptMap {
+		var lowestTs int64
+		var err error
+		lowestTs, err = calculateWorkerLowestCheckpoint(info.syncer)
+
+		if lowestTs > 0 && err == nil {
+			switch {
+			case bson.MongoTimestamp(lowestTs) > info.ackTs:
+				manager.Update(replset, bson.MongoTimestamp(lowestTs))
+				LOG.Info("checkpoint replset %v updated from %v to %v", replset,
+					utils.ExtractTimestampForLog(info.ackTs), utils.ExtractTimestampForLog(lowestTs))
+				info.syncer.replMetric.AddCheckpoint(1)
+				info.syncer.replMetric.SetLSNCheckpoint(lowestTs)
+			case bson.MongoTimestamp(lowestTs) < info.ackTs:
+				LOG.Info("checkpoint replset %v calculated is smaller than value in memory. lowest %v current %v",
+					replset, utils.ExtractTimestampForLog(lowestTs), utils.ExtractTimestampForLog(info.ackTs))
+			}
+		} else {
+			// this log will be print if no ack calculated
+			LOG.Warn("checkpoint replset %v updated is not suitable. lowest[%d] current[%d] reason: %v",
+				replset, lowestTs, utils.TimestampToInt64(info.ackTs), err)
+		}
+	}
+	if err := manager.Flush(); err != nil {
+		LOG.Warn("checkpoint flush failed. %v", err)
+	}
+}
+
+func (manager *CheckpointManager) ensureNetwork() bool {
+	// make connection if we don't already established
+	if manager.conn == nil {
+		if conn, err := utils.NewMongoConn(manager.url, utils.ConnectModePrimary, true); err == nil {
+			manager.conn = conn
+		} else {
+			LOG.Warn("CheckpointManager connect to %v failed. %v", manager.url, err)
+			return false
+		}
+	}
+	// set WriteMajority while checkpoint is writing to ConfigServer
+	if conf.Options.IsShardCluster() {
+		manager.conn.Session.EnsureSafe(&mgo.Safe{WMode: MajorityWriteConcern})
+	}
+	return true
+}
+
+func calculateWorkerLowestCheckpoint(sync *OplogSyncer) (v int64, err error) {
 	// no need to lock and eventually consistence is acceptable
 	allAcked := true
 	candidates := make([]int64, 0, len(sync.batcher.workerGroup))

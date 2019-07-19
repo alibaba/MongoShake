@@ -15,20 +15,20 @@ import (
 func NewMoveChunkManager() *MoveChunkManager {
 	manager := &MoveChunkManager{
 		moveChunkMap: make(map[MoveChunkKey]*MoveChunkInfo),
-		syncInfoMap:  make(map[string]*SyncInfo),
+		syncInfoMap:  make(map[string]*SyncerMoveChunk),
 	}
 	return manager
 }
 
 type MoveChunkManager struct {
-	syncInfoMap map[string]*SyncInfo
+	syncInfoMap map[string]*SyncerMoveChunk
 	// ensure the order of oplog when move chunk occur
 	moveChunkMap  map[MoveChunkKey]*MoveChunkInfo
 	moveChunkLock sync.Mutex
 }
 
 func (manager *MoveChunkManager) addOplogSyncer(syncer *OplogSyncer) {
-	manager.syncInfoMap[syncer.replset] = &SyncInfo{syncer: syncer}
+	manager.syncInfoMap[syncer.replset] = &SyncerMoveChunk{syncer: syncer}
 }
 
 func (manager *MoveChunkManager) start() {
@@ -59,22 +59,22 @@ func (manager *MoveChunkManager) barrierProbe(key MoveChunkKey, timestamp bson.M
 	return result
 }
 
-type SyncInfo struct {
+type SyncerMoveChunk struct {
 	syncer      *OplogSyncer
-	syncTs		bson.MongoTimestamp
-	barrierKey	MoveChunkKey
+	syncTs      bson.MongoTimestamp
+	barrierKey  MoveChunkKey
 	barrierChan chan interface{}
 	mutex       sync.Mutex
 }
 
-func (syncInfo *SyncInfo) DeleteBarrier() {
+func (syncInfo *SyncerMoveChunk) DeleteBarrier() {
 	syncInfo.mutex.Lock()
 	syncInfo.barrierKey = MoveChunkKey{}
 	syncInfo.barrierChan = nil
 	syncInfo.mutex.Unlock()
 }
 
-func (syncInfo *SyncInfo) BlockOplog(replset string, partialLog *oplog.PartialLog) {
+func (syncInfo *SyncerMoveChunk) BlockOplog(replset string, partialLog *oplog.PartialLog) {
 	var barrierChan chan interface{}
 	syncInfo.mutex.Lock()
 	if syncInfo.syncTs < partialLog.Timestamp {
@@ -104,7 +104,7 @@ func (key MoveChunkKey) String() string {
 }
 
 type MoveChunkInfo struct {
-	insertMap  map[string]bson.MongoTimestamp
+	insertMap map[string]bson.MongoTimestamp
 	// the size of deleteMap will not more than 1
 	deleteItem *MCIItem
 	barrierMap map[string]chan interface{}
@@ -115,7 +115,7 @@ type MCIItem struct {
 	timestamp bson.MongoTimestamp
 }
 
-func (info *MoveChunkInfo) Barrier(replset string, syncInfo *SyncInfo, key MoveChunkKey, partialLog *oplog.PartialLog) {
+func (info *MoveChunkInfo) Barrier(replset string, syncInfo *SyncerMoveChunk, key MoveChunkKey, partialLog *oplog.PartialLog) {
 	if _, ok := info.barrierMap[replset]; ok {
 		LOG.Crashf("syncer %v has more than one barrier in barrierMap when move chunk oplog found[%v %v]",
 			replset, key.String(), utils.TimestampToOplogString(partialLog.Timestamp))
@@ -152,7 +152,6 @@ func (info *MoveChunkInfo) AddMoveChunk(replset string, key MoveChunkKey, partia
 }
 
 func (manager *MoveChunkManager) eliminateBarrier() {
-
 	manager.moveChunkLock.Lock()
 	LOG.Info("move chunk map len=%v", len(manager.moveChunkMap))
 	for replset, syncInfo := range manager.syncInfoMap {
@@ -166,7 +165,6 @@ func (manager *MoveChunkManager) eliminateBarrier() {
 		}
 		syncInfo.mutex.Unlock()
 	}
-
 	var deleteKeyList []MoveChunkKey
 	for key, info := range manager.moveChunkMap {
 		if info.deleteItem != nil {

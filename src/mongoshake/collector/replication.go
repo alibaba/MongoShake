@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sync"
 
-	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
 	"mongoshake/collector/docsyncer"
 	"mongoshake/collector/transform"
@@ -176,10 +175,12 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	}
 
 	needFull := false
-	for replName, ts := range tsMap {
-		ckptManager := ckpt.NewCheckpointManager(replName, 0)
-		ckptTs := ckptManager.Get().Timestamp
-		if ts.Oldest >= ckptTs {
+	ckptManager := NewCheckpointManager(0)
+	if err := ckptManager.Load(); err != nil {
+		return "", 0, err
+	}
+	for replset, ts := range tsMap {
+		if ts.Oldest >= ckptManager.Get(replset) {
 			// checkpoint less than the oldest timestamp
 			needFull = true
 			break
@@ -256,9 +257,16 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	if err := docsyncer.StartIndexSync(indexMap, toUrl, trans); err != nil {
 		return err
 	}
-	if err := docsyncer.Checkpoint(ckptMap); err != nil {
+
+	// checkpoint after document syncer
+	ckptManager := NewCheckpointManager(0)
+	for replset, ts := range ckptMap {
+		ckptManager.Update(replset, ts.Newest)
+	}
+	if err := ckptManager.Flush(); err != nil {
 		return err
 	}
+
 	LOG.Info("document syncer sync end")
 	return nil
 }
@@ -267,18 +275,26 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	// replicate speed limit on all syncer
 	coordinator.rateController = nimo.NewSimpleRateController()
 
-	manager := NewMoveChunkManager()
+	ckptManager := NewCheckpointManager(oplogStartPosition)
+	mvckManager := NewMoveChunkManager()
 
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
 	for _, src := range coordinator.Sources {
-		syncer := NewOplogSyncer(coordinator, src.ReplicaName, oplogStartPosition, fullSyncFinishPosition,
-			src.URL, src.Gid, manager)
+		syncer := NewOplogSyncer(coordinator, src.ReplicaName, fullSyncFinishPosition,
+			src.URL, src.Gid, ckptManager, mvckManager)
 		// syncerGroup http api registry
 		syncer.init()
-		manager.addOplogSyncer(syncer)
+		ckptManager.addOplogSyncer(syncer)
+		mvckManager.addOplogSyncer(syncer)
 		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)
 	}
+
+	// initialize checkpoint timestamp of oplog syncer
+	if err := ckptManager.Load(); err != nil {
+		return err
+	}
+	ckptManager.start()
 
 	// prepare worker routine and bind it to syncer
 	for i := 0; i != conf.Options.WorkerNum; i++ {
@@ -297,7 +313,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	}
 
 	if conf.Options.MoveChunkEnable {
-		manager.start()
+		mvckManager.start()
 	}
 
 	for _, syncer := range coordinator.syncerGroup {

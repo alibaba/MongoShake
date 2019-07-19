@@ -7,14 +7,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
 	"mongoshake/collector/filter"
 	"mongoshake/collector/transform"
 	"mongoshake/common"
 
-	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
 )
@@ -218,17 +217,6 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 	close(namespaces)
 	LOG.Info("document syncer sync index finish")
 	return syncError
-}
-
-func Checkpoint(ckptMap map[string]utils.TimestampNode) error {
-	for name, ts := range ckptMap {
-		ckptManager := ckpt.NewCheckpointManager(name, 0)
-		ckptManager.Get()
-		if err := ckptManager.Update(ts.Newest); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 type DBSyncer struct {

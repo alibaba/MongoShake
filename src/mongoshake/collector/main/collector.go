@@ -8,7 +8,6 @@ import (
 	"syscall"
 
 	"mongoshake/collector"
-	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
 	"mongoshake/common"
 	"mongoshake/executor"
@@ -16,12 +15,12 @@ import (
 	"mongoshake/oplog"
 	"mongoshake/quorum"
 
-	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
 )
 
-type Exit struct {Code int}
+type Exit struct{ Code int }
 
 func main() {
 	var err error
@@ -105,7 +104,7 @@ func startup() {
 
 func selectLeader() {
 	// first of all. ensure we are the Master
-	if conf.Options.MasterQuorum && conf.Options.ContextStorage == ckpt.StorageTypeDB {
+	if conf.Options.MasterQuorum && conf.Options.ContextStorage == collector.StorageTypeDB {
 		// election become to Master. keep waiting if we are the candidate. election id is must fixed
 		quorum.UseElectionObjectId(bson.ObjectIdHex("5204af979955496907000001"))
 		go quorum.BecomeMaster(conf.Options.ContextStorageUrl, utils.AppDatabase)
@@ -164,8 +163,8 @@ func sanitizeOptions() error {
 		return errors.New("worker queue numeric is negative")
 	}
 	if conf.Options.ContextStorage == "" || conf.Options.ContextAddress == "" ||
-		(conf.Options.ContextStorage != ckpt.StorageTypeAPI &&
-			conf.Options.ContextStorage != ckpt.StorageTypeDB) {
+		(conf.Options.ContextStorage != collector.StorageTypeAPI &&
+			conf.Options.ContextStorage != collector.StorageTypeDB) {
 		return errors.New("context storage type or address is invalid")
 	}
 	if conf.Options.WorkerOplogCompressor != module.CompressionNone &&
@@ -174,7 +173,7 @@ func sanitizeOptions() error {
 		conf.Options.WorkerOplogCompressor != module.CompressionDeflate {
 		return errors.New("compressor is not supported")
 	}
-	if conf.Options.MasterQuorum && conf.Options.ContextStorage != ckpt.StorageTypeDB {
+	if conf.Options.MasterQuorum && conf.Options.ContextStorage != collector.StorageTypeDB {
 		return errors.New("context storage should set to 'database' while master election enabled")
 	}
 	if len(conf.Options.FilterNamespaceBlack) != 0 &&
@@ -219,8 +218,8 @@ func sanitizeOptions() error {
 	}
 
 	if conf.Options.MongoConnectMode != utils.ConnectModePrimary &&
-			conf.Options.MongoConnectMode != utils.ConnectModeSecondaryPreferred &&
-			conf.Options.MongoConnectMode != utils.ConnectModeStandalone {
+		conf.Options.MongoConnectMode != utils.ConnectModeSecondaryPreferred &&
+		conf.Options.MongoConnectMode != utils.ConnectModeStandalone {
 		return fmt.Errorf("unknown mongo_connect_mode[%v]", conf.Options.MongoConnectMode)
 	}
 
