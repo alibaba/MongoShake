@@ -177,7 +177,7 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 			return filter.filter(log)
 		case "applyOps":
 			var ops []bson.D
-			var filterOps []interface{} // return []interface{}
+			var filteredOps []interface{} // return []interface{}
 
 			// it's very strange, some documents are []interface, some are []bson.D
 			switch v := oplog.GetKey(log.Object, "applyOps").(type) {
@@ -194,11 +194,11 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 				m, _ := oplog.ConvertBsonD2M(ele)
 				subLog := oplog.NewPartialLog(m)
 				if ok := filter.Filter(subLog); !ok {
-					filterOps = append(filterOps, ele)
+					filteredOps = append(filteredOps, ele)
 				}
 			}
-			oplog.SetFiled(log.Object, "applyOps", filterOps)
-			return len(filterOps) > 0
+			oplog.SetFiled(log.Object, "applyOps", filteredOps)
+			return len(filteredOps) == 0
 		default:
 			// such as: dropDatabase
 			return filter.filter(log)

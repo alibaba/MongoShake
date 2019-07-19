@@ -433,8 +433,8 @@ func TestFilterPartialLog(t *testing.T) {
 		assert.Equal(t, mockFilterPartialLog("c", "admin.$cmd", bson.D{
 			bson.DocElem{
 				Name: "applyOps",
-				Value: []bson.D{
-					{
+				Value: []interface {}{
+					bson.D{
 						bson.DocElem{"op", "i"},
 						bson.DocElem{"ns", "fdb1.fcol1"},
 						bson.DocElem{"o", bson.D{
@@ -478,7 +478,7 @@ func TestFilterPartialLog(t *testing.T) {
 		assert.Equal(t, mockFilterPartialLog("c", "admin.$cmd", bson.D{
 			bson.DocElem{
 				Name: "applyOps",
-				Value: []bson.D(nil),
+				Value: []interface {}(nil),
 			},
 		}), log, "should be equal")
 	}
