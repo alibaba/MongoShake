@@ -174,6 +174,9 @@ func (sync *OplogSyncer) startBatcher() {
 	filterFlag := false // marks whether previous log is filter
 
 	nimo.GoRoutineInLoop(func() {
+
+		sync.ckptManager.GlobalLock.RLock()
+		defer sync.ckptManager.GlobalLock.RUnlock()
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
 		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
@@ -194,7 +197,7 @@ func (sync *OplogSyncer) startBatcher() {
 
 			// flush checkpoint value
 			if barrier {
-				sync.ckptManager.OplogCheckpoint()
+				sync.ckptManager.FlushChan <- true
 				sync.barrierCheckpoint(newestTs)
 			}
 		} else if filterLog != nil {
@@ -268,7 +271,7 @@ func (sync *OplogSyncer) barrierCheckpoint(newestTs bson.MongoTimestamp) {
 			utils.YieldInMs(DDLCheckpointInterval)
 
 			// re-flush
-			sync.ckptManager.OplogCheckpoint()
+			sync.ckptManager.FlushChan <- true
 		}
 	}
 }

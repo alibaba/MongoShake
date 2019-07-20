@@ -264,6 +264,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		ckptManager.Update(replset, ts.Newest)
 	}
 	if err := ckptManager.Flush(); err != nil {
+		LOG.Error("document syncer flush checkpoint failed. %v", err)
 		return err
 	}
 
@@ -290,11 +291,18 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)
 	}
 
+	if conf.Options.MoveChunkEnable {
+		ckptManager.registerPersis(mvckManager)
+	}
 	// initialize checkpoint timestamp of oplog syncer
 	if err := ckptManager.Load(); err != nil {
 		return err
 	}
 	ckptManager.start()
+
+	if conf.Options.MoveChunkEnable {
+		mvckManager.start()
+	}
 
 	// prepare worker routine and bind it to syncer
 	for i := 0; i != conf.Options.WorkerNum; i++ {
@@ -310,10 +318,6 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		// of overall replication is single mongodb replica)
 		syncer.bind(w)
 		go w.startWorker()
-	}
-
-	if conf.Options.MoveChunkEnable {
-		mvckManager.start()
 	}
 
 	for _, syncer := range coordinator.syncerGroup {

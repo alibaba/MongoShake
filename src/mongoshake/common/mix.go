@@ -71,17 +71,21 @@ func TimestampToString(ts int64) string {
 	return time.Unix(ts, 0).Format(TimeFormat)
 }
 
-func TimestampToOplogString(ts bson.MongoTimestamp) string {
-	v := uint64(ts)
-	return fmt.Sprintf("Timestamp(%d, %d)", v>>32, uint32(v))
+func TimestampToLog(ts interface{}) string {
+	switch v := ts.(type) {
+	case bson.MongoTimestamp, int64:
+		vr := v.(int64)
+		return fmt.Sprintf("Timestamp(%d, %d)", vr>>32, uint32(vr))
+	}
+	return ""
 }
 
 func ExtractMongoTimestamp(ts interface{}) int64 {
-	switch src := ts.(type) {
+	switch v := ts.(type) {
 	case bson.MongoTimestamp:
-		return int64(src) >> 32
+		return int64(v) >> 32
 	case int64:
-		return src >> 32
+		return v >> 32
 	}
 
 	return 0

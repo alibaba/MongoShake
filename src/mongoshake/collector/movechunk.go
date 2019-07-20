@@ -12,9 +12,16 @@ import (
 	"time"
 )
 
+const (
+	MoveChunkSyncTSName = "syncts"
+	MoveChunkKeyName    = "key"
+	MoveChunkInsertMap  = "insertmap"
+	MoveChunkDeleteItem = "deleteitem"
+)
+
 func NewMoveChunkManager() *MoveChunkManager {
 	manager := &MoveChunkManager{
-		moveChunkMap: make(map[MoveChunkKey]*MoveChunkInfo),
+		moveChunkMap: make(map[MoveChunkKey]*MoveChunkValue),
 		syncInfoMap:  make(map[string]*SyncerMoveChunk),
 	}
 	return manager
@@ -23,7 +30,7 @@ func NewMoveChunkManager() *MoveChunkManager {
 type MoveChunkManager struct {
 	syncInfoMap map[string]*SyncerMoveChunk
 	// ensure the order of oplog when move chunk occur
-	moveChunkMap  map[MoveChunkKey]*MoveChunkInfo
+	moveChunkMap  map[MoveChunkKey]*MoveChunkValue
 	moveChunkLock sync.Mutex
 }
 
@@ -103,11 +110,10 @@ func (key MoveChunkKey) String() string {
 	}
 }
 
-type MoveChunkInfo struct {
+type MoveChunkValue struct {
 	insertMap map[string]bson.MongoTimestamp
 	// the size of deleteMap will not more than 1
 	deleteItem *MCIItem
-	barrierMap map[string]chan interface{}
 }
 
 type MCIItem struct {
@@ -115,39 +121,33 @@ type MCIItem struct {
 	timestamp bson.MongoTimestamp
 }
 
-func (info *MoveChunkInfo) Barrier(replset string, syncInfo *SyncerMoveChunk, key MoveChunkKey, partialLog *oplog.PartialLog) {
-	if _, ok := info.barrierMap[replset]; ok {
-		LOG.Crashf("syncer %v has more than one barrier in barrierMap when move chunk oplog found[%v %v]",
-			replset, key.String(), utils.TimestampToOplogString(partialLog.Timestamp))
-	}
-	barrierChan := make(chan interface{})
-	info.barrierMap[replset] = barrierChan
+func (value *MoveChunkValue) Barrier(syncInfo *SyncerMoveChunk, key MoveChunkKey, partialLog *oplog.PartialLog) {
 	syncInfo.mutex.Lock()
 	if syncInfo.barrierChan != nil {
 		LOG.Crashf("syncer %v has more than one barrier in syncInfoMap when move chunk oplog found[%v %v]",
-			replset, key.String(), utils.TimestampToOplogString(partialLog.Timestamp))
+			syncInfo.syncer.replset, key.String(), utils.TimestampToLog(partialLog.Timestamp))
 	}
 	syncInfo.barrierKey = key
-	syncInfo.barrierChan = barrierChan
+	syncInfo.barrierChan = make(chan interface{})
 	syncInfo.mutex.Unlock()
 }
 
-func (info *MoveChunkInfo) AddMoveChunk(replset string, key MoveChunkKey, partialLog *oplog.PartialLog) {
+func (value *MoveChunkValue) AddMoveChunk(replset string, key MoveChunkKey, partialLog *oplog.PartialLog) {
 	if partialLog.Operation == "d" {
-		if info.deleteItem != nil {
+		if value.deleteItem != nil {
 			LOG.Crashf("move chunk manager has more than one deleteItem[%v] when delete move chunk oplog found[%v %v]",
-				info.deleteItem, key.String(), utils.TimestampToOplogString(partialLog.Timestamp))
+				value.deleteItem, key.String(), utils.TimestampToLog(partialLog.Timestamp))
 		}
 		LOG.Info("syncer %v add delete move chunk oplog[%v %v]",
-			replset, key.String(), utils.TimestampToOplogString(partialLog.Timestamp))
-		info.deleteItem = &MCIItem{replset: replset, timestamp: partialLog.Timestamp}
+			replset, key.String(), utils.TimestampToLog(partialLog.Timestamp))
+		value.deleteItem = &MCIItem{replset: replset, timestamp: partialLog.Timestamp}
 	} else if partialLog.Operation == "i" {
 		LOG.Info("syncer %v add insert move chunk oplog[%v %v]",
-			replset, key.String(), utils.TimestampToOplogString(partialLog.Timestamp))
-		info.insertMap[replset] = partialLog.Timestamp
+			replset, key.String(), utils.TimestampToLog(partialLog.Timestamp))
+		value.insertMap[replset] = partialLog.Timestamp
 	} else {
 		LOG.Crashf("unsupported %v move chunk oplog[%v %v]",
-			partialLog.Operation, key.String(), utils.TimestampToOplogString(partialLog.Timestamp))
+			partialLog.Operation, key.String(), utils.TimestampToLog(partialLog.Timestamp))
 	}
 }
 
@@ -160,48 +160,50 @@ func (manager *MoveChunkManager) eliminateBarrier() {
 			ack := bson.MongoTimestamp(atomic.LoadInt64(&worker.ack))
 			unack := bson.MongoTimestamp(atomic.LoadInt64(&worker.unack))
 			LOG.Info("syncer %v worker ack[%v] unack[%v] syncTs[%v] barrierKey[%v]", replset,
-				utils.TimestampToOplogString(ack), utils.TimestampToOplogString(unack),
-				utils.TimestampToOplogString(syncInfo.syncTs), syncInfo.barrierKey)
+				utils.TimestampToLog(ack), utils.TimestampToLog(unack),
+				utils.TimestampToLog(syncInfo.syncTs), syncInfo.barrierKey)
 		}
 		syncInfo.mutex.Unlock()
 	}
 	var deleteKeyList []MoveChunkKey
-	for key, info := range manager.moveChunkMap {
-		if info.deleteItem != nil {
-			deleteReplset := info.deleteItem.replset
-			if !manager.barrierProbe(key, info.deleteItem.timestamp) {
+	for key, value := range manager.moveChunkMap {
+		if value.deleteItem != nil {
+			deleteReplset := value.deleteItem.replset
+			if !manager.barrierProbe(key, value.deleteItem.timestamp) {
 				continue
 			}
 			minInsertReplset := ""
 			var minInsertTs bson.MongoTimestamp
-			for replset, insertTs := range info.insertMap {
+			for replset, insertTs := range value.insertMap {
 				if minInsertReplset == "" || minInsertTs > insertTs {
 					minInsertReplset = replset
 					minInsertTs = insertTs
 				}
 			}
 			if minInsertReplset != "" {
-				if barrier, ok := info.barrierMap[minInsertReplset]; ok {
+				// remove insert move chunk
+				insertBarrier := manager.syncInfoMap[minInsertReplset].barrierChan
+				if insertBarrier != nil {
 					LOG.Info("syncer %v eliminate insert barrier[%v %v]", minInsertReplset,
-						key.String(), utils.TimestampToOplogString(info.insertMap[minInsertReplset]))
+						key.String(), utils.TimestampToLog(value.insertMap[minInsertReplset]))
 					manager.syncInfoMap[minInsertReplset].DeleteBarrier()
-					delete(info.barrierMap, minInsertReplset)
-					close(barrier)
+					close(insertBarrier)
 				}
 				LOG.Info("syncer %v remove insert move chunk oplog[%v %v]", minInsertReplset,
-					key.String(), utils.TimestampToOplogString(info.insertMap[minInsertReplset]))
-				delete(info.insertMap, minInsertReplset)
-				if barrier, ok := info.barrierMap[deleteReplset]; ok {
+					key.String(), utils.TimestampToLog(value.insertMap[minInsertReplset]))
+				delete(value.insertMap, minInsertReplset)
+				// remove delete move chunk
+				deleteBarrier := manager.syncInfoMap[deleteReplset].barrierChan
+				if deleteBarrier != nil {
 					LOG.Info("syncer %v eliminate delete barrier[%v %v]", deleteReplset,
-						key.String(), utils.TimestampToOplogString(info.deleteItem.timestamp))
+						key.String(), utils.TimestampToLog(value.deleteItem.timestamp))
 					manager.syncInfoMap[deleteReplset].DeleteBarrier()
-					delete(info.barrierMap, deleteReplset)
-					close(barrier)
+					close(deleteBarrier)
 				}
 				LOG.Info("syncer %v remove delete move chunk oplog[%v %v]", deleteReplset,
-					key.String(), utils.TimestampToOplogString(info.deleteItem.timestamp))
-				info.deleteItem = nil
-				if len(info.insertMap) == 0 && len(info.barrierMap) == 0 {
+					key.String(), utils.TimestampToLog(value.deleteItem.timestamp))
+				value.deleteItem = nil
+				if len(value.insertMap) == 0 {
 					LOG.Info("move chunk map remove move chunk key[%v]", key.String())
 					deleteKeyList = append(deleteKeyList, key)
 				}
@@ -228,33 +230,32 @@ func (manager *MoveChunkManager) barrierBlock(replset string, partialLog *oplog.
 		// barrier == true if the syncer already has a insert/delete move chunk oplog before
 		if oplogId := oplog.GetKey(partialLog.Object, ""); oplogId != nil {
 			key := MoveChunkKey{id: oplogId, namespace: partialLog.Namespace}
-			info, ok := manager.moveChunkMap[key]
+			value, ok := manager.moveChunkMap[key]
 			if ok {
-				if ts, ok := info.insertMap[replset]; ok {
+				if ts, ok := value.insertMap[replset]; ok {
 					LOG.Info("syncer %v meet insert barrier ts[%v] when %v move chunk oplog found[%v %v]",
-						replset, utils.TimestampToOplogString(ts), partialLog.Operation,
-						key.String(), utils.TimestampToOplogString(partialLog.Timestamp))
-					info.Barrier(replset, syncInfo, key, partialLog)
+						replset, utils.TimestampToLog(ts), partialLog.Operation,
+						key.String(), utils.TimestampToLog(partialLog.Timestamp))
+					value.Barrier(syncInfo, key, partialLog)
 					barrier = true
-				} else if info.deleteItem != nil && info.deleteItem.replset == replset {
+				} else if value.deleteItem != nil && value.deleteItem.replset == replset {
 					LOG.Info("syncer %v meet delete barrier ts[%v] when %v move chunk oplog found[%v %v]",
-						replset, utils.TimestampToOplogString(info.deleteItem.timestamp), partialLog.Operation,
-						key.String(), utils.TimestampToOplogString(partialLog.Timestamp))
-					info.Barrier(replset, syncInfo, key, partialLog)
+						replset, utils.TimestampToLog(value.deleteItem.timestamp), partialLog.Operation,
+						key.String(), utils.TimestampToLog(partialLog.Timestamp))
+					value.Barrier(syncInfo, key, partialLog)
 					barrier = true
 				} else {
 					// find a insert/delete move chunk firstly
-					info.AddMoveChunk(replset, key, partialLog)
+					value.AddMoveChunk(replset, key, partialLog)
 				}
 			} else {
-				LOG.Info("syncer %v create move chunk info when move chunk oplog found[%v %v]",
-					replset, key.String(), utils.TimestampToOplogString(partialLog.Timestamp))
-				info := &MoveChunkInfo{
-					insertMap:  make(map[string]bson.MongoTimestamp),
-					barrierMap: make(map[string]chan interface{}),
+				LOG.Info("syncer %v create move chunk value when move chunk oplog found[%v %v]",
+					replset, key.String(), utils.TimestampToLog(partialLog.Timestamp))
+				value := &MoveChunkValue{
+					insertMap: make(map[string]bson.MongoTimestamp),
 				}
-				info.AddMoveChunk(replset, key, partialLog)
-				manager.moveChunkMap[key] = info
+				value.AddMoveChunk(replset, key, partialLog)
+				manager.moveChunkMap[key] = value
 			}
 		}
 	} else {
@@ -269,19 +270,19 @@ func (manager *MoveChunkManager) barrierBlock(replset string, partialLog *oplog.
 		}
 		if oplogId != nil {
 			key := MoveChunkKey{id: oplogId, namespace: partialLog.Namespace}
-			info, ok := manager.moveChunkMap[key]
+			value, ok := manager.moveChunkMap[key]
 			if ok {
-				if ts, ok := info.insertMap[replset]; ok {
+				if ts, ok := value.insertMap[replset]; ok {
 					// barrier == true if the syncer already has a insert move chunk oplog before
 					LOG.Info("syncer %v meet insert barrier ts[%v] when operation oplog found[%v %v]",
-						replset, utils.TimestampToOplogString(ts), key.String(), utils.TimestampToOplogString(partialLog.Timestamp))
-					info.Barrier(replset, manager.syncInfoMap[replset], key, partialLog)
+						replset, utils.TimestampToLog(ts), key.String(), utils.TimestampToLog(partialLog.Timestamp))
+					value.Barrier(manager.syncInfoMap[replset], key, partialLog)
 					barrier = true
 				} else {
-					if info.deleteItem != nil && info.deleteItem.replset == replset {
+					if value.deleteItem != nil && value.deleteItem.replset == replset {
 						LOG.Crashf("syncer %v meet delete barrier ts[%v] when operation oplog found[%v %v] illegal",
-							replset, utils.TimestampToOplogString(info.deleteItem.timestamp),
-							key.String(), utils.TimestampToOplogString(partialLog.Timestamp))
+							replset, utils.TimestampToLog(value.deleteItem.timestamp),
+							key.String(), utils.TimestampToLog(partialLog.Timestamp))
 					}
 				}
 			}
@@ -289,4 +290,88 @@ func (manager *MoveChunkManager) barrierBlock(replset string, partialLog *oplog.
 	}
 	manager.moveChunkLock.Unlock()
 	return barrier
+}
+
+func (manager *MoveChunkManager) Load(conn *utils.MongoConn, db string, tablePrefix string) error {
+	manager.moveChunkLock.Lock()
+	defer manager.moveChunkLock.Unlock()
+	iter := conn.Session.DB(db).C(tablePrefix + "_mvck_syncer").Find(bson.M{}).Iter()
+	ckptDoc := make(map[string]interface{})
+	for iter.Next(ckptDoc) {
+		replset, ok1 := ckptDoc[CheckpointName].(string)
+		syncTs, ok2 := ckptDoc[MoveChunkSyncTSName].(bson.MongoTimestamp)
+		if !ok1 || !ok2 {
+			return fmt.Errorf("MoveChunkManager load checkpoint illegal record %v", ckptDoc)
+		} else if syncInfo, ok := manager.syncInfoMap[replset]; !ok {
+			return fmt.Errorf("MoveChunkManager load checkpoint unknown replset %v", ckptDoc)
+		} else {
+			syncInfo.syncTs = syncTs
+		}
+	}
+	if err := iter.Close(); err != nil {
+		LOG.Critical("MoveChunkManager close iterator failed. %v", err)
+	}
+	iter = conn.Session.DB(db).C(tablePrefix + "_mvck_map").Find(bson.M{}).Iter()
+	for iter.Next(ckptDoc) {
+		key, ok1 := ckptDoc[CheckpointName].(MoveChunkKey)
+		insertMap, ok2 := ckptDoc[MoveChunkInsertMap].(map[string]bson.MongoTimestamp)
+		deleteItem, ok3 := ckptDoc[MoveChunkDeleteItem].(MCIItem)
+		if !ok1 || !ok2 || !ok3 {
+			return fmt.Errorf("MoveChunkManager load checkpoint illegal record %v", ckptDoc)
+		} else {
+			manager.moveChunkMap[key] = &MoveChunkValue{insertMap:insertMap, deleteItem:&deleteItem}
+		}
+	}
+	if err := iter.Close(); err != nil {
+		LOG.Critical("MoveChunkManager close iterator failed. %v", err)
+	}
+	return nil
+}
+
+func (manager *MoveChunkManager) PrepareFlush() error {
+	for replset, syncInfo := range manager.syncInfoMap {
+		syncInfo.mutex.Lock()
+		if syncInfo.barrierChan != nil {
+			syncInfo.mutex.Unlock()
+			return fmt.Errorf("sycner %v meet move chunk barrier %v", replset, syncInfo.barrierKey)
+		}
+		syncInfo.mutex.Unlock()
+	}
+	return nil
+}
+
+func (manager *MoveChunkManager) Flush(conn *utils.MongoConn, db string, tablePrefix string) error {
+	manager.moveChunkLock.Lock()
+	defer manager.moveChunkLock.Unlock()
+	for replset, syncInfo := range manager.syncInfoMap {
+		syncInfo.mutex.Lock()
+		ckptDoc := map[string]interface{}{
+			CheckpointName:      replset,
+			MoveChunkSyncTSName: syncInfo.syncTs,
+		}
+		if _, err := conn.Session.DB(db).C(tablePrefix+"_mvck_syncer").
+			Upsert(bson.M{CheckpointName: replset}, ckptDoc); err != nil {
+			syncInfo.mutex.Unlock()
+			LOG.Critical("MoveChunkManager flush checkpoint syncer %v upsert error %v", ckptDoc, err)
+			return err
+		}
+		syncInfo.mutex.Unlock()
+	}
+	table := tablePrefix + "_mvck_map"
+	if err := conn.Session.DB(db).C(table).DropCollection(); err != nil {
+		LOG.Critical("MoveChunkManager flush checkpoint drop collection %v error %v", table, err)
+		return err
+	}
+	for key, value := range manager.moveChunkMap {
+		ckptDoc := map[string]interface{}{
+			MoveChunkKeyName:    key,
+			MoveChunkInsertMap:  value.insertMap,
+			MoveChunkDeleteItem: *value.deleteItem,
+		}
+		if err := conn.Session.DB(db).C(table).Insert(ckptDoc); err != nil {
+			LOG.Critical("MoveChunkManager flush checkpoint map %v upsert error %v", ckptDoc, err)
+			return err
+		}
+	}
+	return nil
 }
