@@ -72,12 +72,16 @@ func TimestampToString(ts int64) string {
 }
 
 func TimestampToLog(ts interface{}) string {
+	var vr int64
 	switch v := ts.(type) {
-	case bson.MongoTimestamp, int64:
-		vr := v.(int64)
-		return fmt.Sprintf("Timestamp(%d, %d)", vr>>32, uint32(vr))
+	case bson.MongoTimestamp:
+		vr = int64(v)
+	case int64:
+		vr = v
+	default:
+		return ""
 	}
-	return ""
+	return fmt.Sprintf("Timestamp(%d, %d)", vr>>32, uint32(vr))
 }
 
 func ExtractMongoTimestamp(ts interface{}) int64 {

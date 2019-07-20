@@ -1,12 +1,12 @@
 package collector
 
 import (
-	"mongoshake/collector/configure"
-	"mongoshake/collector/filter"
-	"mongoshake/oplog"
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
+	"mongoshake/collector/configure"
+	"mongoshake/collector/filter"
 	"mongoshake/common"
+	"mongoshake/oplog"
 )
 
 var (
@@ -100,6 +100,7 @@ func (batcher *Batcher) dispatchBatches(batchGroup [][]*oplog.GenericOplog) (wor
 
 // return batched oplogs and barrier flag
 func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool) {
+
 	// picked raw oplogs and batching in sequence
 	batchGroup := make([][]*oplog.GenericOplog, len(batcher.workerGroup))
 	syncer := batcher.syncer

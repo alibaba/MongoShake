@@ -173,10 +173,11 @@ func (sync *OplogSyncer) startBatcher() {
 	filterCheckTs := time.Now()
 	filterFlag := false // marks whether previous log is filter
 
-	nimo.GoRoutineInLoop(func() {
+	if batcher.syncer.replset != "mgset-117" {
+		time.Sleep(1*time.Minute)
+	}
 
-		sync.ckptManager.GlobalLock.RLock()
-		defer sync.ckptManager.GlobalLock.RUnlock()
+	nimo.GoRoutineInLoop(func() {
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
 		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
@@ -198,7 +199,9 @@ func (sync *OplogSyncer) startBatcher() {
 			// flush checkpoint value
 			if barrier {
 				sync.ckptManager.FlushChan <- true
+				LOG.Info("waiting barrier checkpoint[%v] for ddl oplog", newestTs)
 				sync.barrierCheckpoint(newestTs)
+				LOG.Info("finish barrier checkpoint[%v] for filter oplog", newestTs)
 			}
 		} else if filterLog != nil {
 			// if log is nil, check whether filterLog is empty
@@ -237,12 +240,12 @@ func (sync *OplogSyncer) startBatcher() {
 						newestTsLog, utils.ExtractTimestampForLog(log.Timestamp))
 				}
 
-				LOG.Info("waiting last checkpoint[%v] updated", newestTsLog)
+				LOG.Info("waiting barrier checkpoint[%v] for filter oplog[%v]", log.Timestamp, newestTs)
 				// check last checkpoint updated
 
 				sync.barrierCheckpoint(log.Timestamp)
 
-				LOG.Info("last checkpoint[%v] updated ok", newestTsLog)
+				LOG.Info("finish barrier checkpoint[%v] for filter oplog[%v]", log.Timestamp, newestTs)
 			} else {
 				LOG.Info("last log is empty, skip waiting checkpoint updated")
 			}
