@@ -261,7 +261,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// checkpoint after document syncer
 	ckptManager := NewCheckpointManager(0)
 	for replset, ts := range ckptMap {
-		ckptManager.Update(replset, ts.Newest)
+		ckptManager.UpdateAckTs(replset, ts.Newest)
 	}
 	if err := ckptManager.Flush(); err != nil {
 		LOG.Error("document syncer flush checkpoint failed. %v", err)

@@ -93,13 +93,14 @@ func (batcher *Batcher) dispatchBatches(batchGroup [][]*oplog.GenericOplog) (wor
 			work = true
 			batcher.workerGroup[i].AllAcked(false)
 		}
+
 		batcher.workerGroup[i].Offer(batch)
 	}
 	return
 }
 
 // return batched oplogs and barrier flag
-func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool) {
+func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, bool) {
 
 	// picked raw oplogs and batching in sequence
 	batchGroup := make([][]*oplog.GenericOplog, len(batcher.workerGroup))
@@ -132,6 +133,7 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool) {
 
 	// split batch if has DDL
 	allEmpty := true
+	flushCheckpoint := false
 	for i, genericLog := range mergeBatch {
 		// filter oplog such like Noop or Gid-filtered
 		if batcher.filter(genericLog.Parsed) {
@@ -156,6 +158,7 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool) {
 		if !conf.Options.ReplayerDMLOnly && ddlFilter.Filter(genericLog.Parsed) && !barrier {
 			batcher.remainLogs = mergeBatch[i:]
 			barrier = true
+			flushCheckpoint = true
 			break
 		}
 		// current is not ddl but barrier == true
@@ -176,7 +179,7 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool) {
 			break
 		}
 	}
-	return batchGroup, barrier, allEmpty
+	return batchGroup, barrier, allEmpty, flushCheckpoint
 }
 
 func (batcher *Batcher) moveToNextQueue() {
@@ -193,6 +196,5 @@ func moveChunkBarrier(syncer *OplogSyncer, partialLog *oplog.PartialLog) bool {
 	if ddlFilter.Filter(partialLog) {
 		return false
 	}
-
-	return syncer.mvckManager.barrierBlock(syncer.replset, partialLog)
+	return syncer.mvckManager.BarrierOplog(syncer.replset, partialLog)
 }

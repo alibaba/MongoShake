@@ -91,7 +91,7 @@ func NewOplogSyncer(
 		fullSyncFinishPosition: fullSyncFinishPosition,
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
-		reader: NewOplogReader(mongoUrl),
+		reader:      NewOplogReader(mongoUrl),
 		ckptManager: ckptManager,
 		mvckManager: mvckManager,
 	}
@@ -173,18 +173,15 @@ func (sync *OplogSyncer) startBatcher() {
 	filterCheckTs := time.Now()
 	filterFlag := false // marks whether previous log is filter
 
-	if batcher.syncer.replset != "mgset-117" {
-		time.Sleep(1*time.Minute)
-	}
-
 	nimo.GoRoutineInLoop(func() {
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
 		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
-		batchedOplog, barrier, allEmpty := batcher.batchMore()
+		batchedOplog, barrier, allEmpty, flushCheckpoint := batcher.batchMore()
 
 		var newestTs bson.MongoTimestamp
-		if log, filterLog := batcher.getLastOplog(); log != nil && !allEmpty {
+		log, filterLog := batcher.getLastOplog()
+		if log != nil && !allEmpty {
 			newestTs = log.Timestamp
 
 			// push to worker
@@ -194,16 +191,30 @@ func (sync *OplogSyncer) startBatcher() {
 				sync.reader.UpdateQueryTimestamp(newestTs)
 			}
 
+			// update movechunk manager offer ts after dispatch batches
+			sync.mvckManager.UpdateOfferTs(sync.replset)
+
 			filterFlag = false
 
 			// flush checkpoint value
 			if barrier {
-				sync.ckptManager.FlushChan <- true
-				LOG.Info("waiting barrier checkpoint[%v] for ddl oplog", newestTs)
-				sync.barrierCheckpoint(newestTs)
-				LOG.Info("finish barrier checkpoint[%v] for filter oplog", newestTs)
+				if flushCheckpoint {
+					sync.ckptManager.FlushChan <- true
+				}
+				LOG.Info("batcher waiting barrier ack[%v]", newestTs)
+				sync.waitBarrierAck(newestTs)
+				LOG.Info("batcher finish barrier ack[%v]", newestTs)
+				if flushCheckpoint {
+					sync.ckptManager.FlushChan <- true
+				}
 			}
-		} else if filterLog != nil {
+			return
+		}
+
+		// update movechunk manager offer ts even though oplog is filtered
+		sync.mvckManager.UpdateOfferTs(sync.replset)
+
+		if filterLog != nil {
 			// if log is nil, check whether filterLog is empty
 			now := time.Now()
 
@@ -215,13 +226,13 @@ func (sync *OplogSyncer) startBatcher() {
 			}
 
 			// pass only if all received oplog are filtered for {FilterCheckpointCheckInterval} seconds.
-			if now.After(filterCheckTs.Add(FilterCheckpointCheckInterval * time.Second)) == false {
+			if now.After(filterCheckTs.Add(FilterCheckpointCheckInterval*time.Second)) == false {
 				return
 			}
 
 			checkpointTs := utils.ExtractMongoTimestamp(sync.ckptManager.Get(sync.replset))
 			filterNewestTs := utils.ExtractMongoTimestamp(filterLog.Timestamp)
-			if filterNewestTs - FilterCheckpointGap < checkpointTs {
+			if filterNewestTs-FilterCheckpointGap < checkpointTs {
 				return
 			}
 
@@ -240,12 +251,12 @@ func (sync *OplogSyncer) startBatcher() {
 						newestTsLog, utils.ExtractTimestampForLog(log.Timestamp))
 				}
 
-				LOG.Info("waiting barrier checkpoint[%v] for filter oplog[%v]", log.Timestamp, newestTs)
+				LOG.Info("batcher waiting barrier ack[%v] for filter oplog[%v]", log.Timestamp, newestTs)
 				// check last checkpoint updated
 
-				sync.barrierCheckpoint(log.Timestamp)
+				sync.waitBarrierAck(log.Timestamp)
 
-				LOG.Info("finish barrier checkpoint[%v] for filter oplog[%v]", log.Timestamp, newestTs)
+				LOG.Info("batcher waiting barrier ack[%v] for filter oplog[%v]", log.Timestamp, newestTs)
 			} else {
 				LOG.Info("last log is empty, skip waiting checkpoint updated")
 			}
@@ -253,28 +264,22 @@ func (sync *OplogSyncer) startBatcher() {
 			// update latest fetched timestamp in memory
 			sync.reader.UpdateQueryTimestamp(newestTs)
 			// flush checkpoint by the newest filter oplog value
-			sync.ckptManager.Update(sync.replset, newestTs)
-			return
+			sync.ckptManager.UpdateAckTs(sync.replset, newestTs)
 		}
 	})
 }
 
-func (sync *OplogSyncer) barrierCheckpoint(newestTs bson.MongoTimestamp) {
+func (sync *OplogSyncer) waitBarrierAck(newestTs bson.MongoTimestamp) {
 	// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
 	if newestTs > 0 && conf.Options.WorkerNum > 1 {
-		LOG.Info("find barrier")
 		for {
 			checkpointTs := sync.ckptManager.Get(sync.replset)
 			LOG.Info("compare remote checkpoint[%v(%v)] to local newestTs[%v(%v)]",
 				checkpointTs, utils.ExtractMongoTimestamp(checkpointTs), newestTs, utils.ExtractMongoTimestamp(newestTs))
 			if checkpointTs >= newestTs {
-				LOG.Info("barrier checkpoint updated")
 				break
 			}
 			utils.YieldInMs(DDLCheckpointInterval)
-
-			// re-flush
-			sync.ckptManager.FlushChan <- true
 		}
 	}
 }
