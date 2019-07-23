@@ -70,6 +70,7 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.M, 
 		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
 		newObject := log.original.partialLog.Object
 		inserts = append(inserts, newObject)
+		LOG.Debug("writer: insert %v", log.original.partialLog.Dump(nil, true))
 	}
 	dbHandle := cw.session.DB(database)
 
@@ -113,6 +114,7 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 		} else {
 			LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
 		}
+		LOG.Debug("writer: updateOnInsert %v", log.original.partialLog.Dump(nil, true))
 	}
 
 	var err error
@@ -149,6 +151,7 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.M,
 			"u":      newObject,
 			"upsert": upsert,
 			"multi":  false})
+		LOG.Debug("writer: update %v", log.original.partialLog.Dump(nil, true))
 	}
 
 	var err error
@@ -179,6 +182,7 @@ func (cw *CommandWriter) doDelete(database, collection string, metadata bson.M,
 	var err error
 	for _, log := range oplogs {
 		deleted = append(deleted, bson.M{"q": log.original.partialLog.Object, "limit": 0})
+		LOG.Debug("writer: delete %v", log.original.partialLog.Dump(nil, true))
 	}
 
 	if err = cw.session.DB(database).RunCommand(
@@ -210,6 +214,7 @@ func (cw *CommandWriter) doCommand(database string, metadata bson.M, oplogs []*O
 		} else {
 			// exec.batchExecutor.ReplMetric.AddFilter(1)
 		}
+		LOG.Debug("writer: command %v", log.original.partialLog.Dump(nil, true))
 	}
 	return nil
 }
@@ -259,6 +264,8 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, opl
 		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
 		newObject := log.original.partialLog.Object
 		inserts = append(inserts, newObject)
+
+		LOG.Debug("writer: insert %v", log.original.partialLog.Dump(nil, true))
 	}
 	// collectionHandle := bw.session.DB(database).C(collection)
 	bulk := bw.session.DB(database).C(collection).Bulk()
@@ -293,6 +300,8 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 		} else {
 			LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
 		}
+
+		LOG.Debug("writer: updateOnInsert %v", log.original.partialLog.Dump(nil, true))
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
@@ -322,6 +331,8 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 		//}
 		newObject := oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
 		update = append(update, log.original.partialLog.Query, newObject)
+
+		LOG.Debug("writer: update %v", log.original.partialLog.Dump(nil, true))
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
@@ -347,6 +358,8 @@ func (bw *BulkWriter) doDelete(database, collection string, metadata bson.M,
 	var delete []interface{}
 	for _, log := range oplogs {
 		delete = append(delete, log.original.partialLog.Object)
+
+		LOG.Debug("writer: delete %v", log.original.partialLog.Dump(nil, true))
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
@@ -375,6 +388,8 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*Oplo
 		} else {
 			// exec.batchExecutor.ReplMetric.AddFilter(1)
 		}
+
+		LOG.Debug("writer: command %v", log.original.partialLog.Dump(nil, true))
 	}
 	return nil
 }
@@ -401,6 +416,8 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.M, o
 				errMsgs = append(errMsgs, errMsg)
 			}
 		}
+
+		LOG.Debug("writer: insert %v", log.original.partialLog.Dump(nil, true))
 	}
 
 	if len(errMsgs) != 0 {
@@ -436,6 +453,8 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 		} else {
 			LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
 		}
+
+		LOG.Debug("writer: updateOnInsert %v", log.original.partialLog.Dump(nil, true))
 	}
 
 	collectionHandle := sw.session.DB(database).C(collection)
@@ -486,6 +505,8 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 					log.original.partialLog.Query, newObject, err)
 				errMsgs = append(errMsgs, errMsg)
 			}
+
+			LOG.Debug("writer: upsert %v", log.original.partialLog.Dump(nil, true))
 		}
 	} else {
 		for _, log := range oplogs {
@@ -507,6 +528,8 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 					errMsgs = append(errMsgs, errMsg)
 				}
 			}
+
+			LOG.Debug("writer: update %v", log.original.partialLog.Dump(nil, true))
 		}
 	}
 
@@ -533,6 +556,8 @@ func (sw *SingleWriter) doDelete(database, collection string, metadata bson.M,
 				errMsgs = append(errMsgs, errMsg)
 			}
 		}
+
+		LOG.Debug("writer: delete %v", log.original.partialLog.Dump(nil, true))
 	}
 
 	if len(errMsgs) != 0 {
@@ -558,6 +583,8 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*Op
 		} else {
 			// exec.batchExecutor.ReplMetric.AddFilter(1)
 		}
+
+		LOG.Debug("writer: command %v", log.original.partialLog.Dump(nil, true))
 	}
 	return nil
 }
