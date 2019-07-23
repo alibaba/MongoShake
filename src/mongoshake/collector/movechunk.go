@@ -1,7 +1,6 @@
 package collector
 
 import (
-	"encoding/json"
 	"fmt"
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
@@ -261,19 +260,20 @@ func (manager *MoveChunkManager) Load(conn *utils.MongoConn, db string, tablePre
 	for iter.Next(ckptDoc) {
 		key := MoveChunkKey{}
 		value := MoveChunkValue{insertMap: make(map[string]bson.MongoTimestamp)}
-		err1 := json.Unmarshal([]byte(ckptDoc[MoveChunkKeyName].(string)), &key)
-		err2 := json.Unmarshal([]byte(ckptDoc[MoveChunkInsertMap].(string)), &value.insertMap)
-		var err3 error
-		if deleteItemStr, ok := ckptDoc[MoveChunkDeleteItem].(string); ok && deleteItemStr != "" {
-			var item MCIItem
-			err3 = json.Unmarshal([]byte(deleteItemStr), &item)
-			value.deleteItem = &item
-		} else {
-			value.deleteItem, err3 = nil, nil
+
+		err1 := utils.Map2Struct(ckptDoc[MoveChunkKeyName].(map[string]interface{}), "bson", &key)
+		for k, v := range ckptDoc[MoveChunkInsertMap].(map[string]interface{}) {
+			value.insertMap[k] = v.(bson.MongoTimestamp)
 		}
-		if err1 != nil || err2 != nil || err3 != nil {
-			return fmt.Errorf("MoveChunkManager load checkpoint illegal record %v. err1[%v] err2[%v] err3[%v]",
-				ckptDoc, err1, err2, err3)
+		var err2 error
+		deleteItem := ckptDoc[MoveChunkDeleteItem].(map[string]interface{})
+		if len(deleteItem) > 0 {
+			ptr := &MCIItem{}
+			err2 = utils.Map2Struct(deleteItem, "bson", ptr)
+		}
+		if err1 != nil || err2 != nil {
+			return fmt.Errorf("MoveChunkManager load checkpoint illegal record %v. err1[%v] err2[%v]",
+				ckptDoc, err1, err2)
 		} else {
 			manager.moveChunkMap[key] = &value
 		}
@@ -320,23 +320,20 @@ func (manager *MoveChunkManager) Flush(conn *utils.MongoConn, db string, tablePr
 	}
 	buffer := make([]interface{}, 0, MoveChunkBufferSize)
 	for key, value := range manager.moveChunkMap {
-		keyStr, err1 := json.Marshal(key)
-		insertMapStr, err2 := json.Marshal(value.insertMap)
-		var deleteItemStr []byte
-		var err3 error
+		keyItem, err1 := utils.Struct2Map(&key, "bson")
+		var deleteItem map[string]interface{}
+		var err2 error
 		if value.deleteItem != nil {
-			deleteItemStr, err3 = json.Marshal(*value.deleteItem)
-		} else {
-			deleteItemStr, err3 = []byte(""), nil
+			deleteItem, err2 = utils.Struct2Map(value.deleteItem, "bson")
 		}
-		if err1 != nil || err2 != nil || err3 != nil {
+		if err1 != nil || err2 != nil {
 			return fmt.Errorf("MoveChunkManager flush checkpoint json key[%v] insertMap[%v] deleteItem[%v] failed",
 				key, value.insertMap, value.deleteItem)
 		}
 		ckptDoc := map[string]interface{}{
-			MoveChunkKeyName:    string(keyStr),
-			MoveChunkInsertMap:  string(insertMapStr),
-			MoveChunkDeleteItem: string(deleteItemStr),
+			MoveChunkKeyName:    keyItem,
+			MoveChunkInsertMap:  value.insertMap,
+			MoveChunkDeleteItem: deleteItem,
 		}
 		if len(buffer) >= MoveChunkBufferSize {
 			// 1000 * byte size of ckptDoc < 16MB
@@ -404,8 +401,8 @@ func (syncInfo *SyncerMoveChunk) updateSyncTs(partialLog *oplog.PartialLog) {
 }
 
 type MoveChunkKey struct {
-	Id        interface{} `json:"docId"`
-	Namespace string      `json:"namespace"`
+	Id        interface{} `bson:"docId"`
+	Namespace string      `bson:"namespace"`
 }
 
 func (key MoveChunkKey) string() string {
@@ -424,8 +421,8 @@ type MoveChunkValue struct {
 }
 
 type MCIItem struct {
-	Replset   string              `json:"replset"`
-	Timestamp bson.MongoTimestamp `json:"deleteTs"`
+	Replset   string              `bson:"replset"`
+	Timestamp bson.MongoTimestamp `bson:"deleteTs"`
 }
 
 func (value *MoveChunkValue) barrierOplog(syncInfo *SyncerMoveChunk, key MoveChunkKey, partialLog *oplog.PartialLog) {

@@ -114,9 +114,7 @@ func (manager *CheckpointManager) start() {
 			if now.Before(checkTime.Add(time.Duration(intervalMs) * time.Millisecond)) {
 				return
 			}
-			if err := manager.Flush(); err != nil {
-				//LOG.Warn("CheckpointManager flush periodically failed. %v", err)
-			} else {
+			if err := manager.Flush(); err == nil {
 				LOG.Info("CheckpointManager flush periodically successful")
 			}
 			checkTime = time.Now()
