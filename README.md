@@ -5,8 +5,6 @@ This is a brief introduction of Mongo-Shake, please visit [english wiki](https:/
 *  [第一次使用，如何配置](https://github.com/alibaba/MongoShake/wiki/%E7%AC%AC%E4%B8%80%E6%AC%A1%E4%BD%BF%E7%94%A8%EF%BC%8C%E5%A6%82%E4%BD%95%E8%BF%9B%E8%A1%8C%E9%85%8D%E7%BD%AE%EF%BC%9F)
 *  [Tutorial](https://github.com/alibaba/MongoShake/wiki/tutorial-about-how-to-set-up)
 *  [FAQ document](https://github.com/aliyun/mongo-shake/wiki/FAQ)
-*  [English tutorial](https://github.com/alibaba/MongoShake/wiki/tutorial-about-how-to-set-up)
-*  [中文使用文档](https://github.com/alibaba/MongoShake/wiki/%E7%AC%AC%E4%B8%80%E6%AC%A1%E4%BD%BF%E7%94%A8%EF%BC%8C%E5%A6%82%E4%BD%95%E8%BF%9B%E8%A1%8C%E9%85%8D%E7%BD%AE%EF%BC%9F)
 *  [Performance test document](https://github.com/aliyun/mongo-shake/wiki/MongoShake-Performance-Document)
 *  [WeChat discuss group](https://github.com/aliyun/mongo-shake#shake-series-tool)
 
