@@ -197,6 +197,7 @@ func (manager *CheckpointManager) Flush() error {
 	}
 	manager.mutex.Lock()
 	defer manager.mutex.Unlock()
+	// TODO if one of persist flush failed, need clean up other persist flush
 	for _, persist := range manager.persistList {
 		if err := persist.Flush(manager.conn, manager.db, manager.table); err != nil {
 			manager.conn.Close()

@@ -164,6 +164,7 @@ func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.
 	}
 
 	barrier := false
+	tsUpdate := true
 	if moveChunkFilter.Filter(partialLog) {
 		// barrier == true if the syncer already has a insert/delete move chunk oplog before
 		if oplogId := oplog.GetKey(partialLog.Object, ""); oplogId != nil {
@@ -176,12 +177,16 @@ func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.
 						key.string(), utils.TimestampToLog(partialLog.Timestamp))
 					value.barrierOplog(syncInfo, key, partialLog)
 					barrier = true
+					tsUpdate = false
 				} else if value.deleteItem != nil && value.deleteItem.Replset == replset {
 					LOG.Info("syncer %v meet delete barrier ts[%v] when %v move chunk oplog found[%v %v]",
 						replset, utils.TimestampToLog(value.deleteItem.Timestamp), partialLog.Operation,
 						key.string(), utils.TimestampToLog(partialLog.Timestamp))
 					value.barrierOplog(syncInfo, key, partialLog)
 					barrier = true
+					// if move chunk fail and retry, the dest oplog list will be I -> D -> I,
+					// so D & I will be eliminate at the same syncer
+					value.addMoveChunk(replset, key, partialLog)
 				} else {
 					// find a insert/delete move chunk firstly
 					value.addMoveChunk(replset, key, partialLog)
@@ -227,7 +232,7 @@ func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.
 			}
 		}
 	}
-	if !barrier {
+	if tsUpdate {
 		syncInfo.updateSyncTs(partialLog)
 	}
 	return barrier

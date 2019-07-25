@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"github.com/vinllen/mgo/bson"
 	"testing"
 	"fmt"
 
@@ -24,7 +25,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 
 	var (
 		nr         int
-		checkpoint int64
+		checkpoint bson.MongoTimestamp
 		err        error
 	)
 
@@ -36,7 +37,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		syncer := mockCheckpointSyncer(8)
 		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, "no candidates ack values found", err.Error(), "should be equal")
-		assert.Equal(t, int64(0), checkpoint, "should be equal")
+		assert.Equal(t, bson.MongoTimestamp(0), checkpoint, "should be equal")
 	}
 
 	// one of the workers return ack
@@ -50,7 +51,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker3.unack = 10
 		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, int64(10), checkpoint, "should be equal")
+		assert.Equal(t, bson.MongoTimestamp(10), checkpoint, "should be equal")
 	}
 
 	// not all ack, return the smallest candidate
@@ -67,7 +68,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker4.unack = 30
 		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, int64(20), checkpoint, "should be equal")
+		assert.Equal(t, bson.MongoTimestamp(20), checkpoint, "should be equal")
 	}
 
 	// not all ack, return the smallest candidate
@@ -81,7 +82,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker3.unack = 10
 		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, "smallest candidates is zero", err.Error(), "should be equal")
-		assert.Equal(t, int64(0), checkpoint, "should be equal")
+		assert.Equal(t, bson.MongoTimestamp(0), checkpoint, "should be equal")
 	}
 
 	// not all ack, return the smallest candidate
@@ -95,7 +96,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker3.unack = 10
 		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, int64(5), checkpoint, "should be equal")
+		assert.Equal(t, bson.MongoTimestamp(5), checkpoint, "should be equal")
 	}
 
 	// not all ack again, unack candidate is smaller than ack, return the smallest candidate
@@ -115,7 +116,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker5.unack = 40
 		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, int64(20), checkpoint, "should be equal")
+		assert.Equal(t, bson.MongoTimestamp(20), checkpoint, "should be equal")
 	}
 
 	// all ack
@@ -135,7 +136,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker1.unack = 40
 		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, int64(40), checkpoint, "should be equal")
+		assert.Equal(t, bson.MongoTimestamp(40), checkpoint, "should be equal")
 	}
 
 	// ack less than unack, unack != 0
@@ -155,7 +156,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker1.unack = 30
 		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, true, err != nil, "should be equal")
-		assert.Equal(t, int64(0), checkpoint, "should be equal")
+		assert.Equal(t, bson.MongoTimestamp(0), checkpoint, "should be equal")
 	}
 
 	// ack less than unack, unack == 0, has candidate
@@ -175,7 +176,7 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker1.unack = 0
 		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, int64(20), checkpoint, "should be equal")
+		assert.Equal(t, bson.MongoTimestamp(20), checkpoint, "should be equal")
 	}
 
 	// ack less than unack, unack == 0, no candidate
@@ -195,6 +196,6 @@ func TestCalculateWorkerLowestCheckpoint(t *testing.T) {
 		worker1.unack = 0
 		checkpoint, err = calculateWorkerLowestCheckpoint(syncer)
 		assert.Equal(t, "no candidates ack values found", err.Error(), "should be equal")
-		assert.Equal(t, int64(0), checkpoint, "should be equal")
+		assert.Equal(t, bson.MongoTimestamp(0), checkpoint, "should be equal")
 	}
 }
