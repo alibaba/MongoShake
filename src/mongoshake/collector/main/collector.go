@@ -91,7 +91,7 @@ func startup() {
 		coordinator.Sources[i] = new(utils.MongoSource)
 		coordinator.Sources[i].URL = src
 		if len(conf.Options.OplogGIDS) != 0 {
-			coordinator.Sources[i].Gid = conf.Options.OplogGIDS
+			coordinator.Sources[i].Gids = conf.Options.OplogGIDS
 		}
 	}
 

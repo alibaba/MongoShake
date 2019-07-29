@@ -27,12 +27,30 @@ func (chain OplogFilterChain) IterateFilter(log *oplog.PartialLog) bool {
 }
 
 type GidFilter struct {
-	Gid string
+	gidMp map[string]struct{}
+}
+
+func NewGidFilter(gids []string) *GidFilter {
+	mp := make(map[string]struct{}, len(gids))
+	for _, gid := range gids {
+		mp[gid] = struct{}{}
+	}
+	return &GidFilter{
+		gidMp: mp,
+	}
 }
 
 func (filter *GidFilter) Filter(log *oplog.PartialLog) bool {
 	// filter OplogGlobalId from others
-	return len(filter.Gid) != 0 && log.Gid != filter.Gid
+	if len(filter.gidMp) == 0 {
+		// all pass if gid map is empty
+		return false
+	}
+	if _, ok := filter.gidMp[log.Gid]; ok {
+		// should match if gid map isn't empty
+		return false
+	}
+	return true
 }
 
 type AutologousFilter struct {
