@@ -8,6 +8,7 @@ import (
 
 	"mongoshake/collector/configure"
 	"mongoshake/common"
+	"mongoshake/oplog"
 
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
@@ -129,6 +130,10 @@ func (exec *DocExecutor) start() {
 }
 
 func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
+	if len(docs) == 0 {
+		return nil
+	}
+
 	ns := exec.colExecutor.ns
 
 	var docList []interface{}
@@ -137,7 +142,10 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 	}
 
 	if err := exec.session.DB(ns.Database).C(ns.Collection).Insert(docList...); err != nil {
-		return fmt.Errorf("Insert docs [%v] into ns %v of dest mongo failed. %v", docs, ns, err)
+		printLog := new(oplog.PartialLog)
+		bson.Unmarshal(docs[0].Data, printLog)
+		return fmt.Errorf("insert docs with length[%v] into ns %v of dest mongo failed[%v]. first doc: %v",
+			len(docList), ns, err, printLog)
 	}
 
 	return nil

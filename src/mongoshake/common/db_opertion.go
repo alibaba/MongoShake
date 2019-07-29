@@ -24,7 +24,7 @@ const (
 type MongoSource struct {
 	URL         string
 	ReplicaName string
-	Gid         string
+	Gids        []string
 }
 
 // get db version, return string with format like "3.0.1"

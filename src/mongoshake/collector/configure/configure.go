@@ -10,7 +10,7 @@ type Configuration struct {
 	LogLevel                string   `config:"log_level"`
 	LogFileName             string   `config:"log_file"`
 	LogBuffer               bool     `config:"log_buffer"`
-	OplogGIDS               string   `config:"oplog.gids"`
+	OplogGIDS               []string `config:"oplog.gids"`
 	ShardKey                string   `config:"shard_key"`
 	SyncerReaderBufferTime  uint     `config:"syncer.reader.buffer_time"`
 	WorkerNum               int      `config:"worker"`
@@ -43,6 +43,10 @@ type Configuration struct {
 	ReplayerCollectionParallel int  `config:"replayer.collection_parallel"`
 	ReplayerDocumentParallel   int  `config:"replayer.document_parallel"`
 	ReplayerDocumentBatchSize  int  `config:"replayer.document_batch_size"`
+
+	/*---------------------------------------------------------*/
+	// generated variables
+	Version string // version
 }
 
 func (configuration *Configuration) IsShardCluster() bool {

@@ -89,7 +89,7 @@ func NewOplogSyncer(
 		startPosition int64,
 		fullSyncFinishPosition int64,
 		mongoUrl string,
-		gid string) *OplogSyncer {
+		gids []string) *OplogSyncer {
 	syncer := &OplogSyncer{
 		coordinator:            coordinator,
 		replset:                replset,
@@ -108,11 +108,8 @@ func NewOplogSyncer(
 		syncer.hasher = &oplog.PrimaryKeyHasher{}
 	}
 
-	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
-	// gid filter
-	if gid != "" {
-		filterList = append(filterList, &filter.GidFilter{Gid: gid})
-	}
+	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter), filter.NewGidFilter(gids)}
+
 	// DDL filter
 	if conf.Options.ReplayerDMLOnly {
 		filterList = append(filterList, new(filter.DDLFilter))

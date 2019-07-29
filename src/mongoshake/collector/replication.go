@@ -76,6 +76,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 		if err != nil {
 			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
 		}
+		LOG.Info("------------------------full sync done!------------------------")
 		LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
 			utils.ExtractMongoTimestamp(fullBeginTs), utils.ExtractMongoTimestamp(fullFinishTs))
 
@@ -83,7 +84,6 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			return err
 		}
 	case SYNCMODE_DOCUMENT:
-
 		if err := coordinator.startDocumentReplication(); err != nil {
 			return err
 		}
@@ -273,7 +273,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	// otherwise one syncer connects to one shard
 	for _, src := range coordinator.Sources {
 		syncer := NewOplogSyncer(coordinator, src.ReplicaName, oplogStartPosition, fullSyncFinishPosition, src.URL,
-			src.Gid)
+			src.Gids)
 		// syncerGroup http api registry
 		syncer.init()
 		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)

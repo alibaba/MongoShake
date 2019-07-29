@@ -311,7 +311,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 				if err != nil {
 					LOG.Critical("document syncer-%d collExecutor-%d sync ns %v to %v failed. %v",
 						syncer.id, collExecutorId, ns, toNS, err)
-					syncError = errors.New(fmt.Sprintf("document syncer sync ns %v to %vfailed. %v",
+					syncError = errors.New(fmt.Sprintf("document syncer sync ns %v to %v failed. %v",
 						ns, toNS, err))
 				} else {
 					process := int(atomic.LoadInt32(&nsDoneCount)) * 100 / len(nsList)

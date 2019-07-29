@@ -51,12 +51,15 @@ func main() {
 		crash(fmt.Sprintf("Configure file %s parse failed. %v", *configuration, err), -2)
 	}
 
+	utils.InitialLogger(conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogBuffer, *verbose)
+
 	// verify collector options and revise
 	if err = sanitizeOptions(); err != nil {
 		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
 	}
 
-	utils.InitialLogger(conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogBuffer, *verbose)
+	conf.Options.Version = utils.BRANCH
+
 	nimo.Profiling(int(conf.Options.SystemProfile))
 	nimo.RegisterSignalForProfiling(syscall.SIGUSR2)
 	nimo.RegisterSignalForPrintStack(syscall.SIGUSR1, func(bytes []byte) {
@@ -88,7 +91,7 @@ func startup() {
 		coordinator.Sources[i] = new(utils.MongoSource)
 		coordinator.Sources[i].URL = src
 		if len(conf.Options.OplogGIDS) != 0 {
-			coordinator.Sources[i].Gid = conf.Options.OplogGIDS
+			coordinator.Sources[i].Gids = conf.Options.OplogGIDS
 		}
 	}
 
@@ -130,7 +133,9 @@ func sanitizeOptions() error {
 	}
 	if len(conf.Options.MongoUrls) > 1 {
 		if conf.Options.WorkerNum != len(conf.Options.MongoUrls) {
-			return errors.New("replication worker should be equal to count of mongo_urls while multi sources (shard)")
+			LOG.Warn("replication worker should be equal to count of mongo_urls while multi sources (shard), set worker = %v",
+				len(conf.Options.MongoUrls))
+			conf.Options.WorkerNum = len(conf.Options.MongoUrls)
 		}
 		if conf.Options.ReplayerDMLOnly == false {
 			return errors.New("DDL is not support for sharding, pleasing waiting")
