@@ -9,7 +9,8 @@ import sys
 import getopt
 
 # constant
-COMPARISION_COUNT = "comparision_count"
+COMPARISION_COUNT = "comparison_count"
+COMPARISION_MODE = "comparisonMode"
 EXCLUDE_DBS = "excludeDbs"
 EXCLUDE_COLLS = "excludeColls"
 SAMPLE = "sample"
@@ -75,7 +76,7 @@ def check(src, dst):
             log_error("DIFF => database [%s] only in srcDb" % (db))
             return False
 
-        # db.stats() comparision
+        # db.stats() comparison
         srcDb = src.conn[db] 
         dstDb = dst.conn[db] 
         srcStats = srcDb.command("dbstats") 
@@ -112,14 +113,14 @@ def check(src, dst):
 
             srcColl = srcDb[coll]
             dstColl = dstDb[coll]
-            # compare collection records number
+            # comparison collection records number
             if srcColl.count() != dstColl.count():
                 log_error("DIFF => collection [%s] record count not equals" % (coll))
                 return False
             else:
                 log_info("EQUL => collection [%s] record count equals" % (coll))
 
-            # compare collection index number
+            # comparison collection index number
             src_index_length = len(srcColl.index_information())
             dst_index_length = len(dstColl.index_information())
             if src_index_length != dst_index_length:
@@ -129,19 +130,19 @@ def check(src, dst):
                 log_info("EQUL => collection [%s] index number equals" % (coll))
 
             # check sample data
-            if not sample_comparision(srcColl, dstColl):
-                log_error("DIFF => collection [%s] data comparision not equals" % (coll))
+            if not data_comparison(srcColl, dstColl, configure[COMPARISION_MODE]):
+                log_error("DIFF => collection [%s] data comparison not equals" % (coll))
                 return False
             else:
-                log_info("EQUL => collection [%s] data data comparision exactly eauals" % (coll))
+                log_info("EQUL => collection [%s] data data comparison exactly eauals" % (coll))
 
     return True
 
 
 """
-    check sample data. compare every entry
+    check sample data. comparison every entry
 """
-def data_comparision(srcColl, dstColl, mode):
+def data_comparison(srcColl, dstColl, mode):
     if mode == "no":
         return True
     elif mode == "sample":
@@ -181,14 +182,14 @@ def data_comparision(srcColl, dstColl, mode):
 
 def usage():
     print '|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|'
-    print "| Usage: ./comparision.py --src=localhost:27017/db? --dest=localhost:27018/db? --count=10000 (the sample number) --excludeDbs=admin,local --excludeCollections=system.profile --compareMode=sample/all/no (sample: compare sample number, default; all: compare all data; no: only compare outline without data)  |"
+    print "| Usage: ./comparison.py --src=localhost:27017/db? --dest=localhost:27018/db? --count=10000 (the sample number) --excludeDbs=admin,local --excludeCollections=system.profile --comparisonMode=sample/all/no (sample: comparison sample number, default; all: comparison all data; no: only comparison outline without data)  |"
     print '|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|'
-    print '| Like : ./comparision.py --src="localhost:3001" --dest=localhost:3100  --count=1000  --excludeDbs=admin,local,mongoshake --excludeCollections=system.profile --compareMode=sample  |'
+    print '| Like : ./comparison.py --src="localhost:3001" --dest=localhost:3100  --count=1000  --excludeDbs=admin,local,mongoshake --excludeCollections=system.profile --comparisonMode=sample  |'
     print '|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|'
     exit(0)
 
 if __name__ == "__main__":
-    opts, args = getopt.getopt(sys.argv[1:], "hs:d:n:e:x:", ["help", "src=", "dest=", "count=", "excludeDbs=", "excludeCollections=", "compareMode="])
+    opts, args = getopt.getopt(sys.argv[1:], "hs:d:n:e:x:", ["help", "src=", "dest=", "count=", "excludeDbs=", "excludeCollections=", "comparisonMode="])
 
     configure[SAMPLE] = True
     configure[EXCLUDE_DBS] = []
@@ -208,11 +209,14 @@ if __name__ == "__main__":
             configure[EXCLUDE_DBS] = value.split(",")
         if key in ("-x", "--excludeCollections"):
             configure[EXCLUDE_COLLS] = value.split(",")
-        if key in ("--compareMode"):
-            configure[SAMPLE] = value
+        if key in ("--comparisonMode"):
+            print value
             if value != "all" and value != "no" and value != "sample":
-                log_info("compareMode[%r] illegal" % (value))
+                log_info("comparisonMode[%r] illegal" % (value))
                 exit(1)
+            configure[COMPARISION_MODE] = value
+    if COMPARISION_MODE not in configure:
+        configure[COMPARISION_MODE] = "sample"
 
     # params verify
     if len(srcUrl) == 0 or len(dstUrl) == 0:
