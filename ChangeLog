@@ -1,3 +1,9 @@
+2019-07-29 Alibaba Cloud.
+	* version: 2.0.5
+	* IMPROVE: comparison.py support sharding comparison. see #200.
+	* BUGFIX: comparison.py fix bug of negative count. see #199.
+	* IMPROVE: set worker number to shards number. see #198.
+
 2019-07-15 Alibaba Cloud.
 	* version: 2.0.4
 	* BUG FIX: fix bug of batched oplog size exceeding 16MB, This bug was
