@@ -3,6 +3,8 @@
 	* IMPROVE: comparison.py support sharding comparison. see #197.
 	* BUGFIX: comparison.py fix bug of negative count. see #199.
 	* IMPROVE: set worker number to shards number. see #198.
+	* IMPROVE: support sharding active-active architecture. This is	only
+	used in Alibaba-Cloud.
 
 2019-07-15 Alibaba Cloud.
 	* version: 2.0.4
