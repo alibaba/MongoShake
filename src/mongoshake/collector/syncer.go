@@ -104,7 +104,7 @@ func NewOplogSyncer(
 		syncer.hasher = &oplog.PrimaryKeyHasher{}
 	}
 
-	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+	filterList := filter.OplogFilterChain{new(filter.AutologousFilter)}
 	// gid filter
 	if gid != "" {
 		filterList = append(filterList, &filter.GidFilter{Gid: gid})
@@ -191,11 +191,7 @@ func (sync *OplogSyncer) startBatcher() {
 				sync.reader.UpdateQueryTimestamp(newestTs)
 			}
 
-			// update movechunk manager offer ts after dispatch batches
-			sync.mvckManager.UpdateOfferTs(sync.replset)
-
 			filterFlag = false
-
 			// flush checkpoint value
 			if barrier {
 				if flushCheckpoint {
@@ -208,6 +204,8 @@ func (sync *OplogSyncer) startBatcher() {
 					sync.ckptManager.FlushChan <- true
 				}
 			}
+			// update movechunk manager offer ts after dispatch batches
+			sync.mvckManager.UpdateOfferTs(sync.replset)
 			return
 		}
 

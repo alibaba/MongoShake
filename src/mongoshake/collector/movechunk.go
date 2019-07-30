@@ -5,6 +5,7 @@ import (
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
+	conf "mongoshake/collector/configure"
 	utils "mongoshake/common"
 	"mongoshake/oplog"
 	"sync"
@@ -42,23 +43,35 @@ func (manager *MoveChunkManager) addOplogSyncer(syncer *OplogSyncer) {
 }
 
 func (manager *MoveChunkManager) start() {
-	nimo.GoRoutineInLoop(manager.eliminateBarrier)
+	nimo.GoRoutineInLoop(func() {
+		removeOK := manager.eliminateBarrier()
+		if removeOK {
+			time.Sleep(50 * time.Millisecond)
+		} else {
+			time.Sleep(time.Duration(conf.Options.MoveChunkInterval) * time.Millisecond)
+		}
+	})
 }
 
-func (manager *MoveChunkManager) barrierProbe(key MoveChunkKey, timestamp bson.MongoTimestamp) bool {
+func (manager *MoveChunkManager) barrierProbe(key MoveChunkKey, value *MoveChunkValue) bool {
+	insertMap := value.insertMap
+	deleteItem := value.deleteItem
 	result := true
 	for _, syncInfo := range manager.syncInfoMap {
 		// worker ack must exceed timestamp of insert/delete move chunk oplog
 		syncInfo.mutex.Lock()
+		replset := syncInfo.syncer.replset
+		_, hasInsert := insertMap[replset]
 		for _, worker := range syncInfo.syncer.batcher.workerGroup {
 			unack := atomic.LoadInt64(&worker.unack)
 			ack := atomic.LoadInt64(&worker.ack)
 			if syncInfo.barrierChan != nil && ack == unack &&
-				(syncInfo.offerTs > timestamp || syncInfo.barrierKey == key) {
+				(syncInfo.offerTs >= deleteItem.Timestamp || syncInfo.barrierKey == key) {
 				continue
 			}
-			if syncInfo.barrierChan == nil && syncInfo.offerTs >= timestamp &&
-				(ack == unack || ack < unack && ack > int64(timestamp)) {
+			if syncInfo.barrierChan == nil && (hasInsert && replset != deleteItem.Replset ||
+				syncInfo.offerTs >= deleteItem.Timestamp &&
+					(ack == unack || ack < unack && ack >= int64(deleteItem.Timestamp))) {
 				continue
 			}
 			syncInfo.mutex.Unlock()
@@ -77,8 +90,9 @@ func (manager *MoveChunkManager) UpdateOfferTs(replset string) {
 	}
 }
 
-func (manager *MoveChunkManager) eliminateBarrier() {
+func (manager *MoveChunkManager) eliminateBarrier() bool {
 	manager.moveChunkLock.Lock()
+	defer manager.moveChunkLock.Unlock()
 	LOG.Info("move chunk map len=%v", len(manager.moveChunkMap))
 	if len(manager.moveChunkMap) > 0 {
 		for key := range manager.moveChunkMap {
@@ -97,11 +111,12 @@ func (manager *MoveChunkManager) eliminateBarrier() {
 		}
 		syncInfo.mutex.Unlock()
 	}
+	removeOK := false
 	var deleteKeyList []MoveChunkKey
 	for key, value := range manager.moveChunkMap {
 		if value.deleteItem != nil {
 			deleteReplset := value.deleteItem.Replset
-			if !manager.barrierProbe(key, value.deleteItem.Timestamp) {
+			if !manager.barrierProbe(key, value) {
 				continue
 			}
 			minInsertReplset := ""
@@ -113,6 +128,7 @@ func (manager *MoveChunkManager) eliminateBarrier() {
 				}
 			}
 			if minInsertReplset != "" {
+				removeOK = true
 				if barrier, ok := value.barrierMap[minInsertReplset]; ok {
 					// remove insert move chunk
 					LOG.Info("syncer %v eliminate insert barrier[%v %v]", minInsertReplset,
@@ -147,12 +163,10 @@ func (manager *MoveChunkManager) eliminateBarrier() {
 			delete(manager.moveChunkMap, key)
 		}
 	}
-	manager.moveChunkLock.Unlock()
-	time.Sleep(1 * time.Second)
+	return removeOK
 }
 
-// TODO migrate insert/update/delete may occur multiple times
-func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.PartialLog) bool {
+func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.PartialLog) (bool, bool, interface{}) {
 	syncInfo := manager.syncInfoMap[replset]
 	syncInfo.blockOplog(replset, partialLog)
 
@@ -160,7 +174,7 @@ func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.
 	defer manager.moveChunkLock.Unlock()
 
 	if syncInfo.filterOplog(partialLog) {
-		return false
+		return false, false, nil
 	}
 
 	barrier := false
@@ -182,7 +196,7 @@ func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.
 					LOG.Info("syncer %v meet delete barrier ts[%v] when %v move chunk oplog found[%v %v]",
 						replset, utils.TimestampToLog(value.deleteItem.Timestamp), partialLog.Operation,
 						key.string(), utils.TimestampToLog(partialLog.Timestamp))
-					value.barrierOplog(syncInfo, key, partialLog)
+					//value.barrierOplog(syncInfo, key, partialLog)
 					barrier = true
 					// if move chunk fail and retry, the dest oplog list will be I -> D -> I,
 					// so D & I will be eliminate at the same syncer
@@ -222,6 +236,7 @@ func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.
 						replset, utils.TimestampToLog(ts), key.string(), utils.TimestampToLog(partialLog.Timestamp))
 					value.barrierOplog(manager.syncInfoMap[replset], key, partialLog)
 					barrier = true
+					tsUpdate = false
 				} else {
 					if value.deleteItem != nil && value.deleteItem.Replset == replset {
 						LOG.Crashf("syncer %v meet delete barrier ts[%v] when operation oplog found[%v %v] illegal",
@@ -232,10 +247,15 @@ func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.
 			}
 		}
 	}
+	// updateObj used for test case, it means update operation can execute
+	var updateObj interface{}
 	if tsUpdate {
 		syncInfo.updateSyncTs(partialLog)
+		if partialLog.Operation == "u" {
+			updateObj = partialLog.Object
+		}
 	}
-	return barrier
+	return barrier, tsUpdate, updateObj
 }
 
 func (manager *MoveChunkManager) Load(conn *utils.MongoConn, db string, tablePrefix string) error {
@@ -264,7 +284,8 @@ func (manager *MoveChunkManager) Load(conn *utils.MongoConn, db string, tablePre
 	iter = conn.Session.DB(db).C(tablePrefix + "_mvck_map").Find(bson.M{}).Iter()
 	for iter.Next(ckptDoc) {
 		key := MoveChunkKey{}
-		value := MoveChunkValue{insertMap: make(map[string]bson.MongoTimestamp)}
+		value := MoveChunkValue{insertMap: make(map[string]bson.MongoTimestamp),
+			barrierMap: make(map[string]chan interface{})}
 
 		err1 := utils.Map2Struct(ckptDoc[MoveChunkKeyName].(map[string]interface{}), "bson", &key)
 		for k, v := range ckptDoc[MoveChunkInsertMap].(map[string]interface{}) {

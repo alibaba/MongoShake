@@ -12,6 +12,7 @@ import (
 var (
 	moveChunkFilter filter.MigrateFilter
 	ddlFilter       filter.DDLFilter
+	noopFilter      filter.NoopFilter
 )
 
 /*
@@ -135,7 +136,8 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, bool) 
 	allEmpty := true
 	flushCheckpoint := false
 	for i, genericLog := range mergeBatch {
-		// filter oplog such like Noop or Gid-filtered
+
+		// filter oplog such like Autologous or Gid-filtered
 		if batcher.filter(genericLog.Parsed) {
 			// doesn't push to worker, set lastFilterOplog
 			batcher.lastFilterOplog = genericLog.Parsed
@@ -143,13 +145,14 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, bool) 
 		}
 
 		// ensure the oplog order when moveChunk occurs if enabled move chunk at source sharding db
+		// need noop oplog to update OfferTs of move chunk when no valid oplog occur in shard db
 		if conf.Options.MoveChunkEnable && moveChunkBarrier(batcher.syncer, genericLog.Parsed) {
 			batcher.remainLogs = mergeBatch[i:]
 			barrier = true
 			break
 		}
 
-		if moveChunkFilter.Filter(genericLog.Parsed) {
+		if noopFilter.Filter(genericLog.Parsed) || moveChunkFilter.Filter(genericLog.Parsed) {
 			continue
 		}
 		allEmpty = false
@@ -196,5 +199,6 @@ func moveChunkBarrier(syncer *OplogSyncer, partialLog *oplog.PartialLog) bool {
 	if ddlFilter.Filter(partialLog) {
 		return false
 	}
-	return syncer.mvckManager.BarrierOplog(syncer.replset, partialLog)
+	barrier, _, _ := syncer.mvckManager.BarrierOplog(syncer.replset, partialLog)
+	return barrier
 }
