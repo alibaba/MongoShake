@@ -56,7 +56,6 @@ func (manager *MoveChunkManager) start() {
 func (manager *MoveChunkManager) barrierProbe(key MoveChunkKey, value *MoveChunkValue) bool {
 	insertMap := value.insertMap
 	deleteItem := value.deleteItem
-	result := true
 	for _, syncInfo := range manager.syncInfoMap {
 		// worker ack must exceed timestamp of insert/delete move chunk oplog
 		syncInfo.mutex.Lock()
@@ -79,7 +78,19 @@ func (manager *MoveChunkManager) barrierProbe(key MoveChunkKey, value *MoveChunk
 		}
 		syncInfo.mutex.Unlock()
 	}
-	return result
+	return true
+}
+
+func (manager *MoveChunkManager) minTsProbe(minTs bson.MongoTimestamp) bool {
+	for _, syncInfo := range manager.syncInfoMap {
+		syncInfo.mutex.Lock()
+		if syncInfo.barrierChan == nil && syncInfo.offerTs < minTs {
+			syncInfo.mutex.Unlock()
+			return false
+		}
+		syncInfo.mutex.Unlock()
+	}
+	return true
 }
 
 func (manager *MoveChunkManager) UpdateOfferTs(replset string) {
@@ -127,7 +138,7 @@ func (manager *MoveChunkManager) eliminateBarrier() bool {
 					minInsertTs = insertTs
 				}
 			}
-			if minInsertReplset != "" {
+			if minInsertReplset != "" && manager.minTsProbe(minInsertTs) {
 				removeOK = true
 				if barrier, ok := value.barrierMap[minInsertReplset]; ok {
 					// remove insert move chunk

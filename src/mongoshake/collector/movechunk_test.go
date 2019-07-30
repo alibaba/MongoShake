@@ -159,24 +159,20 @@ func TestMoveChunkManager(t *testing.T) {
 			TransferLog(manager, "a2", 2), "should be equal")
 		assert.Equal(t, 0, len(manager.moveChunkMap))
 		assert.Equal(t, []interface{}{false, true, nil},
-			TransferLog(manager, "a3", 3), "should be equal")
+			TransferLog(manager, "a3", 8), "should be equal")
 		assert.Equal(t, 1, len(manager.moveChunkMap))
 		assert.Equal(t, []interface{}{false, true, nil},
 			TransferLog(manager, "b1", 4), "should be equal")
 		assert.Equal(t, []interface{}{true, false, nil},
 			TransferLog(manager, "b2", 5), "should be equal")
 		assert.Equal(t, []interface{}{false, true, nil},
-			TransferLog(manager, "c0", 5), "should be equal")
-		assert.Equal(t, []interface{}{false, true, updateGenerator(222)},
-			TransferLog(manager, "b2", 5), "should be equal")
-		assert.Equal(t, []interface{}{false, true, nil},
-			TransferLog(manager, "b3", 6), "should be equal")
-		assert.Equal(t, []interface{}{false, true, nil},
 			TransferLog(manager, "c1", 7), "should be equal")
 		assert.Equal(t, []interface{}{true, false, nil},
 			TransferLog(manager, "c2", 8), "should be equal")
+		assert.Equal(t, []interface{}{false, true, updateGenerator(222)},
+			TransferLog(manager, "b2", 5), "should be equal")
 		assert.Equal(t, []interface{}{false, true, nil},
-			TransferLog(manager, "a0", 9), "should be equal")
+			TransferLog(manager, "b3", 8), "should be equal")
 		assert.Equal(t, []interface{}{false, true, updateGenerator(333)},
 			TransferLog(manager, "c2", 8), "should be equal")
 		manager.eliminateBarrier()
@@ -202,12 +198,12 @@ func TestMoveChunkManager(t *testing.T) {
 		assert.Equal(t, []interface{}{false, true, updateGenerator(111)},
 			TransferLog(manager, "a2", 2), "should be equal")
 		assert.Equal(t, []interface{}{false, true, nil},
-			TransferLog(manager, "a3", 6), "should be equal")
+			TransferLog(manager, "a3", 8), "should be equal")
 		assert.Equal(t, 1, len(manager.moveChunkMap))
 		assert.Equal(t, []interface{}{false, true, updateGenerator(222)},
 			TransferLog(manager, "b2", 5), "should be equal")
 		assert.Equal(t, []interface{}{false, true, nil},
-			TransferLog(manager, "b3", 6), "should be equal")
+			TransferLog(manager, "b3", 8), "should be equal")
 		assert.Equal(t, []interface{}{false, true, updateGenerator(333)},
 			TransferLog(manager, "c2", 8), "should be equal")
 		manager.eliminateBarrier()
@@ -228,14 +224,14 @@ func TestMoveChunkManager(t *testing.T) {
 		assert.Equal(t, []interface{}{false, true, updateGenerator(111)},
 			TransferLog(manager, "a2", 2), "should be equal")
 		assert.Equal(t, []interface{}{false, true, nil},
-			TransferLog(manager, "a3", 6), "should be equal")
+			TransferLog(manager, "a3", 8), "should be equal")
 		manager.eliminateBarrier()
 		assert.Equal(t, []interface{}{false, true, updateGenerator(222)},
 			TransferLog(manager, "b2", 5), "should be equal")
 		assert.Equal(t, []interface{}{true, false, nil},
 			TransferLog(manager, "c2", 8), "should be equal")
 		assert.Equal(t, []interface{}{false, true, nil},
-			TransferLog(manager, "b3", 6), "should be equal")
+			TransferLog(manager, "b3", 8), "should be equal")
 		assert.Equal(t, []interface{}{false, true, updateGenerator(333)},
 			TransferLog(manager, "c2", 8), "should be equal")
 		manager.eliminateBarrier()
@@ -307,15 +303,17 @@ func TestMoveChunkManager(t *testing.T) {
 			TransferLog(manager, "b2", 4), "should be equal")
 		assert.Equal(t, []interface{}{false, true, nil},
 			TransferLog(manager, "c1", 5), "should be equal")
+		assert.Equal(t, []interface{}{true, false, nil},
+			TransferLog(manager, "c2", 6), "should be equal")
 		assert.Equal(t, []interface{}{false, true, updateGenerator(222)},
 			TransferLog(manager, "b2", 4), "should be equal")
 		assert.Equal(t, []interface{}{false, true, nil},
 			TransferLog(manager, "b3", 6), "should be equal")
 		assert.Equal(t, []interface{}{true, true, nil},
 			TransferLog(manager, "b4", 7), "should be equal")
-		assert.Equal(t, []interface{}{true, false, nil},
-			TransferLog(manager, "c2", 6), "should be equal")
 		manager.eliminateBarrier()
+		assert.Equal(t, []interface{}{true, false, nil},
+			TransferLog(manager, "b5", 8), "should be equal")
 		assert.Equal(t, []interface{}{false, true, updateGenerator(333)},
 			TransferLog(manager, "c2", 6), "should be equal")
 		assert.Equal(t, []interface{}{false, true, nil},
@@ -325,6 +323,8 @@ func TestMoveChunkManager(t *testing.T) {
 			TransferLog(manager, "b5", 8), "should be equal")
 		assert.Equal(t, []interface{}{false, true, nil},
 			TransferLog(manager, "b6", 10), "should be equal")
+		assert.Equal(t, []interface{}{true, false, nil},
+			TransferLog(manager, "a5", 10), "should be equal")
 		manager.eliminateBarrier()
 		assert.Equal(t, []interface{}{false, true, updateGenerator(555)},
 			TransferLog(manager, "a5", 10), "should be equal")
@@ -333,6 +333,7 @@ func TestMoveChunkManager(t *testing.T) {
 	}
 
 	{
+		// move chunk from a to b failed, then repeat it
 		fmt.Printf("TestMoveChunkManager case %d.\n", nr)
 		nr++
 		manager := mockMoveChunkManager()
@@ -347,15 +348,45 @@ func TestMoveChunkManager(t *testing.T) {
 		assert.Equal(t, []interface{}{false, true, nil},
 			TransferLog(manager, "b1", 3), "should be equal")
 		assert.Equal(t, []interface{}{false, true, nil},
-			TransferLog(manager, "c0", 7), "should be equal")
+			TransferLog(manager, "c1", 7), "should be equal")
 		manager.eliminateBarrier()
 		assert.Equal(t, []interface{}{false, true, nil},
 			TransferLog(manager, "b3", 4), "should be equal")
 		assert.Equal(t, []interface{}{true, true, nil},
 			TransferLog(manager, "b1", 5), "should be equal")
+		assert.Equal(t, []interface{}{true, false, nil},
+			TransferLog(manager, "b2", 6), "should be equal")
 		manager.eliminateBarrier()
 		assert.Equal(t, []interface{}{false, true, updateGenerator(222)},
 			TransferLog(manager, "b2", 6), "should be equal")
+		assert.Equal(t, []interface{}{false, true, nil},
+			TransferLog(manager, "b3", 7), "should be equal")
+		manager.eliminateBarrier()
+		assert.Equal(t, 0, len(manager.moveChunkMap))
+	}
+	{
+		// move chunk from a to b failed, then from a to c, no support
+		fmt.Printf("TestMoveChunkManager case %d.\n", nr)
+		nr++
+		manager := mockMoveChunkManager()
+		manager.start()
 
+		assert.Equal(t, []interface{}{false, true, nil},
+			TransferLog(manager, "a1", 1), "should be equal")
+		assert.Equal(t, []interface{}{false, true, updateGenerator(111)},
+			TransferLog(manager, "a2", 2), "should be equal")
+		assert.Equal(t, []interface{}{false, true, nil},
+			TransferLog(manager, "a3", 5), "should be equal")
+		assert.Equal(t, []interface{}{false, true, nil},
+			TransferLog(manager, "b1", 3), "should be equal")
+		assert.Equal(t, []interface{}{false, true, nil},
+			TransferLog(manager, "c1", 4), "should be equal")
+		assert.Equal(t, []interface{}{true, false, nil},
+			TransferLog(manager, "c2", 5), "should be equal")
+		manager.eliminateBarrier()
+		//assert.Equal(t, []interface{}{false, true, updateGenerator(222)},
+		//	TransferLog(manager, "c2", 5), "should be equal")
+		manager.eliminateBarrier()
+		assert.Equal(t, 1, len(manager.moveChunkMap))
 	}
 }
