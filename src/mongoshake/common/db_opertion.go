@@ -2,23 +2,24 @@ package utils
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
-	"math"
 
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-)
-
-var (
-	QueryTs = "ts"
-	localDB = "local"
 )
 
 const (
 	DBRefRef = "$ref"
 	DBRefId  = "$id"
 	DBRefDb  = "$db"
+
+	LocalDB  = "local"
+	ConfigDB = "config"
+
+	QueryTs     = "ts"
+	SettingsCol = "settings"
 )
 
 type MongoSource struct {
@@ -74,6 +75,23 @@ func GetAndCompareVersion(session *mgo.Session, threshold string) (bool, error) 
 	return true, nil
 }
 
+// get balancer status from config server
+func GetBalancerStatusByUrl(url string) (bool, error) {
+	var conn *MongoConn
+	var err error
+	if conn, err = NewMongoConn(url, ConnectModePrimary, true); conn == nil || err != nil {
+		return true, err
+	}
+	defer conn.Close()
+
+	var retMap map[string]interface{}
+	err = conn.Session.DB(ConfigDB).C(SettingsCol).Find(bson.M{"_id": "balancer"}).Limit(1).One(&retMap)
+	if err != nil {
+		return true, err
+	}
+	return !retMap["stopped"].(bool), nil
+}
+
 func IsNotFound(err error) bool {
 	return err.Error() == mgo.ErrNotFound.Error()
 }
@@ -94,7 +112,7 @@ func ApplyOpsFilter(key string) bool {
 // get newest oplog
 func GetNewestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, error) {
 	var retMap map[string]interface{}
-	err := session.DB(localDB).C(OplogNS).Find(bson.M{}).Sort("-$natural").Limit(1).One(&retMap)
+	err := session.DB(LocalDB).C(OplogNS).Find(bson.M{}).Sort("-$natural").Limit(1).One(&retMap)
 	if err != nil {
 		return 0, err
 	}
@@ -104,7 +122,7 @@ func GetNewestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, err
 // get oldest oplog
 func GetOldestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, error) {
 	var retMap map[string]interface{}
-	err := session.DB(localDB).C(OplogNS).Find(bson.M{}).Limit(1).One(&retMap)
+	err := session.DB(LocalDB).C(OplogNS).Find(bson.M{}).Limit(1).One(&retMap)
 	if err != nil {
 		return 0, err
 	}
@@ -147,7 +165,7 @@ type TimestampNode struct {
  *     error: error
  */
 func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.MongoTimestamp,
-		bson.MongoTimestamp, error) {
+	bson.MongoTimestamp, error) {
 	smallest := bson.MongoTimestamp(math.MaxInt64)
 	biggest := bson.MongoTimestamp(0)
 	tsMap := make(map[string]TimestampNode)

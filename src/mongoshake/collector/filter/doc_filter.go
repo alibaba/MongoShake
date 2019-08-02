@@ -7,17 +7,7 @@ import (
 	"strings"
 )
 
-var NsShouldBeIgnore = [...]string{
-	"admin.",
-	"local.",
-	"config.",
 
-	// oplogs belong to this app. AppDatabase and
-	// APPConflictDatabase should be initialized already
-	// by const expression. so it is safe
-	utils.AppDatabase + ".",
-	utils.APPConflictDatabase + ".",
-}
 
 
 // DocFilter: AutologousFilter, NamespaceFilter
@@ -40,7 +30,19 @@ func (chain DocFilterChain) IterateFilter(namespace string) bool {
 func (filter *AutologousFilter) FilterNs(namespace string) bool {
 	// for namespace. we filter noop operation and collection name
 	// that are admin, local, config, mongoshake, mongoshake_conflict
-	for _, ignorePrefix := range NsShouldBeIgnore {
+	var nsShouldBeIgnore = [...]string{
+		"admin.",
+		"local.",
+		"config.",
+
+		// oplogs belong to this app. AppDatabase and
+		// APPConflictDatabase should be initialized already
+		// by const expression. so it is safe
+		utils.AppDatabase() + ".",
+		utils.APPConflictDatabase() + ".",
+	}
+
+	for _, ignorePrefix := range nsShouldBeIgnore {
 		if strings.HasPrefix(namespace, ignorePrefix) {
 			return true
 		}

@@ -107,7 +107,7 @@ func selectLeader() {
 	if conf.Options.MasterQuorum && conf.Options.ContextStorage == collector.StorageTypeDB {
 		// election become to Master. keep waiting if we are the candidate. election id is must fixed
 		quorum.UseElectionObjectId(bson.ObjectIdHex("5204af979955496907000001"))
-		go quorum.BecomeMaster(conf.Options.ContextStorageUrl, utils.AppDatabase)
+		go quorum.BecomeMaster(conf.Options.ContextStorageUrl, utils.AppDatabase())
 
 		// wait until become to a real master
 		<-quorum.MasterPromotionNotifier
@@ -124,12 +124,15 @@ func sanitizeOptions() error {
 		if len(conf.Options.MongoUrls) == 1 {
 			conf.Options.ContextStorageUrl = conf.Options.MongoUrls[0]
 		} else if len(conf.Options.MongoUrls) > 1 {
-			return errors.New("storage server should be configured while using mongo shard servers")
+			return errors.New("checkpoint url should be configured while using mongo shard servers")
 		}
 	}
 	if len(conf.Options.MongoUrls) > 1 {
 		if conf.Options.WorkerNum != len(conf.Options.MongoUrls) {
 			return errors.New("replication worker should be equal to count of mongo_urls while multi sources (shard)")
+		}
+		if conf.Options.MongoCsUrl == "" {
+			return errors.New("config server url should be configured while using mongo shard servers")
 		}
 		if conf.Options.ReplayerDMLOnly == false {
 			return errors.New("DDL is not support for sharding, pleasing waiting")
@@ -162,7 +165,8 @@ func sanitizeOptions() error {
 	if conf.Options.WorkerBatchQueueSize <= 0 {
 		return errors.New("worker queue numeric is negative")
 	}
-	if conf.Options.ContextStorage == "" || conf.Options.ContextAddress == "" ||
+	if conf.Options.ContextStorage == "" || conf.Options.ContextStorageDB == "" ||
+		conf.Options.ContextStorageCollection == "" ||
 		(conf.Options.ContextStorage != collector.StorageTypeAPI &&
 			conf.Options.ContextStorage != collector.StorageTypeDB) {
 		return errors.New("context storage type or address is invalid")

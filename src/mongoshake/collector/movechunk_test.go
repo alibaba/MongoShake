@@ -148,6 +148,7 @@ func TestMoveChunkManager(t *testing.T) {
 	var nr int
 	conf.Options.MoveChunkInterval = 50
 	{
+		// move chunk order: a -> b -> c
 		fmt.Printf("TestMoveChunkManager case %d.\n", nr)
 		nr++
 		manager := mockMoveChunkManager()
@@ -179,6 +180,7 @@ func TestMoveChunkManager(t *testing.T) {
 		assert.Equal(t, 0, len(manager.moveChunkMap))
 	}
 	{
+		// move chunk order: a -> b -> c
 		fmt.Printf("TestMoveChunkManager case %d.\n", nr)
 		nr++
 		manager := mockMoveChunkManager()
@@ -210,6 +212,7 @@ func TestMoveChunkManager(t *testing.T) {
 		assert.Equal(t, 0, len(manager.moveChunkMap))
 	}
 	{
+		// move chunk order: a -> b -> c
 		fmt.Printf("TestMoveChunkManager case %d.\n", nr)
 		nr++
 		manager := mockMoveChunkManager()
@@ -239,6 +242,7 @@ func TestMoveChunkManager(t *testing.T) {
 	}
 
 	{
+		// move chunk order: a -> b -> c -> b -> a
 		fmt.Printf("TestMoveChunkManager case %d.\n", nr)
 		nr++
 		manager := mockMoveChunkManager()
@@ -284,6 +288,7 @@ func TestMoveChunkManager(t *testing.T) {
 		assert.Equal(t, 0, len(manager.moveChunkMap))
 	}
 	{
+		// move chunk order: a -> b -> c -> b -> a
 		fmt.Printf("TestMoveChunkManager case %d.\n", nr)
 		nr++
 		manager := mockMoveChunkManager()
@@ -365,7 +370,7 @@ func TestMoveChunkManager(t *testing.T) {
 		assert.Equal(t, 0, len(manager.moveChunkMap))
 	}
 	{
-		// move chunk from a to b failed, then from a to c, no support
+		// move chunk from a to b failed, then move from a to c, unsupported
 		fmt.Printf("TestMoveChunkManager case %d.\n", nr)
 		nr++
 		manager := mockMoveChunkManager()

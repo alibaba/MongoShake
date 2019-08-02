@@ -25,7 +25,7 @@ const (
 	tailTimeout   = 7
 	oplogChanSize = 0
 
-	localDB = "local"
+	LocalDB = "local"
 )
 
 const (
@@ -211,7 +211,7 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 	// rebuild syncerGroup condition statement with current checkpoint timestamp
 	reader.conn.Session.SetBatch(8192) //
 	reader.conn.Session.SetPrefetch(0.2)
-	reader.oplogsIterator = reader.conn.Session.DB(localDB).C(utils.OplogNS).
+	reader.oplogsIterator = reader.conn.Session.DB(LocalDB).C(utils.OplogNS).
 		Find(reader.query).LogReplay().Tail(time.Second * tailTimeout) // this timeout is useless
 	return
 }

@@ -112,6 +112,16 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	}
 	conn.Close()
 
+	csUrl := conf.Options.MongoCsUrl
+	if csUrl != "" {
+		// try to connect MongoCsUrl
+		if conn, err = utils.NewMongoConn(csUrl, utils.ConnectModePrimary, true); conn == nil || !conn.IsGood() || err != nil {
+			LOG.Critical("Connect MongoCsUrl[%v] error[%v].", csUrl, err)
+			return err
+		}
+		conn.Close()
+	}
+
 	for i, src := range coordinator.Sources {
 		if conn, err = utils.NewMongoConn(src.URL, conf.Options.MongoConnectMode, true); conn == nil || !conn.IsGood() || err != nil {
 			LOG.Critical("Connect mongo server error. %v, url : %s", err, src.URL)
@@ -196,6 +206,15 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 }
 
 func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
+	fromIsSharding := len(coordinator.Sources) > 1
+	if fromIsSharding {
+		ok, err := utils.GetBalancerStatusByUrl(conf.Options.MongoCsUrl)
+		LOG.Info("balancer status %v err %v", ok, err)
+		if ok {
+			return fmt.Errorf("balancer need to stop when document replication occur for source mongodb sharding")
+		}
+	}
+
 	// get all namespace need to sync
 	nsSet, err := docsyncer.GetAllNamespace(coordinator.Sources)
 	if err != nil {
@@ -207,7 +226,6 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		return err
 	}
 
-	fromIsSharding := len(coordinator.Sources) > 1
 	toUrl := conf.Options.TunnelAddress[0]
 	var toConn *utils.MongoConn
 	if toConn, err = utils.NewMongoConn(toUrl, utils.ConnectModePrimary, true); err != nil {
@@ -222,7 +240,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		return err
 	}
 	if shardingSync {
-		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.ContextStorageUrl, toConn, trans); err != nil {
+		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.MongoCsUrl, toConn, trans); err != nil {
 			return err
 		}
 	}

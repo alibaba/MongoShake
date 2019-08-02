@@ -328,7 +328,7 @@ func (sync *OplogSyncer) poll() {
 	if checkpointTs == 0 {
 		// we doesn't continue working on ckpt fetched failed. because we should
 		// confirm the exist checkpoint value or exactly knows that it doesn't exist
-		LOG.Critical("Acquire the existing checkpoint from remote[%s] failed !", conf.Options.ContextAddress)
+		LOG.Critical("Acquire the existing checkpoint from remote[%s] failed !", conf.Options.ContextStorageCollection)
 		return
 	}
 	sync.reader.SetQueryTimestampOnEmpty(checkpointTs)

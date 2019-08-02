@@ -19,8 +19,6 @@ import (
 const (
 	StorageTypeAPI            = "api"
 	StorageTypeDB             = "database"
-	CheckpointDefaultDatabase = utils.AppDatabase
-	CheckpointAdminDatabase   = "admin"
 	CheckpointName            = "name"
 	CheckpointTimestamp       = "ckpt"
 
@@ -54,10 +52,7 @@ type CheckpointManager struct {
 }
 
 func NewCheckpointManager(startPosition int64) *CheckpointManager {
-	db := CheckpointDefaultDatabase
-	if conf.Options.IsShardCluster() {
-		db = CheckpointAdminDatabase
-	}
+	db := utils.AppDatabase()
 	// we can't insert Timestamp(0, 0) that will be treat as Now() inserted
 	// into mongo. so we use Timestamp(0, 1)
 	startPosition = int64(math.Max(float64(startPosition), 1))
@@ -66,7 +61,7 @@ func NewCheckpointManager(startPosition int64) *CheckpointManager {
 		FlushChan:     make(chan bool),
 		url:           conf.Options.ContextStorageUrl,
 		db:            db,
-		table:         conf.Options.ContextAddress,
+		table:         conf.Options.ContextStorageCollection,
 		startPosition: startPosition,
 	}
 	return manager

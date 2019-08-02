@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	conf "mongoshake/collector/configure"
 	"os"
 	"strings"
 
@@ -26,10 +27,6 @@ const (
 var BRANCH = "$"
 
 const (
-	APPNAME = "mongoshake"
-
-	AppDatabase          = APPNAME
-	APPConflictDatabase  = APPNAME + "_conflict"
 	GlobalDiagnosticPath = "diagnostic"
 
 	// This is the time of golang was born to the world
@@ -39,6 +36,14 @@ const (
 func init() {
 	// prepare global folders
 	Mkdirs(GlobalDiagnosticPath /*, GlobalStoragePath*/)
+}
+
+func AppDatabase() string {
+	return conf.Options.ContextStorageDB
+}
+
+func APPConflictDatabase() string {
+	return AppDatabase() + "_conflict"
 }
 
 func RunStatusMessage(status uint64) string {
