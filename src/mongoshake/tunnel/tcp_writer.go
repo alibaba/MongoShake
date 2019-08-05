@@ -10,8 +10,8 @@ import (
 
 	"mongoshake/common"
 
-	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 )
 
 // Network packet structure

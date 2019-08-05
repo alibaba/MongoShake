@@ -19,7 +19,6 @@ var NsShouldBeIgnore = [...]string{
 	utils.APPConflictDatabase + ".",
 }
 
-
 // DocFilter: AutologousFilter, NamespaceFilter
 type DocFilter interface {
 	FilterNs(namespace string) bool
@@ -36,7 +35,6 @@ func (chain DocFilterChain) IterateFilter(namespace string) bool {
 	return false
 }
 
-
 func (filter *AutologousFilter) FilterNs(namespace string) bool {
 	// for namespace. we filter noop operation and collection name
 	// that are admin, local, config, mongoshake, mongoshake_conflict
@@ -47,7 +45,6 @@ func (filter *AutologousFilter) FilterNs(namespace string) bool {
 	}
 	return false
 }
-
 
 func (filter *NamespaceFilter) FilterNs(namespace string) bool {
 	if filter.whiteRule != "" {

@@ -1,8 +1,8 @@
 package tunnel
 
 import (
-	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 )
 
 type MockWriter struct {

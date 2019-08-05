@@ -62,7 +62,7 @@ func (generator *FakeGenerator) start() {
 				for k, oid := range existIds {
 					partialLog.Operation = "d"
 					partialLog.Gid = "mock-delete"
-					partialLog.Object =bson.D{bson.DocElem{"_id", oid}}
+					partialLog.Object = bson.D{bson.DocElem{"_id", oid}}
 					delete(existIds, k)
 					break
 				}
