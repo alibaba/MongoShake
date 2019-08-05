@@ -33,7 +33,7 @@ func NewReader(address string) (*Reader, error) {
 		return nil, err
 	}
 
-	r := &Reader {
+	r := &Reader{
 		brokers:           brokers,
 		topic:             topic,
 		partition:         defaultPartition,
@@ -49,7 +49,7 @@ func (r *Reader) Read() chan *Message {
 	return r.messageChannel
 }
 
-func (r * Reader) send() {
+func (r *Reader) send() {
 	for msg := range r.partitionConsumer.Messages() {
 		r.messageChannel <- &Message{
 			Key:       msg.Key,

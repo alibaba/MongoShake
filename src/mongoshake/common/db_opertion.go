@@ -2,9 +2,9 @@ package utils
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
-	"math"
 
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
@@ -147,7 +147,7 @@ type TimestampNode struct {
  *     error: error
  */
 func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.MongoTimestamp,
-		bson.MongoTimestamp, error) {
+	bson.MongoTimestamp, error) {
 	smallest := bson.MongoTimestamp(math.MaxInt64)
 	biggest := bson.MongoTimestamp(0)
 	tsMap := make(map[string]TimestampNode)

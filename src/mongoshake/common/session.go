@@ -23,7 +23,7 @@ func (ns NS) Str() string {
 
 func NewNS(namespace string) NS {
 	pair := strings.SplitN(namespace, ".", 2)
-	return NS{Database:pair[0], Collection:pair[1]}
+	return NS{Database: pair[0], Collection: pair[1]}
 }
 
 type MongoConn struct {
@@ -91,7 +91,7 @@ func (conn *MongoConn) AcquireReplicaSetName() string {
 	var replicaset struct {
 		Id string `bson:"set"`
 	}
-	if err := conn.Session.DB("admin").Run(bson.M{"replSetGetStatus":1}, &replicaset); err != nil {
+	if err := conn.Session.DB("admin").Run(bson.M{"replSetGetStatus": 1}, &replicaset); err != nil {
 		LOG.Warn("Replica set name not found in system.replset, %v", err)
 	}
 	return replicaset.Id

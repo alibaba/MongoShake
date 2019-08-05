@@ -13,14 +13,14 @@ import (
 	"mongoshake/collector/transform"
 	"mongoshake/common"
 
-	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
 )
 
 const (
-	MAX_BUFFER_BYTE_SIZE = 16*1024*1024
+	MAX_BUFFER_BYTE_SIZE = 16 * 1024 * 1024
 )
 
 func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
@@ -354,7 +354,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
 			}
 			break
 		}
-		if bufferByteSize + len(doc.Data) > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
+		if bufferByteSize+len(doc.Data) > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
 			colExecutor.Sync(buffer)
 			buffer = make([]*bson.Raw, 0, bufferSize)
 			bufferByteSize = 0

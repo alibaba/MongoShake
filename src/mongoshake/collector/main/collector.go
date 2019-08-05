@@ -16,12 +16,12 @@ import (
 	"mongoshake/oplog"
 	"mongoshake/quorum"
 
-	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
 )
 
-type Exit struct {Code int}
+type Exit struct{ Code int }
 
 func main() {
 	var err error
@@ -224,8 +224,8 @@ func sanitizeOptions() error {
 	}
 
 	if conf.Options.MongoConnectMode != utils.ConnectModePrimary &&
-			conf.Options.MongoConnectMode != utils.ConnectModeSecondaryPreferred &&
-			conf.Options.MongoConnectMode != utils.ConnectModeStandalone {
+		conf.Options.MongoConnectMode != utils.ConnectModeSecondaryPreferred &&
+		conf.Options.MongoConnectMode != utils.ConnectModeStandalone {
 		return fmt.Errorf("unknown mongo_connect_mode[%v]", conf.Options.MongoConnectMode)
 	}
 

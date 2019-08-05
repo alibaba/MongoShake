@@ -36,7 +36,7 @@ func (combiner LogsGroupCombiner) mergeToGroups(logs []*OplogRecord) (groups []*
 		if !forceSplit && // force split by log's wait function
 			len(groups) > 0 && // have one group existing at least
 			len(groups[last].oplogRecords) < combiner.maxGroupNr && // no more than max group number
-			sizeInGroup + log.original.partialLog.RawSize < combiner.maxGroupSize && // no more than one group size
+			sizeInGroup+log.original.partialLog.RawSize < combiner.maxGroupSize && // no more than one group size
 			groups[last].op == op && groups[last].ns == ns { // same op and ns
 			// we can merge this oplog into the latest batched oplogRecords group
 			combiner.merge(groups[len(groups)-1], log)

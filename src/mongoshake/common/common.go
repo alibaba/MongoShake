@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	LOG "github.com/vinllen/log4go"
 	"github.com/nightlyone/lockfile"
+	LOG "github.com/vinllen/log4go"
 )
 
 const (
