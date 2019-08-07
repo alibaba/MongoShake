@@ -118,7 +118,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 			LOG.Critical("Connect mongo server error. %v, url : %s", err, src.URL)
 			return err
 		}
-		
+
 		// a conventional ReplicaSet should have local.oplog.rs collection
 		if conf.Options.SyncMode != SYNCMODE_DOCUMENT && !conn.HasOplogNs() {
 			LOG.Critical("There has no oplog collection in mongo db server")

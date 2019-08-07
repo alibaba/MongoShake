@@ -101,8 +101,11 @@ func startup() {
 		crash(fmt.Sprintf("Oplog Tailer initialize failed: %v", err), -6)
 	}
 
-	if err := utils.HttpApi.Listen(); err != nil {
-		LOG.Critical("Coordinator http api listen failed. %v", err)
+	// if the sync mode is "document", mongoshake should exit here.
+	if conf.Options.SyncMode != collector.SYNCMODE_DOCUMENT {
+		if err := utils.HttpApi.Listen(); err != nil {
+			LOG.Critical("Coordinator http api listen failed. %v", err)
+		}
 	}
 }
 
