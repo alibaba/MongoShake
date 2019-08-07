@@ -4,6 +4,8 @@
 	* IMPROVE: when the synchronization mode is full synchronization,
 	support for the case where oplog does not exist. see #215.
 	* IMPROVE: let mongoshake exits when finish full syncing. see #210.
+	* IMPROVE: add `log.dir` to write log and pid file in absolute path.
+	see #211.
 
 2019-07-29 Alibaba Cloud.
 	* version: 2.0.5
