@@ -201,10 +201,14 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	if err != nil {
 		return err
 	}
-	// get all newest timestamp for each mongodb
-	ckptMap, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
-	if err != nil {
-		return err
+
+	var ckptMap map[string]utils.TimestampNode
+	// get all newest timestamp for each mongodb if sync mode isn't "document"
+	if conf.Options.SyncMode != SYNCMODE_DOCUMENT {
+		ckptMap, _, _, err = utils.GetAllTimestamp(coordinator.Sources)
+		if err != nil {
+			return err
+		}
 	}
 
 	fromIsSharding := len(coordinator.Sources) > 1
@@ -257,8 +261,11 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	if err := docsyncer.StartIndexSync(indexMap, toUrl, trans); err != nil {
 		return err
 	}
-	if err := docsyncer.Checkpoint(ckptMap); err != nil {
-		return err
+	if conf.Options.SyncMode != SYNCMODE_DOCUMENT {
+		LOG.Info("try to set checkpoint with map[%v]", ckptMap)
+		if err := docsyncer.Checkpoint(ckptMap); err != nil {
+			return err
+		}
 	}
 	LOG.Info("document syncer sync end")
 	return nil
