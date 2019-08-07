@@ -19,9 +19,9 @@ import (
 )
 
 const (
-	SYNCMODE_ALL = "all"
+	SYNCMODE_ALL      = "all"
 	SYNCMODE_DOCUMENT = "document"
-	SYNCMODE_OPLOG = "oplog"
+	SYNCMODE_OPLOG    = "oplog"
 )
 
 // ReplicationCoordinator global coordinator instance. consist of
