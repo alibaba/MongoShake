@@ -3,8 +3,8 @@ package tunnel
 import (
 	"mongoshake/executor"
 
-	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 	"mongoshake/common"
 )
 

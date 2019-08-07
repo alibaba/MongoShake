@@ -34,7 +34,7 @@ type MetricDelta struct {
 
 func (o *MetricDelta) Update() {
 	current := atomic.LoadUint64(&o.Value)
-	o.Delta, o.previous = current - o.previous, current
+	o.Delta, o.previous = current-o.previous, current
 }
 
 type ReplicationStatus uint64
@@ -56,8 +56,8 @@ type ReplicationMetric struct {
 	LSNAck          int64
 	LSNCheckpoint   int64
 
-	OplogMaxSize  int64
-	OplogAvgSize  int64
+	OplogMaxSize int64
+	OplogAvgSize int64
 
 	TableOperations *TableOps
 

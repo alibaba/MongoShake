@@ -1,12 +1,12 @@
 package collector
 
 import (
-	"mongoshake/collector/configure"
-	"mongoshake/collector/filter"
-	"mongoshake/oplog"
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
+	"mongoshake/collector/configure"
+	"mongoshake/collector/filter"
 	"mongoshake/common"
+	"mongoshake/oplog"
 )
 
 var (

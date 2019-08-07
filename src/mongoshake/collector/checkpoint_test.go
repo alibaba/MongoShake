@@ -1,8 +1,8 @@
 package collector
 
 import (
-	"testing"
 	"fmt"
+	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -13,7 +13,7 @@ func mockCheckpointSyncer(workerNum int) *OplogSyncer {
 		workers[i] = new(Worker)
 	}
 	return &OplogSyncer{
-		batcher: &Batcher {
+		batcher: &Batcher{
 			workerGroup: workers,
 		},
 	}

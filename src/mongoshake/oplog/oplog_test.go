@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/vinllen/mgo/bson"
 	"github.com/stretchr/testify/assert"
+	"github.com/vinllen/mgo/bson"
 )
 
 func TestRemoveFiled(t *testing.T) {
@@ -16,29 +16,29 @@ func TestRemoveFiled(t *testing.T) {
 		fmt.Printf("TestMergeToGroups case %d.\n", nr)
 		nr++
 
-		input := bson.D {
+		input := bson.D{
 			bson.DocElem{
-				Name: "w",
+				Name:  "w",
 				Value: 1,
 			},
 			bson.DocElem{
-				Name: "$v",
+				Name:  "$v",
 				Value: 2,
 			},
 			bson.DocElem{
-				Name: "a",
+				Name:  "a",
 				Value: 3,
 			},
 		}
 
 		ret := RemoveFiled(input, "w")
-		assert.Equal(t, bson.D {
+		assert.Equal(t, bson.D{
 			bson.DocElem{
-				Name: "$v",
+				Name:  "$v",
 				Value: 2,
 			},
 			bson.DocElem{
-				Name: "a",
+				Name:  "a",
 				Value: 3,
 			},
 		}, ret, "should be equal")
@@ -48,29 +48,29 @@ func TestRemoveFiled(t *testing.T) {
 		fmt.Printf("TestMergeToGroups case %d.\n", nr)
 		nr++
 
-		input := bson.D {
+		input := bson.D{
 			bson.DocElem{
-				Name: "w",
+				Name:  "w",
 				Value: 1,
 			},
 			bson.DocElem{
-				Name: "$v",
+				Name:  "$v",
 				Value: 2,
 			},
 			bson.DocElem{
-				Name: "a",
+				Name:  "a",
 				Value: 3,
 			},
 		}
 
 		ret := RemoveFiled(input, "$v")
-		assert.Equal(t, bson.D {
+		assert.Equal(t, bson.D{
 			bson.DocElem{
-				Name: "w",
+				Name:  "w",
 				Value: 1,
 			},
 			bson.DocElem{
-				Name: "a",
+				Name:  "a",
 				Value: 3,
 			},
 		}, ret, "should be equal")
@@ -80,29 +80,29 @@ func TestRemoveFiled(t *testing.T) {
 		fmt.Printf("TestMergeToGroups case %d.\n", nr)
 		nr++
 
-		input := bson.D {
+		input := bson.D{
 			bson.DocElem{
-				Name: "w",
+				Name:  "w",
 				Value: 1,
 			},
 			bson.DocElem{
-				Name: "$v",
+				Name:  "$v",
 				Value: 2,
 			},
 			bson.DocElem{
-				Name: "a",
+				Name:  "a",
 				Value: 3,
 			},
 		}
 
 		ret := RemoveFiled(input, "a")
-		assert.Equal(t, bson.D {
+		assert.Equal(t, bson.D{
 			bson.DocElem{
-				Name: "w",
+				Name:  "w",
 				Value: 1,
 			},
 			bson.DocElem{
-				Name: "$v",
+				Name:  "$v",
 				Value: 2,
 			},
 		}, ret, "should be equal")
@@ -112,17 +112,17 @@ func TestRemoveFiled(t *testing.T) {
 		fmt.Printf("TestMergeToGroups case %d.\n", nr)
 		nr++
 
-		input := bson.D {
+		input := bson.D{
 			bson.DocElem{
-				Name: "w",
+				Name:  "w",
 				Value: 1,
 			},
 			bson.DocElem{
-				Name: "$v",
+				Name:  "$v",
 				Value: 2,
 			},
 			bson.DocElem{
-				Name: "a",
+				Name:  "a",
 				Value: 3,
 			},
 		}

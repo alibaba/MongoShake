@@ -1,10 +1,10 @@
 package filter
 
 import (
-	"testing"
 	"fmt"
-	"mongoshake/oplog"
 	"github.com/stretchr/testify/assert"
+	"mongoshake/oplog"
+	"testing"
 )
 
 func TestNamespaceFilter(t *testing.T) {

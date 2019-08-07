@@ -2,15 +2,15 @@ package executor
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
-	"strings"
 	"time"
 
 	"mongoshake/collector/configure"
+	"mongoshake/collector/transform"
 	"mongoshake/common"
 	"mongoshake/oplog"
-	"mongoshake/collector/transform"
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"

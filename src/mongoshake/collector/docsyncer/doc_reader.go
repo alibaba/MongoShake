@@ -7,9 +7,9 @@ import (
 	"mongoshake/collector/filter"
 	"mongoshake/common"
 
+	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-	LOG "github.com/vinllen/log4go"
 	"mongoshake/collector/configure"
 )
 
@@ -50,7 +50,7 @@ func getDbNamespace(url string) (nsList []utils.NS, err error) {
 			return nil, err
 		}
 		for _, col := range colNames {
-			ns := utils.NS{Database:db, Collection:col}
+			ns := utils.NS{Database: db, Collection: col}
 			if strings.HasPrefix(col, "system.") {
 				continue
 			}
@@ -68,11 +68,11 @@ func getDbNamespace(url string) (nsList []utils.NS, err error) {
 type DocumentReader struct {
 	// source mongo address url
 	src string
-	ns utils.NS
+	ns  utils.NS
 
 	// mongo document reader
-	conn          	*utils.MongoConn
-	docIterator 	*mgo.Iter
+	conn        *utils.MongoConn
+	docIterator *mgo.Iter
 
 	// query statement and current max cursor
 	query bson.M
@@ -82,7 +82,6 @@ type DocumentReader struct {
 func NewDocumentReader(src string, ns utils.NS) *DocumentReader {
 	return &DocumentReader{src: src, ns: ns, query: bson.M{}}
 }
-
 
 // NextDoc returns an document by raw bytes which is []byte
 func (reader *DocumentReader) NextDoc() (doc *bson.Raw, err error) {

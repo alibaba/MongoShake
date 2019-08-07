@@ -88,10 +88,10 @@ func (controller *WriteController) Send(logs []*oplog.GenericOplog, tag uint32) 
 	}
 
 	message := &tunnel.WMessage{
-		TMessage: &tunnel.TMessage {
-			Tag:        tag,
-			Shard:      controller.worker.id,
-			RawLogs:    oplog.LogEntryEncode(logs),
+		TMessage: &tunnel.TMessage{
+			Tag:     tag,
+			Shard:   controller.worker.id,
+			RawLogs: oplog.LogEntryEncode(logs),
 		},
 		ParsedLogs: oplog.LogParsed(logs),
 	}

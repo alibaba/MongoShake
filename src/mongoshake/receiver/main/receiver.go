@@ -1,7 +1,7 @@
 // this is an receiver example connect to different tunnels
 package main
 
-import(
+import (
 	"flag"
 	"fmt"
 	"os"
@@ -10,14 +10,14 @@ import(
 	"mongoshake/receiver/configure"
 	"mongoshake/tunnel"
 
-	LOG "github.com/vinllen/log4go"
-	"github.com/gugemichael/nimo4go"
 	"errors"
-	"syscall"
+	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 	"mongoshake/receiver"
+	"syscall"
 )
 
-type Exit struct {Code int}
+type Exit struct{ Code int }
 
 func main() {
 	var err error
@@ -59,7 +59,7 @@ func main() {
 
 	startup()
 
-	select{}
+	select {}
 }
 
 func sanitizeOptions() error {
