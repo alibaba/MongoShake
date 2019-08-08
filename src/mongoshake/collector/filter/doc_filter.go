@@ -1,24 +1,21 @@
 package filter
 
 import (
-	conf "mongoshake/collector/configure"
-	utils "mongoshake/common"
+	"mongoshake/collector/configure"
+	"mongoshake/common"
 	"regexp"
 	"strings"
 )
 
-var NsShouldBeIgnore = [...]string{
-	"admin.",
-	"local.",
-	"config.",
-
-	// oplogs belong to this app. AppDatabase and
-	// APPConflictDatabase should be initialized already
-	// by const expression. so it is safe
-	utils.AppDatabase + ".",
-	utils.APPConflictDatabase + ".",
+// key: ns, value: true means prefix, false means contain
+var NsShouldBeIgnore = map[string]bool{
+	"admin.":                        true,
+	"local.":                        true,
+	"config.":                       true,
+	utils.AppDatabase + ".":         true,
+	utils.APPConflictDatabase + ".": true,
+	"system.views":                  false,
 }
-
 
 // DocFilter: AutologousFilter, NamespaceFilter
 type DocFilter interface {
@@ -36,18 +33,19 @@ func (chain DocFilterChain) IterateFilter(namespace string) bool {
 	return false
 }
 
-
 func (filter *AutologousFilter) FilterNs(namespace string) bool {
 	// for namespace. we filter noop operation and collection name
 	// that are admin, local, config, mongoshake, mongoshake_conflict
-	for _, ignorePrefix := range NsShouldBeIgnore {
-		if strings.HasPrefix(namespace, ignorePrefix) {
+	for key, val := range NsShouldBeIgnore {
+		if val == true && strings.HasPrefix(namespace, key) {
+			return true
+		}
+		if val == false && strings.Contains(namespace, key) {
 			return true
 		}
 	}
 	return false
 }
-
 
 func (filter *NamespaceFilter) FilterNs(namespace string) bool {
 	if filter.whiteRule != "" {

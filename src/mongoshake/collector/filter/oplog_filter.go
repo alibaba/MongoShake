@@ -6,8 +6,8 @@ import (
 
 	"mongoshake/oplog"
 
-	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/mgo/bson"
 )
 
 // OplogFilter: AutologousFilter, NamespaceFilter, GidFilter, NoopFilter, DDLFilter

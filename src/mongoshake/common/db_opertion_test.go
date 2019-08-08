@@ -1,11 +1,11 @@
 package utils
 
 import (
-	"testing"
 	"fmt"
+	"testing"
 
-	"github.com/vinllen/mgo/bson"
 	"github.com/stretchr/testify/assert"
+	"github.com/vinllen/mgo/bson"
 )
 
 func TestAdjustDBRef(t *testing.T) {
@@ -169,22 +169,22 @@ func TestAdjustDBRef(t *testing.T) {
 		fmt.Printf("TestAdjustDBRef case %d.\n", nr)
 		nr++
 
-		input := bson.M {
-			"ts" : 1560588963,
-			"t" : 8,
-			"h" : -4461630918490158108,
-			"v" : 2,
-			"op" : "u",
-			"ns" : "test.zzz",
-			"o2" : bson.M {
-				"_id" : "5d04b02c27d5888ce0224fc8",
+		input := bson.M{
+			"ts": 1560588963,
+			"t":  8,
+			"h":  -4461630918490158108,
+			"v":  2,
+			"op": "u",
+			"ns": "test.zzz",
+			"o2": bson.M{
+				"_id": "5d04b02c27d5888ce0224fc8",
 			},
-			"o" : bson.M{
+			"o": bson.M{
 				"_id": "5d04b02c27d5888ce0224fc8",
 				"b":   7,
 				"user": bson.M{
 					"$ref": "xxx",
-					"$id": "40b6d79e507b2c613615f15d",
+					"$id":  "40b6d79e507b2c613615f15d",
 				},
 			},
 		}

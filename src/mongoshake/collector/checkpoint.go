@@ -11,8 +11,8 @@ import (
 	"mongoshake/collector/configure"
 	"mongoshake/common"
 
-	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/mgo/bson"
 )
 
 func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int64) {
@@ -29,7 +29,7 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 	now := time.Now()
 
 	// do checkpoint every once in a while
-	if !flush && sync.ckptTime.Add(time.Duration(conf.Options.CheckpointInterval) * time.Millisecond).After(now) {
+	if !flush && sync.ckptTime.Add(time.Duration(conf.Options.CheckpointInterval)*time.Millisecond).After(now) {
 		return
 	}
 	// we force update the ckpt time even failed
@@ -39,7 +39,7 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 	// in AckRequired() tunnel. such as "rpc". While collector is restarted,
 	// we can't get the correct worker ack offset since collector have lost
 	// the unack offset...
-	if !flush && conf.Options.Tunnel != "direct" && now.Before(sync.startTime.Add(3 * time.Minute)) {
+	if !flush && conf.Options.Tunnel != "direct" && now.Before(sync.startTime.Add(3*time.Minute)) {
 		// LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
 		return
 	}

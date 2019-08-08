@@ -54,6 +54,6 @@ func parse(address string) (string, []string, error) {
 		topic = arr[0]
 	}
 
-	brokers := strings.Split(arr[l - 1], brokersSplitter)
+	brokers := strings.Split(arr[l-1], brokersSplitter)
 	return topic, brokers, nil
 }

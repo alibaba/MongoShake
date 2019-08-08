@@ -7,9 +7,10 @@ type Configuration struct {
 	CheckpointInterval      int64    `config:"checkpoint.interval"`
 	HTTPListenPort          int      `config:"http_profile"`
 	SystemProfile           int      `config:"system_profile"`
-	LogLevel                string   `config:"log_level"`
-	LogFileName             string   `config:"log_file"`
-	LogBuffer               bool     `config:"log_buffer"`
+	LogLevel                string   `config:"log.level"`
+	LogDirectory            string   `config:"log.dir"`
+	LogFileName             string   `config:"log.file"`
+	LogBuffer               bool     `config:"log.buffer"`
 	OplogGIDS               []string `config:"oplog.gids"`
 	ShardKey                string   `config:"shard_key"`
 	SyncerReaderBufferTime  uint     `config:"syncer.reader.buffer_time"`
@@ -43,6 +44,12 @@ type Configuration struct {
 	ReplayerCollectionParallel int  `config:"replayer.collection_parallel"`
 	ReplayerDocumentParallel   int  `config:"replayer.document_parallel"`
 	ReplayerDocumentBatchSize  int  `config:"replayer.document_batch_size"`
+
+	/*---------------------------------------------------------*/
+	// inner variables
+	LogLevelOld    string `config:"log_level"`  // compatible with older versions
+	LogFileNameOld string `config:"log_file"`   // compatible with older versions
+	LogBufferOld   bool   `config:"log_buffer"` // compatible with older versions
 
 	/*---------------------------------------------------------*/
 	// generated variables

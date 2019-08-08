@@ -1,10 +1,10 @@
 package replayer
 
-import(
-	"mongoshake/tunnel"
+import (
+	"mongoshake/common"
 	"mongoshake/modules"
 	"mongoshake/oplog"
-	"mongoshake/common"
+	"mongoshake/tunnel"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
@@ -136,7 +136,7 @@ func (er *ExampleReplayer) handler() {
 
 		// get the newest timestamp
 		n := len(oplogs)
-		lastTs := utils.TimestampToInt64(oplogs[n - 1].Timestamp)
+		lastTs := utils.TimestampToInt64(oplogs[n-1].Timestamp)
 		er.Ack = lastTs
 
 		LOG.Debug("handle ack[%v]", er.Ack)

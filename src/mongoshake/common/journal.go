@@ -1,9 +1,9 @@
 package utils
 
 import (
-	"mongoshake/oplog"
 	"bufio"
 	"fmt"
+	"mongoshake/oplog"
 	"os"
 	"path/filepath"
 )

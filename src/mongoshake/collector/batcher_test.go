@@ -28,13 +28,13 @@ func mockSyncer() *OplogSyncer {
 func mockOplogs(length int, ddlGiven []int) []*oplog.GenericOplog {
 	output := make([]*oplog.GenericOplog, length)
 	j := 0
-	for i := 0; i < length; i ++ {
+	for i := 0; i < length; i++ {
 		op := "u"
 		if j < len(ddlGiven) && ddlGiven[j] == i {
 			op = "c"
 			j++
 		}
-		output[i] = &oplog.GenericOplog {
+		output[i] = &oplog.GenericOplog{
 			Parsed: &oplog.PartialLog{
 				Namespace: "a.b",
 				Operation: op,
@@ -331,7 +331,6 @@ func TestBatchMore(t *testing.T) {
 	}
 }
 
-
 func mockBatcher(nsWhite []string, nsBlack []string) *Batcher {
 	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
 	// namespace filter
@@ -340,22 +339,22 @@ func mockBatcher(nsWhite []string, nsBlack []string) *Batcher {
 		filterList = append(filterList, namespaceFilter)
 	}
 	return &Batcher{
-		syncer:      &OplogSyncer{
+		syncer: &OplogSyncer{
 			fullSyncFinishPosition: 0,
 		},
-		filterList:  filterList,
+		filterList: filterList,
 	}
 }
 
 func mockFilterPartialLog(op, ns string, logObject bson.D) *oplog.PartialLog {
 	// log.Timestamp > fullSyncFinishPosition
 	return &oplog.PartialLog{
-				Timestamp: bson.MongoTimestamp(1),
-				Namespace: ns,
-				Operation: op,
-				RawSize:   1,
-				Object:    logObject,
-			}
+		Timestamp: bson.MongoTimestamp(1),
+		Namespace: ns,
+		Operation: op,
+		RawSize:   1,
+		Object:    logObject,
+	}
 }
 
 func TestFilterPartialLog(t *testing.T) {

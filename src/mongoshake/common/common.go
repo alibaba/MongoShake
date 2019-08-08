@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	LOG "github.com/vinllen/log4go"
 	"github.com/nightlyone/lockfile"
+	LOG "github.com/vinllen/log4go"
 )
 
 const (
@@ -60,28 +60,38 @@ func RunStatusMessage(status uint64) string {
 	}
 }
 
-func InitialLogger(logFile string, level string, logBuffer bool, verbose bool) bool {
+func InitialLogger(logDir, logFile, level string, logBuffer bool, verbose bool) error {
 	logLevel := parseLogLevel(level)
 	if verbose {
 		LOG.AddFilter("console", logLevel, LOG.NewConsoleLogWriter())
 	}
-	if len(logFile) != 0 {
-		// create logs folder for log4go. because of its mistake that doesn't create !
-		if err := os.MkdirAll("logs", os.ModeDir|os.ModePerm); err != nil {
-			return false
+
+	if len(logDir) == 0 {
+		logDir = "logs"
+	}
+	// check directory exists
+	if _, err := os.Stat(logDir); err != nil && os.IsNotExist(err) {
+		if err := os.MkdirAll(logDir, os.ModeDir|os.ModePerm); err != nil {
+			return fmt.Errorf("create log.dir[%v] failed[%v]", logDir, err)
 		}
+	}
+
+	if len(logFile) != 0 {
 		if logBuffer {
 			LOG.LogBufferLength = 32
 		} else {
 			LOG.LogBufferLength = 0
 		}
-		fileLogger := LOG.NewFileLogWriter(fmt.Sprintf("logs/%s", logFile), true)
+		fileLogger := LOG.NewFileLogWriter(fmt.Sprintf("%s/%s", logDir, logFile), true)
 		fileLogger.SetRotateDaily(true)
 		fileLogger.SetFormat("[%D %T] [%L] [%s] %M")
 		fileLogger.SetRotateMaxBackup(7)
 		LOG.AddFilter("file", logLevel, fileLogger)
+	} else {
+		return fmt.Errorf("log.file[%v] shouldn't be empty", logFile)
 	}
-	return true
+
+	return nil
 }
 
 func parseLogLevel(level string) LOG.Level {

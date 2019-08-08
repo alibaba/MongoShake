@@ -1,10 +1,10 @@
 package filter
 
 import (
-	"testing"
 	"fmt"
-	"mongoshake/oplog"
 	"github.com/stretchr/testify/assert"
+	"mongoshake/oplog"
+	"testing"
 )
 
 func TestNamespaceFilter(t *testing.T) {
@@ -63,5 +63,44 @@ func TestGidFilter(t *testing.T) {
 			Gid: "8",
 		}
 		assert.Equal(t, true, filter.Filter(log), "should be equal")
+	}
+}
+
+func TestAutologousFilter(t *testing.T) {
+	// test AutologousFilter
+
+	var nr int
+	{
+		fmt.Printf("TestAutologousFilter case %d.\n", nr)
+		nr++
+
+		filter := new(AutologousFilter)
+		log := &oplog.PartialLog{
+			Namespace: "a.b",
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "mongoshake.x",
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "local.x.z.y",
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "a.system.views",
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "a.system.view",
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
 	}
 }

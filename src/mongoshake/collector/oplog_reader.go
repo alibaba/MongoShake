@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"mongoshake/common"
 	"mongoshake/collector/configure"
+	"mongoshake/common"
 	"mongoshake/oplog"
 
 	LOG "github.com/vinllen/log4go"
@@ -39,8 +39,8 @@ var CollectionCappedError = errors.New("collection capped error")
 
 // used in internal channel
 type retOplog struct {
-	log     *bson.Raw // log content
-	err     error     // error detail message
+	log *bson.Raw // log content
+	err error     // error detail message
 }
 
 // OplogReader represents stream reader from mongodb that specified
@@ -66,8 +66,8 @@ type OplogReader struct {
 // NewOplogReader creates reader with mongodb url
 func NewOplogReader(src string) *OplogReader {
 	return &OplogReader{
-		src: src,
-		query: bson.M{},
+		src:       src,
+		query:     bson.M{},
 		oplogChan: make(chan *retOplog, oplogChanSize),
 		firstRead: true,
 	}
@@ -110,10 +110,10 @@ func (reader *OplogReader) NextOplog() (log *oplog.GenericOplog, err error) {
 // timeout which is acceptable.
 func (reader *OplogReader) get() (log *bson.Raw, err error) {
 	select {
-		case ret := <-reader.oplogChan:
-			return ret.log, ret.err
-		case <-time.After(time.Second * time.Duration(conf.Options.SyncerReaderBufferTime)):
-			return nil, TimeoutError
+	case ret := <-reader.oplogChan:
+		return ret.log, ret.err
+	case <-time.After(time.Second * time.Duration(conf.Options.SyncerReaderBufferTime)):
+		return nil, TimeoutError
 	}
 }
 
@@ -172,8 +172,7 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 			reader.conn.Close()
 		}
 		// reconnect
-		if reader.conn, err = utils.NewMongoConn(reader.src, conf.Options.MongoConnectMode, true);
-				reader.conn == nil || err != nil {
+		if reader.conn, err = utils.NewMongoConn(reader.src, conf.Options.MongoConnectMode, true); reader.conn == nil || err != nil {
 			err = fmt.Errorf("reconnect mongo instance [%s] error. %s", reader.src, err.Error())
 			return err
 		}
