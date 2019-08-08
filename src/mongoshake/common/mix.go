@@ -151,8 +151,10 @@ func Mkdirs(dirs ...string) error {
 	return nil
 }
 
-func WritePidById(id string) bool {
-	dir, _ := os.Getwd()
+func WritePidById(dir, id string) bool {
+	if len(dir) == 0 {
+		dir, _ = os.Getwd()
+	}
 	pidfile := filepath.Join(dir, id) + ".pid"
 	if err := WritePid(pidfile); err != nil {
 		LOG.Critical("Process write pid and lock file failed : %v", err)

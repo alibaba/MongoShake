@@ -51,11 +51,14 @@ func main() {
 		crash(fmt.Sprintf("Configure file %s parse failed. %v", *configuration, err), -2)
 	}
 
-	utils.InitialLogger(conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogBuffer, *verbose)
-
 	// verify collector options and revise
 	if err = sanitizeOptions(); err != nil {
 		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
+	}
+
+	if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogBuffer, *verbose); err != nil {
+		crash(fmt.Sprintf("initial log.dir[%v] log.name[%v] failed[%v].", conf.Options.LogDirectory,
+			conf.Options.LogFileName, err), -2)
 	}
 
 	conf.Options.Version = utils.BRANCH
@@ -68,7 +71,7 @@ func main() {
 	utils.Welcome()
 
 	// get exclusive process lock and write pid
-	if utils.WritePidById(conf.Options.CollectorId) {
+	if utils.WritePidById(conf.Options.LogDirectory, conf.Options.CollectorId) {
 		startup()
 	}
 }
@@ -101,8 +104,11 @@ func startup() {
 		crash(fmt.Sprintf("Oplog Tailer initialize failed: %v", err), -6)
 	}
 
-	if err := utils.HttpApi.Listen(); err != nil {
-		LOG.Critical("Coordinator http api listen failed. %v", err)
+	// if the sync mode is "document", mongoshake should exit here.
+	if conf.Options.SyncMode != collector.SYNCMODE_DOCUMENT {
+		if err := utils.HttpApi.Listen(); err != nil {
+			LOG.Critical("Coordinator http api listen failed. %v", err)
+		}
 	}
 }
 
@@ -121,6 +127,20 @@ func selectLeader() {
 }
 
 func sanitizeOptions() error {
+	// compatible with old version
+	if len(conf.Options.LogFileNameOld) != 0 {
+		conf.Options.LogFileName = conf.Options.LogFileNameOld
+	}
+	if len(conf.Options.LogLevelOld) != 0 {
+		conf.Options.LogLevel = conf.Options.LogLevelOld
+	}
+	if conf.Options.LogBufferOld == true {
+		conf.Options.LogBuffer = conf.Options.LogBufferOld
+	}
+	if len(conf.Options.LogFileName) == 0 {
+		return fmt.Errorf("log.name[%v] shouldn't be empty", conf.Options.LogFileName)
+	}
+
 	if len(conf.Options.MongoUrls) == 0 {
 		return errors.New("mongo_urls were empty")
 	}
@@ -133,8 +153,8 @@ func sanitizeOptions() error {
 	}
 	if len(conf.Options.MongoUrls) > 1 {
 		if conf.Options.WorkerNum != len(conf.Options.MongoUrls) {
-			LOG.Warn("replication worker should be equal to count of mongo_urls while multi sources (shard), set worker = %v",
-				len(conf.Options.MongoUrls))
+			//LOG.Warn("replication worker should be equal to count of mongo_urls while multi sources (shard), set worker = %v",
+			//	len(conf.Options.MongoUrls))
 			conf.Options.WorkerNum = len(conf.Options.MongoUrls)
 		}
 		if conf.Options.ReplayerDMLOnly == false {
