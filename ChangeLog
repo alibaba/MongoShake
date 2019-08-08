@@ -1,4 +1,4 @@
-2019-08-07 Alibaba Cloud.
+2019-08-08 Alibaba Cloud.
 	* version: 2.0.6
 	* IMPROVE: filter views in syncing, see #206.
 	* IMPROVE: when the synchronization mode is full synchronization,
