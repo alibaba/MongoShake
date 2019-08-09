@@ -71,11 +71,22 @@ func (coordinator *ReplicationCoordinator) Run() error {
 		}
 
 		// get current newest timestamp
-		_, fullFinishTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
+		_, fullFinishTs, _, oldestTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
 		if err != nil {
 			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
 		}
 		LOG.Info("------------------------full sync done!------------------------")
+
+		LOG.Info("oldestTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractMongoTimestamp(oldestTs),
+			utils.ExtractMongoTimestamp(fullBeginTs), utils.ExtractMongoTimestamp(fullFinishTs))
+		// the oldest oplog is lost
+		if utils.ExtractMongoTimestamp(oldestTs) >= fullBeginTs {
+			err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's " +
+				"oplog collection size is too small or full sync continues too long", fullBeginTs, oldestTs)
+			LOG.Error(err)
+			return err
+		}
+
 		LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
 			utils.ExtractMongoTimestamp(fullBeginTs), utils.ExtractMongoTimestamp(fullFinishTs))
 
@@ -171,7 +182,7 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	}
 
 	// oldestTs is the smallest of the all newest timestamp
-	tsMap, _, oldestTs, err := utils.GetAllTimestamp(coordinator.Sources)
+	tsMap, _, oldestTs, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
 	if err != nil {
 		return syncMode, 0, nil
 	}
@@ -205,7 +216,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	var ckptMap map[string]utils.TimestampNode
 	// get all newest timestamp for each mongodb if sync mode isn't "document"
 	if conf.Options.SyncMode != SYNCMODE_DOCUMENT {
-		ckptMap, _, _, err = utils.GetAllTimestamp(coordinator.Sources)
+		ckptMap, _, _, _, _, err = utils.GetAllTimestamp(coordinator.Sources)
 		if err != nil {
 			return err
 		}
