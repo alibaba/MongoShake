@@ -148,7 +148,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 			return errors.New("duplicated replica set source")
 		}
 		rs[rsName] = 1
-		src.ReplicaName = rsName
+		src.Replset = rsName
 
 		// look around if there has uniq index
 		if !hasUniqIndex {
@@ -206,12 +206,17 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 }
 
 func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
+	var chunkMap utils.ChunkMap
 	fromIsSharding := len(coordinator.Sources) > 1
 	if fromIsSharding {
-		ok, err := utils.GetBalancerStatusByUrl(conf.Options.MongoCsUrl)
-		LOG.Info("balancer status %v err %v", ok, err)
+		ok, _ := utils.GetBalancerStatusByUrl(conf.Options.MongoCsUrl)
 		if ok {
-			return fmt.Errorf("balancer need to stop when document replication occur for source mongodb sharding")
+			LOG.Critical("source mongodb sharding need to stop balancer when document replication occur")
+			return errors.New("source mongodb sharding need to stop balancer when document replication occur")
+		}
+		var err error
+		if chunkMap, err = utils.GetChunkMapByUrl(conf.Options.MongoCsUrl); err != nil {
+			return err
 		}
 	}
 
@@ -251,7 +256,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	indexMap := make(map[utils.NS][]mgo.Index)
 
 	for i, src := range coordinator.Sources {
-		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl, trans)
+		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl, trans, chunkMap)
 		LOG.Info("document syncer-%d do replication for url=%v", i, src.URL)
 		wg.Add(1)
 		nimo.GoRoutine(func() {
@@ -300,7 +305,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
 	for _, src := range coordinator.Sources {
-		syncer := NewOplogSyncer(coordinator, src.ReplicaName, fullSyncFinishPosition,
+		syncer := NewOplogSyncer(coordinator, src.Replset, fullSyncFinishPosition,
 			src.URL, src.Gid, ckptManager, mvckManager)
 		// syncerGroup http api registry
 		syncer.init()

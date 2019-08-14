@@ -20,12 +20,14 @@ const (
 
 	QueryTs     = "ts"
 	SettingsCol = "settings"
+	ShardCol    = "shards"
+	ChunkCol    = "chunks"
 )
 
 type MongoSource struct {
-	URL         string
-	ReplicaName string
-	Gid         string
+	URL     string
+	Replset string
+	Gid     string
 }
 
 // get db version, return string with format like "3.0.1"
@@ -90,6 +92,55 @@ func GetBalancerStatusByUrl(url string) (bool, error) {
 		return true, err
 	}
 	return !retMap["stopped"].(bool), nil
+}
+
+type ChunkRange struct {
+	Min *bson.Raw `bson:"min"`
+	Max *bson.Raw `bson:"max"`
+}
+
+type ChunkMap map[string]map[string][]*ChunkRange
+
+func GetChunkMapByUrl(url string) (ChunkMap, error) {
+	var conn *MongoConn
+	var err error
+	if conn, err = NewMongoConn(url, ConnectModePrimary, true); conn == nil || err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	chunkMap := make(ChunkMap)
+
+	type ShardDoc struct {
+		Tag  string `bson:"_id"`
+		Host string `bson:"host"`
+	}
+	shardMap := make(map[string]string)
+	var shardDoc ShardDoc
+	shardIter := conn.Session.DB(ConfigDB).C(ShardCol).Find(bson.M{}).Iter()
+	for shardIter.Next(&shardDoc) {
+		replset := strings.Split(shardDoc.Host, "/")[0]
+		shardMap[shardDoc.Tag] = replset
+		chunkMap[replset] = make(map[string][]*ChunkRange)
+	}
+
+	type ChunkDoc struct {
+		Ns    string    `bson:"ns"`
+		Min   *bson.Raw `bson:"min"`
+		Max   *bson.Raw `bson:"max"`
+		Shard string    `bson:"shard"`
+	}
+	var chunkDoc ChunkDoc
+	chunkIter := conn.Session.DB(ConfigDB).C(ChunkCol).Find(bson.M{}).Sort("min").Iter()
+	for chunkIter.Next(&chunkDoc) {
+		replset := shardMap[chunkDoc.Shard]
+		if chunks, ok := chunkMap[replset][chunkDoc.Ns]; ok {
+			chunkMap[replset][chunkDoc.Ns] = append(chunks, &ChunkRange{Min:chunkDoc.Min, Max:chunkDoc.Max})
+		} else {
+			chunkMap[replset][chunkDoc.Ns] = make([]*ChunkRange, 0)
+		}
+	}
+	return chunkMap, nil
 }
 
 func IsNotFound(err error) bool {
@@ -179,7 +230,7 @@ func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.Mon
 		if err != nil {
 			return nil, 0, 0, err
 		}
-		tsMap[src.ReplicaName] = TimestampNode{
+		tsMap[src.Replset] = TimestampNode{
 			Oldest: oldest,
 			Newest: newest,
 		}

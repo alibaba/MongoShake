@@ -52,6 +52,13 @@ func (filter *AutologousFilter) FilterNs(namespace string) bool {
 
 
 func (filter *NamespaceFilter) FilterNs(namespace string) bool {
+	// if whiteRule is db.col, then db.$cmd command will not be filtered
+	if strings.HasSuffix(namespace, ".$cmd") {
+		db := strings.SplitN(namespace, ".", 2)[0]
+		if _, ok := filter.whiteDBRuleMap[db]; ok {
+			return false
+		}
+	}
 	if filter.whiteRule != "" {
 		if match, _ := regexp.MatchString(filter.whiteRule, namespace); !match {
 			// filter

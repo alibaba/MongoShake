@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	MAX_BUFFER_BYTE_SIZE = 16*1024*1024
+	MAX_BUFFER_BYTE_SIZE = 16 * 1024 * 1024
 )
 
 func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
@@ -96,7 +96,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 	dbSpecIter := fromConn.Session.DB("config").C("databases").Find(bson.M{}).Iter()
 	for dbSpecIter.Next(&dbSpecDoc) {
 		if dbSpecDoc.Partitioned {
-			if filterList.IterateFilter(dbSpecDoc.Db) {
+			if filterList.IterateFilter(dbSpecDoc.Db + ".$cmd") {
 				LOG.Debug("DB is filtered. %v", dbSpecDoc.Db)
 				continue
 			}
@@ -230,8 +230,10 @@ type DBSyncer struct {
 	indexMap map[utils.NS][]mgo.Index
 	// start time of sync
 	startTime time.Time
-
+	// namespace transform
 	nsTrans *transform.NamespaceTransform
+	// filter duplicate record
+	chunkMap utils.ChunkMap
 
 	mutex sync.Mutex
 
@@ -242,7 +244,8 @@ func NewDBSyncer(
 	id int,
 	fromMongoUrl string,
 	toMongoUrl string,
-	nsTrans *transform.NamespaceTransform) *DBSyncer {
+	nsTrans *transform.NamespaceTransform,
+	chunkMap utils.ChunkMap) *DBSyncer {
 
 	syncer := &DBSyncer{
 		id:           id,
@@ -250,6 +253,7 @@ func NewDBSyncer(
 		ToMongoUrl:   toMongoUrl,
 		indexMap:     make(map[utils.NS][]mgo.Index),
 		nsTrans:      nsTrans,
+		chunkMap:     chunkMap,
 	}
 
 	return syncer
@@ -342,7 +346,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
 			}
 			break
 		}
-		if bufferByteSize + len(doc.Data) > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
+		if bufferByteSize+len(doc.Data) > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
 			colExecutor.Sync(buffer)
 			buffer = make([]*bson.Raw, 0, bufferSize)
 			bufferByteSize = 0
