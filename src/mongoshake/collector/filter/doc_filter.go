@@ -5,6 +5,7 @@ import (
 	"mongoshake/common"
 	"regexp"
 	"strings"
+	"fmt"
 )
 
 // key: ns, value: true means prefix, false means contain
@@ -15,6 +16,18 @@ var NsShouldBeIgnore = map[string]bool{
 	utils.AppDatabase + ".":         true,
 	utils.APPConflictDatabase + ".": true,
 	"system.views":                  false,
+}
+
+func InitNs(specialNsList []string) {
+	for _, ns := range specialNsList {
+		if _, ok := NsShouldBeIgnore[ns]; ok {
+			delete(NsShouldBeIgnore, ns)
+		}
+		newNs := fmt.Sprintf("%s.", ns)
+		if _, ok := NsShouldBeIgnore[newNs]; ok {
+			delete(NsShouldBeIgnore, newNs)
+		}
+	}
 }
 
 // DocFilter: AutologousFilter, NamespaceFilter
@@ -48,6 +61,13 @@ func (filter *AutologousFilter) FilterNs(namespace string) bool {
 }
 
 func (filter *NamespaceFilter) FilterNs(namespace string) bool {
+	// if whiteRule is db.col, then db.$cmd command will not be filtered
+	if strings.HasSuffix(namespace, ".$cmd") {
+		db := strings.SplitN(namespace, ".", 2)[0]
+		if _, ok := filter.whiteDBRuleMap[db]; ok {
+			return false
+		}
+	}
 	if filter.whiteRule != "" {
 		if match, _ := regexp.MatchString(filter.whiteRule, namespace); !match {
 			// filter

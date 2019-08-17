@@ -28,6 +28,7 @@ type Configuration struct {
 	ContextStartPosition    int64    `config:"context.start_position" type:"date"`
 	FilterNamespaceBlack    []string `config:"filter.namespace.black"`
 	FilterNamespaceWhite    []string `config:"filter.namespace.white"`
+	FilterPassSpecialDb     []string `config:"filter.pass.special.db"`
 	SyncMode                string   `config:"sync_mode"`
 	TransformNamespace      []string `config:"transform.namespace"`
 	DBRef                   bool     `config:"dbref"`

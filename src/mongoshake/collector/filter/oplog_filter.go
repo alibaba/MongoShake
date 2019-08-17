@@ -225,12 +225,5 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 }
 
 func (filter *NamespaceFilter) filter(log *oplog.PartialLog) bool {
-	// if whiteRule is db.col, then db.$cmd command will not be filtered
-	if strings.HasSuffix(log.Namespace, ".$cmd") {
-		db := strings.SplitN(log.Namespace, ".", 2)[0]
-		if _, ok := filter.whiteDBRuleMap[db]; ok {
-			return false
-		}
-	}
 	return filter.FilterNs(log.Namespace)
 }
