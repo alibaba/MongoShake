@@ -5,6 +5,7 @@ import (
 	"mongoshake/common"
 	"regexp"
 	"strings"
+	"fmt"
 )
 
 // key: ns, value: true means prefix, false means contain
@@ -15,6 +16,18 @@ var NsShouldBeIgnore = map[string]bool{
 	utils.AppDatabase + ".":         true,
 	utils.APPConflictDatabase + ".": true,
 	"system.views":                  false,
+}
+
+func InitNs(specialNsList []string) {
+	for _, ns := range specialNsList {
+		if _, ok := NsShouldBeIgnore[ns]; ok {
+			delete(NsShouldBeIgnore, ns)
+		}
+		newNs := fmt.Sprintf("%s.", ns)
+		if _, ok := NsShouldBeIgnore[newNs]; ok {
+			delete(NsShouldBeIgnore, newNs)
+		}
+	}
 }
 
 // DocFilter: AutologousFilter, NamespaceFilter
