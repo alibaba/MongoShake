@@ -7,6 +7,9 @@
 	cause db filtered. see #222.
 	* IMPROVE: add switch in configuration to support syncing some special
 	database like 'admin', 'local', default is disbale. see #223.
+	* IMPROVE: set `adaptive.batching_max_size = 1024` by default to reduce
+	memory usage. see
+	https://github.com/alibaba/MongoShake/wiki/FAQ#q-mongoshake-crashed-because-of-oomout-of-memory-how-can-i-estimate-memory-usage
 
 2019-08-08 Alibaba Cloud.
 	* version: 2.0.6
