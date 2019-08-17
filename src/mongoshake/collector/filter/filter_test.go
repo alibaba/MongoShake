@@ -102,5 +102,51 @@ func TestAutologousFilter(t *testing.T) {
 			Namespace: "a.system.view",
 		}
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "admin.x",
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestAutologousFilter case %d.\n", nr)
+		nr++
+
+		InitNs([]string{"admin", "system.views"})
+
+		filter := new(AutologousFilter)
+		log := &oplog.PartialLog{
+			Namespace: "a.b",
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "mongoshake.x",
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "local.x.z.y",
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "a.system.views",
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "a.system.view",
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "admin.x",
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
+	"mongoshake/collector/filter"
 )
 
 type Exit struct{ Code int }
@@ -206,6 +207,11 @@ func sanitizeOptions() error {
 		len(conf.Options.FilterNamespaceWhite) != 0 {
 		return errors.New("at most one of black lists and white lists option can be given")
 	}
+	if len(conf.Options.FilterPassSpecialDb) != 0 {
+		// init ns
+		filter.InitNs(conf.Options.FilterPassSpecialDb)
+	}
+
 	conf.Options.HTTPListenPort = utils.MayBeRandom(conf.Options.HTTPListenPort)
 	conf.Options.SystemProfile = utils.MayBeRandom(conf.Options.SystemProfile)
 
