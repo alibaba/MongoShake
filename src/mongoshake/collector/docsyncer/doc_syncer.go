@@ -97,7 +97,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 	dbSpecIter := fromConn.Session.DB("config").C("databases").Find(bson.M{}).Iter()
 	for dbSpecIter.Next(&dbSpecDoc) {
 		if dbSpecDoc.Partitioned {
-			if filterList.IterateFilter(dbSpecDoc.Db) {
+			if filterList.IterateFilter(dbSpecDoc.Db + ".$cmd") {
 				LOG.Debug("DB is filtered. %v", dbSpecDoc.Db)
 				continue
 			}
