@@ -1,3 +1,13 @@
+2019-08-17 Alibaba Cloud.
+	* version: 2.0.7
+	* BUGFIX: exit when the oldest ts bigger than full-sync-begin
+	timestamp so that data may lost between full sync and increase sync.
+	see #218.
+	* BUGFIX: bugfix: set white namespace filter for sharding replication
+	cause db filtered. see #222.
+	* IMPROVE: add switch in configuration to support syncing some special
+	database like 'admin', 'local', default is disbale. see #223.
+
 2019-08-08 Alibaba Cloud.
 	* version: 2.0.6
 	* IMPROVE: filter views in syncing, see #206.
