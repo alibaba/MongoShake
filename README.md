@@ -83,7 +83,7 @@ Run `./bin/collector.darwin64` or `collector.linux64` which is built in OSX and 
 Or you can build mongo-shake yourself according to the following steps:
 *  git clone https://github.com/alibaba/MongoShake.git
 *  cd MongoShake
-*  export GOPATH=\`pwd\`/../..
+*  export GOPATH=\`pwd\`
 *  cd src/vendor
 *  govendor sync    #please note: must install govendor first and then pull all dependencies: `go get -u github.com/kardianos/govendor`
 *  cd ../../ && ./build.sh
