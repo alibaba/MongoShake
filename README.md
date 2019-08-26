@@ -85,7 +85,7 @@ Or you can build mongo-shake yourself according to the following steps:
 *  cd MongoShake
 *  export GOPATH=\`pwd\`
 *  cd src/vendor
-*  govendor sync    #please note: must install govendor first and then pull all dependencies: `go get -u github.com/kardianos/govendor`
+*  govendor sync    #please note: must install govendor first and then pull all dependencies: `go get -u github.com/kardianos/govendor`. Or, users can use govendor located in `tools` directory: `../../tools/govendor sync`
 *  cd ../../ && ./build.sh
 *  ./bin/collector -conf=conf/collector.conf #please note: user must modify collector.conf first to match needs. You can also use \"start.sh\" script which supports hypervisor mechanism in Linux OS only.
 
