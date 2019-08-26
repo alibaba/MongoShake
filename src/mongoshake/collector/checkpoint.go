@@ -130,6 +130,9 @@ func (manager *CheckpointManager) Get(replset string) bson.MongoTimestamp {
 func (manager *CheckpointManager) UpdateAckTs(replset string, ts bson.MongoTimestamp) {
 	manager.mutex.Lock()
 	defer manager.mutex.Unlock()
+	if _, ok := manager.ckptMap[replset]; !ok {
+		manager.ckptMap[replset] = &SyncerCheckpoint{ackTs: 0}
+	}
 	manager.ckptMap[replset].ackTs = ts
 }
 
@@ -202,8 +205,10 @@ func (manager *CheckpointManager) Flush() error {
 	}
 	for replset, info := range manager.ckptMap {
 		LOG.Info("checkpoint replset %v updated to %v", replset, utils.ExtractTimestampForLog(info.ackTs))
-		info.syncer.replMetric.AddCheckpoint(1)
-		info.syncer.replMetric.SetLSNCheckpoint(int64(info.ackTs))
+		if info.syncer != nil {
+			info.syncer.replMetric.AddCheckpoint(1)
+			info.syncer.replMetric.SetLSNCheckpoint(int64(info.ackTs))
+		}
 
 		ckptDoc := map[string]interface{}{
 			CheckpointName:      replset,

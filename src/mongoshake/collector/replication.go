@@ -81,7 +81,6 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			return err
 		}
 	case SYNCMODE_DOCUMENT:
-
 		if err := coordinator.startDocumentReplication(); err != nil {
 			return err
 		}
@@ -206,7 +205,7 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 }
 
 func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
-	var chunkMap utils.ChunkMap
+	shardingChunkMap := make(utils.ShardingChunkMap)
 	fromIsSharding := len(coordinator.Sources) > 1
 	if fromIsSharding {
 		ok, _ := utils.GetBalancerStatusByUrl(conf.Options.MongoCsUrl)
@@ -215,7 +214,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 			return errors.New("source mongodb sharding need to stop balancer when document replication occur")
 		}
 		var err error
-		if chunkMap, err = utils.GetChunkMapByUrl(conf.Options.MongoCsUrl); err != nil {
+		if shardingChunkMap, err = utils.GetChunkMapByUrl(conf.Options.MongoCsUrl); err != nil {
 			return err
 		}
 	}
@@ -255,9 +254,16 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	var mutex sync.Mutex
 	indexMap := make(map[utils.NS][]mgo.Index)
 
-	for i, src := range coordinator.Sources {
-		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl, trans, chunkMap)
-		LOG.Info("document syncer-%d do replication for url=%v", i, src.URL)
+	for _, src := range coordinator.Sources {
+		dbChunkMap := make(utils.DBChunkMap)
+		if chunkMap, ok := shardingChunkMap[src.Replset]; ok {
+			dbChunkMap = chunkMap
+		} else {
+			LOG.Warn("document syncer %v has no chunk map", src.Replset)
+		}
+
+		dbSyncer := docsyncer.NewDBSyncer(src.Replset, src.URL, toUrl, trans, dbChunkMap)
+		LOG.Info("document syncer %v begin replication for url=%v", src.Replset, src.URL)
 		wg.Add(1)
 		nimo.GoRoutine(func() {
 			defer wg.Done()
