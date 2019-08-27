@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mongoshake/collector/filter"
 	"sync"
 
 	"mongoshake/collector/configure"
@@ -261,8 +262,9 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		} else {
 			LOG.Warn("document syncer %v has no chunk map", src.Replset)
 		}
+		orphanFilter := filter.NewOrphanFilter(src.Replset, dbChunkMap)
 
-		dbSyncer := docsyncer.NewDBSyncer(src.Replset, src.URL, toUrl, trans, dbChunkMap)
+		dbSyncer := docsyncer.NewDBSyncer(src.Replset, src.URL, toUrl, trans, orphanFilter)
 		LOG.Info("document syncer %v begin replication for url=%v", src.Replset, src.URL)
 		wg.Add(1)
 		nimo.GoRoutine(func() {

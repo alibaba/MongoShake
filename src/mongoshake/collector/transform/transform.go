@@ -69,33 +69,50 @@ func NewDBTransform(transRule []string) *DBTransform {
 	return &DBTransform{ruleMap: ruleMap}
 }
 
-func TransformDBRef(logObject bson.D, db string, nsTrans *NamespaceTransform) bson.D {
-	if logObject[0].Name == "$ref" {
+func TransformDBRef(doc *bson.Raw, db string, nsTrans *NamespaceTransform) *bson.Raw {
+	var docD bson.D
+	if err := bson.Unmarshal(doc.Data, &docD); err != nil {
+		LOG.Warn("TransformDBRef unmarshal bson %v from db[%v] failed. %v", doc.Data, db, err)
+		return doc
+	}
+
+	docD = TransformDBRefByDocD(docD, db, nsTrans)
+
+	if v, err := bson.Marshal(docD); err != nil {
+		LOG.Warn("TransformDBRef marshal bson %v from db[%v] failed. %v", docD, db, err)
+	} else {
+		doc.Data = v
+	}
+	return doc
+}
+
+func TransformDBRefByDocD(docD bson.D, db string, nsTrans *NamespaceTransform) bson.D {
+	if docD[0].Name == "$ref" {
 		// if has DBRef, [0] must be "$ref"
-		collection := logObject[0].Value.(string)
-		if len(logObject) > 2 && logObject[2].Name == "$db" {
-			db = logObject[2].Value.(string)
+		collection := docD[0].Value.(string)
+		if len(docD) > 2 && docD[2].Name == "$db" {
+			db = docD[2].Value.(string)
 		}
 
 		ns := fmt.Sprintf("%s.%s", db, collection)
 		transformNs := nsTrans.Transform(ns)
 		tuple := strings.SplitN(transformNs, ".", 2)
-		logObject[0].Value = tuple[1]
-		if len(logObject) > 2 {
-			logObject[2].Value = tuple[0]
+		docD[0].Value = tuple[1]
+		if len(docD) > 2 {
+			docD[2].Value = tuple[0]
 		} else {
-			logObject = append(logObject, bson.DocElem{"$db", tuple[0]})
+			docD = append(docD, bson.DocElem{"$db", tuple[0]})
 		}
-		return logObject
+		return docD
 	}
 
-	for _, ele := range logObject {
+	for _, ele := range docD {
 		switch v := ele.Value.(type) {
 		case bson.D:
-			ele.Value = TransformDBRef(v, db, nsTrans)
+			ele.Value = TransformDBRefByDocD(v, db, nsTrans)
 		default:
 			// do nothing
 		}
 	}
-	return logObject
+	return docD
 }

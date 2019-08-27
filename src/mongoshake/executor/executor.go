@@ -2,15 +2,15 @@ package executor
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
-	"strings"
 	"time"
 
 	"mongoshake/collector/configure"
+	"mongoshake/collector/transform"
 	"mongoshake/common"
 	"mongoshake/oplog"
-	"mongoshake/collector/transform"
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
@@ -260,7 +260,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		}
 		partialLog.Namespace = nsTrans.Transform(partialLog.Namespace)
 		if transformRef {
-			partialLog.Object = transform.TransformDBRef(partialLog.Object, db, nsTrans)
+			partialLog.Object = transform.TransformDBRefByDocD(partialLog.Object, db, nsTrans)
 		}
 	} else {
 		operation, found := oplog.ExtraCommandName(partialLog.Object)

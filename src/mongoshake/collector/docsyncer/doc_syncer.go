@@ -3,8 +3,6 @@ package docsyncer
 import (
 	"errors"
 	"fmt"
-	"mongoshake/oplog"
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,10 +21,6 @@ import (
 const (
 	MAX_BUFFER_BYTE_SIZE = 16 * 1024 * 1024
 )
-
-var ChunkRangeTypes = [][]string{
-	{"float64", "int64"},
-	{"string"}, {"bson.ObjectId"}, {"bool"}}
 
 func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
 	var toIsSharding bool
@@ -230,8 +224,8 @@ type DBSyncer struct {
 	startTime time.Time
 	// namespace transform
 	nsTrans *transform.NamespaceTransform
-	// filter duplicate record
-	chunkMap utils.DBChunkMap
+	// filter orphan duplicate record
+	orphanFilter *filter.OrphanFilter
 
 	mutex sync.Mutex
 
@@ -243,7 +237,7 @@ func NewDBSyncer(
 	fromMongoUrl string,
 	toMongoUrl string,
 	nsTrans *transform.NamespaceTransform,
-	chunkMap utils.DBChunkMap) *DBSyncer {
+	orphanFilter *filter.OrphanFilter) *DBSyncer {
 
 	syncer := &DBSyncer{
 		replset:      replset,
@@ -251,7 +245,7 @@ func NewDBSyncer(
 		ToMongoUrl:   toMongoUrl,
 		indexMap:     make(map[utils.NS][]mgo.Index),
 		nsTrans:      nsTrans,
-		chunkMap:     chunkMap,
+		orphanFilter: orphanFilter,
 	}
 
 	return syncer
@@ -347,8 +341,15 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
 			buffer = make([]*bson.Raw, 0, bufferSize)
 			bufferByteSize = 0
 		}
-		if syncer.filterDocData(doc, ns) {
+
+		// filter orphan document of chunk
+		if conf.Options.FilterOrphanDocument && syncer.orphanFilter.Filter(doc, ns.Str()) {
 			continue
+		}
+
+		// transform dbref
+		if len(conf.Options.TransformNamespace) > 0 && conf.Options.DBRef {
+			doc = transform.TransformDBRef(doc, ns.Database, syncer.nsTrans)
 		}
 
 		buffer = append(buffer, doc)
@@ -369,146 +370,4 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
 
 func (syncer *DBSyncer) GetIndexMap() map[utils.NS][]mgo.Index {
 	return syncer.indexMap
-}
-
-func (syncer *DBSyncer) filterDocData(doc *bson.Raw, ns utils.NS) bool {
-	// parse document data when transform dbref, when chunkMap != nil
-	hasTransform := len(conf.Options.TransformNamespace) > 0 && conf.Options.DBRef
-	shardCol, hasChunk := syncer.chunkMap[ns.Str()]
-
-	if !hasTransform && !hasChunk {
-		return false
-	}
-	var docD bson.D
-	if err := bson.Unmarshal(doc.Data, &docD); err != nil {
-		LOG.Warn("filterDocData unmarshal bson %v from ns %v failed. %v", doc.Data, ns, err)
-		return false
-	}
-	// get key _id
-	if id := oplog.GetKey(docD, ""); id == nil {
-		LOG.Warn("filterDocData meet unknown doc %v", docD)
-		return false
-	}
-
-	// filter orphan document of chunk
-	if hasChunk {
-		key := oplog.GetKey(docD, shardCol.Key)
-		if key == nil {
-			LOG.Warn("filterDocData find no key[%v] in doc %v", shardCol.Key, docD)
-			return false
-		}
-		if shardCol.ShardType == utils.HashedShard {
-			return false
-			
-			//var out bytes.Buffer
-			//var err error
-			//cmd := exec.Command("/usr/local/bin/mongo", "--nodb", "--quiet", "--eval",
-			//	fmt.Sprintf("convertShardKeyToHashed(%#v)", key))
-			//
-			//cmd.Stdout = &out
-			//if err = cmd.Run(); err != nil {
-			//	LOG.Warn("filterDocData get hash value of doc %v in ns %v failed. %v", docD, ns, err)
-			//	return false
-			//}
-			//outB := out.Bytes()
-			//outS := string(outB[12 : len(outB)-3])
-			//if key, err = strconv.ParseInt(outS, 10, 64); err != nil {
-			//	LOG.Warn("filterDocData get hash int64 from %v of doc %v in ns %v failed. %v",
-			//		outS, docD, ns, err)
-			//	return false
-			//}
-		}
-
-		for _, chunkRage := range shardCol.Chunks {
-			if chunkRage.Min != bson.MinKey {
-				if !chunkGte(reflect.ValueOf(key), reflect.ValueOf(chunkRage.Min)) {
-					continue
-				}
-			}
-			if chunkRage.Max != bson.MaxKey {
-				if !chunkLt(reflect.ValueOf(key), reflect.ValueOf(chunkRage.Max)) {
-					continue
-				}
-			}
-			return false
-		}
-		LOG.Warn("document syncer %v filter orphan document %v with shard key {%v: %v} in ns %v",
-			syncer.replset, docD, shardCol.Key, key, ns)
-		return true
-	}
-
-	// transform dbref
-	if hasTransform {
-		docD = transform.TransformDBRef(docD, ns.Database, syncer.nsTrans)
-		if v, err := bson.Marshal(docD); err != nil {
-			LOG.Warn("collectionSync do bson marshal %v from ns %v failed. %v", docD, ns, err)
-		} else {
-			doc.Data = v
-		}
-	}
-	return false
-}
-
-func chunkGte(x, y reflect.Value) bool {
-	if x.Type() != y.Type() {
-		xid, yid := -1, -1
-		for i, rangeTypes := range ChunkRangeTypes {
-			for _, te := range rangeTypes {
-				if x.Type().String() == te {
-					xid = i
-				}
-				if y.Type().String() == te {
-					yid = i
-				}
-			}
-		}
-		if xid == -1 || yid == -1 {
-			LOG.Crashf("chunkGte meet unknown type %v %v ", x.Type(), y.Type())
-		}
-		return xid > yid
-	}
-
-	switch x.Kind() {
-	case reflect.Float64:
-		return x.Float() >= y.Float()
-	case reflect.String:
-		return x.String() >= y.String()
-	case reflect.Int64:
-		return x.Int() >= y.Int()
-	default:
-		LOG.Crashf("chunkGte meet unknown type %v", x.Type())
-	}
-	return true
-}
-
-func chunkLt(x, y reflect.Value) bool {
-	if x.Type() != y.Type() {
-		xid, yid := -1, -1
-		for i, rangeTypes := range ChunkRangeTypes {
-			for _, te := range rangeTypes {
-				if x.Type().String() == te {
-					xid = i
-				}
-				if y.Type().String() == te {
-					yid = i
-				}
-			}
-		}
-		if xid == -1 || yid == -1 {
-			LOG.Crashf("chunkLt meet unknown type %v %v ", x.Type(), y.Type())
-		}
-		return xid < yid
-	}
-
-	switch x.Kind() {
-	case reflect.Float64:
-		return x.Float() < y.Float()
-	case reflect.String:
-		return x.String() < y.String()
-	case reflect.Int64:
-		return x.Int() < y.Int()
-	default:
-		LOG.Crashf("chunkLt meet unknown type %v", x.Type())
-	}
-	return true
 }

@@ -47,6 +47,7 @@ type Configuration struct {
 	ReplayerCollectionParallel int  `config:"replayer.collection_parallel"`
 	ReplayerDocumentParallel   int  `config:"replayer.document_parallel"`
 	ReplayerDocumentBatchSize  int  `config:"replayer.document_batch_size"`
+	FilterOrphanDocument       bool `config:"filter.orphan_document"`
 }
 
 func (configuration *Configuration) IsShardCluster() bool {
