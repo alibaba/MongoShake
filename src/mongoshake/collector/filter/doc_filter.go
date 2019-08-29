@@ -1,14 +1,10 @@
 package filter
 
 import (
-	conf "mongoshake/collector/configure"
-	utils "mongoshake/common"
+	"mongoshake/collector/configure"
 	"regexp"
 	"strings"
 )
-
-
-
 
 // DocFilter: AutologousFilter, NamespaceFilter
 type DocFilter interface {
@@ -26,30 +22,18 @@ func (chain DocFilterChain) IterateFilter(namespace string) bool {
 	return false
 }
 
-
 func (filter *AutologousFilter) FilterNs(namespace string) bool {
 	// for namespace. we filter noop operation and collection name
-	// that are admin, local, config, mongoshake, mongoshake_conflict
-	var nsShouldBeIgnore = [...]string{
-		"admin.",
-		"local.",
-		"config.",
-
-		// oplogs belong to this app. AppDatabase and
-		// APPConflictDatabase should be initialized already
-		// by const expression. so it is safe
-		utils.AppDatabase() + ".",
-		utils.APPConflictDatabase() + ".",
-	}
-
-	for _, ignorePrefix := range nsShouldBeIgnore {
-		if strings.HasPrefix(namespace, ignorePrefix) {
+	for key, val := range filter.nsShouldBeIgnore {
+		if val == true && strings.HasPrefix(namespace, key) {
+			return true
+		}
+		if val == false && strings.Contains(namespace, key) {
 			return true
 		}
 	}
 	return false
 }
-
 
 func (filter *NamespaceFilter) FilterNs(namespace string) bool {
 	// if whiteRule is db.col, then db.$cmd command will not be filtered

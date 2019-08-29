@@ -8,10 +8,11 @@ type Configuration struct {
 	CheckpointInterval       int64    `config:"checkpoint.interval"`
 	HTTPListenPort           int      `config:"http_profile"`
 	SystemProfile            int      `config:"system_profile"`
-	LogLevel                 string   `config:"log_level"`
-	LogFileName              string   `config:"log_file"`
-	LogBuffer                bool     `config:"log_buffer"`
-	OplogGIDS                string   `config:"oplog.gids"`
+	LogLevel                 string   `config:"log.level"`
+	LogDirectory             string   `config:"log.dir"`
+	LogFileName              string   `config:"log.file"`
+	LogBuffer                bool     `config:"log.buffer"`
+	OplogGIDS                []string `config:"oplog.gids"`
 	ShardKey                 string   `config:"shard_key"`
 	SyncerReaderBufferTime   uint     `config:"syncer.reader.buffer_time"`
 	WorkerNum                int      `config:"worker"`
@@ -29,6 +30,7 @@ type Configuration struct {
 	ContextStartPosition     int64    `config:"context.start_position" type:"date"`
 	FilterNamespaceBlack     []string `config:"filter.namespace.black"`
 	FilterNamespaceWhite     []string `config:"filter.namespace.white"`
+	FilterPassSpecialDb      []string `config:"filter.pass.special.db"`
 	SyncMode                 string   `config:"sync_mode"`
 	TransformNamespace       []string `config:"transform.namespace"`
 	DBRef                    bool     `config:"dbref"`
@@ -48,6 +50,16 @@ type Configuration struct {
 	ReplayerDocumentParallel   int  `config:"replayer.document_parallel"`
 	ReplayerDocumentBatchSize  int  `config:"replayer.document_batch_size"`
 	FilterOrphanDocument       bool `config:"filter.orphan_document"`
+
+	/*---------------------------------------------------------*/
+	// inner variables
+	LogLevelOld    string `config:"log_level"`  // compatible with older versions
+	LogFileNameOld string `config:"log_file"`   // compatible with older versions
+	LogBufferOld   bool   `config:"log_buffer"` // compatible with older versions
+
+	/*---------------------------------------------------------*/
+	// generated variables
+	Version string // version
 }
 
 func (configuration *Configuration) IsShardCluster() bool {

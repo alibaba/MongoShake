@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"reflect"
 
-	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 )
 
 // SentinelOptions. option's value type should be

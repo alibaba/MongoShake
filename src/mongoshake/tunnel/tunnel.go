@@ -8,8 +8,8 @@ import (
 
 	"mongoshake/oplog"
 
-	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 )
 
 const InitialStageChecking = false
@@ -41,11 +41,11 @@ type WMessage struct {
 	ParsedLogs []*oplog.PartialLog // parsed log
 }
 type TMessage struct {
-	Checksum   uint32
-	Tag        uint32
-	Shard      uint32
-	Compress   uint32
-	RawLogs    [][]byte
+	Checksum uint32
+	Tag      uint32
+	Shard    uint32
+	Compress uint32
+	RawLogs  [][]byte
 }
 
 func (msg *TMessage) Crc32() uint32 {

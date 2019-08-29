@@ -1,13 +1,13 @@
 package executor
 
 import (
-	"mongoshake/common"
 	"mongoshake/collector/configure"
+	"mongoshake/common"
 	"mongoshake/oplog"
 
+	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-	LOG "github.com/vinllen/log4go"
 )
 
 func HandleDuplicated(collection *mgo.Collection, records []*OplogRecord, op int8) {

@@ -164,8 +164,10 @@ func Mkdirs(dirs ...string) error {
 	return nil
 }
 
-func WritePidById(id string) bool {
-	dir, _ := os.Getwd()
+func WritePidById(dir, id string) bool {
+	if len(dir) == 0 {
+		dir, _ = os.Getwd()
+	}
 	pidfile := filepath.Join(dir, id) + ".pid"
 	if err := WritePid(pidfile); err != nil {
 		LOG.Critical("Process write pid and lock file failed : %v", err)
@@ -179,14 +181,14 @@ func Welcome() {
 		`______________________________
 \                             \           _         ______ |
  \                             \        /   \___-=O'/|O'/__|
-  \       Here we go !!!        \_______\          / | /    )
+  \ MongoShake, Here we go !!!  \_______\          / | /    )
   /                             /        '/-==__ _/__|/__=-|  -GM
  /                             /         *             \ | |
 /                             /                        (o)
 ------------------------------
 `
-
-	LOG.Warn(fmt.Sprintf("\n%s", welcome))
+	startMsg := "if you have any problem, please visit https://github.com/alibaba/MongoShake/wiki/FAQ"
+	LOG.Warn(fmt.Sprintf("\n%s\n%s\n", welcome, startMsg))
 }
 
 func Goodbye() {

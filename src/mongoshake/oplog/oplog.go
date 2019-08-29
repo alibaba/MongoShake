@@ -1,9 +1,9 @@
 package oplog
 
 import (
+	"github.com/gugemichael/nimo4go"
 	"github.com/vinllen/mgo/bson"
 	"reflect"
-	"github.com/gugemichael/nimo4go"
 )
 
 const (
@@ -128,7 +128,7 @@ func RemoveFiled(input bson.D, key string) bson.D {
 	}
 
 	if flag != -1 {
-		input = append(input[: flag], input[flag + 1:]...)
+		input = append(input[:flag], input[flag+1:]...)
 	}
 	return input
 }

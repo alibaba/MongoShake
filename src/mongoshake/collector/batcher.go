@@ -136,7 +136,6 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, bool) 
 	allEmpty := true
 	flushCheckpoint := false
 	for i, genericLog := range mergeBatch {
-
 		// filter oplog such like Autologous or Gid-filtered
 		if batcher.filter(genericLog.Parsed) {
 			// doesn't push to worker, set lastFilterOplog

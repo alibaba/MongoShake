@@ -2,12 +2,14 @@ package filter
 
 import (
 	"fmt"
+	utils "mongoshake/common"
 	"strings"
 
+	conf "mongoshake/collector/configure"
 	"mongoshake/oplog"
 
-	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/mgo/bson"
 )
 
 // OplogFilter: AutologousFilter, NamespaceFilter, GidFilter, NoopFilter, DDLFilter
@@ -27,21 +29,67 @@ func (chain OplogFilterChain) IterateFilter(log *oplog.PartialLog) bool {
 }
 
 type GidFilter struct {
-	Gid string
+	gidMp map[string]struct{}
+}
+
+func NewGidFilter(gids []string) *GidFilter {
+	mp := make(map[string]struct{}, len(gids))
+	for _, gid := range gids {
+		mp[gid] = struct{}{}
+	}
+	return &GidFilter{
+		gidMp: mp,
+	}
 }
 
 func (filter *GidFilter) Filter(log *oplog.PartialLog) bool {
 	// filter OplogGlobalId from others
-	return len(filter.Gid) != 0 && log.Gid != filter.Gid
+	if len(filter.gidMp) == 0 {
+		// all pass if gid map is empty
+		return false
+	}
+	if _, ok := filter.gidMp[log.Gid]; ok {
+		// should match if gid map isn't empty
+		return false
+	}
+	return true
 }
 
 type AutologousFilter struct {
+	nsShouldBeIgnore map[string]bool
 }
 
 func (filter *AutologousFilter) Filter(log *oplog.PartialLog) bool {
 	// for namespace. we filter noop operation and collection name
 	// that are admin, local, mongoshake, mongoshake_conflict
 	return filter.FilterNs(log.Namespace)
+}
+
+func NewAutologousFilter() *AutologousFilter {
+	// key: ns, value: true means prefix, false means contain
+	var nsShouldBeIgnore = map[string]bool{
+		"admin.":                          true,
+		"local.":                          true,
+		"config.":                         true,
+		utils.AppDatabase() + ".":         true,
+		utils.APPConflictDatabase() + ".": true,
+		"system.views":                    false,
+	}
+
+	if len(conf.Options.FilterPassSpecialDb) != 0 {
+		// init ns
+		for _, ns := range conf.Options.FilterPassSpecialDb {
+			if _, ok := nsShouldBeIgnore[ns]; ok {
+				delete(nsShouldBeIgnore, ns)
+			}
+			newNs := fmt.Sprintf("%s.", ns)
+			if _, ok := nsShouldBeIgnore[newNs]; ok {
+				delete(nsShouldBeIgnore, newNs)
+			}
+		}
+	}
+
+	return &AutologousFilter{nsShouldBeIgnore: nsShouldBeIgnore}
 }
 
 type NoopFilter struct {

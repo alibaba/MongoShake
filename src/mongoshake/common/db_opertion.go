@@ -31,7 +31,7 @@ const (
 type MongoSource struct {
 	URL     string
 	Replset string
-	Gid     string
+	Gids        []string
 }
 
 // get db version, return string with format like "3.0.1"
@@ -257,33 +257,41 @@ type TimestampNode struct {
  *     error: error
  */
 func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.MongoTimestamp,
-	bson.MongoTimestamp, error) {
-	smallest := bson.MongoTimestamp(math.MaxInt64)
-	biggest := bson.MongoTimestamp(0)
+	bson.MongoTimestamp, bson.MongoTimestamp, bson.MongoTimestamp, error) {
+	smallestNew := bson.MongoTimestamp(math.MaxInt64)
+	biggestNew := bson.MongoTimestamp(0)
+	smallestOld := bson.MongoTimestamp(math.MaxInt64)
+	biggestOld := bson.MongoTimestamp(0)
 	tsMap := make(map[string]TimestampNode)
 	for _, src := range sources {
 		newest, err := GetNewestTimestampByUrl(src.URL)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, 0, 0, err
 		}
 
 		oldest, err := GetOldestTimestampByUrl(src.URL)
 		if err != nil {
-			return nil, 0, 0, err
+			return nil, 0, 0, 0, 0, err
 		}
 		tsMap[src.Replset] = TimestampNode{
 			Oldest: oldest,
 			Newest: newest,
 		}
 
-		if newest > biggest {
-			biggest = newest
+		if newest > biggestNew {
+			biggestNew = newest
 		}
-		if newest < smallest {
-			smallest = newest
+		if newest < smallestNew {
+			smallestNew = newest
+		}
+		if oldest > biggestOld {
+			biggestOld = oldest
+		}
+		if oldest < smallestOld {
+			smallestOld = oldest
 		}
 	}
-	return tsMap, biggest, smallest, nil
+	return tsMap, biggestNew, smallestNew, biggestOld, smallestOld, nil
 }
 
 // adjust dbRef order: $ref, $id, $db, others

@@ -28,13 +28,13 @@ func mockSyncer() *OplogSyncer {
 func mockOplogs(length int, ddlGiven []int) []*oplog.GenericOplog {
 	output := make([]*oplog.GenericOplog, length)
 	j := 0
-	for i := 0; i < length; i ++ {
+	for i := 0; i < length; i++ {
 		op := "u"
 		if j < len(ddlGiven) && ddlGiven[j] == i {
 			op = "c"
 			j++
 		}
-		output[i] = &oplog.GenericOplog {
+		output[i] = &oplog.GenericOplog{
 			Parsed: &oplog.PartialLog{
 				Namespace: "a.b",
 				Operation: op,
@@ -55,7 +55,7 @@ func TestBatchMore(t *testing.T) {
 		nr++
 
 		syncer := mockSyncer()
-		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		filterList := filter.OplogFilterChain{filter.NewAutologousFilter(), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 100
@@ -76,7 +76,7 @@ func TestBatchMore(t *testing.T) {
 		nr++
 
 		syncer := mockSyncer()
-		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		filterList := filter.OplogFilterChain{filter.NewAutologousFilter(), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 10
@@ -100,7 +100,7 @@ func TestBatchMore(t *testing.T) {
 		nr++
 
 		syncer := mockSyncer()
-		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		filterList := filter.OplogFilterChain{filter.NewAutologousFilter(), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 100
@@ -129,7 +129,7 @@ func TestBatchMore(t *testing.T) {
 		nr++
 
 		syncer := mockSyncer()
-		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		filterList := filter.OplogFilterChain{filter.NewAutologousFilter(), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 100
@@ -182,7 +182,7 @@ func TestBatchMore(t *testing.T) {
 		nr++
 
 		syncer := mockSyncer()
-		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		filterList := filter.OplogFilterChain{filter.NewAutologousFilter(), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 100
@@ -228,7 +228,7 @@ func TestBatchMore(t *testing.T) {
 		nr++
 
 		syncer := mockSyncer()
-		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		filterList := filter.OplogFilterChain{filter.NewAutologousFilter(), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 100
@@ -290,7 +290,7 @@ func TestBatchMore(t *testing.T) {
 		nr++
 
 		syncer := mockSyncer()
-		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		filterList := filter.OplogFilterChain{filter.NewAutologousFilter(), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 8
@@ -332,7 +332,6 @@ func TestBatchMore(t *testing.T) {
 	}
 }
 
-
 func mockNamespaceFilter(nsWhite []string, nsBlack []string) *filter.NamespaceFilter {
 	if len(nsWhite) != 0 || len(nsBlack) != 0 {
 		return filter.NewNamespaceFilter(nsWhite, nsBlack)
@@ -343,12 +342,12 @@ func mockNamespaceFilter(nsWhite []string, nsBlack []string) *filter.NamespaceFi
 func mockFilterPartialLog(op, ns string, logObject bson.D) *oplog.PartialLog {
 	// log.Timestamp > fullSyncFinishPosition
 	return &oplog.PartialLog{
-				Timestamp: bson.MongoTimestamp(1),
-				Namespace: ns,
-				Operation: op,
-				RawSize:   1,
-				Object:    logObject,
-			}
+		Timestamp: bson.MongoTimestamp(1),
+		Namespace: ns,
+		Operation: op,
+		RawSize:   1,
+		Object:    logObject,
+	}
 }
 
 func TestFilterPartialLog(t *testing.T) {

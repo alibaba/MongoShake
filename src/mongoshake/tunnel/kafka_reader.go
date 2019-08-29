@@ -10,8 +10,8 @@ import (
 )
 
 type KafkaReader struct {
-	address string
-	reader *kafka.Reader
+	address  string
+	reader   *kafka.Reader
 	replayer []Replayer
 }
 

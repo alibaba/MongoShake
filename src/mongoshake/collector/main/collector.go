@@ -55,7 +55,13 @@ func main() {
 		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
 	}
 
-	utils.InitialLogger(conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogBuffer, *verbose)
+	if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogBuffer, *verbose); err != nil {
+		crash(fmt.Sprintf("initial log.dir[%v] log.name[%v] failed[%v].", conf.Options.LogDirectory,
+			conf.Options.LogFileName, err), -2)
+	}
+
+	conf.Options.Version = utils.BRANCH
+
 	nimo.Profiling(int(conf.Options.SystemProfile))
 	nimo.RegisterSignalForProfiling(syscall.SIGUSR2)
 	nimo.RegisterSignalForPrintStack(syscall.SIGUSR1, func(bytes []byte) {
@@ -64,7 +70,7 @@ func main() {
 	utils.Welcome()
 
 	// get exclusive process lock and write pid
-	if utils.WritePidById(conf.Options.CollectorId) {
+	if utils.WritePidById(conf.Options.LogDirectory, conf.Options.CollectorId) {
 		startup()
 	}
 }
@@ -87,7 +93,7 @@ func startup() {
 		coordinator.Sources[i] = new(utils.MongoSource)
 		coordinator.Sources[i].URL = src
 		if len(conf.Options.OplogGIDS) != 0 {
-			coordinator.Sources[i].Gid = conf.Options.OplogGIDS
+			coordinator.Sources[i].Gids = conf.Options.OplogGIDS
 		}
 	}
 
@@ -97,8 +103,11 @@ func startup() {
 		crash(fmt.Sprintf("Oplog Tailer initialize failed: %v", err), -6)
 	}
 
-	if err := utils.HttpApi.Listen(); err != nil {
-		LOG.Critical("Coordinator http api listen failed. %v", err)
+	// if the sync mode is "document", mongoshake should exit here.
+	if conf.Options.SyncMode != collector.SYNCMODE_DOCUMENT {
+		if err := utils.HttpApi.Listen(); err != nil {
+			LOG.Critical("Coordinator http api listen failed. %v", err)
+		}
 	}
 }
 
@@ -117,6 +126,20 @@ func selectLeader() {
 }
 
 func sanitizeOptions() error {
+	// compatible with old version
+	if len(conf.Options.LogFileNameOld) != 0 {
+		conf.Options.LogFileName = conf.Options.LogFileNameOld
+	}
+	if len(conf.Options.LogLevelOld) != 0 {
+		conf.Options.LogLevel = conf.Options.LogLevelOld
+	}
+	if conf.Options.LogBufferOld == true {
+		conf.Options.LogBuffer = conf.Options.LogBufferOld
+	}
+	if len(conf.Options.LogFileName) == 0 {
+		return fmt.Errorf("log.name[%v] shouldn't be empty", conf.Options.LogFileName)
+	}
+
 	if len(conf.Options.MongoUrls) == 0 {
 		return errors.New("mongo_urls were empty")
 	}
@@ -129,7 +152,9 @@ func sanitizeOptions() error {
 	}
 	if len(conf.Options.MongoUrls) > 1 {
 		if conf.Options.WorkerNum != len(conf.Options.MongoUrls) {
-			return errors.New("replication worker should be equal to count of mongo_urls while multi sources (shard)")
+			//LOG.Warn("replication worker should be equal to count of mongo_urls while multi sources (shard), set worker = %v",
+			//	len(conf.Options.MongoUrls))
+			conf.Options.WorkerNum = len(conf.Options.MongoUrls)
 		}
 		if conf.Options.MongoCsUrl == "" {
 			return errors.New("config server url should be configured while using mongo shard servers")
@@ -184,6 +209,7 @@ func sanitizeOptions() error {
 		len(conf.Options.FilterNamespaceWhite) != 0 {
 		return errors.New("at most one of black lists and white lists option can be given")
 	}
+
 	conf.Options.HTTPListenPort = utils.MayBeRandom(conf.Options.HTTPListenPort)
 	conf.Options.SystemProfile = utils.MayBeRandom(conf.Options.SystemProfile)
 

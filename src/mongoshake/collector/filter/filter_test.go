@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
+	conf "mongoshake/collector/configure"
 	utils "mongoshake/common"
 	"mongoshake/oplog"
 	"testing"
@@ -84,5 +85,137 @@ func TestOrphanFilter(t *testing.T) {
 		assert.Equal(t, false, filter.Filter(&doc, "col"), "should be equal")
 		doc.Data, _ = bson.Marshal(bson.D{{"b", bson.ObjectIdHex("5d5ceef31a3088623ce706ad")}, {"c", "c"}})
 		assert.Equal(t, true, filter.Filter(&doc, "col"), "should be equal")
+	}
+}
+
+func TestGidFilter(t *testing.T) {
+	// test GidFilter
+
+	var nr int
+	{
+		fmt.Printf("TestGidFilter case %d.\n", nr)
+		nr++
+
+		filter := NewGidFilter([]string{})
+		log := &oplog.PartialLog{
+			Gid: "1",
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestGidFilter case %d.\n", nr)
+		nr++
+
+		filter := NewGidFilter([]string{"5", "6", "7"})
+		log := &oplog.PartialLog{
+			Gid: "1",
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Gid: "5",
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Gid: "8",
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+	}
+}
+
+func TestAutologousFilter(t *testing.T) {
+	// test AutologousFilter
+
+	var nr int
+	{
+		fmt.Printf("TestAutologousFilter case %d.\n", nr)
+		nr++
+
+		conf.Options.FilterPassSpecialDb = []string{}
+		conf.Options.ContextStorageDB = "mongoshake"
+
+		filter := NewAutologousFilter()
+		log := &oplog.PartialLog{
+			Namespace: "a.b",
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "mongoshake.x",
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "local.x.z.y",
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "a.system.views",
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "a.system.view",
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "admin.x",
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestAutologousFilter case %d.\n", nr)
+		nr++
+
+		conf.Options.FilterPassSpecialDb = []string{"admin", "system.views"}
+		conf.Options.ContextStorageDB = "mongoshake"
+
+		filter := NewAutologousFilter()
+		log := &oplog.PartialLog{
+			Namespace: "a.b",
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "mongoshake.x",
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "local.x.z.y",
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "a.system.views",
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "a.system.view",
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			Namespace: "admin.x",
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
 	}
 }

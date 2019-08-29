@@ -1,7 +1,7 @@
 // this is an receiver example connect to different tunnels
 package main
 
-import(
+import (
 	"flag"
 	"fmt"
 	"os"
@@ -10,14 +10,14 @@ import(
 	"mongoshake/receiver/configure"
 	"mongoshake/tunnel"
 
-	LOG "github.com/vinllen/log4go"
-	"github.com/gugemichael/nimo4go"
 	"errors"
-	"syscall"
+	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 	"mongoshake/receiver"
+	"syscall"
 )
 
-type Exit struct {Code int}
+type Exit struct{ Code int }
 
 func main() {
 	var err error
@@ -50,7 +50,10 @@ func main() {
 		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
 	}
 
-	utils.InitialLogger(conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogBuffer, *verbose)
+	if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogBuffer, *verbose); err != nil {
+		crash(fmt.Sprintf("initial log.dir[%v] log.name[%v] failed[%v].", conf.Options.LogDirectory,
+			conf.Options.LogFileName, err), -2)
+	}
 	nimo.Profiling(int(conf.Options.SystemProfile))
 	nimo.RegisterSignalForProfiling(syscall.SIGUSR2)
 	nimo.RegisterSignalForPrintStack(syscall.SIGUSR1, func(bytes []byte) {
@@ -59,7 +62,7 @@ func main() {
 
 	startup()
 
-	select{}
+	select {}
 }
 
 func sanitizeOptions() error {

@@ -1,4 +1,34 @@
-2019-07-11 Alibaba Cloud.
+2019-08-17 Alibaba Cloud.
+	* version: 2.0.7
+	* BUGFIX: exit when the oldest ts bigger than full-sync-begin
+	timestamp so that data may lost between full sync and increase sync.
+	see #218.
+	* BUGFIX: bugfix: set white namespace filter for sharding replication
+	cause db filtered. see #222.
+	* IMPROVE: add switch in configuration to support syncing some special
+	database like 'admin', 'local', default is disbale. see #223.
+	* IMPROVE: set `adaptive.batching_max_size = 1024` by default to reduce
+	memory usage. see
+	https://github.com/alibaba/MongoShake/wiki/FAQ#q-mongoshake-crashed-because-of-oomout-of-memory-how-can-i-estimate-memory-usage
+
+2019-08-08 Alibaba Cloud.
+	* version: 2.0.6
+	* IMPROVE: filter views in syncing, see #206.
+	* IMPROVE: when the synchronization mode is full synchronization,
+	support for the case where oplog does not exist. see #215.
+	* IMPROVE: let mongoshake exits when finish full syncing. see #210.
+	* IMPROVE: add `log.dir` to write log and pid file in absolute path.
+	see #211.
+
+2019-07-29 Alibaba Cloud.
+	* version: 2.0.5
+	* IMPROVE: comparison.py support sharding comparison. see #197.
+	* BUGFIX: comparison.py fix bug of negative count. see #199.
+	* IMPROVE: set worker number to shards number. see #198.
+	* IMPROVE: support sharding active-active architecture. This is	only
+	used in Alibaba-Cloud.
+
+2019-07-15 Alibaba Cloud.
 	* version: 2.0.4
 	* BUG FIX: fix bug of batched oplog size exceeding 16MB, This bug was
 	not completely resolved in version v1.4.6. see #122 and #187.

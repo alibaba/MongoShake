@@ -63,7 +63,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	 * TODO
 	 */
 	LOG.Info("start running with mode[%v], fullBeginTs[%v]", syncMode, fullBeginTs)
-
+	
 	switch syncMode {
 	case SYNCMODE_ALL:
 		if err := coordinator.startDocumentReplication(); err != nil {
@@ -71,10 +71,22 @@ func (coordinator *ReplicationCoordinator) Run() error {
 		}
 
 		// get current newest timestamp
-		_, fullFinishTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
+		_, fullFinishTs, _, oldestTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
 		if err != nil {
 			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
 		}
+		LOG.Info("------------------------full sync done!------------------------")
+
+		LOG.Info("oldestTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractMongoTimestamp(oldestTs),
+			utils.ExtractMongoTimestamp(fullBeginTs), utils.ExtractMongoTimestamp(fullFinishTs))
+		// the oldest oplog is lost
+		if utils.ExtractMongoTimestamp(oldestTs) >= fullBeginTs {
+			err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's " +
+				"oplog collection size is too small or full sync continues too long", fullBeginTs, oldestTs)
+			LOG.Error(err)
+			return err
+		}
+
 		LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
 			utils.ExtractMongoTimestamp(fullBeginTs), utils.ExtractMongoTimestamp(fullFinishTs))
 
@@ -82,12 +94,13 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			return err
 		}
 	case SYNCMODE_DOCUMENT:
+
 		if err := coordinator.startDocumentReplication(); err != nil {
 			return err
 		}
 	case SYNCMODE_OPLOG:
 		if err := coordinator.startOplogReplication(conf.Options.ContextStartPosition,
-			conf.Options.ContextStartPosition); err != nil {
+				conf.Options.ContextStartPosition); err != nil {
 			return err
 		}
 	default:
@@ -127,8 +140,9 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 			LOG.Critical("Connect mongo server error. %v, url : %s", err, src.URL)
 			return err
 		}
+
 		// a conventional ReplicaSet should have local.oplog.rs collection
-		if !conn.HasOplogNs() {
+		if conf.Options.SyncMode != SYNCMODE_DOCUMENT && !conn.HasOplogNs() {
 			LOG.Critical("There has no oplog collection in mongo db server")
 			conn.Close()
 			return errors.New("no oplog ns in mongo")
@@ -179,7 +193,7 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	}
 
 	// oldestTs is the smallest of the all newest timestamp
-	tsMap, _, oldestTs, err := utils.GetAllTimestamp(coordinator.Sources)
+	tsMap, _, oldestTs, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
 	if err != nil {
 		return syncMode, 0, nil
 	}
@@ -225,10 +239,14 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	if err != nil {
 		return err
 	}
-	// get all newest timestamp for each mongodb
-	ckptMap, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
-	if err != nil {
-		return err
+
+	var ckptMap map[string]utils.TimestampNode
+	// get all newest timestamp for each mongodb if sync mode isn't "document"
+	if conf.Options.SyncMode != SYNCMODE_DOCUMENT {
+		ckptMap, _, _, _, _, err = utils.GetAllTimestamp(coordinator.Sources)
+		if err != nil {
+			return err
+		}
 	}
 
 	toUrl := conf.Options.TunnelAddress[0]
@@ -290,15 +308,17 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 
 	// checkpoint after document syncer
-	ckptManager := NewCheckpointManager(0)
-	for replset, ts := range ckptMap {
-		ckptManager.UpdateAckTs(replset, ts.Newest)
+	if conf.Options.SyncMode != SYNCMODE_DOCUMENT {
+		LOG.Info("try to set checkpoint with map[%v]", ckptMap)
+		ckptManager := NewCheckpointManager(0)
+		for replset, ts := range ckptMap {
+			ckptManager.UpdateAckTs(replset, ts.Newest)
+		}
+		if err := ckptManager.Flush(); err != nil {
+			LOG.Error("document syncer flush checkpoint failed. %v", err)
+			return err
+		}
 	}
-	if err := ckptManager.Flush(); err != nil {
-		LOG.Error("document syncer flush checkpoint failed. %v", err)
-		return err
-	}
-
 	LOG.Info("document syncer sync end")
 	return nil
 }
@@ -314,7 +334,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	// otherwise one syncer connects to one shard
 	for _, src := range coordinator.Sources {
 		syncer := NewOplogSyncer(coordinator, src.Replset, fullSyncFinishPosition,
-			src.URL, src.Gid, ckptManager, mvckManager)
+			src.URL, src.Gids, ckptManager, mvckManager)
 		// syncerGroup http api registry
 		syncer.init()
 		ckptManager.addOplogSyncer(syncer)
