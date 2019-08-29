@@ -94,7 +94,7 @@ func NewAutologousFilter() *AutologousFilter {
 
 type NoopFilter struct {
 }
-DocFilterChain
+
 func (filter *NoopFilter) Filter(log *oplog.PartialLog) bool {
 	return log.Operation == "n"
 }
