@@ -305,7 +305,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
-	bulk.Unordered()
+	// bulk.Unordered()
 	if upsert {
 		bulk.Upsert(update...)
 	} else {
@@ -336,7 +336,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
-	bulk.Unordered()
+	// bulk.Unordered()
 	if upsert {
 		bulk.Upsert(update...)
 	} else {

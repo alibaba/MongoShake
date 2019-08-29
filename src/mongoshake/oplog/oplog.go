@@ -1,9 +1,10 @@
 package oplog
 
 import (
+	"reflect"
+
 	"github.com/gugemichael/nimo4go"
 	"github.com/vinllen/mgo/bson"
-	"reflect"
 )
 
 const (
