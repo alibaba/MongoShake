@@ -63,7 +63,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	 * TODO
 	 */
 	LOG.Info("start running with mode[%v], fullBeginTs[%v]", syncMode, fullBeginTs)
-	
+
 	switch syncMode {
 	case SYNCMODE_ALL:
 		if err := coordinator.startDocumentReplication(); err != nil {
@@ -81,7 +81,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			utils.ExtractMongoTimestamp(fullBeginTs), utils.ExtractMongoTimestamp(fullFinishTs))
 		// the oldest oplog is lost
 		if utils.ExtractMongoTimestamp(oldestTs) >= fullBeginTs {
-			err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's " +
+			err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's "+
 				"oplog collection size is too small or full sync continues too long", fullBeginTs, oldestTs)
 			LOG.Error(err)
 			return err
@@ -100,7 +100,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 		}
 	case SYNCMODE_OPLOG:
 		if err := coordinator.startOplogReplication(conf.Options.ContextStartPosition,
-				conf.Options.ContextStartPosition); err != nil {
+			conf.Options.ContextStartPosition); err != nil {
 			return err
 		}
 	default:

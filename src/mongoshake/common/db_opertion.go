@@ -18,10 +18,10 @@ const (
 	LocalDB  = "local"
 	ConfigDB = "config"
 
-	QueryTs     = "ts"
-	SettingsCol = "settings"
-	ShardCol    = "shards"
-	ChunkCol    = "chunks"
+	QueryTs       = "ts"
+	SettingsCol   = "settings"
+	ShardCol      = "shards"
+	ChunkCol      = "chunks"
 	CollectionCol = "collections"
 
 	HashedShard = "hashed"
@@ -31,7 +31,7 @@ const (
 type MongoSource struct {
 	URL     string
 	Replset string
-	Gids        []string
+	Gids    []string
 }
 
 // get db version, return string with format like "3.0.1"
@@ -104,8 +104,8 @@ type ChunkRange struct {
 }
 
 type ShardCollection struct {
-	Chunks []*ChunkRange
-	Key string
+	Chunks    []*ChunkRange
+	Key       string
 	ShardType string
 }
 
@@ -149,7 +149,7 @@ func GetChunkMapByUrl(url string) (ShardingChunkMap, error) {
 		if _, ok := chunkMap[replset][chunkDoc.Ns]; !ok {
 			key, shardType, err := GetColShardType(conn.Session, chunkDoc.Ns)
 			if err != nil {
-				return nil ,err
+				return nil, err
 			}
 			chunkMap[replset][chunkDoc.Ns] = &ShardCollection{Key: key, ShardType: shardType}
 		}
@@ -172,7 +172,7 @@ func GetColShardType(session *mgo.Session, namespace string) (string, string, er
 	if err := session.DB(ConfigDB).C(CollectionCol).Find(bson.M{"_id": namespace}).One(&colDoc); err != nil {
 		return "", "", err
 	}
-	for key, shardType := range colDoc["key"].(map[string]interface {}) {
+	for key, shardType := range colDoc["key"].(map[string]interface{}) {
 		switch shardType.(type) {
 		case string:
 			return key, HashedShard, nil
