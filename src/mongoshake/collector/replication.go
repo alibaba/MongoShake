@@ -94,7 +94,6 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			return err
 		}
 	case SYNCMODE_DOCUMENT:
-
 		if err := coordinator.startDocumentReplication(); err != nil {
 			return err
 		}

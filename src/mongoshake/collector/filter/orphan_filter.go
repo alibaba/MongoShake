@@ -10,15 +10,14 @@ import (
 )
 
 const (
-	BsonInvalid    = 0
+	// refer to mongo/bson/bsontypes.h of mongodb kernel 4.0
+	BsonInvalid    = -1
+	BsonMinKey     = 0
 	BsonTypeNumber = 10
 	BsonTypeString = 15
 	BsonTypeOid    = 35
+	BsonMaxKey     = 100
 )
-
-var ChunkRangeTypes = [][]string{
-	{"float64", "int64", "int"},
-	{"string"}, {"bson.ObjectId"}, {"bool"}}
 
 type OrphanFilter struct {
 	replset  string
@@ -42,37 +41,67 @@ func (filter *OrphanFilter) Filter(doc *bson.Raw, namespace string) bool {
 		LOG.Warn("OrphanFilter unmarshal bson %v from ns[%v] failed. %v", doc.Data, namespace, err)
 		return false
 	}
-	key := oplog.GetKey(docD, shardCol.Key)
-	if key == nil {
-		LOG.Warn("OrphanFilter find no key[%v] in doc %v", shardCol.Key, docD)
-		return false
-	}
-	if shardCol.ShardType == utils.HashedShard {
-		var err error
-		if key, err = ComputeHash(key); err != nil {
-			return false
-		}
-	}
-
+NextChunk:
 	for _, chunkRage := range shardCol.Chunks {
-		if chunkRage.Min != bson.MinKey {
-			if !chunkGte(key, chunkRage.Min) {
-				continue
+		LOG.Info("1 %v ", docD)
+		// check greater and equal than the minimum of the chunk range
+		for keyInd, keyName := range shardCol.Keys {
+			key := oplog.GetKey(docD, keyName)
+			if key == nil {
+				LOG.Warn("OrphanFilter find no key[%v] in doc %v", keyName, docD)
+				return false
 			}
-		}
-		if chunkRage.Max != bson.MaxKey {
-			if !chunkLt(key, chunkRage.Max) {
-				continue
+			LOG.Info("2 %v %v min %v", keyName, key, chunkRage.Mins[keyInd])
+			if shardCol.ShardType == utils.HashedShard {
+				var err error
+				if key, err = ComputeHash(key); err != nil {
+					return false
+				}
 			}
+			if chunkLt(key, chunkRage.Mins[keyInd]) {
+				continue NextChunk
+			}
+			if chunkGt(key, chunkRage.Mins[keyInd]) {
+				break
+			}
+			LOG.Info("3 %v %v min %v", keyName, key, chunkRage.Mins[keyInd])
 		}
+		LOG.Info("4 %v", docD)
+		// check less than the maximum of the chunk range
+		for keyInd, keyName := range shardCol.Keys {
+			key := oplog.GetKey(docD, keyName)
+			if key == nil {
+				LOG.Warn("OrphanFilter find no key[%v] in doc %v", keyName, docD)
+				return false
+			}
+			if shardCol.ShardType == utils.HashedShard {
+				var err error
+				if key, err = ComputeHash(key); err != nil {
+					return false
+				}
+			}
+			LOG.Info("5 %v %v max %v", keyName, key, chunkRage.Maxs[keyInd])
+			if chunkGt(key, chunkRage.Maxs[keyInd]) {
+				continue NextChunk
+			}
+			if chunkLt(key, chunkRage.Maxs[keyInd]) {
+				break
+			}
+			if keyInd == len(shardCol.Keys)-1 {
+				continue NextChunk
+			}
+			LOG.Info("6 %v %v max %v", keyName, key, chunkRage.Maxs[keyInd])
+		}
+		// current key in the chunk, therefore dont filter
 		return false
 	}
-	LOG.Warn("document syncer %v filter orphan document %v with shard key {%v: %v} in ns[%v]",
-		filter.replset, docD, shardCol.Key, key, namespace)
+	LOG.Warn("document syncer %v filter orphan document %v with shard key %v in ns[%v]",
+		filter.replset, docD, shardCol.Keys, namespace)
 	return true
 }
 
 func ComputeHash(data interface{}) (int64, error) {
+	// refer to mongo/db/hasher.cpp of mongodb kernel 4.0
 	w := md5.New()
 	var buf = make([]byte, 4)
 	binary.LittleEndian.PutUint32(buf, uint32(0))
@@ -136,7 +165,7 @@ func fromHex(c byte) byte {
 	return 0xff
 }
 
-func chunkGte(x, y interface{}) bool {
+func chunkGt(x, y interface{}) bool {
 	xType, rx := getBsonType(x)
 	yType, ry := getBsonType(y)
 
@@ -145,12 +174,39 @@ func chunkGte(x, y interface{}) bool {
 	}
 
 	switch xType {
+	case BsonMinKey:
+		return false
+	case BsonMaxKey:
+		return false
 	case BsonTypeNumber:
-		return rx.(float64) >= ry.(float64)
+		return rx.(float64) > ry.(float64)
 	case BsonTypeString:
-		return rx.(string) >= ry.(string)
+		return rx.(string) > ry.(string)
 	default:
-		LOG.Crashf("chunkLt meet unknown type %v", xType)
+		LOG.Crashf("chunkGt meet unknown type %v", xType)
+	}
+	return true
+}
+
+func chunkEqual(x, y interface{}) bool {
+	xType, rx := getBsonType(x)
+	yType, ry := getBsonType(y)
+
+	if xType != yType {
+		return false
+	}
+
+	switch xType {
+	case BsonMinKey:
+		return true
+	case BsonMaxKey:
+		return true
+	case BsonTypeNumber:
+		return rx.(float64) == ry.(float64)
+	case BsonTypeString:
+		return rx.(string) == ry.(string)
+	default:
+		LOG.Crashf("chunkEqual meet unknown type %v", xType)
 	}
 	return true
 }
@@ -164,6 +220,10 @@ func chunkLt(x, y interface{}) bool {
 	}
 
 	switch xType {
+	case BsonMinKey:
+		return false
+	case BsonMaxKey:
+		return false
 	case BsonTypeNumber:
 		return rx.(float64) < ry.(float64)
 	case BsonTypeString:
@@ -175,6 +235,12 @@ func chunkLt(x, y interface{}) bool {
 }
 
 func getBsonType(x interface{}) (int, interface{}) {
+	if x == bson.MinKey {
+		return BsonMinKey, nil
+	}
+	if x == bson.MaxKey {
+		return BsonMaxKey, nil
+	}
 	switch rx := x.(type) {
 	case float32:
 		return BsonTypeNumber, float64(rx)

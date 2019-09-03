@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"math"
+	"mongoshake/oplog"
 	"strconv"
 	"strings"
 
@@ -99,13 +100,13 @@ func GetBalancerStatusByUrl(url string) (bool, error) {
 }
 
 type ChunkRange struct {
-	Min interface{}
-	Max interface{}
+	Mins []interface{}
+	Maxs []interface{}
 }
 
 type ShardCollection struct {
 	Chunks    []*ChunkRange
-	Key       string
+	Keys      []string
 	ShardType string
 }
 
@@ -147,41 +148,66 @@ func GetChunkMapByUrl(url string) (ShardingChunkMap, error) {
 	for chunkIter.Next(&chunkDoc) {
 		replset := shardMap[chunkDoc.Shard]
 		if _, ok := chunkMap[replset][chunkDoc.Ns]; !ok {
-			key, shardType, err := GetColShardType(conn.Session, chunkDoc.Ns)
+			keys, shardType, err := GetColShardType(conn.Session, chunkDoc.Ns)
 			if err != nil {
 				return nil, err
 			}
-			chunkMap[replset][chunkDoc.Ns] = &ShardCollection{Key: key, ShardType: shardType}
+			chunkMap[replset][chunkDoc.Ns] = &ShardCollection{Keys: keys, ShardType: shardType}
 		}
 		var minD, maxD bson.D
 		err1 := bson.Unmarshal(chunkDoc.Min.Data, &minD)
 		err2 := bson.Unmarshal(chunkDoc.Max.Data, &maxD)
-		if err1 != nil || err2 != nil || len(minD) != 1 || len(maxD) != 1 || minD[0].Name != maxD[0].Name {
-			return nil, fmt.Errorf("GetChunkMapByUrl get illegal chunk doc min[%v] max[%v]",
-				chunkDoc.Min, chunkDoc.Max)
+		if err1 != nil || err2 != nil || len(minD) != len(maxD) {
+			return nil, fmt.Errorf("GetChunkMapByUrl get illegal chunk doc min[%v] max[%v]. err1[%v] err2[%v]",
+				minD, maxD, err1, err2)
 		}
-		chunkRange := &ChunkRange{Min: minD[0].Value, Max: maxD[0].Value}
 		shardCol := chunkMap[replset][chunkDoc.Ns]
+		var mins, maxs []interface{}
+		for i, item := range minD {
+
+			if item.Name != shardCol.Keys[i] {
+				return nil, fmt.Errorf("GetChunkMapByUrl get illegal chunk doc min[%v] keys[%v]",
+					minD, shardCol.Keys)
+			}
+			mins = append(mins, item.Value)
+		}
+		for i, item := range maxD {
+			if item.Name != shardCol.Keys[i] {
+				return nil, fmt.Errorf("GetChunkMapByUrl get illegal chunk doc max[%v] keys[%v]",
+					maxD, shardCol.Keys)
+			}
+			maxs = append(maxs, item.Value)
+		}
+		chunkRange := &ChunkRange{Mins: mins, Maxs: maxs}
 		shardCol.Chunks = append(shardCol.Chunks, chunkRange)
 	}
 	return chunkMap, nil
 }
 
-func GetColShardType(session *mgo.Session, namespace string) (string, string, error) {
-	colDoc := make(map[string]interface{})
+func GetColShardType(session *mgo.Session, namespace string) ([]string, string, error) {
+	var colDoc bson.D
 	if err := session.DB(ConfigDB).C(CollectionCol).Find(bson.M{"_id": namespace}).One(&colDoc); err != nil {
-		return "", "", err
+		return nil, "", err
 	}
-	for key, shardType := range colDoc["key"].(map[string]interface{}) {
-		switch shardType.(type) {
+	var keys []string
+	var shardType string
+	var ok bool
+	if colDoc, ok = oplog.GetKey(colDoc, "key").(bson.D); !ok {
+		return nil, "", fmt.Errorf("GetColShardType has no key item in doc %v", colDoc)
+	}
+	for _, item := range colDoc {
+		// either be a single hashed field, or a list of ascending fields
+		switch item.Value.(type) {
 		case string:
-			return key, HashedShard, nil
+			shardType = HashedShard
 		case float64:
-			return key, RangedShard, nil
+			shardType = RangedShard
+		default:
+			return nil, "", fmt.Errorf("GetColShardType meet unknown ShakeKey type %v", colDoc)
 		}
-		break
+		keys = append(keys, item.Name)
 	}
-	return "", "", fmt.Errorf("GetColShardType meet unknown ShakeKey type %v", colDoc["key"])
+	return keys, shardType, nil
 }
 
 func IsNotFound(err error) bool {
