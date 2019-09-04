@@ -43,7 +43,6 @@ func (filter *OrphanFilter) Filter(doc *bson.Raw, namespace string) bool {
 	}
 NextChunk:
 	for _, chunkRage := range shardCol.Chunks {
-		LOG.Info("1 %v ", docD)
 		// check greater and equal than the minimum of the chunk range
 		for keyInd, keyName := range shardCol.Keys {
 			key := oplog.GetKey(docD, keyName)
@@ -51,7 +50,6 @@ NextChunk:
 				LOG.Warn("OrphanFilter find no key[%v] in doc %v", keyName, docD)
 				return false
 			}
-			LOG.Info("2 %v %v min %v", keyName, key, chunkRage.Mins[keyInd])
 			if shardCol.ShardType == utils.HashedShard {
 				var err error
 				if key, err = ComputeHash(key); err != nil {
@@ -64,9 +62,7 @@ NextChunk:
 			if chunkGt(key, chunkRage.Mins[keyInd]) {
 				break
 			}
-			LOG.Info("3 %v %v min %v", keyName, key, chunkRage.Mins[keyInd])
 		}
-		LOG.Info("4 %v", docD)
 		// check less than the maximum of the chunk range
 		for keyInd, keyName := range shardCol.Keys {
 			key := oplog.GetKey(docD, keyName)
@@ -80,7 +76,6 @@ NextChunk:
 					return false
 				}
 			}
-			LOG.Info("5 %v %v max %v", keyName, key, chunkRage.Maxs[keyInd])
 			if chunkGt(key, chunkRage.Maxs[keyInd]) {
 				continue NextChunk
 			}
@@ -90,7 +85,6 @@ NextChunk:
 			if keyInd == len(shardCol.Keys)-1 {
 				continue NextChunk
 			}
-			LOG.Info("6 %v %v max %v", keyName, key, chunkRage.Maxs[keyInd])
 		}
 		// current key in the chunk, therefore dont filter
 		return false
