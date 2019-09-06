@@ -119,14 +119,15 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	// try to connect ContextStorageUrl
 	storageUrl := conf.Options.ContextStorageUrl
 	if conn, err = utils.NewMongoConn(storageUrl, utils.ConnectModePrimary, true); conn == nil || !conn.IsGood() || err != nil {
-		LOG.Critical("Connect storageUrl[%v] error[%v].", storageUrl, err)
+		LOG.Critical("Connect storageUrl[%v] error[%v]. Please add primary node into 'mongo_urls' " +
+			"if 'context.storage.url' is empty", storageUrl, err)
 		return err
 	}
 	conn.Close()
 
 	for i, src := range coordinator.Sources {
 		if conn, err = utils.NewMongoConn(src.URL, conf.Options.MongoConnectMode, true); conn == nil || !conn.IsGood() || err != nil {
-			LOG.Critical("Connect mongo server error. %v, url : %s", err, src.URL)
+			LOG.Critical("Connect mongo server error. %v, url : %s. See https://github.com/alibaba/MongoShake/wiki/FAQ#q-how-to-solve-the-oplog-tailer-initialize-failed-no-reachable-servers-error", err, src.URL)
 			return err
 		}
 
@@ -134,7 +135,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		if conf.Options.SyncMode != SYNCMODE_DOCUMENT && !conn.HasOplogNs() {
 			LOG.Critical("There has no oplog collection in mongo db server")
 			conn.Close()
-			return errors.New("no oplog ns in mongo")
+			return errors.New("no oplog ns in mongo. See https://github.com/alibaba/MongoShake/wiki/FAQ#q-how-to-solve-the-oplog-tailer-initialize-failed-no-oplog-ns-in-mongo-error")
 		}
 
 		// check if there has dup server every replica set in RS or Shard
