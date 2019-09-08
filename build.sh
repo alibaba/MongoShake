@@ -60,20 +60,29 @@ info=$info","$t
 
 run_builder='go build -v'
 
-for i in "${modules[@]}" ; do
-	echo "Build ""$i"
-	if [ $DEBUG -eq 1 ]; then
-		$run_builder ${compile_line} -ldflags "-X $info" -gcflags='-N -l' -o "bin/$i" -tags "debug" "src/mongoshake//$i/main/$i.go"
-	else
-		$run_builder ${compile_line} -ldflags "-X $info" -o "bin/$i" "src/mongoshake//$i/main/$i.go"
-	fi
+goos=(linux darwin windows)
+for g in "${goos[@]}"; do
+    export GOOS=$g
+    echo "try build goos=$g"
+    if [ $g != "windows" ]; then
+        info="$info -X mongoshake/common.SIGNALPROFILE=31 -X mongoshake/common.SIGNALSTACK=30"
+    fi
 
-	# execute and show compile messages
-	if [ -f ${output}/"$i" ];then
-		${output}/"$i"
-	fi
+    for i in "${modules[@]}" ; do
+        echo "Build ""$i"
+        if [ $DEBUG -eq 1 ]; then
+            $run_builder ${compile_line} -ldflags "-X $info" -gcflags='-N -l' -o "bin/$i.$g" -tags "debug" "src/mongoshake//$i/main/$i.go"
+        else
+            $run_builder ${compile_line} -ldflags "-X $info" -o "bin/$i.$g" "src/mongoshake//$i/main/$i.go"
+        fi
+
+        # execute and show compile messages
+        if [ -f ${output}/"$i" ];then
+            ${output}/"$i"
+        fi
+    done
+    echo "build $g successfully!"
 done
-
 # *.sh
 cp scripts/start.sh ${output}/
 cp scripts/stop.sh ${output}/
