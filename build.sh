@@ -7,17 +7,6 @@ modules=(collector receiver)
 
 tags=""
 
-#whether to compile across platforms
-#for example: compile Linux executables on MAC or compile Linux 64-bit executables on Windows
-is_cross_compile=false
-if [ $is_cross_compile = true ]; then
-    #cross platform cross compilation
-    export CGO_ENABLED=0
-    export GOARCH=amd64
-    #GOOS optional: windows linux darwin
-    export GOOS=linux
-fi
-
 # older version Git don't support --short !
 if [ -d ".git" ];then
     #branch=`git symbolic-ref --short -q HEAD`
@@ -79,12 +68,10 @@ for i in "${modules[@]}" ; do
 		$run_builder ${compile_line} -ldflags "-X $info" -o "bin/$i" "src/mongoshake//$i/main/$i.go"
 	fi
 
-  if [ $is_cross_compile = false ]; then
-    # execute and show compile messages
-  	if [ -f ${output}/"$i" ];then
-  		${output}/"$i"
-  	fi
-  fi
+	# execute and show compile messages
+	if [ -f ${output}/"$i" ];then
+		${output}/"$i"
+	fi
 done
 
 # *.sh
