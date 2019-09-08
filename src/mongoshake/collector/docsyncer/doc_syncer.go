@@ -55,19 +55,20 @@ func StartDropDestCollection(nsSet map[utils.NS]bool, toConn *utils.MongoConn,
 		if !conf.Options.ReplayerCollectionDrop {
 			colNames, err := toConn.Session.DB(toNS.Database).CollectionNames()
 			if err != nil {
-				LOG.Critical("Get collection names of db %v of dest mongodb failed. %v", toNS.Database, err)
+				_ = LOG.Critical("Get collection names of db %v of dest mongodb failed. %v", toNS.Database, err)
 				return err
 			}
 			for _, colName := range colNames {
 				if colName == ns.Collection {
-					LOG.Critical("ns %v to be synced already exists in dest mongodb", toNS)
-					return errors.New(fmt.Sprintf("ns %v to be synced already exists in dest mongodb", toNS))
+					//return errors.New(fmt.Sprintf("ns %v to be synced already exists in dest mongodb", toNS))
+					_ = LOG.Error("ns %v to be synced already exists in dest mongodb", toNS)
+					return nil
 				}
 			}
 		}
 		err := toConn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
 		if err != nil && err.Error() != "ns not found" {
-			LOG.Critical("Drop collection ns %v of dest mongodb failed. %v", toNS, err)
+			_ = LOG.Critical("Drop collection ns %v of dest mongodb failed. %v", toNS, err)
 			return errors.New(fmt.Sprintf("Drop collection ns %v of dest mongodb failed. %v", toNS, err))
 		}
 	}
