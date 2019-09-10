@@ -60,8 +60,9 @@ func StartDropDestCollection(nsSet map[utils.NS]bool, toConn *utils.MongoConn,
 			}
 			for _, colName := range colNames {
 				if colName == ns.Collection {
-					LOG.Critical("ns %v to be synced already exists in dest mongodb", toNS)
-					return errors.New(fmt.Sprintf("ns %v to be synced already exists in dest mongodb", toNS))
+					//return errors.New(fmt.Sprintf("ns %v to be synced already exists in dest mongodb", toNS))
+					LOG.Warn("ns %v to be synced already exists in dest mongodb", toNS)
+					return nil
 				}
 			}
 		}
