@@ -36,9 +36,6 @@ type Batcher struct {
 	// the last oplog in the batch
 	lastOplog *oplog.PartialLog
 
-	// the last filtered oplog in the batch
-	lastFilterOplog *oplog.PartialLog
-
 	// remainLogs store the logs that split by barrier and haven't been consumed yet.
 	remainLogs []*oplog.GenericOplog
 }
@@ -51,15 +48,6 @@ func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
 		handler:     handler,
 		workerGroup: workerGroup,
 	}
-}
-
-/*
- * return the last oplog, if the current batch is empty(first oplog in this batch is ddl),
- * just return the last oplog in the previous batch.
- * if just start, this is nil.
- */
-func (batcher *Batcher) getLastOplog() (*oplog.PartialLog, *oplog.PartialLog) {
-	return batcher.lastOplog, batcher.lastFilterOplog
 }
 
 func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
@@ -100,8 +88,13 @@ func (batcher *Batcher) dispatchBatches(batchGroup [][]*oplog.GenericOplog) (wor
 	return
 }
 
-// return batched oplogs and barrier flag
-func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, bool) {
+/*
+ * return batched oplogs and barrier flag
+ * return the last oplog, if the current batch is empty(first oplog in this batch is ddl),
+ * just return the last oplog in the previous batch.
+ * if just start, this is nil.
+ */
+func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, *oplog.PartialLog, *oplog.PartialLog) {
 
 	// picked raw oplogs and batching in sequence
 	batchGroup := make([][]*oplog.GenericOplog, len(batcher.workerGroup))
@@ -133,13 +126,13 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, bool) 
 	nimo.AssertTrue(len(mergeBatch) != 0, "logs queue batch logs has zero length")
 
 	// split batch if has DDL
-	allEmpty := true
+	var lastOplog, lastFilterOplog *oplog.PartialLog
 	flushCheckpoint := false
 	for i, genericLog := range mergeBatch {
 		// filter oplog such like Autologous or Gid-filtered
 		if batcher.filter(genericLog.Parsed) {
 			// doesn't push to worker, set lastFilterOplog
-			batcher.lastFilterOplog = genericLog.Parsed
+			lastFilterOplog = genericLog.Parsed
 			continue
 		}
 
@@ -154,13 +147,14 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, bool) 
 		if noopFilter.Filter(genericLog.Parsed) || moveChunkFilter.Filter(genericLog.Parsed) {
 			continue
 		}
-		allEmpty = false
 
 		// current is ddl and barrier == false
 		if !conf.Options.ReplayerDMLOnly && ddlFilter.Filter(genericLog.Parsed) && !barrier {
 			batcher.remainLogs = mergeBatch[i:]
 			barrier = true
 			flushCheckpoint = true
+			LOG.Info("oplog syncer %v batch more with ddl oplog type[%v] ns[%v] object[%v]. lastOplog[%v] lastFilterOplog[%v]",
+				syncer.replset, genericLog.Parsed.Operation, genericLog.Parsed.Namespace, genericLog.Parsed.Object, lastOplog, lastFilterOplog)
 			break
 		}
 		// current is not ddl but barrier == true
@@ -171,6 +165,7 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, bool) 
 
 		which := syncer.hasher.DistributeOplogByMod(genericLog.Parsed, len(batcher.workerGroup))
 		batchGroup[which] = append(batchGroup[which], genericLog)
+		lastOplog = genericLog.Parsed
 		batcher.lastOplog = genericLog.Parsed
 
 		// barrier == true which means the current must be ddl so we should return only 1 oplog and then do split
@@ -181,7 +176,7 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, bool) 
 			break
 		}
 	}
-	return batchGroup, barrier, allEmpty, flushCheckpoint
+	return batchGroup, barrier, flushCheckpoint, lastOplog, lastFilterOplog
 }
 
 func (batcher *Batcher) moveToNextQueue() {

@@ -100,12 +100,14 @@ func GetBalancerStatusByUrl(url string) (bool, error) {
 }
 
 type ChunkRange struct {
+	// the minimum/maximum of the chunk range of multiple columns shard key has multiple values
 	Mins []interface{}
 	Maxs []interface{}
 }
 
 type ShardCollection struct {
 	Chunks    []*ChunkRange
+	// shard key may have multiple columns, for example {a:1, b:1, c:1}
 	Keys      []string
 	ShardType string
 }

@@ -31,6 +31,7 @@ type Persist interface {
 	Flush(conn *utils.MongoConn, db string, tablePrefix string) error
 }
 
+// checkpoint info of each replset
 type SyncerCheckpoint struct {
 	syncer *OplogSyncer
 	ackTs  bson.MongoTimestamp
@@ -89,6 +90,7 @@ func (manager *CheckpointManager) start() {
 		now := time.Now()
 		select {
 		case <-manager.FlushChan:
+			LOG.Info("CheckpointManager flush immediately begin")
 			manager.UpdateCheckpoint()
 			if err := manager.Flush(); err != nil {
 				LOG.Warn("CheckpointManager flush immediately failed. %v", err)

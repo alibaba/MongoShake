@@ -159,9 +159,6 @@ func sanitizeOptions() error {
 		if conf.Options.MongoCsUrl == "" {
 			return errors.New("config server url should be configured while using mongo shard servers")
 		}
-		if conf.Options.ReplayerDMLOnly == false {
-			return errors.New("DDL is not support for sharding, pleasing waiting")
-		}
 	}
 	// avoid the typo of mongo urls
 	if utils.HasDuplicated(conf.Options.MongoUrls) {
