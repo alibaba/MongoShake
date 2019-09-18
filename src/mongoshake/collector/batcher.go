@@ -95,7 +95,6 @@ func (batcher *Batcher) dispatchBatches(batchGroup [][]*oplog.GenericOplog) (wor
  * if just start, this is nil.
  */
 func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, *oplog.PartialLog, *oplog.PartialLog) {
-
 	// picked raw oplogs and batching in sequence
 	batchGroup := make([][]*oplog.GenericOplog, len(batcher.workerGroup))
 	syncer := batcher.syncer

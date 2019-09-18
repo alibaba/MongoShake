@@ -2,6 +2,7 @@ package collector
 
 import (
 	"fmt"
+	"mongoshake/collector/oplogsyncer"
 	"time"
 
 	"mongoshake/collector/configure"
@@ -31,6 +32,8 @@ const (
 	DDLCheckpointGap              = 5    // unit: seconds.
 	FilterCheckpointGap           = 180  // unit: seconds. no checkpoint update, flush checkpoint mandatory
 	FilterCheckpointCheckInterval = 180  // unit: seconds.
+
+	ShardingWorkerId = 0
 )
 
 type OplogHandler interface {
@@ -51,6 +54,7 @@ type OplogSyncer struct {
 
 	ckptManager *CheckpointManager
 	mvckManager *MoveChunkManager
+	ddlManager  *oplogsyncer.DDLManager
 
 	// oplog hash strategy
 	hasher oplog.Hasher
@@ -64,7 +68,7 @@ type OplogSyncer struct {
 	nextQueuePosition uint64
 
 	// source mongo oplog reader
-	reader *OplogReader
+	reader *oplogsyncer.OplogReader
 	// journal log that records all oplogs
 	journal *utils.Journal
 	// oplogs dispatcher
@@ -87,16 +91,18 @@ func NewOplogSyncer(
 	mongoUrl string,
 	gids []string,
 	ckptManager *CheckpointManager,
-	mvckManager *MoveChunkManager) *OplogSyncer {
+	mvckManager *MoveChunkManager,
+	ddlManager *oplogsyncer.DDLManager) *OplogSyncer {
 	syncer := &OplogSyncer{
 		coordinator:            coordinator,
 		replset:                replset,
 		fullSyncFinishPosition: fullSyncFinishPosition,
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
-		reader:      NewOplogReader(mongoUrl),
+		reader:      oplogsyncer.NewOplogReader(mongoUrl),
 		ckptManager: ckptManager,
 		mvckManager: mvckManager,
+		ddlManager:  ddlManager,
 	}
 
 	// concurrent level hasher
@@ -172,6 +178,14 @@ func (sync *OplogSyncer) startBatcher() {
 	var batcher = sync.batcher
 	filterCheckTs := time.Now()
 
+	var csConn *utils.MongoConn
+	var err error
+	if !conf.Options.ReplayerDMLOnly && conf.Options.MongoCsUrl != "" {
+		if csConn, err = utils.NewMongoConn(conf.Options.MongoCsUrl, utils.ConnectModePrimary, true); err != nil {
+			LOG.Crashf("Connect storageUrl[%v] error[%v].", conf.Options.MongoCsUrl, err)
+		}
+	}
+
 	nimo.GoRoutineInLoop(func() {
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
@@ -179,31 +193,69 @@ func (sync *OplogSyncer) startBatcher() {
 		batchedOplog, barrier, flushCheckpoint, lastOplog, lastFilterOplog := batcher.batchMore()
 
 		if lastOplog != nil {
+			LOG.Debug("Oplog syncer %v fetch lastOplog %v checkpointTs %v",
+				sync.replset, lastOplog, sync.ckptManager.Get(sync.replset))
 			lastNewestTs := lastOplog.Timestamp
 
-			// push to worker
-			if worked := batcher.dispatchBatches(batchedOplog); worked {
-				sync.replMetric.SetLSN(utils.TimestampToInt64(lastNewestTs))
-				// update latest fetched timestamp in memory
-				sync.reader.UpdateQueryTimestamp(lastNewestTs)
+			needDispatch := true
+			needUnBlock := false
+			// DDL operate at sharded collection of mongodb sharding
+			// block if not all shard nodes reach the ddl operation
+			if csConn != nil && ddlFilter.Filter(lastOplog) {
+				shardColSpec := utils.GetShardCollectionSpec(csConn.Session, lastOplog.Namespace)
+				if shardColSpec != nil {
+					blockChan := sync.ddlManager.BlockDDL(sync.replset, lastOplog)
+					if blockChan != nil {
+						<-blockChan
+						// ddl has run by other oplog syncer, so no need to run here
+						needDispatch = false
+					} else {
+						// transform ddl to run at mongos of dest sharding
+						// number of worker of sharding instance and number of ddl command must be 1
+						logRaw := batchedOplog[ShardingWorkerId][0].Raw
+						batchedOplog[ShardingWorkerId] = []*oplog.GenericOplog{}
+						transOplogs := oplogsyncer.TransformDDL(sync.replset, lastOplog, shardColSpec)
+						for _, tlog := range transOplogs {
+							batchedOplog[ShardingWorkerId] = append(batchedOplog[ShardingWorkerId],
+								&oplog.GenericOplog{Raw: logRaw, Parsed: tlog})
+						}
+						LOG.Debug("Oplog syncer %v transform batchedOplog %v",
+							sync.replset, batchedOplog[ShardingWorkerId])
+						needUnBlock = true
+					}
+				}
+			}
+
+			if needDispatch {
+				// push to worker to run
+				if worked := batcher.dispatchBatches(batchedOplog); worked {
+					sync.replMetric.SetLSN(utils.TimestampToInt64(lastNewestTs))
+					// update latest fetched timestamp in memory
+					sync.reader.UpdateQueryTimestamp(lastNewestTs)
+				}
 			}
 
 			if barrier {
 				// wait for ddl operation finish, and flush checkpoint value
 				sync.waitBarrierAck(lastNewestTs, flushCheckpoint)
+				if needUnBlock {
+					// unblock other shard nodes when sharding ddl has finished
+					sync.ddlManager.UnBlockDDL(lastOplog)
+				}
 			}
 			// update movechunk manager offerTs after dispatch batches
 			sync.mvckManager.UpdateOfferTs(sync.replset)
 			return
 		}
-
+		LOG.Debug("Oplog syncer %v fetch no lastOplog checkpointTs %v",
+			sync.replset, sync.ckptManager.Get(sync.replset))
 		// update movechunk manager offerTs even though oplog is filtered
 		sync.mvckManager.UpdateOfferTs(sync.replset)
 
 		if lastFilterOplog != nil {
 			now := time.Now()
-			// UpdateAckTs for filtered oplog has interval
-			if now.After(filterCheckTs.Add(FilterCheckpointCheckInterval*time.Second)) == false {
+			// UpdateAckTs for filtered oplog has time interval
+			if !now.After(filterCheckTs.Add(FilterCheckpointCheckInterval * time.Second)) {
 				return
 			}
 			// UpdateAckTs for filtered oplog when filter oplogTs exceed checkpointTs
@@ -357,10 +409,10 @@ func (sync *OplogSyncer) next() bool {
 		sync.replMetric.SetOplogMax(payload)
 		sync.replMetric.SetOplogAvg(payload)
 		sync.replMetric.ReplStatus.Clear(utils.FetchBad)
-	} else if err == CollectionCappedError {
+	} else if err == oplogsyncer.CollectionCappedError {
 		LOG.Error("oplog collection capped error, users should fix it manually")
 		return false
-	} else if err != nil && err != TimeoutError {
+	} else if err != nil && err != oplogsyncer.TimeoutError {
 		LOG.Error("oplog syncer internal error: %v", err)
 		// error is nil indicate that only timeout incur syncer.next()
 		// return false. so we regardless that

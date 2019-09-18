@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"mongoshake/collector/filter"
+	"mongoshake/collector/oplogsyncer"
 	"sync"
 
 	"mongoshake/collector/configure"
@@ -328,12 +329,13 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 
 	ckptManager := NewCheckpointManager(oplogStartPosition)
 	mvckManager := NewMoveChunkManager()
+	ddlManager := oplogsyncer.NewDDLManager(len(coordinator.Sources))
 
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
 	for _, src := range coordinator.Sources {
 		syncer := NewOplogSyncer(coordinator, src.Replset, fullSyncFinishPosition,
-			src.URL, src.Gids, ckptManager, mvckManager)
+			src.URL, src.Gids, ckptManager, mvckManager, ddlManager)
 		// syncerGroup http api registry
 		syncer.init()
 		ckptManager.addOplogSyncer(syncer)

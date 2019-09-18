@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+const (
+	VersionMark = "$v"
+	UuidMark    = "ui"
+)
+
 type CommandOperation struct {
 	concernSyncData bool
 	runOnAdmin      bool // some commands like `renameCollection` need run on admin database

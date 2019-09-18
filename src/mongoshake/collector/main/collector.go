@@ -142,6 +142,19 @@ func sanitizeOptions() error {
 
 	if len(conf.Options.MongoUrls) == 0 {
 		return errors.New("mongo_urls were empty")
+	} else if len(conf.Options.MongoUrls) > 1 {
+		if conf.Options.WorkerNum != len(conf.Options.MongoUrls) {
+			//LOG.Warn("replication worker should be equal to count of mongo_urls while multi sources (shard), set worker = %v",
+			//	len(conf.Options.MongoUrls))
+			conf.Options.WorkerNum = len(conf.Options.MongoUrls)
+		}
+		if conf.Options.MongoCsUrl == "" {
+			return errors.New("config server url should be configured when transfer from mongo sharding")
+		}
+	} else {
+		if conf.Options.MongoCsUrl != "" {
+			return errors.New("config server url should not be configured when transfer from mongo replica set")
+		}
 	}
 	if conf.Options.ContextStorageUrl == "" {
 		if len(conf.Options.MongoUrls) == 1 {
@@ -150,16 +163,7 @@ func sanitizeOptions() error {
 			return errors.New("checkpoint url should be configured while using mongo shard servers")
 		}
 	}
-	if len(conf.Options.MongoUrls) > 1 {
-		if conf.Options.WorkerNum != len(conf.Options.MongoUrls) {
-			//LOG.Warn("replication worker should be equal to count of mongo_urls while multi sources (shard), set worker = %v",
-			//	len(conf.Options.MongoUrls))
-			conf.Options.WorkerNum = len(conf.Options.MongoUrls)
-		}
-		if conf.Options.MongoCsUrl == "" {
-			return errors.New("config server url should be configured while using mongo shard servers")
-		}
-	}
+
 	// avoid the typo of mongo urls
 	if utils.HasDuplicated(conf.Options.MongoUrls) {
 		return errors.New("mongo urls were duplicated")

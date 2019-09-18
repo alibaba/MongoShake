@@ -328,7 +328,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 						LOG.Warn("transformPartialLog sublog %v return nil, ignore!", subLog)
 						return nil
 					}
-					ops[i] = transSubLog.Dump(keys, false)
+					ops[i] = transSubLog.Dump(keys)
 				}
 			}
 		default:

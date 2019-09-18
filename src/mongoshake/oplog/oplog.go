@@ -65,15 +65,15 @@ func NewPartialLog(data bson.M) *PartialLog {
 	return partialLog
 }
 
-// dump according to the given keys, "all" == true means ignore keys
-func (partialLog *PartialLog) Dump(keys map[string]struct{}, all bool) bson.D {
+// dump according to the given keys, "keys" == nil means ignore keys
+func (partialLog *PartialLog) Dump(keys map[string]struct{}) bson.D {
 	var out bson.D
 	logType := reflect.TypeOf(*partialLog)
 	for i := 0; i < logType.NumField(); i++ {
 		if tagName, ok := logType.Field(i).Tag.Lookup("bson"); ok {
 			// out[tagName] = reflect.ValueOf(partialLog).Elem().Field(i).Interface()
 			value := reflect.ValueOf(partialLog).Elem().Field(i).Interface()
-			if !all {
+			if keys == nil {
 				if _, ok := keys[tagName]; !ok {
 					continue
 				}

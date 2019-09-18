@@ -14,10 +14,7 @@ import (
 	"mongoshake/common"
 )
 
-const (
-	versionMark = "$v"
-	uuidMark    = "ui"
-)
+
 
 type BasicWriter interface {
 	// insert operation
@@ -70,7 +67,7 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.M, 
 		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
 		newObject := log.original.partialLog.Object
 		inserts = append(inserts, newObject)
-		LOG.Debug("writer: insert %v", log.original.partialLog.Dump(nil, true))
+		LOG.Debug("writer: insert %v", log.original.partialLog.Dump(nil))
 	}
 	dbHandle := cw.session.DB(database)
 
@@ -114,7 +111,7 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 		} else {
 			LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
 		}
-		LOG.Debug("writer: updateOnInsert %v", log.original.partialLog.Dump(nil, true))
+		LOG.Debug("writer: updateOnInsert %v", log.original.partialLog.Dump(nil))
 	}
 
 	var err error
@@ -145,13 +142,13 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.M,
 		//if _, ok := newObject[versionMark]; ok {
 		//	delete(newObject, versionMark)
 		//}
-		newObject := oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+		newObject := oplog.RemoveFiled(log.original.partialLog.Object, oplog.VersionMark)
 		updates = append(updates, bson.M{
 			"q":      log.original.partialLog.Query,
 			"u":      newObject,
 			"upsert": upsert,
 			"multi":  false})
-		LOG.Debug("writer: update %v", log.original.partialLog.Dump(nil, true))
+		LOG.Debug("writer: update %v", log.original.partialLog.Dump(nil))
 	}
 
 	var err error
@@ -182,7 +179,7 @@ func (cw *CommandWriter) doDelete(database, collection string, metadata bson.M,
 	var err error
 	for _, log := range oplogs {
 		deleted = append(deleted, bson.M{"q": log.original.partialLog.Object, "limit": 0})
-		LOG.Debug("writer: delete %v", log.original.partialLog.Dump(nil, true))
+		LOG.Debug("writer: delete %v", log.original.partialLog.Dump(nil))
 	}
 
 	if err = cw.session.DB(database).RunCommand(
@@ -214,7 +211,7 @@ func (cw *CommandWriter) doCommand(database string, metadata bson.M, oplogs []*O
 		} else {
 			// exec.batchExecutor.ReplMetric.AddFilter(1)
 		}
-		LOG.Debug("writer: command %v", log.original.partialLog.Dump(nil, true))
+		LOG.Debug("writer: command %v", log.original.partialLog.Dump(nil))
 	}
 	return nil
 }
@@ -265,7 +262,7 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, opl
 		newObject := log.original.partialLog.Object
 		inserts = append(inserts, newObject)
 
-		LOG.Debug("writer: insert %v", log.original.partialLog.Dump(nil, true))
+		LOG.Debug("writer: insert %v", log.original.partialLog.Dump(nil))
 	}
 	// collectionHandle := bw.session.DB(database).C(collection)
 	bulk := bw.session.DB(database).C(collection).Bulk()
@@ -301,7 +298,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 			LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
 		}
 
-		LOG.Debug("writer: updateOnInsert %v", log.original.partialLog.Dump(nil, true))
+		LOG.Debug("writer: updateOnInsert %v", log.original.partialLog.Dump(nil))
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
@@ -329,10 +326,10 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 		//if _, ok := newObject[versionMark]; ok {
 		//	delete(newObject, versionMark)
 		//}
-		newObject := oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+		newObject := oplog.RemoveFiled(log.original.partialLog.Object, oplog.VersionMark)
 		update = append(update, log.original.partialLog.Query, newObject)
 
-		LOG.Debug("writer: update %v", log.original.partialLog.Dump(nil, true))
+		LOG.Debug("writer: update %v", log.original.partialLog.Dump(nil))
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
@@ -359,7 +356,7 @@ func (bw *BulkWriter) doDelete(database, collection string, metadata bson.M,
 	for _, log := range oplogs {
 		delete = append(delete, log.original.partialLog.Object)
 
-		LOG.Debug("writer: delete %v", log.original.partialLog.Dump(nil, true))
+		LOG.Debug("writer: delete %v", log.original.partialLog.Dump(nil))
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
@@ -389,7 +386,7 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*Oplo
 			// exec.batchExecutor.ReplMetric.AddFilter(1)
 		}
 
-		LOG.Debug("writer: command %v", log.original.partialLog.Dump(nil, true))
+		LOG.Debug("writer: command %v", log.original.partialLog.Dump(nil))
 	}
 	return nil
 }
@@ -417,7 +414,7 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.M, o
 			}
 		}
 
-		LOG.Debug("writer: insert %v", log.original.partialLog.Dump(nil, true))
+		LOG.Debug("writer: insert %v", log.original.partialLog.Dump(nil))
 	}
 
 	if len(errMsgs) != 0 {
@@ -454,7 +451,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 			LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
 		}
 
-		LOG.Debug("writer: updateOnInsert %v", log.original.partialLog.Dump(nil, true))
+		LOG.Debug("writer: updateOnInsert %v", log.original.partialLog.Dump(nil))
 	}
 
 	collectionHandle := sw.session.DB(database).C(collection)
@@ -494,7 +491,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 			//if _, ok := newObject[versionMark]; ok {
 			//	delete(newObject, versionMark)
 			//}
-			newObject := oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+			newObject := oplog.RemoveFiled(log.original.partialLog.Object, oplog.VersionMark)
 			_, err := collectionHandle.Upsert(log.original.partialLog.Query, newObject)
 			if err != nil {
 				if mgo.IsDup(err) {
@@ -506,7 +503,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 				errMsgs = append(errMsgs, errMsg)
 			}
 
-			LOG.Debug("writer: upsert %v", log.original.partialLog.Dump(nil, true))
+			LOG.Debug("writer: upsert %v", log.original.partialLog.Dump(nil))
 		}
 	} else {
 		for _, log := range oplogs {
@@ -515,7 +512,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 			//if _, ok := newObject[versionMark]; ok {
 			//	delete(newObject, versionMark)
 			//}
-			newObject := oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+			newObject := oplog.RemoveFiled(log.original.partialLog.Object, oplog.VersionMark)
 			err := collectionHandle.Update(log.original.partialLog.Query, newObject)
 			if err != nil {
 				if utils.IsNotFound(err) {
@@ -529,7 +526,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 				}
 			}
 
-			LOG.Debug("writer: update %v", log.original.partialLog.Dump(nil, true))
+			LOG.Debug("writer: update %v", log.original.partialLog.Dump(nil))
 		}
 	}
 
@@ -557,7 +554,7 @@ func (sw *SingleWriter) doDelete(database, collection string, metadata bson.M,
 			}
 		}
 
-		LOG.Debug("writer: delete %v", log.original.partialLog.Dump(nil, true))
+		LOG.Debug("writer: delete %v", log.original.partialLog.Dump(nil))
 	}
 
 	if len(errMsgs) != 0 {
@@ -584,13 +581,13 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*Op
 			// exec.batchExecutor.ReplMetric.AddFilter(1)
 		}
 
-		LOG.Debug("writer: command %v", log.original.partialLog.Dump(nil, true))
+		LOG.Debug("writer: command %v", log.original.partialLog.Dump(nil))
 	}
 	return nil
 }
 
 func runCommand(database, operation string, log *oplog.PartialLog, session *mgo.Session) error {
-	defer LOG.Debug("runCommand run DDL: %v", log.Dump(nil, true))
+	defer LOG.Debug("runCommand run DDL: %v", log.Dump(nil))
 	dbHandler := session.DB(database)
 	LOG.Info("runCommand run DDL with type[%s]", operation)
 	var err error
@@ -631,7 +628,7 @@ func runCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 				arr := ele.Value.([]interface{})
 				for i, ele := range arr {
 					doc := ele.(bson.D)
-					arr[i] = oplog.RemoveFiled(doc, uuidMark)
+					arr[i] = oplog.RemoveFiled(doc, oplog.UuidMark)
 				}
 			}
 			store = append(store, ele)
@@ -681,7 +678,7 @@ func runCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 		store = append(store, bson.DocElem{
 			Name: "applyOps",
 			Value: []bson.D{
-				log.Dump(nil, true),
+				log.Dump(nil),
 			},
 		})
 		err = dbHandler.Run(store, nil)
