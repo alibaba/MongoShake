@@ -73,7 +73,7 @@ func (partialLog *PartialLog) Dump(keys map[string]struct{}) bson.D {
 		if tagName, ok := logType.Field(i).Tag.Lookup("bson"); ok {
 			// out[tagName] = reflect.ValueOf(partialLog).Elem().Field(i).Interface()
 			value := reflect.ValueOf(partialLog).Elem().Field(i).Interface()
-			if keys == nil {
+			if keys != nil {
 				if _, ok := keys[tagName]; !ok {
 					continue
 				}

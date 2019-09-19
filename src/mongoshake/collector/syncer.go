@@ -178,14 +178,6 @@ func (sync *OplogSyncer) startBatcher() {
 	var batcher = sync.batcher
 	filterCheckTs := time.Now()
 
-	var csConn *utils.MongoConn
-	var err error
-	if !conf.Options.ReplayerDMLOnly && conf.Options.MongoCsUrl != "" {
-		if csConn, err = utils.NewMongoConn(conf.Options.MongoCsUrl, utils.ConnectModePrimary, true); err != nil {
-			LOG.Crashf("Connect storageUrl[%v] error[%v].", conf.Options.MongoCsUrl, err)
-		}
-	}
-
 	nimo.GoRoutineInLoop(func() {
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
@@ -201,26 +193,31 @@ func (sync *OplogSyncer) startBatcher() {
 			needUnBlock := false
 			// DDL operate at sharded collection of mongodb sharding
 			// block if not all shard nodes reach the ddl operation
-			if csConn != nil && ddlFilter.Filter(lastOplog) {
-				shardColSpec := utils.GetShardCollectionSpec(csConn.Session, lastOplog.Namespace)
+			if sync.ddlManager.Enabled() && ddlFilter.Filter(lastOplog) {
+				namespace := oplogsyncer.GetDDLNamespace(sync.replset, lastOplog)
+				shardColSpec := utils.GetShardCollectionSpec(sync.ddlManager.FromCsConn.Session, namespace)
 				if shardColSpec != nil {
-					blockChan := sync.ddlManager.BlockDDL(sync.replset, lastOplog)
-					if blockChan != nil {
-						<-blockChan
+					if oplogsyncer.ShardingDDLFilter(lastOplog, shardColSpec) {
+						LOG.Info("Oplog syncer %v filter sharding ddl log %v", sync.replset, lastOplog)
+						return
+					}
+					ddlValue := sync.ddlManager.BlockDDL(sync.replset, lastOplog)
+					if ddlValue != nil {
+						LOG.Info("Oplog syncer %v block at ddl log %v", sync.replset, lastOplog)
+						<-ddlValue.BlockChan
 						// ddl has run by other oplog syncer, so no need to run here
 						needDispatch = false
 					} else {
+						LOG.Info("Oplog syncer %v prepare to dispatch ddl log %v", sync.replset, lastOplog)
 						// transform ddl to run at mongos of dest sharding
 						// number of worker of sharding instance and number of ddl command must be 1
 						logRaw := batchedOplog[ShardingWorkerId][0].Raw
 						batchedOplog[ShardingWorkerId] = []*oplog.GenericOplog{}
-						transOplogs := oplogsyncer.TransformDDL(sync.replset, lastOplog, shardColSpec)
+						transOplogs := oplogsyncer.TransformDDL(sync.replset, lastOplog, shardColSpec, sync.ddlManager.ToIsSharding)
 						for _, tlog := range transOplogs {
 							batchedOplog[ShardingWorkerId] = append(batchedOplog[ShardingWorkerId],
 								&oplog.GenericOplog{Raw: logRaw, Parsed: tlog})
 						}
-						LOG.Debug("Oplog syncer %v transform batchedOplog %v",
-							sync.replset, batchedOplog[ShardingWorkerId])
 						needUnBlock = true
 					}
 				}
@@ -233,14 +230,15 @@ func (sync *OplogSyncer) startBatcher() {
 					// update latest fetched timestamp in memory
 					sync.reader.UpdateQueryTimestamp(lastNewestTs)
 				}
-			}
 
-			if barrier {
-				// wait for ddl operation finish, and flush checkpoint value
-				sync.waitBarrierAck(lastNewestTs, flushCheckpoint)
-				if needUnBlock {
-					// unblock other shard nodes when sharding ddl has finished
-					sync.ddlManager.UnBlockDDL(lastOplog)
+				if barrier {
+					// wait for ddl operation finish, and flush checkpoint value
+					sync.waitBarrierAck(lastNewestTs, flushCheckpoint)
+					if needUnBlock {
+						LOG.Info("Oplog syncer %v Unblock at ddl log %v", sync.replset, lastOplog)
+						// unblock other shard nodes when sharding ddl has finished
+						sync.ddlManager.UnBlockDDL(sync.replset, lastOplog)
+					}
 				}
 			}
 			// update movechunk manager offerTs after dispatch batches

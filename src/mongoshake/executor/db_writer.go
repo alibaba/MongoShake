@@ -636,6 +636,10 @@ func runCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 		err = dbHandler.Run(store, nil)
 	case "dropDatabase":
 		err = dbHandler.DropDatabase()
+	case "enableSharding":
+		fallthrough
+	case "shardCollection":
+		fallthrough
 	case "create":
 		fallthrough
 	case "collMod":

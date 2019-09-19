@@ -174,3 +174,13 @@ func GetShardCollectionSpec(session *mgo.Session, namespace string) *ShardCollec
 	}
 	return nil
 }
+
+func IsSharding(session *mgo.Session) bool {
+	var result interface{}
+	err := session.DB("config").C("version").Find(bson.M{}).One(&result)
+	if err != nil {
+		return false
+	} else {
+		return true
+	}
+}

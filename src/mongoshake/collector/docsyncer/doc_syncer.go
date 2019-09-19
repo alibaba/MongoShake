@@ -23,14 +23,7 @@ const (
 )
 
 func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
-	var toIsSharding bool
-	var result interface{}
-	err := toConn.Session.DB("config").C("version").Find(bson.M{}).One(&result)
-	if err != nil {
-		toIsSharding = false
-	} else {
-		toIsSharding = true
-	}
+	toIsSharding := utils.IsSharding(toConn.Session)
 
 	if fromIsSharding && toIsSharding {
 		LOG.Info("replication from sharding to sharding")

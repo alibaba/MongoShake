@@ -326,10 +326,11 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition, fullSyncFinishPosition int64) error {
 	// replicate speed limit on all syncer
 	coordinator.rateController = nimo.NewSimpleRateController()
+	toUrl := conf.Options.TunnelAddress[0]
 
 	ckptManager := NewCheckpointManager(oplogStartPosition)
 	mvckManager := NewMoveChunkManager()
-	ddlManager := oplogsyncer.NewDDLManager(len(coordinator.Sources))
+	ddlManager := oplogsyncer.NewDDLManager(len(coordinator.Sources), conf.Options.MongoCsUrl, toUrl)
 
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
