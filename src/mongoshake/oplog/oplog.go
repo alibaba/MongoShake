@@ -81,7 +81,6 @@ func (partialLog *PartialLog) Dump(keys map[string]struct{}) bson.D {
 			out = append(out, bson.DocElem{tagName, value})
 		}
 	}
-
 	return out
 }
 
