@@ -180,8 +180,10 @@ func sanitizeOptions() error {
 	if conf.Options.HTTPListenPort <= 1024 && conf.Options.HTTPListenPort > 0 {
 		return errors.New("http listen port too low numeric")
 	}
-	if conf.Options.CheckpointInterval <= 0 {
+	if conf.Options.CheckpointInterval < 0 {
 		return errors.New("checkpoint batch size is negative")
+	} else if conf.Options.CheckpointInterval  == 0 {
+		conf.Options.CheckpointInterval = 5000 // set default to 5 seconds
 	}
 	if conf.Options.ShardKey != oplog.ShardByNamespace &&
 		conf.Options.ShardKey != oplog.ShardByID &&
