@@ -1,6 +1,10 @@
 2019-09-06 Alibaba Cloud.
 	* version: 2.0.8
 	* BUGFIX: fetch data from kafka failed. update "sarama" driver, see #212.
+	* IMPROVE: support for the compilation of windows environment. see #233.
+	* IMPROVE: remove some parameters in configuration.
+	* IMRPOVE: add TPS in restful metric.
+
 2019-08-17 Alibaba Cloud.
 	* version: 2.0.7
 	* BUGFIX: exit when the oldest ts bigger than full-sync-begin

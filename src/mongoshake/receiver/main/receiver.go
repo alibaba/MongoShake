@@ -5,16 +5,17 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"syscall"
+	"errors"
+	"strconv"
 
 	"mongoshake/common"
 	"mongoshake/receiver/configure"
 	"mongoshake/tunnel"
+	"mongoshake/receiver"
 
-	"errors"
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"mongoshake/receiver"
-	"syscall"
 )
 
 type Exit struct{ Code int }
@@ -55,10 +56,15 @@ func main() {
 			conf.Options.LogFileName, err), -2)
 	}
 	nimo.Profiling(int(conf.Options.SystemProfile))
-	nimo.RegisterSignalForProfiling(syscall.SIGUSR2)
-	nimo.RegisterSignalForPrintStack(syscall.SIGUSR1, func(bytes []byte) {
-		LOG.Info(string(bytes))
-	})
+	signalProfile, _ := strconv.Atoi(utils.SIGNALPROFILE)
+	signalStack, _ := strconv.Atoi(utils.SIGNALSTACK)
+	if signalProfile > 0 {
+		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile)) // syscall.SIGUSR2
+		nimo.RegisterSignalForPrintStack(syscall.Signal(signalStack), func(bytes []byte) { // syscall.SIGUSR1
+			LOG.Info(string(bytes))
+		})
+	}
+
 
 	startup()
 
