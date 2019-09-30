@@ -176,6 +176,10 @@ func (metric *ReplicationMetric) Success() uint64 {
 	return atomic.LoadUint64(&metric.OplogSuccess.Value)
 }
 
+func (metric *ReplicationMetric) Tps() uint64 {
+	return atomic.LoadUint64(&metric.OplogSuccess.Delta)
+}
+
 func (metric *ReplicationMetric) AddSuccess(incr uint64) {
 	atomic.AddUint64(&metric.OplogSuccess.Value, incr)
 }

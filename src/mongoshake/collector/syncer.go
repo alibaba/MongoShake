@@ -130,8 +130,8 @@ func NewOplogSyncer(
 
 func (sync *OplogSyncer) init() {
 	sync.replMetric = utils.NewMetric(sync.replset, utils.METRIC_CKPT_TIMES|
-		utils.METRIC_TUNNEL_TRAFFIC|utils.METRIC_LSN_CKPT|utils.METRIC_SUCCESS|
-		utils.METRIC_TPS|utils.METRIC_RETRANSIMISSION)
+		utils.METRIC_TUNNEL_TRAFFIC| utils.METRIC_LSN_CKPT| utils.METRIC_SUCCESS|
+		utils.METRIC_TPS| utils.METRIC_RETRANSIMISSION)
 	sync.replMetric.ReplStatus.Update(utils.WorkGood)
 
 	sync.RestAPI()
@@ -431,6 +431,7 @@ func (sync *OplogSyncer) RestAPI() {
 		Logs        uint64     `json:"logs_get"`
 		LogsRepl    uint64     `json:"logs_repl"`
 		LogsSuccess uint64     `json:"logs_success"`
+		Tps         uint64     `json:"tps"`
 		Lsn         *MongoTime `json:"lsn"`
 		LsnAck      *MongoTime `json:"lsn_ack"`
 		LsnCkpt     *MongoTime `json:"lsn_ckpt"`
@@ -445,6 +446,7 @@ func (sync *OplogSyncer) RestAPI() {
 			Logs:        sync.replMetric.Get(),
 			LogsRepl:    sync.replMetric.Apply(),
 			LogsSuccess: sync.replMetric.Success(),
+			Tps:         sync.replMetric.Tps(),
 			Lsn: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSN),
 				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSN),
 					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSN))}},
