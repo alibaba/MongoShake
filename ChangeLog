@@ -1,4 +1,4 @@
-2019-09-06 Alibaba Cloud.
+2019-09-30 Alibaba Cloud.
 	* version: 2.0.8
 	* BUGFIX: fetch data from kafka failed. update "sarama" driver, see #212.
 	* IMPROVE: support for the compilation of windows environment. see #233.
