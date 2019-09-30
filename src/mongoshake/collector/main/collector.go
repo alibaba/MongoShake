@@ -240,8 +240,9 @@ func sanitizeOptions() error {
 		if len(conf.Options.TunnelAddress) > conf.Options.WorkerNum {
 			return errors.New("then length of tunnel_address with type 'direct' shouldn't bigger than worker number")
 		}
-		if conf.Options.ReplayerExecutor < 1 {
-			return errors.New("executor number should be large than 1")
+		if conf.Options.ReplayerExecutor <= 0 {
+			conf.Options.ReplayerExecutor = 1
+			// return errors.New("executor number should be large than 1")
 		}
 		if conf.Options.ReplayerConflictWriteTo != executor.DumpConflictToDB &&
 			conf.Options.ReplayerConflictWriteTo != executor.DumpConflictToSDK &&
