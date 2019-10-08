@@ -2,6 +2,7 @@ package executor
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"mongoshake/collector/configure"
@@ -13,8 +14,6 @@ import (
 	"github.com/vinllen/mgo/bson"
 	"mongoshake/common"
 )
-
-
 
 type BasicWriter interface {
 	// insert operation
@@ -377,9 +376,23 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*Oplo
 		if !conf.Options.ReplayerDMLOnly || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
 			if err = runCommand(database, operation, log.original.partialLog, bw.session); err == nil {
-				LOG.Info("Execute command (op==c) oplog dml_only mode [%t], operation [%s]",
-					conf.Options.ReplayerDMLOnly, operation)
+				LOG.Info("Bulk execute command (op==c) oplog, operation[%s]", operation)
 			} else {
+				LOG.Info("Bulk execute command (op==c) oplog, operation[%s], error type[%v], error[%v]",
+					operation, reflect.TypeOf(err), err.Error())
+				if e, ok := err.(*mgo.LastError); ok {
+					LOG.Info("Bulk execute command (op==c) oplog, operation[%s], LastError error[%v], code[%v]",
+						operation, e.Err, e.Code)
+					if e.Code == 20 || e.Code == 23 {
+						continue
+					}
+				} else if e, ok := err.(*mgo.QueryError); ok {
+					LOG.Info("Bulk execute command (op==c) oplog, operation[%s], QueryError error[%v], code[%v]",
+						operation, e.Message, e.Code)
+					if e.Code == 23 {
+						continue
+					}
+				}
 				return err
 			}
 		} else {
@@ -502,7 +515,6 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 					log.original.partialLog.Query, newObject, err)
 				errMsgs = append(errMsgs, errMsg)
 			}
-
 			LOG.Debug("writer: upsert %v", log.original.partialLog.Dump(nil))
 		}
 	} else {
@@ -525,7 +537,6 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 					errMsgs = append(errMsgs, errMsg)
 				}
 			}
-
 			LOG.Debug("writer: update %v", log.original.partialLog.Dump(nil))
 		}
 	}
@@ -572,9 +583,23 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*Op
 		if !conf.Options.ReplayerDMLOnly || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
 			if err = runCommand(database, operation, log.original.partialLog, sw.session); err == nil {
-				LOG.Info("Execute command (op==c) oplog dml_only mode [%t], operation [%s]",
-					conf.Options.ReplayerDMLOnly, operation)
+				LOG.Info("Single execute command (op==c) oplog, operation[%s]", operation)
 			} else {
+				LOG.Info("Single execute command (op==c) oplog, operation[%s], error type[%v], error[%v]",
+					operation, reflect.TypeOf(err), err.Error())
+				if e, ok := err.(*mgo.LastError); ok {
+					LOG.Info("Single execute command (op==c) oplog, operation[%s], LastError error[%v], code[%v]",
+						operation, e.Err, e.Code)
+					if e.Code == 20 || e.Code == 23 {
+						continue
+					}
+				} else if e, ok := err.(*mgo.QueryError); ok {
+					LOG.Info("Single execute command (op==c) oplog, operation[%s], QueryError error[%v], code[%v]",
+						operation, e.Message, e.Code)
+					if e.Code == 23 {
+						continue
+					}
+				}
 				return err
 			}
 		} else {

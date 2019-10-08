@@ -20,6 +20,8 @@ const (
 
 	HashedShard = "hashed"
 	RangedShard = "ranged"
+
+	ConifgShardLogInterval = 1 // s
 )
 
 // get balancer status from config server
@@ -153,26 +155,107 @@ func GetColShardType(session *mgo.Session, namespace string) ([]string, string, 
 }
 
 type ShardCollectionSpec struct {
-	Ns      string    `bson:"_id"`
-	Key     *bson.Raw `bson:"key"`
-	Unique  bool      `bson:"unique"`
-	Dropped bool      `bson:"dropped"`
+	Ns      string
+	Key     bson.D
+	Unique  bool
 }
 
-func GetShardCollectionSpec(session *mgo.Session, namespace string) *ShardCollectionSpec {
-	var colSpecDoc ShardCollectionSpec
-	var err error
-	// enable sharding for db
-	colSpecIter := session.DB("config").C("collections").Find(bson.M{"_id": namespace}).Iter()
-	for colSpecIter.Next(&colSpecDoc) {
-		if !colSpecDoc.Dropped {
-			return &colSpecDoc
+func GetShardCollectionSpec(session *mgo.Session, log *oplog.PartialLog) *ShardCollectionSpec {
+	type ConfigDoc struct {
+		Timestamp bson.MongoTimestamp `bson:"ts"`
+		Operation string              `bson:"op"`
+		Object    bson.D              `bson:"o"`
+	}
+	namespace := GetDDLNamespace(log)
+
+	var configDoc ConfigDoc
+	var leftDoc, rightDoc ConfigDoc
+	colSpecIter := session.DB("local").C("oplog.rs").
+		Find(bson.M{"ns": "config.collections", "o._id": namespace}).Sort("ts:1").Iter()
+	defer colSpecIter.Close()
+	for colSpecIter.Next(&configDoc) {
+		if configDoc.Timestamp < log.Timestamp {
+			if leftDoc.Timestamp < configDoc.Timestamp {
+				leftDoc = configDoc
+			}
+		} else {
+			rightDoc = configDoc
+			break
 		}
 	}
-	if err = colSpecIter.Close(); err != nil {
-		LOG.Critical("Close iterator of config.collections failed. %v", err)
+	if leftDoc.Operation != "" {
+		if dropped, ok := oplog.GetKey(leftDoc.Object, "dropped").(bool); ok && !dropped {
+			LOG.Info("GetShardCollectionSpec from left doc %v of config.collections for log %v",
+				leftDoc, log)
+			return &ShardCollectionSpec{Ns:namespace,
+				Key: oplog.GetKey(leftDoc.Object, "key").(bson.D),
+				Unique: oplog.GetKey(leftDoc.Object, "unique").(bool),
+			}
+		}
 	}
+	if rightDoc.Operation != "" {
+		if dropped, ok := oplog.GetKey(rightDoc.Object, "dropped").(bool); ok && !dropped {
+			if rightDoc.Timestamp < log.Timestamp + (ConifgShardLogInterval << 32) {
+				LOG.Info("GetShardCollectionSpec from right doc %v of config.collections for log %v",
+					rightDoc, log)
+				return &ShardCollectionSpec{Ns:namespace,
+					Key: oplog.GetKey(rightDoc.Object, "key").(bson.D),
+					Unique: oplog.GetKey(rightDoc.Object, "unique").(bool),
+				}
+			}
+			LOG.Warn("GetShardCollectionSpec get no spec from invalid right doc %v of config.collections for log %v",
+				rightDoc, log)
+		}
+	}
+	LOG.Warn("GetShardCollectionSpec has no config collection spec for ns[%v], maybe not sharding", namespace)
 	return nil
+}
+
+func GetDDLNamespace(log *oplog.PartialLog) string {
+	operation, _ := oplog.ExtraCommandName(log.Object)
+	logD := log.Dump(nil)
+	switch operation {
+	case "create":
+		fallthrough
+	case "createIndexes":
+		fallthrough
+	case "dropDatabase":
+		fallthrough
+	case "collMod":
+		fallthrough
+	case "drop":
+		fallthrough
+	case "deleteIndex":
+		fallthrough
+	case "deleteIndexes":
+		fallthrough
+	case "dropIndex":
+		fallthrough
+	case "dropIndexes":
+		db := strings.SplitN(log.Namespace, ".", 2)[0]
+		collection, ok := oplog.GetKey(log.Object, operation).(string)
+		if !ok {
+			LOG.Crashf("GetDDLNamespace meet illegal DDL log[%s]", logD)
+		}
+		return fmt.Sprintf("%s.%s", db, collection)
+	case "renameCollection":
+		fallthrough
+	case "convertToCapped":
+		fallthrough
+	case "emptycapped":
+		fallthrough
+	case "applyOps":
+		LOG.Crashf("GetDDLNamespace illegal DDL log[%v]", logD)
+	default:
+		if strings.HasSuffix(log.Namespace, "system.indexes") {
+			namespace, ok := oplog.GetKey(log.Object, "ns").(string)
+			if !ok {
+				LOG.Crashf("GetDDLNamespace meet illegal DDL log[%s]", logD)
+			}
+			return namespace
+		}
+	}
+	return log.Namespace
 }
 
 func IsSharding(session *mgo.Session) bool {

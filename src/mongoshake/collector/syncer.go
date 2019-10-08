@@ -54,7 +54,7 @@ type OplogSyncer struct {
 
 	ckptManager *CheckpointManager
 	mvckManager *MoveChunkManager
-	ddlManager  *oplogsyncer.DDLManager
+	ddlManager  *DDLManager
 
 	// oplog hash strategy
 	hasher oplog.Hasher
@@ -92,7 +92,7 @@ func NewOplogSyncer(
 	gids []string,
 	ckptManager *CheckpointManager,
 	mvckManager *MoveChunkManager,
-	ddlManager *oplogsyncer.DDLManager) *OplogSyncer {
+	ddlManager *DDLManager) *OplogSyncer {
 	syncer := &OplogSyncer{
 		coordinator:            coordinator,
 		replset:                replset,
@@ -192,34 +192,24 @@ func (sync *OplogSyncer) startBatcher() {
 			needDispatch := true
 			needUnBlock := false
 			// DDL operate at sharded collection of mongodb sharding
-			// block if not all shard nodes reach the ddl operation
-			if sync.ddlManager.Enabled() && ddlFilter.Filter(lastOplog) {
-				namespace := oplogsyncer.GetDDLNamespace(sync.replset, lastOplog)
-				shardColSpec := utils.GetShardCollectionSpec(sync.ddlManager.FromCsConn.Session, namespace)
-				if shardColSpec != nil {
-					if oplogsyncer.ShardingDDLFilter(lastOplog, shardColSpec) {
-						LOG.Info("Oplog syncer %v filter sharding ddl log %v", sync.replset, lastOplog)
-						return
-					}
-					ddlValue := sync.ddlManager.BlockDDL(sync.replset, lastOplog)
-					if ddlValue != nil {
-						LOG.Info("Oplog syncer %v block at ddl log %v", sync.replset, lastOplog)
-						<-ddlValue.BlockChan
-						// ddl has run by other oplog syncer, so no need to run here
-						needDispatch = false
-					} else {
-						LOG.Info("Oplog syncer %v prepare to dispatch ddl log %v", sync.replset, lastOplog)
-						// transform ddl to run at mongos of dest sharding
-						// number of worker of sharding instance and number of ddl command must be 1
+			if DDLSupportForSharding() && ddlFilter.Filter(lastOplog) {
+				needDispatch = sync.ddlManager.BlockDDL(sync.replset, lastOplog)
+				if needDispatch {
+					// ddl need to run, when not all but majority oplog syncer received ddl oplog
+					LOG.Info("Oplog syncer %v prepare to dispatch ddl log %v", sync.replset, lastOplog)
+					// transform ddl to run at mongos of dest sharding
+					// number of worker of sharding instance and number of ddl command must be 1
+					shardColSpec := utils.GetShardCollectionSpec(sync.ddlManager.FromCsConn.Session, lastOplog)
+					if shardColSpec != nil {
 						logRaw := batchedOplog[ShardingWorkerId][0].Raw
 						batchedOplog[ShardingWorkerId] = []*oplog.GenericOplog{}
-						transOplogs := oplogsyncer.TransformDDL(sync.replset, lastOplog, shardColSpec, sync.ddlManager.ToIsSharding)
+						transOplogs := TransformDDL(sync.replset, lastOplog, shardColSpec, sync.ddlManager.ToIsSharding)
 						for _, tlog := range transOplogs {
 							batchedOplog[ShardingWorkerId] = append(batchedOplog[ShardingWorkerId],
 								&oplog.GenericOplog{Raw: logRaw, Parsed: tlog})
 						}
-						needUnBlock = true
 					}
+					needUnBlock = true
 				}
 			}
 

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"mongoshake/collector/filter"
-	"mongoshake/collector/oplogsyncer"
 	"sync"
 
 	"mongoshake/collector/configure"
@@ -326,11 +325,10 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition, fullSyncFinishPosition int64) error {
 	// replicate speed limit on all syncer
 	coordinator.rateController = nimo.NewSimpleRateController()
-	toUrl := conf.Options.TunnelAddress[0]
 
 	ckptManager := NewCheckpointManager(oplogStartPosition)
 	mvckManager := NewMoveChunkManager()
-	ddlManager := oplogsyncer.NewDDLManager(len(coordinator.Sources), conf.Options.MongoCsUrl, toUrl)
+	ddlManager := NewDDLManager()
 
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
@@ -341,6 +339,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		syncer.init()
 		ckptManager.addOplogSyncer(syncer)
 		mvckManager.addOplogSyncer(syncer)
+		ddlManager.addOplogSyncer(syncer)
 		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)
 	}
 
@@ -355,6 +354,10 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 
 	if conf.Options.MoveChunkEnable {
 		mvckManager.start()
+	}
+
+	if DDLSupportForSharding() {
+		ddlManager.start()
 	}
 
 	// prepare worker routine and bind it to syncer
@@ -377,4 +380,8 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		go syncer.start()
 	}
 	return nil
+}
+
+func DDLSupportForSharding() bool {
+	return !conf.Options.ReplayerDMLOnly && conf.Options.MongoCsUrl != ""
 }
