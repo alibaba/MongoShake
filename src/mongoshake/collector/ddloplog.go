@@ -26,6 +26,7 @@ type DDLKey struct {
 }
 
 type DDLValue struct {
+	blockLog *oplog.PartialLog
 	blockChan chan bool
 	blockMap  map[string]bson.MongoTimestamp
 }
@@ -71,24 +72,31 @@ func (manager *DDLManager) start() {
 	})
 }
 
-func (manager *DDLManager) BlockDDL(replset string, log *oplog.PartialLog) bool {
+func (manager *DDLManager) addDDL(replset string, log *oplog.PartialLog) *DDLValue {
+	manager.mutex.Lock()
+	defer manager.mutex.Unlock()
 	if objectStr, err := json.Marshal(log.Object); err == nil {
-		manager.mutex.Lock()
 		ddlKey := DDLKey{Namespace: log.Namespace, ObjectStr: string(objectStr)}
 		if _, ok := manager.ddlMap[ddlKey]; !ok {
-			manager.ddlMap[ddlKey] = &DDLValue{blockChan: make(chan bool),
-				blockMap: make(map[string]bson.MongoTimestamp)}
+			manager.ddlMap[ddlKey] = &DDLValue{
+				blockChan: make(chan bool),
+				blockMap: make(map[string]bson.MongoTimestamp),
+				blockLog: log}
 		}
 		ddlValue := manager.ddlMap[ddlKey]
 		ddlValue.blockMap[replset] = log.Timestamp
-		LOG.Info("Oplog syncer %v block at ddl log %v", replset, log)
-		manager.mutex.Unlock()
-		_, ok := <-ddlValue.blockChan
-		return ok
+		return ddlValue
 	} else {
-		LOG.Crashf("DDLManager syncer %v BlockDDL json marshal %v error. %v", replset, log.Object, err)
-		return false
+		LOG.Crashf("DDLManager syncer %v json marshal ddl log %v error. %v", replset, log.Object, err)
+		return nil
 	}
+}
+
+func (manager *DDLManager) BlockDDL(replset string, log *oplog.PartialLog) bool {
+	ddlValue := manager.addDDL(replset, log)
+	LOG.Info("Oplog syncer %v block at ddl log %v", replset, log)
+	_, ok := <-ddlValue.blockChan
+	return ok
 }
 
 func (manager *DDLManager) UnBlockDDL(replset string, log *oplog.PartialLog) {
@@ -126,78 +134,82 @@ func (manager *DDLManager) eliminateBlock() {
 	if ddlMinTs == math.MaxInt64 {
 		return
 	}
-	// whether unblock oplog syncer exceed minTs
-	forceRun := true
-	for replset, syncer := range manager.syncMap {
-		if _, ok := AllBlockMap[replset]; ok {
-			continue
-		}
-		for _, worker := range syncer.batcher.workerGroup {
-			unack := bson.MongoTimestamp(atomic.LoadInt64(&worker.unack))
-			if unack < ddlMinTs {
-				return
-			}
-			if unack < ddlMinTs + (DDLForceRunInterval << 32) {
-				forceRun = false
-			}
+	ddlMinValue := manager.ddlMap[ddlMinKey]
+	if ddlMinValue == manager.lastDDLValue {
+		LOG.Info("DDLManager already eliminate ddl %v", ddlMinKey)
+		return
+	}
+	// whether non sharding ddl
+	if manager.FromCsConn != nil {
+		time.Sleep(DDLCheckInterval * time.Second)
+		shardColSpec := utils.GetShardCollectionSpec(manager.FromCsConn.Session, ddlMinValue.blockLog)
+		if shardColSpec == nil {
+			LOG.Info("DDLManager eliminate block and run non sharding ddl %v", ddlMinKey)
+			manager.lastDDLValue = ddlMinValue
+			ddlMinValue.blockChan <- true
+			return
 		}
 	}
 	// try to run the earliest ddl
-	if value, ok := manager.ddlMap[ddlMinKey]; ok {
-		if value == manager.lastDDLValue {
-			LOG.Info("DDLManager already eliminate ddl %v", ddlMinKey)
-			return
-		}
-		if strings.HasSuffix(ddlMinKey.Namespace, "system.indexes") {
-			LOG.Info("DDLManager eliminate block and run ddl %v", ddlMinKey)
-			manager.lastDDLValue = value
-			value.blockChan <- true
-			return
-		}
-		var object bson.D
-		if err := json.Unmarshal([]byte(ddlMinKey.ObjectStr), &object); err != nil {
-			LOG.Crashf("DDLManager unmarshal bson %v from ns[%v] failed. %v",
-				ddlMinKey.ObjectStr, ddlMinKey.Namespace, err)
-		}
-		operation, _ := oplog.ExtraCommandName(object)
-		switch operation {
-		case "create":
-			fallthrough
-		case "createIndexes":
-			fallthrough
-		case "deleteIndex":
-			fallthrough
-		case "deleteIndexes":
-			fallthrough
-		case "collMod":
-			fallthrough
-		case "dropIndex":
-			fallthrough
-		case "dropIndexes":
-			LOG.Info("DDLManager eliminate block and run ddl %v", ddlMinKey)
-			manager.lastDDLValue = value
-			value.blockChan <- true
-		case "dropDatabase":
-			fallthrough
-		case "drop":
-			if forceRun {
-				LOG.Info("DDLManager eliminate block and force run ddl %v", ddlMinKey)
-				manager.lastDDLValue = value
-				value.blockChan <- true
+	if strings.HasSuffix(ddlMinKey.Namespace, "system.indexes") {
+		LOG.Info("DDLManager eliminate block and run ddl %v", ddlMinKey)
+		manager.lastDDLValue = ddlMinValue
+		ddlMinValue.blockChan <- true
+		return
+	}
+	var object bson.D
+	if err := json.Unmarshal([]byte(ddlMinKey.ObjectStr), &object); err != nil {
+		LOG.Crashf("DDLManager unmarshal bson %v from ns[%v] failed. %v",
+			ddlMinKey.ObjectStr, ddlMinKey.Namespace, err)
+	}
+	operation, _ := oplog.ExtraCommandName(object)
+	switch operation {
+	case "create":
+		fallthrough
+	case "createIndexes":
+		fallthrough
+	case "deleteIndex":
+		fallthrough
+	case "deleteIndexes":
+		fallthrough
+	case "collMod":
+		fallthrough
+	case "dropIndex":
+		fallthrough
+	case "dropIndexes":
+		LOG.Info("DDLManager eliminate block and run ddl %v", ddlMinKey)
+		manager.lastDDLValue = ddlMinValue
+		ddlMinValue.blockChan <- true
+	case "dropDatabase":
+		fallthrough
+	case "drop":
+		// drop dll must block until get all oplog or 10 seconds later
+		for replset, syncer := range manager.syncMap {
+			if _, ok := AllBlockMap[replset]; ok {
+				continue
 			}
-		case "renameCollection":
-			fallthrough
-		case "convertToCapped":
-			fallthrough
-		case "emptycapped":
-			fallthrough
-		case "applyOps":
-			LOG.Crashf("DDLManager illegal DDL %v", ddlMinKey)
-		default:
-			LOG.Info("DDLManager eliminate block and run unsupported ddl %v", ddlMinKey)
-			manager.lastDDLValue = value
-			value.blockChan <- true
+			for _, worker := range syncer.batcher.workerGroup {
+				unack := bson.MongoTimestamp(atomic.LoadInt64(&worker.unack))
+				if unack < ddlMinTs + (DDLForceRunInterval << 32) {
+					return
+				}
+			}
 		}
+		LOG.Info("DDLManager eliminate block and force run ddl %v", ddlMinKey)
+		manager.lastDDLValue = ddlMinValue
+		ddlMinValue.blockChan <- true
+	case "renameCollection":
+		fallthrough
+	case "convertToCapped":
+		fallthrough
+	case "emptycapped":
+		fallthrough
+	case "applyOps":
+		LOG.Crashf("DDLManager illegal DDL %v", ddlMinKey)
+	default:
+		LOG.Info("DDLManager eliminate block and run unsupported ddl %v", ddlMinKey)
+		manager.lastDDLValue = ddlMinValue
+		ddlMinValue.blockChan <- true
 	}
 }
 

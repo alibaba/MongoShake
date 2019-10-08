@@ -54,9 +54,9 @@ func TestDDLManager(t *testing.T) {
 
 		worker3 := manager.syncMap[repliset3].batcher.workerGroup[0]
 
-		v1 := manager.BlockDDL(repliset1, mockOpLog(1, "c", bson.D{{"create", "tbl"}}))
+		v1 := manager.addDDL(repliset1, mockOpLog(1, "c", bson.D{{"create", "tbl"}}))
 		assert.NotNil(t, v1)
-		v2 := manager.BlockDDL(repliset2, mockOpLog(1, "c", bson.D{{"create", "tbl"}}))
+		v2 := manager.addDDL(repliset2, mockOpLog(1, "c", bson.D{{"create", "tbl"}}))
 		assert.NotNil(t, v2)
 		atomic.StoreInt64(&worker3.unack, 1)
 		_, ok := <-v1.blockChan
@@ -68,15 +68,17 @@ func TestDDLManager(t *testing.T) {
 		manager := mockDDLManager()
 		manager.start()
 
-		v1 := manager.BlockDDL(repliset1, mockOpLog(1, "c", bson.D{{"create", "tbl"}}))
+		v1 := manager.addDDL(repliset1, mockOpLog(1, "c", bson.D{{"create", "tbl"}}))
 		assert.NotNil(t, v1)
-		v2 := manager.BlockDDL(repliset2, mockOpLog(1, "c", bson.D{{"create", "tbl"}}))
+		v2 := manager.addDDL(repliset2, mockOpLog(1, "c", bson.D{{"create", "tbl"}}))
 		assert.NotNil(t, v2)
-		v3 := manager.BlockDDL(repliset3, mockOpLog(1, "c", bson.D{{"create", "tbl"}}))
-		assert.Nil(t, v3)
-		manager.UnBlockDDL(repliset3, mockOpLog(1, "c", bson.D{{"create", "tbl"}}))
-		_, ok := <-v1.blockChan
-		assert.Equal(t, false, ok)
+		v3 := manager.addDDL(repliset3, mockOpLog(1, "c", bson.D{{"create", "tbl"}}))
+		assert.NotNil(t, v3)
+		_, ok1 := <-v1.blockChan
+		assert.Equal(t, true, ok1)
+		manager.UnBlockDDL(repliset1, mockOpLog(1, "c", bson.D{{"create", "tbl"}}))
+		_, ok2 := <-v2.blockChan
+		assert.Equal(t, false, ok2)
 	}
 	{
 		fmt.Printf("TestDDLManager case %d.\n", nr)
@@ -86,20 +88,23 @@ func TestDDLManager(t *testing.T) {
 
 		worker1 := manager.syncMap[repliset1].batcher.workerGroup[0]
 
-		v1 := manager.BlockDDL(repliset1, mockOpLog(1, "c", bson.D{{"create", "tmp"}}))
+		v1 := manager.addDDL(repliset1, mockOpLog(1, "c", bson.D{{"create", "tmp"}}))
 		assert.NotNil(t, v1)
-		v2 := manager.BlockDDL(repliset2, mockOpLog(2, "c", bson.D{{"create", "tbl"}}))
+		v2 := manager.addDDL(repliset2, mockOpLog(2, "c", bson.D{{"create", "tbl"}}))
 		assert.NotNil(t, v2)
-		v3 := manager.BlockDDL(repliset3, mockOpLog(2, "c", bson.D{{"createIndexes", "tbl"}}))
+		v3 := manager.addDDL(repliset3, mockOpLog(2, "c", bson.D{{"createIndexes", "tbl"}}))
 		assert.NotNil(t, v3)
 		_, ok1 := <-v1.blockChan
-		assert.Equal(t, false, ok1)
-		v4 := manager.BlockDDL(repliset1, mockOpLog(2, "c", bson.D{{"create", "tbl"}}))
+		assert.Equal(t, true, ok1)
+		manager.UnBlockDDL(repliset1, mockOpLog(1, "c", bson.D{{"create", "tmp"}}))
+		v4 := manager.addDDL(repliset1, mockOpLog(2, "c", bson.D{{"create", "tbl"}}))
 		assert.NotNil(t, v4)
 		_, ok2 := <-v2.blockChan
 		assert.Equal(t, true, ok2)
 		manager.UnBlockDDL(repliset2, mockOpLog(2, "c", bson.D{{"create", "tbl"}}))
-		v5 := manager.BlockDDL(repliset2, mockOpLog(3, "c", bson.D{{"createIndexes", "tbl"}}))
+		_, ok4 := <-v4.blockChan
+		assert.Equal(t, false, ok4)
+		v5 := manager.addDDL(repliset2, mockOpLog(3, "c", bson.D{{"createIndexes", "tbl"}}))
 		assert.NotNil(t, v5)
 		atomic.StoreInt64(&worker1.unack, 3)
 		_, ok3 := <-v3.blockChan

@@ -380,16 +380,10 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*Oplo
 			} else {
 				LOG.Info("Bulk execute command (op==c) oplog, operation[%s], error type[%v], error[%v]",
 					operation, reflect.TypeOf(err), err.Error())
-				if e, ok := err.(*mgo.LastError); ok {
-					LOG.Info("Bulk execute command (op==c) oplog, operation[%s], LastError error[%v], code[%v]",
-						operation, e.Err, e.Code)
-					if e.Code == 20 || e.Code == 23 {
-						continue
-					}
-				} else if e, ok := err.(*mgo.QueryError); ok {
+				if e, ok := err.(*mgo.QueryError); ok {
 					LOG.Info("Bulk execute command (op==c) oplog, operation[%s], QueryError error[%v], code[%v]",
 						operation, e.Message, e.Code)
-					if e.Code == 23 {
+					if e.Code == 20 || e.Code == 23 {
 						continue
 					}
 				}
@@ -587,16 +581,10 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*Op
 			} else {
 				LOG.Info("Single execute command (op==c) oplog, operation[%s], error type[%v], error[%v]",
 					operation, reflect.TypeOf(err), err.Error())
-				if e, ok := err.(*mgo.LastError); ok {
-					LOG.Info("Single execute command (op==c) oplog, operation[%s], LastError error[%v], code[%v]",
-						operation, e.Err, e.Code)
-					if e.Code == 20 || e.Code == 23 {
-						continue
-					}
-				} else if e, ok := err.(*mgo.QueryError); ok {
+				if e, ok := err.(*mgo.QueryError); ok {
 					LOG.Info("Single execute command (op==c) oplog, operation[%s], QueryError error[%v], code[%v]",
 						operation, e.Message, e.Code)
-					if e.Code == 23 {
+					if e.Code == 20 || e.Code == 23 {
 						continue
 					}
 				}
