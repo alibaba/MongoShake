@@ -232,6 +232,10 @@ func GetDDLNamespace(log *oplog.PartialLog) string {
 	case "dropIndex":
 		fallthrough
 	case "dropIndexes":
+		fallthrough
+	case "convertToCapped":
+		fallthrough
+	case "emptycapped":
 		db := strings.SplitN(log.Namespace, ".", 2)[0]
 		collection, ok := oplog.GetKey(log.Object, operation).(string)
 		if !ok {
@@ -239,11 +243,11 @@ func GetDDLNamespace(log *oplog.PartialLog) string {
 		}
 		return fmt.Sprintf("%s.%s", db, collection)
 	case "renameCollection":
-		fallthrough
-	case "convertToCapped":
-		fallthrough
-	case "emptycapped":
-		fallthrough
+		ns, ok := oplog.GetKey(log.Object, operation).(string)
+		if !ok {
+			LOG.Crashf("extraCommandName meets illegal %v oplog %v, ignore!", operation, log.Object)
+		}
+		return ns
 	case "applyOps":
 		LOG.Crashf("GetDDLNamespace illegal DDL log[%v]", logD)
 	default:

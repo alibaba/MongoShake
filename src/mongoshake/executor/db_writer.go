@@ -383,7 +383,7 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*Oplo
 				if e, ok := err.(*mgo.QueryError); ok {
 					LOG.Info("Bulk execute command (op==c) oplog, operation[%s], QueryError error[%v], code[%v]",
 						operation, e.Message, e.Code)
-					if e.Code == 20 || e.Code == 23 {
+					if e.Code == 20 || e.Code == 23 || e.Code == 48 {
 						continue
 					}
 				}
@@ -584,7 +584,7 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*Op
 				if e, ok := err.(*mgo.QueryError); ok {
 					LOG.Info("Single execute command (op==c) oplog, operation[%s], QueryError error[%v], code[%v]",
 						operation, e.Message, e.Code)
-					if e.Code == 20 || e.Code == 23 {
+					if e.Code == 20 || e.Code == 23 || e.Code == 48 {
 						continue
 					}
 				}
