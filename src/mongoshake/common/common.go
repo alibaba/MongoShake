@@ -25,6 +25,8 @@ const (
 
 // Build info
 var BRANCH = "$"
+var SIGNALPROFILE = "$"
+var SIGNALSTACK = "$"
 
 const (
 	GlobalDiagnosticPath = "diagnostic"
