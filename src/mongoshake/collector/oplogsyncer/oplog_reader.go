@@ -47,7 +47,8 @@ type retOplog struct {
 // by an url. And with query options. user can iterate oplogs.
 type OplogReader struct {
 	// source mongo address url
-	src string
+	src     string
+	replset string
 	// mongo oplog reader
 	conn           *utils.MongoConn
 	oplogsIterator *mgo.Iter
@@ -64,9 +65,10 @@ type OplogReader struct {
 }
 
 // NewOplogReader creates reader with mongodb url
-func NewOplogReader(src string) *OplogReader {
+func NewOplogReader(src, replset string) *OplogReader {
 	return &OplogReader{
 		src:       src,
+		replset:   replset,
 		query:     bson.M{},
 		oplogChan: make(chan *retOplog, oplogChanSize),
 		firstRead: true,
@@ -146,8 +148,7 @@ func (reader *OplogReader) fetcher() {
 				// some internal error. need rebuild the oplogsIterator
 				reader.releaseIterator()
 				if reader.isCollectionCappedError(err) { // print it
-					LOG.Error("oplog collection capped may happen: %v", err)
-					reader.oplogChan <- &retOplog{nil, CollectionCappedError}
+					LOG.Crashf("oplog sync replset %v collection oplog.rs capped may happen: %v", reader.replset, err)
 				} else {
 					reader.oplogChan <- &retOplog{nil, fmt.Errorf("get next oplog failed. release oplogsIterator, %s", err.Error())}
 				}

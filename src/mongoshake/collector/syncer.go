@@ -99,7 +99,7 @@ func NewOplogSyncer(
 		fullSyncFinishPosition: fullSyncFinishPosition,
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
-		reader:      oplogsyncer.NewOplogReader(mongoUrl),
+		reader:      oplogsyncer.NewOplogReader(mongoUrl, replset),
 		ckptManager: ckptManager,
 		mvckManager: mvckManager,
 		ddlManager:  ddlManager,
@@ -135,8 +135,8 @@ func NewOplogSyncer(
 
 func (sync *OplogSyncer) init() {
 	sync.replMetric = utils.NewMetric(sync.replset, utils.METRIC_CKPT_TIMES|
-		utils.METRIC_TUNNEL_TRAFFIC| utils.METRIC_LSN_CKPT| utils.METRIC_SUCCESS|
-		utils.METRIC_TPS| utils.METRIC_RETRANSIMISSION)
+		utils.METRIC_TUNNEL_TRAFFIC|utils.METRIC_LSN_CKPT|utils.METRIC_SUCCESS|
+		utils.METRIC_TPS|utils.METRIC_RETRANSIMISSION)
 	sync.replMetric.ReplStatus.Update(utils.WorkGood)
 
 	sync.RestAPI()
@@ -397,9 +397,6 @@ func (sync *OplogSyncer) next() bool {
 		sync.replMetric.SetOplogMax(payload)
 		sync.replMetric.SetOplogAvg(payload)
 		sync.replMetric.ReplStatus.Clear(utils.FetchBad)
-	} else if err == oplogsyncer.CollectionCappedError {
-		LOG.Error("oplog collection capped error, users should fix it manually")
-		return false
 	} else if err != nil && err != oplogsyncer.TimeoutError {
 		LOG.Error("oplog syncer internal error: %v", err)
 		// error is nil indicate that only timeout incur syncer.next()

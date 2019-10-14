@@ -155,9 +155,9 @@ func GetColShardType(session *mgo.Session, namespace string) ([]string, string, 
 }
 
 type ShardCollectionSpec struct {
-	Ns      string
-	Key     bson.D
-	Unique  bool
+	Ns     string
+	Key    bson.D
+	Unique bool
 }
 
 func GetShardCollectionSpec(session *mgo.Session, log *oplog.PartialLog) *ShardCollectionSpec {
@@ -187,19 +187,19 @@ func GetShardCollectionSpec(session *mgo.Session, log *oplog.PartialLog) *ShardC
 		if dropped, ok := oplog.GetKey(leftDoc.Object, "dropped").(bool); ok && !dropped {
 			LOG.Info("GetShardCollectionSpec from left doc %v of config.collections for log %v",
 				leftDoc, log)
-			return &ShardCollectionSpec{Ns:namespace,
-				Key: oplog.GetKey(leftDoc.Object, "key").(bson.D),
+			return &ShardCollectionSpec{Ns: namespace,
+				Key:    oplog.GetKey(leftDoc.Object, "key").(bson.D),
 				Unique: oplog.GetKey(leftDoc.Object, "unique").(bool),
 			}
 		}
 	}
 	if rightDoc.Operation != "" {
 		if dropped, ok := oplog.GetKey(rightDoc.Object, "dropped").(bool); ok && !dropped {
-			if rightDoc.Timestamp < log.Timestamp + (ConifgShardLogInterval << 32) {
+			if rightDoc.Timestamp < log.Timestamp+(ConifgShardLogInterval<<32) {
 				LOG.Info("GetShardCollectionSpec from right doc %v of config.collections for log %v",
 					rightDoc, log)
-				return &ShardCollectionSpec{Ns:namespace,
-					Key: oplog.GetKey(rightDoc.Object, "key").(bson.D),
+				return &ShardCollectionSpec{Ns: namespace,
+					Key:    oplog.GetKey(rightDoc.Object, "key").(bson.D),
 					Unique: oplog.GetKey(rightDoc.Object, "unique").(bool),
 				}
 			}
@@ -207,7 +207,7 @@ func GetShardCollectionSpec(session *mgo.Session, log *oplog.PartialLog) *ShardC
 				rightDoc, log)
 		}
 	}
-	LOG.Warn("GetShardCollectionSpec has no config collection spec for ns[%v], maybe not sharding", namespace)
+	LOG.Info("GetShardCollectionSpec has no config collection spec for ns[%v]", namespace)
 	return nil
 }
 

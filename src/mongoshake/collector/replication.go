@@ -71,20 +71,18 @@ func (coordinator *ReplicationCoordinator) Run() error {
 		}
 
 		// get current newest timestamp
-		_, fullFinishTs, _, oldestTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
+		_, fullFinishTs, _, bigOldTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
 		if err != nil {
 			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
 		}
 		LOG.Info("------------------------full sync done!------------------------")
 
-		LOG.Info("oldestTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractMongoTimestamp(oldestTs),
+		LOG.Info("bigOldTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractMongoTimestamp(bigOldTs),
 			utils.ExtractMongoTimestamp(fullBeginTs), utils.ExtractMongoTimestamp(fullFinishTs))
 		// the oldest oplog is lost
-		if utils.ExtractMongoTimestamp(oldestTs) >= fullBeginTs {
-			err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's "+
-				"oplog collection size is too small or full sync continues too long", fullBeginTs, oldestTs)
-			LOG.Error(err)
-			return err
+		if utils.ExtractMongoTimestamp(bigOldTs) >= fullBeginTs {
+			return fmt.Errorf("incr sync fullBeginTs[%v] is less than current bigOldTs[%v], this error means user's "+
+				"oplog collection size is too small or full sync continues too long", fullBeginTs, bigOldTs)
 		}
 
 		LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
@@ -98,8 +96,20 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			return err
 		}
 	case SYNCMODE_OPLOG:
-		if err := coordinator.startOplogReplication(conf.Options.ContextStartPosition,
-			conf.Options.ContextStartPosition); err != nil {
+		beginTs := conf.Options.ContextStartPosition
+		if beginTs != 0 {
+			// get current oldest timestamp
+			_, _, _, bigOldTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
+			if err != nil {
+				return fmt.Errorf("get oldest timestamp failed[%v]", err)
+			}
+			// the oldest oplog is lost
+			if utils.ExtractMongoTimestamp(bigOldTs) >= beginTs {
+				return fmt.Errorf("incr sync beginTs[%v] is less than current bigOldTs[%v], this error means user's "+
+					"oplog collection size is too small or full sync continues too long", beginTs, bigOldTs)
+			}
+		}
+		if err := coordinator.startOplogReplication(beginTs, beginTs); err != nil {
 			return err
 		}
 	default:
@@ -119,7 +129,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	// try to connect ContextStorageUrl
 	storageUrl := conf.Options.ContextStorageUrl
 	if conn, err = utils.NewMongoConn(storageUrl, utils.ConnectModePrimary, true); conn == nil || !conn.IsGood() || err != nil {
-		LOG.Critical("Connect storageUrl[%v] error[%v]. Please add primary node into 'mongo_urls' " +
+		LOG.Critical("Connect storageUrl[%v] error[%v]. Please add primary node into 'mongo_urls' "+
 			"if 'context.storage.url' is empty", storageUrl, err)
 		return err
 	}
@@ -193,7 +203,7 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	}
 
 	// oldestTs is the smallest of the all newest timestamp
-	tsMap, _, oldestTs, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
+	tsMap, _, smallNewTs, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
 	if err != nil {
 		return syncMode, 0, nil
 	}
@@ -212,7 +222,7 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	}
 
 	if needFull {
-		return SYNCMODE_ALL, utils.TimestampToInt64(oldestTs), nil
+		return SYNCMODE_ALL, utils.TimestampToInt64(smallNewTs), nil
 	} else {
 		LOG.Info("sync mode change from 'all' to 'oplog'")
 		return SYNCMODE_OPLOG, 0, nil
