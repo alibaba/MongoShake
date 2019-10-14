@@ -164,14 +164,19 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(len(indexMap))
+	for ns := range indexMap {
+		if _, ok := nsExistedSet[ns.Str()]; ok {
+			LOG.Debug("Index sync is skipped. %v", ns.Str())
+			continue
+		}
+		wg.Add(1)
+	}
 
 	collExecutorParallel := conf.Options.ReplayerCollectionParallel
 	namespaces := make(chan *IndexNS, collExecutorParallel)
 	nimo.GoRoutine(func() {
 		for ns, indexList := range indexMap {
 			if _, ok := nsExistedSet[ns.Str()]; ok {
-				LOG.Debug("Index sync is skipped. %v", ns.Str())
 				continue
 			}
 			namespaces <- &IndexNS{ns: ns, indexList: indexList}

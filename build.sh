@@ -73,9 +73,9 @@ for g in "${goos[@]}"; do
     for i in "${modules[@]}" ; do
         echo "Build ""$i"
         if [ $DEBUG -eq 1 ]; then
-            $run_builder ${compile_line} -ldflags "-X $build_info" -gcflags='-N -l' -o "bin/$i.$g" -tags "debug" "src/mongoshake//$i/main/$i.go"
+            $run_builder ${compile_line} -ldflags "-X $build_info" -gcflags='-N -l' -o "bin/$i.$g" -tags "debug" "src/mongoshake/$i/main/$i.go"
         else
-            $run_builder ${compile_line} -ldflags "-X $build_info" -o "bin/$i.$g" "src/mongoshake//$i/main/$i.go"
+            $run_builder ${compile_line} -ldflags "-X $build_info" -o "bin/$i.$g" "src/mongoshake/$i/main/$i.go"
         fi
 
         # execute and show compile messages
