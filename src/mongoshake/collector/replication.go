@@ -234,11 +234,12 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	trans := transform.NewNamespaceTransform(conf.Options.TransformNamespace)
 
 	shardingSync := docsyncer.IsShardingToSharding(fromIsSharding, toConn)
-	if err := docsyncer.StartDropDestCollection(nsSet, toConn, trans); err != nil {
+	nsExistedSet, err := docsyncer.StartDropDestCollection(nsSet, toConn, trans)
+	if err != nil {
 		return err
 	}
 	if shardingSync {
-		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.ContextStorageUrl, toConn, trans); err != nil {
+		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.ContextStorageUrl, toConn, nsExistedSet, trans); err != nil {
 			return err
 		}
 	}
@@ -270,7 +271,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		return replError
 	}
 
-	if err := docsyncer.StartIndexSync(indexMap, toUrl, trans); err != nil {
+	if err := docsyncer.StartIndexSync(indexMap, toUrl, nsExistedSet, trans); err != nil {
 		return err
 	}
 	if conf.Options.SyncMode != SYNCMODE_DOCUMENT {
