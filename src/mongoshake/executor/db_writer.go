@@ -378,8 +378,8 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*Oplo
 			if err = runCommand(database, operation, log.original.partialLog, bw.session); err == nil {
 				LOG.Info("Bulk execute command (op==c) oplog, operation[%s]", operation)
 			} else {
-				LOG.Info("Bulk execute command (op==c) oplog, operation[%s], error type[%v], error[%v]",
-					operation, reflect.TypeOf(err), err.Error())
+				LOG.Info("Bulk execute command (op==c) oplog, operation[%s], log[%v], error type[%v], error[%v]",
+					operation, newObject, reflect.TypeOf(err), err.Error())
 				if e, ok := err.(*mgo.QueryError); ok {
 					LOG.Info("Bulk execute command (op==c) oplog, operation[%s], QueryError error[%v], code[%v]",
 						operation, e.Message, e.Code)
@@ -579,8 +579,8 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*Op
 			if err = runCommand(database, operation, log.original.partialLog, sw.session); err == nil {
 				LOG.Info("Single execute command (op==c) oplog, operation[%s]", operation)
 			} else {
-				LOG.Info("Single execute command (op==c) oplog, operation[%s], error type[%v], error[%v]",
-					operation, reflect.TypeOf(err), err.Error())
+				LOG.Info("Single execute command (op==c) oplog, operation[%s], log[%v], error type[%v], error[%v]",
+					operation, newObject, reflect.TypeOf(err), err.Error())
 				if e, ok := err.(*mgo.QueryError); ok {
 					LOG.Info("Single execute command (op==c) oplog, operation[%s], QueryError error[%v], code[%v]",
 						operation, e.Message, e.Code)

@@ -199,7 +199,7 @@ func (manager *DDLManager) eliminateBlock() {
 	case "dropDatabase":
 		fallthrough
 	case "drop":
-		// drop dll must block until get all oplog
+		// drop ddl must block until get drop oplog from all dbs or unblocked db run more than ddlMinTs
 		for replset, syncer := range manager.syncMap {
 			if _, ok := ddlMinValue.dbMap[replset].(*BlockDB); ok {
 				continue
