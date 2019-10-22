@@ -163,13 +163,13 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 		return nil
 	}
 
-	var wg sync.WaitGroup
+	var indexNeedSync int
 	for ns := range indexMap {
 		if _, ok := nsExistedSet[ns.Str()]; ok {
-			LOG.Debug("Index sync is skipped. %v", ns.Str())
+			LOG.Info("document syncer index sync of ns[%v] is skipped", ns.Str())
 			continue
 		}
-		wg.Add(1)
+		indexNeedSync++
 	}
 
 	collExecutorParallel := conf.Options.ReplayerCollectionParallel
@@ -190,33 +190,37 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 	}
 	defer conn.Close()
 
-	for i := 0; i < collExecutorParallel; i++ {
-		nimo.GoRoutine(func() {
-			session := conn.Session.Clone()
-			defer session.Close()
+	if indexNeedSync > 0 {
+		var wg sync.WaitGroup
+		wg.Add(indexNeedSync)
+		for i := 0; i < collExecutorParallel; i++ {
+			nimo.GoRoutine(func() {
+				session := conn.Session.Clone()
+				defer session.Close()
 
-			for {
-				indexNs, ok := <-namespaces
-				if !ok {
-					break
-				}
-				ns := indexNs.ns
-				toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
-
-				for _, index := range indexNs.indexList {
-					index.Background = false
-					if err = session.DB(toNS.Database).C(toNS.Collection).EnsureIndex(index); err != nil {
-						LOG.Warn("Create indexes for ns %v of dest mongodb failed. %v", ns, err)
+				for {
+					indexNs, ok := <-namespaces
+					if !ok {
+						break
 					}
-				}
-				LOG.Info("Create indexes for ns %v of dest mongodb finish", toNS)
+					ns := indexNs.ns
+					toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
 
-				wg.Done()
-			}
-		})
+					for _, index := range indexNs.indexList {
+						index.Background = false
+						if err = session.DB(toNS.Database).C(toNS.Collection).EnsureIndex(index); err != nil {
+							LOG.Warn("Create indexes for ns %v of dest mongodb failed. %v", ns, err)
+						}
+					}
+					LOG.Info("Create indexes for ns %v of dest mongodb finish", toNS)
+
+					wg.Done()
+				}
+			})
+		}
+		wg.Wait()
 	}
 
-	wg.Wait()
 	close(namespaces)
 	LOG.Info("document syncer sync index finish")
 	return syncError
