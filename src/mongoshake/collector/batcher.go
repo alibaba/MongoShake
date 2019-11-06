@@ -3,10 +3,16 @@ package collector
 import (
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/mgo/bson"
 	"mongoshake/collector/configure"
 	"mongoshake/collector/filter"
 	"mongoshake/common"
 	"mongoshake/oplog"
+	"sync/atomic"
+)
+
+const (
+	WaitAckIntervalMS = 1000
 )
 
 var (
@@ -33,8 +39,10 @@ type Batcher struct {
 	// related tunnel workerGroup. not owned
 	workerGroup []*Worker
 
-	// the last oplog in the batch
-	lastOplog *oplog.PartialLog
+	// timestamp of prepare to sync oplog, including filtered oplog
+	unsyncTs bson.MongoTimestamp
+	// timestamp of already synced oplog, including filtered oplog
+	syncTs bson.MongoTimestamp
 
 	// remainLogs store the logs that split by barrier and haven't been consumed yet.
 	remainLogs []*oplog.GenericOplog
@@ -94,7 +102,7 @@ func (batcher *Batcher) dispatchBatches(batchGroup [][]*oplog.GenericOplog) (wor
  * just return the last oplog in the previous batch.
  * if just start, this is nil.
  */
-func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, *oplog.PartialLog, *oplog.PartialLog) {
+func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, *oplog.PartialLog) {
 	// picked raw oplogs and batching in sequence
 	batchGroup := make([][]*oplog.GenericOplog, len(batcher.workerGroup))
 	syncer := batcher.syncer
@@ -125,22 +133,28 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, *oplog
 	nimo.AssertTrue(len(mergeBatch) != 0, "logs queue batch logs has zero length")
 
 	// split batch if has DDL
-	var lastOplog, lastFilterOplog *oplog.PartialLog
+	var lastOplog *oplog.PartialLog
 	flushCheckpoint := false
 	for i, genericLog := range mergeBatch {
 		// filter oplog such like Autologous or Gid-filtered
 		if batcher.filter(genericLog.Parsed) {
-			// doesn't push to worker, set lastFilterOplog
-			lastFilterOplog = genericLog.Parsed
 			continue
 		}
+		batcher.unsyncTs = genericLog.Parsed.Timestamp
 
 		// ensure the oplog order when moveChunk occurs if enabled move chunk at source sharding db
 		// need noop oplog to update OfferTs of move chunk when no valid oplog occur in shard db
-		if conf.Options.MoveChunkEnable && moveChunkBarrier(batcher.syncer, genericLog.Parsed) {
-			batcher.remainLogs = mergeBatch[i:]
-			barrier = true
-			break
+		if conf.Options.MoveChunkEnable {
+			mcBarrier, resend := moveChunkBarrier(batcher.syncer, genericLog.Parsed)
+			if mcBarrier {
+				if resend {
+					batcher.remainLogs = mergeBatch[i:]
+				} else {
+					batcher.remainLogs = mergeBatch[i+1:]
+				}
+				barrier = true
+				break
+			}
 		}
 
 		if noopFilter.Filter(genericLog.Parsed) || moveChunkFilter.Filter(genericLog.Parsed) {
@@ -152,8 +166,8 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, *oplog
 			batcher.remainLogs = mergeBatch[i:]
 			barrier = true
 			flushCheckpoint = true
-			LOG.Info("oplog syncer %v batch more with ddl oplog type[%v] ns[%v] object[%v]. lastOplog[%v] lastFilterOplog[%v]",
-				syncer.replset, genericLog.Parsed.Operation, genericLog.Parsed.Namespace, genericLog.Parsed.Object, lastOplog, lastFilterOplog)
+			LOG.Info("oplog syncer %v batch more with ddl oplog type[%v] ns[%v] object[%v]. lastOplog[%v]",
+				syncer.replset, genericLog.Parsed.Operation, genericLog.Parsed.Namespace, genericLog.Parsed.Object, lastOplog)
 			break
 		}
 		// current is not ddl but barrier == true
@@ -165,17 +179,14 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool, *oplog
 		which := syncer.hasher.DistributeOplogByMod(genericLog.Parsed, len(batcher.workerGroup))
 		batchGroup[which] = append(batchGroup[which], genericLog)
 		lastOplog = genericLog.Parsed
-		batcher.lastOplog = genericLog.Parsed
 
 		// barrier == true which means the current must be ddl so we should return only 1 oplog and then do split
 		if barrier {
-			if i+1 < len(mergeBatch) {
-				batcher.remainLogs = mergeBatch[i+1:]
-			}
+			batcher.remainLogs = mergeBatch[i+1:]
 			break
 		}
 	}
-	return batchGroup, barrier, flushCheckpoint, lastOplog, lastFilterOplog
+	return batchGroup, barrier, flushCheckpoint, lastOplog
 }
 
 func (batcher *Batcher) moveToNextQueue() {
@@ -187,11 +198,40 @@ func (batcher *Batcher) currentQueue() uint64 {
 	return batcher.nextQueue
 }
 
-// operations for _id record before migrate delete at node A must start ahead of operations after migrate insert at B
-func moveChunkBarrier(syncer *OplogSyncer, partialLog *oplog.PartialLog) bool {
-	if ddlFilter.Filter(partialLog) {
-		return false
+func (batcher *Batcher) isAllAcked() bool {
+	var maxAck int64 = 0
+	for _, worker := range batcher.workerGroup {
+		ack := atomic.LoadInt64(&worker.ack)
+		unack := atomic.LoadInt64(&worker.unack)
+		// all oplogs have been acked for right now or previous status
+		if ack != unack && !worker.IsAllAcked() {
+			LOG.Info("oplog syncer %v not acked. unack[%v] ack[%v]",
+				batcher.syncer.replset, utils.TimestampToLog(unack), utils.TimestampToLog(ack))
+			return false
+		}
+		if ack > maxAck {
+			maxAck = ack
+		}
 	}
-	barrier, _, _ := syncer.mvckManager.BarrierOplog(syncer.replset, partialLog)
-	return barrier
+	LOG.Info("oplog syncer %v all acked. ack[%v]", batcher.syncer.replset, utils.TimestampToLog(maxAck))
+	return true
+}
+
+func (batcher *Batcher) WaitAllAck() bool {
+	for {
+		if batcher.isAllAcked() {
+			break
+		}
+		utils.YieldInMs(WaitAckIntervalMS)
+	}
+}
+
+
+// operations for _id record before migrate delete at node A must start ahead of operations after migrate insert at B
+func moveChunkBarrier(syncer *OplogSyncer, partialLog *oplog.PartialLog) (bool, bool) {
+	if ddlFilter.Filter(partialLog) {
+		return false, false
+	}
+	barrier, resend, _ := syncer.mvckManager.BarrierOplog(syncer.replset, partialLog)
+	return barrier, resend
 }

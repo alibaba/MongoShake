@@ -65,11 +65,11 @@ func (manager *MoveChunkManager) barrierProbe(key MoveChunkKey, value *MoveChunk
 			unack := atomic.LoadInt64(&worker.unack)
 			ack := atomic.LoadInt64(&worker.ack)
 			if syncInfo.barrierChan != nil && ack == unack &&
-				(syncInfo.offerTs >= deleteItem.Timestamp || syncInfo.barrierKey == key) {
+				(syncInfo.syncer.batcher.syncTs >= deleteItem.Timestamp || syncInfo.barrierKey == key) {
 				continue
 			}
 			if syncInfo.barrierChan == nil && (hasInsert && replset != deleteItem.Replset ||
-				syncInfo.offerTs >= deleteItem.Timestamp &&
+				syncInfo.syncer.batcher.syncTs >= deleteItem.Timestamp &&
 					(ack == unack || ack < unack && ack >= int64(deleteItem.Timestamp))) {
 				continue
 			}
@@ -84,21 +84,13 @@ func (manager *MoveChunkManager) barrierProbe(key MoveChunkKey, value *MoveChunk
 func (manager *MoveChunkManager) minTsProbe(minTs bson.MongoTimestamp) bool {
 	for _, syncInfo := range manager.syncInfoMap {
 		syncInfo.mutex.Lock()
-		if syncInfo.barrierChan == nil && syncInfo.offerTs < minTs {
+		if syncInfo.barrierChan == nil && syncInfo.syncer.batcher.syncTs < minTs {
 			syncInfo.mutex.Unlock()
 			return false
 		}
 		syncInfo.mutex.Unlock()
 	}
 	return true
-}
-
-func (manager *MoveChunkManager) UpdateOfferTs(replset string) {
-	if syncInfo, ok := manager.syncInfoMap[replset]; ok {
-		syncInfo.mutex.Lock()
-		syncInfo.offerTs = syncInfo.syncTs
-		syncInfo.mutex.Unlock()
-	}
 }
 
 func (manager *MoveChunkManager) eliminateBarrier() bool {
@@ -116,9 +108,10 @@ func (manager *MoveChunkManager) eliminateBarrier() bool {
 		for _, worker := range syncInfo.syncer.batcher.workerGroup {
 			ack := bson.MongoTimestamp(atomic.LoadInt64(&worker.ack))
 			unack := bson.MongoTimestamp(atomic.LoadInt64(&worker.unack))
-			LOG.Info("syncer %v worker ack[%v] unack[%v] syncTs[%v] offerTs[%v] barrierKey[%v]", replset,
-				utils.TimestampToLog(ack), utils.TimestampToLog(unack), utils.TimestampToLog(syncInfo.syncTs),
-				utils.TimestampToLog(syncInfo.offerTs), syncInfo.barrierKey)
+			batcher := syncInfo.syncer.batcher
+			LOG.Info("syncer %v worker ack[%v] unack[%v] syncTs[%v] unsyncTs[%v] barrierKey[%v]", replset,
+				utils.TimestampToLog(ack), utils.TimestampToLog(unack), utils.TimestampToLog(batcher.syncTs),
+				utils.TimestampToLog(batcher.unsyncTs), syncInfo.barrierKey)
 		}
 		syncInfo.mutex.Unlock()
 	}
@@ -184,12 +177,8 @@ func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.
 	manager.moveChunkLock.Lock()
 	defer manager.moveChunkLock.Unlock()
 
-	if syncInfo.filterOplog(partialLog) {
-		return false, false, nil
-	}
-
 	barrier := false
-	tsUpdate := true
+	resend := false
 	if moveChunkFilter.Filter(partialLog) {
 		// barrier == true if the syncer already has a insert/delete move chunk oplog before
 		if oplogId := oplog.GetKey(partialLog.Object, ""); oplogId != nil {
@@ -202,7 +191,7 @@ func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.
 						key.string(), utils.TimestampToLog(partialLog.Timestamp))
 					value.barrierOplog(syncInfo, key, partialLog)
 					barrier = true
-					tsUpdate = false
+					resend = true
 				} else if value.deleteItem != nil && value.deleteItem.Replset == replset {
 					LOG.Info("syncer %v meet delete barrier ts[%v] when %v move chunk oplog found[%v %v]",
 						replset, utils.TimestampToLog(value.deleteItem.Timestamp), partialLog.Operation,
@@ -247,7 +236,7 @@ func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.
 						replset, utils.TimestampToLog(ts), key.string(), utils.TimestampToLog(partialLog.Timestamp))
 					value.barrierOplog(manager.syncInfoMap[replset], key, partialLog)
 					barrier = true
-					tsUpdate = false
+					resend = true
 				} else {
 					if value.deleteItem != nil && value.deleteItem.Replset == replset {
 						LOG.Crashf("syncer %v meet delete barrier ts[%v] when operation oplog found[%v %v] illegal",
@@ -260,13 +249,10 @@ func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.
 	}
 	// updateObj used for test case, it means update operation can execute
 	var updateObj interface{}
-	if tsUpdate {
-		syncInfo.updateSyncTs(partialLog)
-		if partialLog.Operation == "u" {
-			updateObj = partialLog.Object
-		}
+	if partialLog.Operation == "u" {
+		updateObj = partialLog.Object
 	}
-	return barrier, tsUpdate, updateObj
+	return barrier, resend, updateObj
 }
 
 func (manager *MoveChunkManager) Load(conn *utils.MongoConn, db string, tablePrefix string) error {
@@ -276,17 +262,13 @@ func (manager *MoveChunkManager) Load(conn *utils.MongoConn, db string, tablePre
 	ckptDoc := make(map[string]interface{})
 	for iter.Next(ckptDoc) {
 		replset, ok1 := ckptDoc[CheckpointName].(string)
-		syncTs, ok2 := ckptDoc[MoveChunkSyncTSName].(bson.MongoTimestamp)
-		offerTs, ok3 := ckptDoc[MoveChunkOfferTSName].(bson.MongoTimestamp)
-		if !ok1 || !ok2 || !ok3 {
+		if !ok1 {
 			return fmt.Errorf("MoveChunkManager load checkpoint illegal record %v", ckptDoc)
 		} else if syncInfo, ok := manager.syncInfoMap[replset]; !ok {
 			return fmt.Errorf("MoveChunkManager load checkpoint unknown replset %v", ckptDoc)
 		} else {
-			syncInfo.syncTs = syncTs
-			syncInfo.offerTs = offerTs
-			LOG.Info("MoveChunkManager load checkpoint set replset[%v] syncTs[%v] offerTs[%v]", replset,
-				utils.ExtractTimestampForLog(syncInfo.syncTs), utils.ExtractTimestampForLog(syncInfo.offerTs))
+			syncInfo.barrierKey = syncTs
+			LOG.Info("MoveChunkManager load checkpoint set replset[%v]", replset)
 		}
 	}
 	if err := iter.Close(); err != nil {
@@ -340,8 +322,6 @@ func (manager *MoveChunkManager) Flush(conn *utils.MongoConn, db string, tablePr
 		syncInfo.mutex.Lock()
 		ckptDoc := map[string]interface{}{
 			CheckpointName:       replset,
-			MoveChunkSyncTSName:  syncInfo.syncTs,
-			MoveChunkOfferTSName: syncInfo.offerTs,
 		}
 		if _, err := conn.Session.DB(db).C(tablePrefix+"_mvck_syncer").
 			Upsert(bson.M{CheckpointName: replset}, ckptDoc); err != nil {
@@ -395,8 +375,6 @@ func (manager *MoveChunkManager) Flush(conn *utils.MongoConn, db string, tablePr
 
 type SyncerMoveChunk struct {
 	syncer      *OplogSyncer
-	syncTs      bson.MongoTimestamp
-	offerTs     bson.MongoTimestamp
 	barrierKey  MoveChunkKey
 	barrierChan chan interface{}
 	mutex       sync.Mutex
@@ -407,15 +385,6 @@ func (syncInfo *SyncerMoveChunk) deleteBarrier() {
 	syncInfo.barrierKey = MoveChunkKey{}
 	syncInfo.barrierChan = nil
 	syncInfo.mutex.Unlock()
-}
-
-func (syncInfo *SyncerMoveChunk) filterOplog(partialLog *oplog.PartialLog) bool {
-	syncInfo.mutex.Lock()
-	defer syncInfo.mutex.Unlock()
-	if syncInfo.syncTs >= partialLog.Timestamp {
-		return true
-	}
-	return false
 }
 
 func (syncInfo *SyncerMoveChunk) blockOplog(replset string, partialLog *oplog.PartialLog) {
@@ -429,12 +398,6 @@ func (syncInfo *SyncerMoveChunk) blockOplog(replset string, partialLog *oplog.Pa
 		<-barrierChan
 		LOG.Info("syncer %v wait barrier finish", replset)
 	}
-}
-
-func (syncInfo *SyncerMoveChunk) updateSyncTs(partialLog *oplog.PartialLog) {
-	syncInfo.mutex.Lock()
-	defer syncInfo.mutex.Unlock()
-	syncInfo.syncTs = partialLog.Timestamp
 }
 
 type MoveChunkKey struct {

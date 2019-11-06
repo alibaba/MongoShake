@@ -167,7 +167,7 @@ func (manager *CheckpointManager) Load() error {
 		} else {
 			info.ackTs = ackTs
 			LOG.Info("CheckpointManager load checkpoint set replset[%v] checkpoint to exist %v",
-				replset, utils.ExtractTimestampForLog(info.ackTs))
+				replset, utils.TimestampToLog(info.ackTs))
 		}
 	}
 	if err := iter.Close(); err != nil {
@@ -177,7 +177,7 @@ func (manager *CheckpointManager) Load() error {
 		if info.ackTs == 0 {
 			info.ackTs = bson.MongoTimestamp(manager.startPosition << 32)
 			LOG.Info("CheckpointManager load checkpoint set replset[%v] checkpoint to start position %v",
-				replset, utils.ExtractTimestampForLog(info.ackTs))
+				replset, utils.TimestampToLog(info.ackTs))
 		}
 	}
 	for _, persist := range manager.persistList {
@@ -206,7 +206,7 @@ func (manager *CheckpointManager) Flush() error {
 		}
 	}
 	for replset, info := range manager.ckptMap {
-		LOG.Info("checkpoint replset %v updated to %v", replset, utils.ExtractTimestampForLog(info.ackTs))
+		LOG.Info("checkpoint replset %v updated to %v", replset, utils.TimestampToLog(info.ackTs))
 		if info.syncer != nil {
 			info.syncer.replMetric.AddCheckpoint(1)
 			info.syncer.replMetric.SetLSNCheckpoint(int64(info.ackTs))

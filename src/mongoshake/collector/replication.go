@@ -77,16 +77,16 @@ func (coordinator *ReplicationCoordinator) Run() error {
 		}
 		LOG.Info("------------------------full sync done!------------------------")
 
-		LOG.Info("bigOldTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractMongoTimestamp(bigOldTs),
-			utils.ExtractMongoTimestamp(fullBeginTs), utils.ExtractMongoTimestamp(fullFinishTs))
+		LOG.Info("bigOldTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractTimestamp(bigOldTs),
+			utils.ExtractTimestamp(fullBeginTs), utils.ExtractTimestamp(fullFinishTs))
 		// the oldest oplog is lost
-		if utils.ExtractMongoTimestamp(bigOldTs) >= fullBeginTs {
+		if utils.ExtractTimestamp(bigOldTs) >= fullBeginTs {
 			return fmt.Errorf("incr sync fullBeginTs[%v] is less than current bigOldTs[%v], this error means user's "+
 				"oplog collection size is too small or full sync continues too long", fullBeginTs, bigOldTs)
 		}
 
 		LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
-			utils.ExtractMongoTimestamp(fullBeginTs), utils.ExtractMongoTimestamp(fullFinishTs))
+			utils.ExtractTimestamp(fullBeginTs), utils.ExtractTimestamp(fullFinishTs))
 
 		if err := coordinator.startOplogReplication(fullBeginTs, utils.TimestampToInt64(fullFinishTs)); err != nil {
 			return err
@@ -104,7 +104,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 				return fmt.Errorf("get oldest timestamp failed[%v]", err)
 			}
 			// the oldest oplog is lost
-			if utils.ExtractMongoTimestamp(bigOldTs) >= beginTs {
+			if utils.ExtractTimestamp(bigOldTs) >= beginTs {
 				return fmt.Errorf("incr sync beginTs[%v] is less than current bigOldTs[%v], this error means user's "+
 					"oplog collection size is too small or full sync continues too long", beginTs, bigOldTs)
 			}

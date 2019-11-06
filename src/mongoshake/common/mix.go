@@ -84,7 +84,7 @@ func TimestampToLog(ts interface{}) string {
 	return fmt.Sprintf("Timestamp(%d, %d)", vr>>32, uint32(vr))
 }
 
-func ExtractMongoTimestamp(ts interface{}) int64 {
+func ExtractTimestamp(ts interface{}) int64 {
 	switch v := ts.(type) {
 	case bson.MongoTimestamp:
 		return int64(v) >> 32
@@ -93,10 +93,6 @@ func ExtractMongoTimestamp(ts interface{}) int64 {
 	}
 
 	return 0
-}
-
-func ExtractTimestampForLog(ts interface{}) string {
-	return fmt.Sprintf("%v(%v)", ts, ExtractMongoTimestamp(ts))
 }
 
 func Int64ToString(v int64) string {

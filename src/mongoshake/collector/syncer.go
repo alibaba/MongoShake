@@ -28,10 +28,8 @@ const (
 	WaitBarrierAckLogTimes = 10
 
 	DurationTime                  = 6000 // unit: ms.
-	DDLCheckpointInterval         = 300  // unit: ms.
 	DDLCheckpointGap              = 5    // unit: seconds.
 	FilterCheckpointGap           = 180  // unit: seconds. no checkpoint update, flush checkpoint mandatory
-	FilterCheckpointCheckInterval = 180  // unit: seconds.
 
 	ShardingWorkerId = 0
 )
@@ -166,7 +164,6 @@ func (sync *OplogSyncer) start() {
 	// forever fetching oplog from mongodb into oplog_reader
 	for {
 		sync.poll()
-
 		// error or exception occur
 		LOG.Warn("Oplog syncer polling yield. master:%t, yield:%dms", quorum.IsMaster(), DurationTime)
 		utils.YieldInMs(DurationTime)
@@ -176,19 +173,16 @@ func (sync *OplogSyncer) start() {
 // fetch all oplog from logs queue, batched together and then send to different workers.
 func (sync *OplogSyncer) startBatcher() {
 	var batcher = sync.batcher
-	filterCheckTs := time.Now()
 
 	nimo.GoRoutineInLoop(func() {
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
 		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
-		batchedOplog, barrier, flushCheckpoint, lastOplog, lastFilterOplog := batcher.batchMore()
+		batchedOplog, barrier, flushCheckpoint, lastOplog := batcher.batchMore()
 
 		if lastOplog != nil {
 			LOG.Debug("Oplog syncer %v fetch lastOplog %v checkpointTs %v",
 				sync.replset, lastOplog, sync.ckptManager.Get(sync.replset))
-			lastNewestTs := lastOplog.Timestamp
-
 			needDispatch := true
 			needUnBlock := false
 			// DDL operate at sharded collection of mongodb sharding
@@ -212,18 +206,16 @@ func (sync *OplogSyncer) startBatcher() {
 					needUnBlock = true
 				}
 			}
-
 			if needDispatch {
 				// push to worker to run
 				if worked := batcher.dispatchBatches(batchedOplog); worked {
-					sync.replMetric.SetLSN(utils.TimestampToInt64(lastNewestTs))
+					sync.replMetric.SetLSN(utils.TimestampToInt64(lastOplog.Timestamp))
 					// update latest fetched timestamp in memory
-					sync.reader.UpdateQueryTimestamp(lastNewestTs)
+					sync.reader.UpdateQueryTimestamp(lastOplog.Timestamp)
 				}
-
 				if barrier {
 					// wait for ddl operation finish, and flush checkpoint value
-					sync.waitBarrierAck(lastNewestTs, flushCheckpoint)
+					sync.waitAllAck(flushCheckpoint)
 					if needUnBlock {
 						LOG.Info("Oplog syncer %v Unblock at ddl log %v", sync.replset, lastOplog)
 						// unblock other shard nodes when sharding ddl has finished
@@ -232,77 +224,39 @@ func (sync *OplogSyncer) startBatcher() {
 				}
 			}
 			// update movechunk manager offerTs after dispatch batches
-			sync.mvckManager.UpdateOfferTs(sync.replset)
+			sync.batcher.syncTs = sync.batcher.unsyncTs
 			return
 		}
+		// update batcher syncTs even though oplog is filtered
+		sync.batcher.syncTs = sync.batcher.unsyncTs
+
 		LOG.Debug("Oplog syncer %v fetch no lastOplog checkpointTs %v",
 			sync.replset, sync.ckptManager.Get(sync.replset))
-		// update movechunk manager offerTs even though oplog is filtered
-		sync.mvckManager.UpdateOfferTs(sync.replset)
 
-		if lastFilterOplog != nil {
-			now := time.Now()
-			// UpdateAckTs for filtered oplog has time interval
-			if !now.After(filterCheckTs.Add(FilterCheckpointCheckInterval * time.Second)) {
-				return
-			}
-			// UpdateAckTs for filtered oplog when filter oplogTs exceed checkpointTs
-			checkpointTs := sync.ckptManager.Get(sync.replset)
-			filterNewestTs := lastFilterOplog.Timestamp
-			if utils.ExtractMongoTimestamp(filterNewestTs)-FilterCheckpointGap < utils.ExtractMongoTimestamp(checkpointTs) {
-				return
-			}
-			filterCheckTs = now
-
-			// force to UpdateAckTs when last oplog of oplog syncer has finished
-			if sync.batcher.lastOplog != nil {
-				if filterNewestTs <= sync.batcher.lastOplog.Timestamp {
-					LOG.Crashf("oplog syncer %v filter newestTs[%v] smaller than lastOplog timestamp[%v]",
-						sync.replset, utils.ExtractTimestampForLog(filterNewestTs),
-						utils.ExtractTimestampForLog(sync.batcher.lastOplog.Timestamp))
-				}
-				sync.waitBarrierAck(sync.batcher.lastOplog.Timestamp, false)
-			} else {
-				LOG.Info("last log is empty, skip waiting checkpoint updated")
-			}
-
+		checkpointTs := sync.ckptManager.Get(sync.replset)
+		syncTs := sync.batcher.syncTs
+		if utils.ExtractTimestamp(syncTs)-utils.ExtractTimestamp(checkpointTs) >= FilterCheckpointGap {
+			sync.waitAllAck(false)
 			LOG.Info("oplog syncer %v force to update checkpointTs from %v to %v",
-				sync.replset, utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(filterNewestTs))
+				sync.replset, utils.TimestampToLog(checkpointTs), utils.TimestampToLog(syncTs))
 			// update latest fetched timestamp in memory
-			sync.reader.UpdateQueryTimestamp(filterNewestTs)
+			sync.reader.UpdateQueryTimestamp(syncTs)
 			// flush checkpoint by the newest filter oplog value
-			sync.ckptManager.UpdateAckTs(sync.replset, filterNewestTs)
+			sync.ckptManager.UpdateAckTs(sync.replset, syncTs)
 		}
 	})
 }
 
-func (sync *OplogSyncer) waitBarrierAck(newestTs bson.MongoTimestamp, flushCheckpoint bool) {
+func (sync *OplogSyncer) waitAllAck(flushCheckpoint bool) {
 	beginTs := time.Now()
 	if flushCheckpoint {
 		LOG.Info("oplog syncer %v prepare for checkpoint", sync.replset)
 		sync.ckptManager.FlushChan <- true
 	}
-	// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
-	if newestTs > 0 && conf.Options.WorkerNum > 1 {
-		for i := WaitBarrierAckLogTimes; ; i += 1 {
-			checkpointTs := sync.ckptManager.Get(sync.replset)
-			if i >= WaitBarrierAckLogTimes {
-				LOG.Info("oplog syncer %v wait barrierTs[%v] with checkpointTs[%v]",
-					sync.replset, utils.ExtractTimestampForLog(newestTs), utils.ExtractTimestampForLog(checkpointTs))
-				i = 0
-			}
-
-			if checkpointTs >= newestTs {
-				LOG.Info("oplog syncer %v finish wait barrierTs[%v] with checkpointTs[%v]",
-					sync.replset, utils.ExtractTimestampForLog(newestTs), utils.ExtractTimestampForLog(checkpointTs))
-				break
-			}
-			utils.YieldInMs(DDLCheckpointInterval)
-		}
-		if flushCheckpoint && time.Now().After(beginTs.Add(DDLCheckpointGap*time.Second)) {
-			LOG.Info("oplog syncer %v prepare for checkpoint.", sync.replset)
-			sync.ckptManager.FlushChan <- true
-		}
+	sync.batcher.WaitAllAck()
+	if flushCheckpoint && time.Now().After(beginTs.Add(DDLCheckpointGap*time.Second)) {
+		LOG.Info("oplog syncer %v prepare for checkpoint.", sync.replset)
+		sync.ckptManager.FlushChan <- true
 	}
 }
 
@@ -472,14 +426,14 @@ func (sync *OplogSyncer) RestAPI() {
 			LogsSuccess: sync.replMetric.Success(),
 			Tps:         sync.replMetric.Tps(),
 			Lsn: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSN),
-				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSN),
-					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSN))}},
+				Time: Time{TimestampUnix: utils.ExtractTimestamp(sync.replMetric.LSN),
+					TimestampTime: utils.TimestampToString(utils.ExtractTimestamp(sync.replMetric.LSN))}},
 			LsnCkpt: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSNCheckpoint),
-				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSNCheckpoint),
-					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSNCheckpoint))}},
+				Time: Time{TimestampUnix: utils.ExtractTimestamp(sync.replMetric.LSNCheckpoint),
+					TimestampTime: utils.TimestampToString(utils.ExtractTimestamp(sync.replMetric.LSNCheckpoint))}},
 			LsnAck: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSNAck),
-				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSNAck),
-					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSNAck))}},
+				Time: Time{TimestampUnix: utils.ExtractTimestamp(sync.replMetric.LSNAck),
+					TimestampTime: utils.TimestampToString(utils.ExtractTimestamp(sync.replMetric.LSNAck))}},
 			Now: &Time{TimestampUnix: time.Now().Unix(), TimestampTime: utils.TimestampToString(time.Now().Unix())},
 		}
 	})

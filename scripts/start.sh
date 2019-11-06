@@ -16,10 +16,12 @@ if [ "Darwin" == "$(uname -s)" ];then
     exit 1
 fi
 
-GOMAXPROCS=0
+(./$name -conf=$1 1>> $name.output 2>&1 &)
 
-if [ $GOMAXPROCS != 0 ] ; then
-	./hypervisor --daemon --exec="GOMAXPROCS=$GOMAXPROCS ./$name -conf=$1 1>> $name.output 2>&1" 1>>hypervisor.output 2>&1
-else
-	./hypervisor --daemon --exec="./$name -conf=$1 1>> $name.output 2>&1" 1>>hypervisor.output 2>&1
-fi
+#GOMAXPROCS=0
+#
+#if [ $GOMAXPROCS != 0 ] ; then
+#	./hypervisor --daemon --exec="GOMAXPROCS=$GOMAXPROCS ./$name -conf=$1 1>> $name.output 2>&1" 1>>hypervisor.output 2>&1
+#else
+#	./hypervisor --daemon --exec="./$name -conf=$1 1>> $name.output 2>&1" 1>>hypervisor.output 2>&1
+#fi
