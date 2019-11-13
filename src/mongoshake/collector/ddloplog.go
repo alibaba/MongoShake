@@ -11,13 +11,12 @@ import (
 	"mongoshake/oplog"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 const (
 	DDLCheckInterval   = 1 // s
-	DDLUnResponseTimes = 10
+	DDLUnResponseThreshold = 60 // s
 )
 
 type DDLKey struct {
@@ -28,19 +27,11 @@ type DDLKey struct {
 type DDLValue struct {
 	blockLog  *oplog.PartialLog
 	blockChan chan bool
-	dbMap     map[string]interface{} // interface{} is BlockDB or UnResponseDB
-}
-
-type BlockDB struct {
-	blockTs bson.MongoTimestamp
-}
-
-type UnResponseDB struct {
-	UnResTs    bson.MongoTimestamp
-	UnResTimes int
+	dbMap     map[string]bson.MongoTimestamp
 }
 
 type DDLManager struct {
+	ckptManager   *CheckpointManager
 	ddlMap  map[DDLKey]*DDLValue
 	syncMap map[string]*OplogSyncer
 
@@ -51,7 +42,7 @@ type DDLManager struct {
 	mutex        sync.Mutex
 }
 
-func NewDDLManager() *DDLManager {
+func NewDDLManager(ckptManager *CheckpointManager) *DDLManager {
 	var fromCsConn *utils.MongoConn
 	var err error
 	if DDLSupportForSharding() {
@@ -67,6 +58,7 @@ func NewDDLManager() *DDLManager {
 	defer toConn.Close()
 
 	return &DDLManager{
+		ckptManager:  ckptManager,
 		ddlMap:       make(map[DDLKey]*DDLValue),
 		syncMap:      make(map[string]*OplogSyncer),
 		FromCsConn:   fromCsConn,
@@ -89,11 +81,11 @@ func (manager *DDLManager) addDDL(replset string, log *oplog.PartialLog) *DDLVal
 		if _, ok := manager.ddlMap[ddlKey]; !ok {
 			manager.ddlMap[ddlKey] = &DDLValue{
 				blockChan: make(chan bool),
-				dbMap:     make(map[string]interface{}),
+				dbMap:     make(map[string]bson.MongoTimestamp),
 				blockLog:  log}
 		}
 		ddlValue := manager.ddlMap[ddlKey]
-		ddlValue.dbMap[replset] = &BlockDB{blockTs: log.Timestamp}
+		ddlValue.dbMap[replset] = log.Timestamp
 		return ddlValue
 	} else {
 		LOG.Crashf("DDLManager syncer %v json marshal ddl log %v error. %v", replset, log.Object, err)
@@ -104,7 +96,9 @@ func (manager *DDLManager) addDDL(replset string, log *oplog.PartialLog) *DDLVal
 func (manager *DDLManager) BlockDDL(replset string, log *oplog.PartialLog) bool {
 	ddlValue := manager.addDDL(replset, log)
 	LOG.Info("Oplog syncer %v block at ddl log %v", replset, log)
+	manager.ckptManager.mutex.RUnlock()
 	_, ok := <-ddlValue.blockChan
+	manager.ckptManager.mutex.RLock()
 	return ok
 }
 
@@ -137,12 +131,10 @@ func (manager *DDLManager) eliminateBlock() {
 	var ddlMinTs bson.MongoTimestamp = math.MaxInt64
 	var ddlMinKey DDLKey
 	for ddlKey, value := range manager.ddlMap {
-		for _, dbInfo := range value.dbMap {
-			if blockDB, ok := dbInfo.(*BlockDB); ok {
-				if ddlMinTs > blockDB.blockTs {
-					ddlMinTs = blockDB.blockTs
-					ddlMinKey = ddlKey
-				}
+		for _, blockTs := range value.dbMap {
+			if ddlMinTs > blockTs {
+				ddlMinTs = blockTs
+				ddlMinKey = ddlKey
 			}
 		}
 	}
@@ -184,53 +176,39 @@ func (manager *DDLManager) eliminateBlock() {
 		fallthrough
 	case "createIndexes":
 		fallthrough
+	case "collMod":
+		LOG.Info("DDLManager eliminate block and run ddl %v", ddlMinKey)
+		manager.lastDDLValue = ddlMinValue
+		ddlMinValue.blockChan <- true
 	case "deleteIndex":
 		fallthrough
 	case "deleteIndexes":
 		fallthrough
-	case "collMod":
-		fallthrough
 	case "dropIndex":
 		fallthrough
 	case "dropIndexes":
-		LOG.Info("DDLManager eliminate block and run ddl %v", ddlMinKey)
-		manager.lastDDLValue = ddlMinValue
-		ddlMinValue.blockChan <- true
+		fallthrough
 	case "dropDatabase":
 		fallthrough
 	case "drop":
 		// drop ddl must block until get drop oplog from all dbs or unblocked db run more than ddlMinTs
+		current := time.Now()
 		for replset, syncer := range manager.syncMap {
-			if _, ok := ddlMinValue.dbMap[replset].(*BlockDB); ok {
+			if _, ok := ddlMinValue.dbMap[replset]; ok {
 				continue
 			}
-			for _, worker := range syncer.batcher.workerGroup {
-				unack := bson.MongoTimestamp(atomic.LoadInt64(&worker.unack))
-				if unack < ddlMinTs {
-					var unResponseDB *UnResponseDB
-					if dbInfo, ok := ddlMinValue.dbMap[replset].(*UnResponseDB); ok {
-						unResponseDB = dbInfo
-					} else {
-						unResponseDB = &UnResponseDB{UnResTs: unack, UnResTimes: 0}
-					}
-					// syncer is unresponsive, maybe no more oplogs run
-					if unResponseDB.UnResTs == unack {
-						unResponseDB.UnResTimes += 1
-					} else {
-						unResponseDB.UnResTs = unack
-						unResponseDB.UnResTimes = 1
-					}
-					ddlMinValue.dbMap[replset] = unResponseDB
-					if unResponseDB.UnResTimes >= DDLUnResponseTimes {
-						continue
-					}
-					LOG.Info("DDLManager eliminate cannot sync ddl %v with spec %v. "+
-						"replset %v unackTs[%v] ddlMinTs[%v] UnResTimes[%v]",
-						ddlMinKey, shardColSpec, worker.syncer.replset,
-						utils.TimestampToLog(unack), utils.TimestampToLog(ddlMinTs), unResponseDB.UnResTimes)
-					return
-				}
+			if syncer.batcher.syncTs >= ddlMinTs {
+				continue
 			}
+			// if the syncer is un responsible for 1 minute, then the syncer has finished to sync
+			if current.After(syncer.batcher.lastResponseTime.Add(DDLUnResponseThreshold*time.Second)) {
+				continue
+			}
+			LOG.Info("DDLManager eliminate cannot sync ddl %v with col spec %v. "+
+				"replset %v ddlMinTs[%v] syncTs[%v] UnResTimes[%v]",
+				ddlMinKey, shardColSpec, replset, utils.TimestampToLog(ddlMinTs),
+				utils.TimestampToLog(syncer.batcher.syncTs), utils.TimestampToLog(syncer.batcher.lastResponseTime))
+			return
 		}
 		LOG.Info("DDLManager eliminate block and force run ddl %v", ddlMinKey)
 		manager.lastDDLValue = ddlMinValue

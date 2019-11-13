@@ -173,16 +173,19 @@ func (sync *OplogSyncer) start() {
 // fetch all oplog from logs queue, batched together and then send to different workers.
 func (sync *OplogSyncer) startBatcher() {
 	var batcher = sync.batcher
-
+	barrier := false
 	nimo.GoRoutineInLoop(func() {
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
 		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
-		batchedOplog, barrier, flushCheckpoint, lastOplog := batcher.batchMore()
+		nextBatch := batcher.Next()
+
+		// avoid to do checkpoint when syncer update ackTs or syncTs
+		sync.ckptManager.mutex.RLock()
+		filteredNextBatch, nextBarrier, flushCheckpoint, lastOplog := batcher.filterAndBlockMoveChunk(nextBatch, barrier)
+		barrier = nextBarrier
 
 		if lastOplog != nil {
-			LOG.Debug("Oplog syncer %v fetch lastOplog %v checkpointTs %v",
-				sync.replset, lastOplog, sync.ckptManager.Get(sync.replset))
 			needDispatch := true
 			needUnBlock := false
 			// DDL operate at sharded collection of mongodb sharding
@@ -195,20 +198,20 @@ func (sync *OplogSyncer) startBatcher() {
 					// number of worker of sharding instance and number of ddl command must be 1
 					shardColSpec := utils.GetShardCollectionSpec(sync.ddlManager.FromCsConn.Session, lastOplog)
 					if shardColSpec != nil {
-						logRaw := batchedOplog[ShardingWorkerId][0].Raw
-						batchedOplog[ShardingWorkerId] = []*oplog.GenericOplog{}
+						logRaw := filteredNextBatch[0].Raw
+						filteredNextBatch = []*oplog.GenericOplog{}
 						transOplogs := TransformDDL(sync.replset, lastOplog, shardColSpec, sync.ddlManager.ToIsSharding)
 						for _, tlog := range transOplogs {
-							batchedOplog[ShardingWorkerId] = append(batchedOplog[ShardingWorkerId],
-								&oplog.GenericOplog{Raw: logRaw, Parsed: tlog})
+							filteredNextBatch = append(filteredNextBatch, &oplog.GenericOplog{Raw: logRaw, Parsed: tlog})
 						}
 					}
+					LOG.Info("### syncer %v prepare to dispatch ddl log ok", sync.replset)
 					needUnBlock = true
 				}
 			}
 			if needDispatch {
 				// push to worker to run
-				if worked := batcher.dispatchBatches(batchedOplog); worked {
+				if worked := batcher.dispatchBatch(filteredNextBatch); worked {
 					sync.replMetric.SetLSN(utils.TimestampToInt64(lastOplog.Timestamp))
 					// update latest fetched timestamp in memory
 					sync.reader.UpdateQueryTimestamp(lastOplog.Timestamp)
@@ -223,27 +226,20 @@ func (sync *OplogSyncer) startBatcher() {
 					}
 				}
 			}
-			// update movechunk manager offerTs after dispatch batches
-			sync.batcher.syncTs = sync.batcher.unsyncTs
-			return
+		} else {
+			checkpointTs := sync.ckptManager.Get(sync.replset)
+			syncTs := sync.batcher.syncTs
+			if utils.ExtractTimestamp(syncTs)-utils.ExtractTimestamp(checkpointTs) >= FilterCheckpointGap {
+				sync.waitAllAck(false)
+				LOG.Info("oplog syncer %v force to update checkpointTs from %v to %v",
+					sync.replset, utils.TimestampToLog(checkpointTs), utils.TimestampToLog(syncTs))
+				// update latest fetched timestamp in memory
+				sync.reader.UpdateQueryTimestamp(syncTs)
+			}
 		}
-		// update batcher syncTs even though oplog is filtered
+		// update syncTs of batcher
 		sync.batcher.syncTs = sync.batcher.unsyncTs
-
-		LOG.Debug("Oplog syncer %v fetch no lastOplog checkpointTs %v",
-			sync.replset, sync.ckptManager.Get(sync.replset))
-
-		checkpointTs := sync.ckptManager.Get(sync.replset)
-		syncTs := sync.batcher.syncTs
-		if utils.ExtractTimestamp(syncTs)-utils.ExtractTimestamp(checkpointTs) >= FilterCheckpointGap {
-			sync.waitAllAck(false)
-			LOG.Info("oplog syncer %v force to update checkpointTs from %v to %v",
-				sync.replset, utils.TimestampToLog(checkpointTs), utils.TimestampToLog(syncTs))
-			// update latest fetched timestamp in memory
-			sync.reader.UpdateQueryTimestamp(syncTs)
-			// flush checkpoint by the newest filter oplog value
-			sync.ckptManager.UpdateAckTs(sync.replset, syncTs)
-		}
+		sync.ckptManager.mutex.RUnlock()
 	})
 }
 

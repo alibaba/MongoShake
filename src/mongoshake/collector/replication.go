@@ -322,9 +322,6 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	if conf.Options.SyncMode != SYNCMODE_DOCUMENT {
 		LOG.Info("try to set checkpoint with map[%v]", ckptMap)
 		ckptManager := NewCheckpointManager(0)
-		for replset, ts := range ckptMap {
-			ckptManager.UpdateAckTs(replset, ts.Newest)
-		}
 		if err := ckptManager.Flush(); err != nil {
 			LOG.Error("document syncer flush checkpoint failed. %v", err)
 			return err
@@ -339,8 +336,8 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	coordinator.rateController = nimo.NewSimpleRateController()
 
 	ckptManager := NewCheckpointManager(oplogStartPosition)
-	mvckManager := NewMoveChunkManager()
-	ddlManager := NewDDLManager()
+	mvckManager := NewMoveChunkManager(ckptManager)
+	ddlManager := NewDDLManager(ckptManager)
 
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
@@ -353,23 +350,6 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		mvckManager.addOplogSyncer(syncer)
 		ddlManager.addOplogSyncer(syncer)
 		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)
-	}
-
-	if conf.Options.MoveChunkEnable {
-		ckptManager.registerPersis(mvckManager)
-	}
-	// initialize checkpoint timestamp of oplog syncer
-	if err := ckptManager.Load(); err != nil {
-		return err
-	}
-	ckptManager.start()
-
-	if conf.Options.MoveChunkEnable {
-		mvckManager.start()
-	}
-
-	if DDLSupportForSharding() {
-		ddlManager.start()
 	}
 
 	// prepare worker routine and bind it to syncer
@@ -386,6 +366,20 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		// of overall replication is single mongodb replica)
 		syncer.bind(w)
 		go w.startWorker()
+	}
+
+	// initialize checkpoint timestamp of oplog syncer
+	if err := ckptManager.Load(); err != nil {
+		return err
+	}
+	ckptManager.start()
+
+	if conf.Options.MoveChunkEnable {
+		mvckManager.start()
+	}
+
+	if DDLSupportForSharding() {
+		ddlManager.start()
 	}
 
 	for _, syncer := range coordinator.syncerGroup {

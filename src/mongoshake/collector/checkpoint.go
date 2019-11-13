@@ -17,13 +17,14 @@ import (
 )
 
 const (
-	StorageTypeAPI            = "api"
-	StorageTypeDB             = "database"
-	CheckpointName            = "name"
-	CheckpointTimestamp       = "ckpt"
+	StorageTypeAPI   = "api"
+	StorageTypeDB    = "database"
+	CheckpointName   = "name"
+	CheckpointAckTs  = "ackTs"
+	CheckpointSyncTs = "syncTs"
 
 	MajorityWriteConcern          = "majority"
-	CheckpointMoveChunkIntervalMS = 60000
+	CheckpointMoveChunkIntervalMS = 5000
 )
 
 type Persist interface {
@@ -31,15 +32,9 @@ type Persist interface {
 	Flush(conn *utils.MongoConn, db string, tablePrefix string) error
 }
 
-// checkpoint info of each replset
-type SyncerCheckpoint struct {
-	syncer *OplogSyncer
-	ackTs  bson.MongoTimestamp
-}
-
 type CheckpointManager struct {
-	ckptMap map[string]*SyncerCheckpoint
-	mutex   sync.Mutex
+	syncMap map[string]*OplogSyncer
+	mutex   sync.RWMutex
 
 	FlushChan chan bool
 
@@ -58,7 +53,7 @@ func NewCheckpointManager(startPosition int64) *CheckpointManager {
 	// into mongo. so we use Timestamp(0, 1)
 	startPosition = int64(math.Max(float64(startPosition), 1))
 	manager := &CheckpointManager{
-		ckptMap:       make(map[string]*SyncerCheckpoint),
+		syncMap:       make(map[string]*OplogSyncer),
 		FlushChan:     make(chan bool),
 		url:           conf.Options.ContextStorageUrl,
 		db:            db,
@@ -69,7 +64,7 @@ func NewCheckpointManager(startPosition int64) *CheckpointManager {
 }
 
 func (manager *CheckpointManager) addOplogSyncer(syncer *OplogSyncer) {
-	manager.ckptMap[syncer.replset] = &SyncerCheckpoint{syncer: syncer, ackTs: 0}
+	manager.syncMap[syncer.replset] = syncer
 }
 
 func (manager *CheckpointManager) registerPersis(persist Persist) {
@@ -91,12 +86,13 @@ func (manager *CheckpointManager) start() {
 		select {
 		case <-manager.FlushChan:
 			LOG.Info("CheckpointManager flush immediately begin")
-			manager.UpdateCheckpoint()
+			manager.mutex.Lock()
 			if err := manager.Flush(); err != nil {
 				LOG.Warn("CheckpointManager flush immediately failed. %v", err)
 			} else {
 				LOG.Info("CheckpointManager flush immediately successful")
 			}
+			manager.mutex.Unlock()
 		case <-time.After(time.Second):
 			// update checkpoint ackts each second
 
@@ -107,45 +103,28 @@ func (manager *CheckpointManager) start() {
 			if conf.Options.Tunnel != "direct" && now.Before(startTime.Add(3*time.Minute)) {
 				return
 			}
-			manager.UpdateCheckpoint()
 			if now.Before(checkTime.Add(time.Duration(intervalMs) * time.Millisecond)) {
 				return
 			}
-			if err := manager.Flush(); err == nil {
+			LOG.Info("CheckpointManager flush periodically begin")
+			manager.mutex.Lock()
+			if err := manager.Flush(); err != nil {
+				LOG.Warn("CheckpointManager flush periodically failed. %v", err)
+			} else {
 				LOG.Info("CheckpointManager flush periodically successful")
 			}
+			manager.mutex.Unlock()
 			checkTime = time.Now()
 		}
 	})
 }
 
 func (manager *CheckpointManager) Get(replset string) bson.MongoTimestamp {
-	manager.mutex.Lock()
-	defer manager.mutex.Unlock()
-	if info, ok := manager.ckptMap[replset]; ok {
-		return info.ackTs
-	} else {
-		return 0
+	ackTs, err := calculateSyncerAckTs(manager.syncMap[replset])
+	if err != nil {
+		LOG.Info("CheckpointManager get ackTs for sycner %v failed. %v", replset, err)
 	}
-}
-
-func (manager *CheckpointManager) UpdateAckTs(replset string, ts bson.MongoTimestamp) {
-	manager.mutex.Lock()
-	defer manager.mutex.Unlock()
-	if _, ok := manager.ckptMap[replset]; !ok {
-		manager.ckptMap[replset] = &SyncerCheckpoint{ackTs: 0}
-	}
-	manager.ckptMap[replset].ackTs = ts
-}
-
-func (manager *CheckpointManager) UpdateCheckpoint() {
-	for replset, info := range manager.ckptMap {
-		if lowestTs, err := calculateWorkerLowestCheckpoint(info.syncer); lowestTs > 0 && err == nil {
-			if lowestTs > info.ackTs {
-				manager.UpdateAckTs(replset, lowestTs)
-			}
-		}
-	}
+	return ackTs
 }
 
 // firstly load checkpoit info to CheckpointManager without concurrent access
@@ -159,25 +138,39 @@ func (manager *CheckpointManager) Load() error {
 	ckptDoc := make(map[string]interface{})
 	for iter.Next(ckptDoc) {
 		replset, ok1 := ckptDoc[CheckpointName].(string)
-		ackTs, ok2 := ckptDoc[CheckpointTimestamp].(bson.MongoTimestamp)
-		if !ok1 || !ok2 {
-			return fmt.Errorf("CheckpointManager load checkpoint illegal record %v", ckptDoc)
-		} else if info, ok := manager.ckptMap[replset]; !ok {
+		ackTs, ok2 := ckptDoc[CheckpointAckTs].(bson.MongoTimestamp)
+		syncTs, ok3 := ckptDoc[CheckpointSyncTs].(bson.MongoTimestamp)
+		if !ok1 || !ok2 || !ok3 {
+			return fmt.Errorf("CheckpointManager load checkpoint illegal record %v. ok1[%v] ok2[%v] ok3[%v]",
+				ckptDoc, ok1, ok2, ok3)
+		} else if syncer, ok := manager.syncMap[replset]; !ok {
 			fmt.Errorf("CheckpointManager load checkpoint unknown replset %v", ckptDoc)
 		} else {
-			info.ackTs = ackTs
-			LOG.Info("CheckpointManager load checkpoint set replset[%v] checkpoint to exist %v",
-				replset, utils.TimestampToLog(info.ackTs))
+			syncer.batcher.syncTs = syncTs
+			syncer.batcher.unsyncTs = syncTs
+			for _, worker := range syncer.batcher.workerGroup {
+				worker.unack = int64(ackTs)
+				worker.ack = int64(ackTs)
+			}
+			LOG.Info("CheckpointManager load checkpoint set replset[%v] checkpoint to exist ackTs[%v] syncTs[%v]",
+				replset, utils.TimestampToLog(ackTs), utils.TimestampToLog(syncTs))
 		}
 	}
 	if err := iter.Close(); err != nil {
 		LOG.Critical("CheckpointManager close iterator failed. %v", err)
 	}
-	for replset, info := range manager.ckptMap {
-		if info.ackTs == 0 {
-			info.ackTs = bson.MongoTimestamp(manager.startPosition << 32)
+	for replset, syncer := range manager.syncMap {
+		// there is no checkpoint before or this is a new node
+		if syncer.batcher.syncTs == 0 {
+			startTs := manager.startPosition << 32
+			syncer.batcher.syncTs = bson.MongoTimestamp(startTs)
+			syncer.batcher.unsyncTs = bson.MongoTimestamp(startTs)
+			for _, worker := range syncer.batcher.workerGroup {
+				worker.unack = startTs
+				worker.ack = startTs
+			}
 			LOG.Info("CheckpointManager load checkpoint set replset[%v] checkpoint to start position %v",
-				replset, utils.TimestampToLog(info.ackTs))
+				replset, utils.TimestampToLog(startTs))
 		}
 	}
 	for _, persist := range manager.persistList {
@@ -195,32 +188,38 @@ func (manager *CheckpointManager) Flush() error {
 	if !manager.ensureNetwork() {
 		return fmt.Errorf("CheckpointManager connect to %v failed", manager.url)
 	}
-	manager.mutex.Lock()
-	defer manager.mutex.Unlock()
-	// TODO if one of persist flush failed, need clean up other persist flush
-	for _, persist := range manager.persistList {
-		if err := persist.Flush(manager.conn, manager.db, manager.table); err != nil {
-			manager.conn.Close()
-			manager.conn = nil
-			return err
-		}
-	}
-	for replset, info := range manager.ckptMap {
-		LOG.Info("checkpoint replset %v updated to %v", replset, utils.TimestampToLog(info.ackTs))
-		if info.syncer != nil {
-			info.syncer.replMetric.AddCheckpoint(1)
-			info.syncer.replMetric.SetLSNCheckpoint(int64(info.ackTs))
-		}
+	for replset, syncer := range manager.syncMap {
+		ackTs := manager.Get(replset)
+		syncTs := syncer.batcher.syncTs
+		unsyncTs := syncer.batcher.unsyncTs
+		nimo.AssertTrue(syncTs == unsyncTs, "should panic when syncTs ¡= unsyncTs")
 
+		LOG.Info("checkpoint replset %v updated to %v", replset, utils.TimestampToLog(ackTs))
+		for _, worker := range syncer.batcher.workerGroup {
+			ack := bson.MongoTimestamp(atomic.LoadInt64(&worker.ack))
+			unack := bson.MongoTimestamp(atomic.LoadInt64(&worker.unack))
+			LOG.Info("syncer %v worker ack[%v] unack[%v] syncTs[%v]", replset,
+				utils.TimestampToLog(ack), utils.TimestampToLog(unack), utils.TimestampToLog(syncTs))
+		}
+		syncer.replMetric.AddCheckpoint(1)
+		syncer.replMetric.SetLSNCheckpoint(int64(ackTs))
 		ckptDoc := map[string]interface{}{
-			CheckpointName:      replset,
-			CheckpointTimestamp: info.ackTs,
+			CheckpointName:   replset,
+			CheckpointAckTs:  ackTs,
+			CheckpointSyncTs: syncTs,
 		}
 		if _, err := manager.conn.Session.DB(manager.db).C(manager.table).
 			Upsert(bson.M{CheckpointName: replset}, ckptDoc); err != nil {
 			manager.conn.Close()
 			manager.conn = nil
 			return fmt.Errorf("CheckpointManager upsert %v error. %v", ckptDoc, err)
+		}
+	}
+	for _, persist := range manager.persistList {
+		if err := persist.Flush(manager.conn, manager.db, manager.table); err != nil {
+			manager.conn.Close()
+			manager.conn = nil
+			return err
 		}
 	}
 	return nil
@@ -243,7 +242,7 @@ func (manager *CheckpointManager) ensureNetwork() bool {
 	return true
 }
 
-func calculateWorkerLowestCheckpoint(sync *OplogSyncer) (v bson.MongoTimestamp, err error) {
+func calculateSyncerAckTs(sync *OplogSyncer) (v bson.MongoTimestamp, err error) {
 	// no need to lock and eventually consistence is acceptable
 	allAcked := true
 	candidates := make([]int64, 0, len(sync.batcher.workerGroup))

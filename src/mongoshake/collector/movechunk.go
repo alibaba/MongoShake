@@ -14,24 +14,28 @@ import (
 )
 
 const (
-	MoveChunkSyncTSName  = "syncTs"
-	MoveChunkOfferTSName = "offerTs"
-
+	MoveChunkBarrierKey = "barrierKey"
 	MoveChunkKeyName    = "key"
 	MoveChunkInsertMap  = "insertMap"
 	MoveChunkDeleteItem = "deleteItem"
 	MoveChunkBufferSize = 1000
+	MoveChunkUnResponseThreshold = 10 // s
 )
 
-func NewMoveChunkManager() *MoveChunkManager {
+func NewMoveChunkManager(ckptManager *CheckpointManager) *MoveChunkManager {
 	manager := &MoveChunkManager{
+		ckptManager:  ckptManager,
 		moveChunkMap: make(map[MoveChunkKey]*MoveChunkValue),
 		syncInfoMap:  make(map[string]*SyncerMoveChunk),
+	}
+	if conf.Options.MoveChunkEnable {
+		ckptManager.registerPersis(manager)
 	}
 	return manager
 }
 
 type MoveChunkManager struct {
+	ckptManager   *CheckpointManager
 	syncInfoMap map[string]*SyncerMoveChunk
 	// ensure the order of oplog when move chunk occur
 	moveChunkMap  map[MoveChunkKey]*MoveChunkValue
@@ -56,6 +60,7 @@ func (manager *MoveChunkManager) start() {
 func (manager *MoveChunkManager) barrierProbe(key MoveChunkKey, value *MoveChunkValue) bool {
 	insertMap := value.insertMap
 	deleteItem := value.deleteItem
+	current := time.Now()
 	for _, syncInfo := range manager.syncInfoMap {
 		// worker ack must exceed timestamp of insert/delete move chunk oplog
 		syncInfo.mutex.Lock()
@@ -73,6 +78,9 @@ func (manager *MoveChunkManager) barrierProbe(key MoveChunkKey, value *MoveChunk
 					(ack == unack || ack < unack && ack >= int64(deleteItem.Timestamp))) {
 				continue
 			}
+			if current.After(syncInfo.syncer.batcher.lastResponseTime.Add(MoveChunkUnResponseThreshold*time.Second)) {
+				continue
+			}
 			syncInfo.mutex.Unlock()
 			return false
 		}
@@ -82,9 +90,11 @@ func (manager *MoveChunkManager) barrierProbe(key MoveChunkKey, value *MoveChunk
 }
 
 func (manager *MoveChunkManager) minTsProbe(minTs bson.MongoTimestamp) bool {
+	current := time.Now()
 	for _, syncInfo := range manager.syncInfoMap {
 		syncInfo.mutex.Lock()
-		if syncInfo.barrierChan == nil && syncInfo.syncer.batcher.syncTs < minTs {
+		if syncInfo.barrierChan == nil && syncInfo.syncer.batcher.syncTs < minTs &&
+			!current.After(syncInfo.syncer.batcher.lastResponseTime.Add(MoveChunkUnResponseThreshold*time.Second)) {
 			syncInfo.mutex.Unlock()
 			return false
 		}
@@ -109,9 +119,9 @@ func (manager *MoveChunkManager) eliminateBarrier() bool {
 			ack := bson.MongoTimestamp(atomic.LoadInt64(&worker.ack))
 			unack := bson.MongoTimestamp(atomic.LoadInt64(&worker.unack))
 			batcher := syncInfo.syncer.batcher
-			LOG.Info("syncer %v worker ack[%v] unack[%v] syncTs[%v] unsyncTs[%v] barrierKey[%v]", replset,
+			LOG.Info("syncer %v worker ack[%v] unack[%v] syncTs[%v] lastResponseTime[%v] barrierKey[%v]", replset,
 				utils.TimestampToLog(ack), utils.TimestampToLog(unack), utils.TimestampToLog(batcher.syncTs),
-				utils.TimestampToLog(batcher.unsyncTs), syncInfo.barrierKey)
+				utils.TimestampToLog(batcher.lastResponseTime.Unix()), syncInfo.barrierKey)
 		}
 		syncInfo.mutex.Unlock()
 	}
@@ -172,7 +182,16 @@ func (manager *MoveChunkManager) eliminateBarrier() bool {
 
 func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.PartialLog) (bool, bool, interface{}) {
 	syncInfo := manager.syncInfoMap[replset]
-	syncInfo.blockOplog(replset, partialLog)
+	barrierChan := syncInfo.getBarrier()
+	// wait for barrier channel must be out of mutex, because eliminateBarrier need to delete barrier
+	if barrierChan != nil {
+		   LOG.Info("syncer %v wait barrier", replset)
+		   // unlock all mutex before blocking by move chunk barrier
+		   manager.ckptManager.mutex.RUnlock()
+		   <-barrierChan
+		   manager.ckptManager.mutex.RLock()
+		   LOG.Info("syncer %v wait barrier finish", replset)
+	}
 
 	manager.moveChunkLock.Lock()
 	defer manager.moveChunkLock.Unlock()
@@ -262,12 +281,20 @@ func (manager *MoveChunkManager) Load(conn *utils.MongoConn, db string, tablePre
 	ckptDoc := make(map[string]interface{})
 	for iter.Next(ckptDoc) {
 		replset, ok1 := ckptDoc[CheckpointName].(string)
-		if !ok1 {
+		barrierKey, ok2 := ckptDoc[MoveChunkBarrierKey].(map[string]interface{})
+		if !ok1 || !ok2 {
 			return fmt.Errorf("MoveChunkManager load checkpoint illegal record %v", ckptDoc)
 		} else if syncInfo, ok := manager.syncInfoMap[replset]; !ok {
 			return fmt.Errorf("MoveChunkManager load checkpoint unknown replset %v", ckptDoc)
 		} else {
-			syncInfo.barrierKey = syncTs
+			// load barrier key and channel
+			if len(barrierKey) > 0 {
+				if err := utils.Map2Struct(barrierKey, "bson", &syncInfo.barrierKey); err != nil {
+					return fmt.Errorf("MoveChunkManager load checkpoint illegal record %v. err[%v]",
+						ckptDoc, err)
+				}
+				syncInfo.barrierChan = make(chan interface{})
+			}
 			LOG.Info("MoveChunkManager load checkpoint set replset[%v]", replset)
 		}
 	}
@@ -287,8 +314,8 @@ func (manager *MoveChunkManager) Load(conn *utils.MongoConn, db string, tablePre
 		var err2 error
 		deleteItem := ckptDoc[MoveChunkDeleteItem].(map[string]interface{})
 		if len(deleteItem) > 0 {
-			ptr := &MCIItem{}
-			err2 = utils.Map2Struct(deleteItem, "bson", ptr)
+			value.deleteItem = &MCIItem{}
+			err2 = utils.Map2Struct(deleteItem, "bson", value.deleteItem)
 		}
 		if err1 != nil || err2 != nil {
 			return fmt.Errorf("MoveChunkManager load checkpoint illegal record %v. err1[%v] err2[%v]",
@@ -300,6 +327,22 @@ func (manager *MoveChunkManager) Load(conn *utils.MongoConn, db string, tablePre
 	if err := iter.Close(); err != nil {
 		LOG.Critical("MoveChunkManager close iterator failed. %v", err)
 	}
+	for replset, syncInfo := range manager.syncInfoMap {
+		if syncInfo.barrierChan != nil {
+			value := manager.moveChunkMap[syncInfo.barrierKey]
+			value.barrierMap[replset] = syncInfo.barrierChan
+		}
+	}
+
+	for replset, syncInfo := range manager.syncInfoMap {
+		LOG.Info("#### syncInfoMap replset %v syncInfo {barrierKey=%v, barrierChan=%v}",
+			replset, syncInfo.barrierKey, syncInfo.barrierChan)
+	}
+	for key, value := range manager.moveChunkMap {
+		LOG.Info("#### moveChunkMap key %v insertMap=%v deleteItem=%v barrierMap=%v",
+			key, value.insertMap, value.deleteItem, value.barrierMap)
+	}
+
 	LOG.Info("MoveChunkManager load checkpoint moveChunkMap size[%v]", len(manager.moveChunkMap))
 	return nil
 }
@@ -307,23 +350,24 @@ func (manager *MoveChunkManager) Load(conn *utils.MongoConn, db string, tablePre
 func (manager *MoveChunkManager) Flush(conn *utils.MongoConn, db string, tablePrefix string) error {
 	manager.moveChunkLock.Lock()
 	defer manager.moveChunkLock.Unlock()
-	// check whether can flush
-	for replset, syncInfo := range manager.syncInfoMap {
-		syncInfo.mutex.Lock()
-		if syncInfo.barrierChan != nil {
-			syncInfo.mutex.Unlock()
-			return fmt.Errorf("MoveChunkManager sycner %v at move chunk barrier %v", replset, syncInfo.barrierKey)
-		}
-		syncInfo.mutex.Unlock()
-	}
 
-	checkpoint_begin := time.Now()
+	checkpointBegin := time.Now()
 	for replset, syncInfo := range manager.syncInfoMap {
 		syncInfo.mutex.Lock()
-		ckptDoc := map[string]interface{}{
-			CheckpointName:       replset,
+		var barrierKey map[string]interface{}
+		var err error
+		if syncInfo.barrierChan != nil {
+			barrierKey, err = utils.Struct2Map(&syncInfo.barrierKey, "bson")
+			if err != nil {
+				return fmt.Errorf("MoveChunkManager flush checkpoint json barrierKey[%v] failed",
+					syncInfo.barrierKey)
+			}
 		}
-		if _, err := conn.Session.DB(db).C(tablePrefix+"_mvck_syncer").
+		ckptDoc := map[string]interface{}{
+			CheckpointName:      replset,
+			MoveChunkBarrierKey: barrierKey,
+		}
+		if _, err = conn.Session.DB(db).C(tablePrefix+"_mvck_syncer").
 			Upsert(bson.M{CheckpointName: replset}, ckptDoc); err != nil {
 			syncInfo.mutex.Unlock()
 			return fmt.Errorf("MoveChunkManager flush checkpoint syncer %v upsert failed. %v", ckptDoc, err)
@@ -355,8 +399,7 @@ func (manager *MoveChunkManager) Flush(conn *utils.MongoConn, db string, tablePr
 		if len(buffer) >= MoveChunkBufferSize {
 			// 1000 * byte size of ckptDoc < 16MB
 			if err := conn.Session.DB(db).C(table).Insert(buffer...); err != nil {
-				LOG.Critical("MoveChunkManager flush checkpoint map buffer %v insert faild. %v", buffer, err)
-				return err
+				return LOG.Critical("MoveChunkManager flush checkpoint map buffer %v insert faild. %v", buffer, err)
 			}
 			buffer = make([]interface{}, 0, MoveChunkBufferSize)
 		}
@@ -364,12 +407,11 @@ func (manager *MoveChunkManager) Flush(conn *utils.MongoConn, db string, tablePr
 	}
 	if len(buffer) > 0 {
 		if err := conn.Session.DB(db).C(table).Insert(buffer...); err != nil {
-			LOG.Critical("MoveChunkManager flush checkpoint map buffer %v insert faild. %v", buffer, err)
-			return err
+			return LOG.Critical("MoveChunkManager flush checkpoint map buffer %v insert faild. %v", buffer, err)
 		}
 	}
 	LOG.Info("MoveChunkManager flush checkpoint moveChunkMap size[%v] cost %vs",
-		len(manager.moveChunkMap), time.Now().Sub(checkpoint_begin).Seconds())
+		len(manager.moveChunkMap), time.Now().Sub(checkpointBegin).Seconds())
 	return nil
 }
 
@@ -387,17 +429,10 @@ func (syncInfo *SyncerMoveChunk) deleteBarrier() {
 	syncInfo.mutex.Unlock()
 }
 
-func (syncInfo *SyncerMoveChunk) blockOplog(replset string, partialLog *oplog.PartialLog) {
-	var barrierChan chan interface{}
+func (syncInfo *SyncerMoveChunk) getBarrier() chan interface{} {
 	syncInfo.mutex.Lock()
-	barrierChan = syncInfo.barrierChan
-	syncInfo.mutex.Unlock()
-	// wait for barrier channel must be out of mutex, because eliminateBarrier need to delete barrier
-	if barrierChan != nil {
-		LOG.Info("syncer %v wait barrier", replset)
-		<-barrierChan
-		LOG.Info("syncer %v wait barrier finish", replset)
-	}
+	defer syncInfo.mutex.Unlock()
+	return syncInfo.barrierChan
 }
 
 type MoveChunkKey struct {

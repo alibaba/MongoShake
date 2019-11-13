@@ -78,6 +78,8 @@ func TimestampToLog(ts interface{}) string {
 		vr = int64(v)
 	case int64:
 		vr = v
+	case time.Time:
+		vr = v.Unix()
 	default:
 		return ""
 	}
