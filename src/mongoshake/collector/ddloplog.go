@@ -96,6 +96,9 @@ func (manager *DDLManager) addDDL(replset string, log *oplog.PartialLog) *DDLVal
 func (manager *DDLManager) BlockDDL(replset string, log *oplog.PartialLog) bool {
 	ddlValue := manager.addDDL(replset, log)
 	LOG.Info("Oplog syncer %v block at ddl log %v", replset, log)
+	// ddl is the only operation in this batch, so no need to update syncTs after dispatch.
+	// why need update? maybe do checkpoint when syncer block, but synTs has not been updated yet
+	manager.syncMap[replset].batcher.syncTs = manager.syncMap[replset].batcher.unsyncTs
 	manager.ckptManager.mutex.RUnlock()
 	_, ok := <-ddlValue.blockChan
 	manager.ckptManager.mutex.RLock()

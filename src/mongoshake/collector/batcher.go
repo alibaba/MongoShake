@@ -246,7 +246,6 @@ func moveChunkBarrier(syncer *OplogSyncer, partialLog *oplog.PartialLog) (bool, 
 	if syncer.batcher.syncTs >= partialLog.Timestamp {
 		return false, false
 	}
-	LOG.Info("### syncer %v syncTs %v log %v", syncer.replset, syncer.batcher.syncTs, partialLog.Timestamp)
 	if ddlFilter.Filter(partialLog) {
 		return false, false
 	}

@@ -193,8 +193,6 @@ func (manager *CheckpointManager) Flush() error {
 		syncTs := syncer.batcher.syncTs
 		unsyncTs := syncer.batcher.unsyncTs
 		nimo.AssertTrue(syncTs == unsyncTs, "should panic when syncTs ¡= unsyncTs")
-
-		LOG.Info("checkpoint replset %v updated to %v", replset, utils.TimestampToLog(ackTs))
 		for _, worker := range syncer.batcher.workerGroup {
 			ack := bson.MongoTimestamp(atomic.LoadInt64(&worker.ack))
 			unack := bson.MongoTimestamp(atomic.LoadInt64(&worker.unack))

@@ -295,7 +295,8 @@ func (manager *MoveChunkManager) Load(conn *utils.MongoConn, db string, tablePre
 				}
 				syncInfo.barrierChan = make(chan interface{})
 			}
-			LOG.Info("MoveChunkManager load checkpoint set replset[%v]", replset)
+			LOG.Info("MoveChunkManager load checkpoint set replset[%v] syncInfo barrierKey[%v] barrierChan[%v]",
+				replset, syncInfo.barrierKey, syncInfo.barrierChan)
 		}
 	}
 	if err := iter.Close(); err != nil {
@@ -333,13 +334,8 @@ func (manager *MoveChunkManager) Load(conn *utils.MongoConn, db string, tablePre
 			value.barrierMap[replset] = syncInfo.barrierChan
 		}
 	}
-
-	for replset, syncInfo := range manager.syncInfoMap {
-		LOG.Info("#### syncInfoMap replset %v syncInfo {barrierKey=%v, barrierChan=%v}",
-			replset, syncInfo.barrierKey, syncInfo.barrierChan)
-	}
 	for key, value := range manager.moveChunkMap {
-		LOG.Info("#### moveChunkMap key %v insertMap=%v deleteItem=%v barrierMap=%v",
+		LOG.Info("### MoveChunkManager load moveChunkMap key=%v insertMap=%v deleteItem=%v barrierMap=%v",
 			key, value.insertMap, value.deleteItem, value.barrierMap)
 	}
 

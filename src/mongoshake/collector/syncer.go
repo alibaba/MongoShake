@@ -205,7 +205,6 @@ func (sync *OplogSyncer) startBatcher() {
 							filteredNextBatch = append(filteredNextBatch, &oplog.GenericOplog{Raw: logRaw, Parsed: tlog})
 						}
 					}
-					LOG.Info("### syncer %v prepare to dispatch ddl log ok", sync.replset)
 					needUnBlock = true
 				}
 			}
