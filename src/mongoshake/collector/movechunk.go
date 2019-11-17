@@ -338,10 +338,10 @@ func (manager *MoveChunkManager) Load() error {
 			value.barrierMap[replset] = syncInfo.barrierChan
 		}
 	}
-	for key, value := range manager.moveChunkMap {
-		LOG.Info("### MoveChunkManager load moveChunkMap key=%v insertMap=%v deleteItem=%v barrierMap=%v",
-			key, value.insertMap, value.deleteItem, value.barrierMap)
-	}
+	//for key, value := range manager.moveChunkMap {
+	//	LOG.Info("### MoveChunkManager load moveChunkMap key=%v insertMap=%v deleteItem=%v barrierMap=%v",
+	//		key, value.insertMap, value.deleteItem, value.barrierMap)
+	//}
 
 	LOG.Info("MoveChunkManager load checkpoint moveChunkMap size[%v]", len(manager.moveChunkMap))
 	return nil

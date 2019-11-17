@@ -216,7 +216,8 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 
 	for replset, ts := range tsMap {
 		if _, ok := ckptMap[replset]; !ok {
-			continue
+			needFull = true
+			break
 		}
 		if ts.Oldest >= ckptMap[replset] {
 			// checkpoint less than the oldest timestamp
