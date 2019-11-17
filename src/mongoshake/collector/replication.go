@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vinllen/mgo/bson"
 	"mongoshake/collector/filter"
 	"sync"
 
@@ -73,7 +74,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 		// get current newest timestamp
 		_, fullFinishTs, _, bigOldTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
 		if err != nil {
-			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
+			return LOG.Critical("get full sync finish timestamp failed[%v]", err)
 		}
 		LOG.Info("------------------------full sync done!------------------------")
 
@@ -81,7 +82,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			utils.ExtractTimestamp(fullBeginTs), utils.ExtractTimestamp(fullFinishTs))
 		// the oldest oplog is lost
 		if utils.ExtractTimestamp(bigOldTs) >= fullBeginTs {
-			return fmt.Errorf("incr sync fullBeginTs[%v] is less than current bigOldTs[%v], this error means user's "+
+			return LOG.Critical("incr sync fullBeginTs[%v] is less than current bigOldTs[%v], this error means user's "+
 				"oplog collection size is too small or full sync continues too long", fullBeginTs, bigOldTs)
 		}
 
@@ -101,11 +102,11 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			// get current oldest timestamp
 			_, _, _, bigOldTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
 			if err != nil {
-				return fmt.Errorf("get oldest timestamp failed[%v]", err)
+				return LOG.Critical("get oldest timestamp failed[%v]", err)
 			}
 			// the oldest oplog is lost
 			if utils.ExtractTimestamp(bigOldTs) >= beginTs {
-				return fmt.Errorf("incr sync beginTs[%v] is less than current bigOldTs[%v], this error means user's "+
+				return LOG.Critical("incr sync beginTs[%v] is less than current bigOldTs[%v], this error means user's "+
 					"oplog collection size is too small or full sync continues too long", beginTs, bigOldTs)
 			}
 		}
@@ -113,8 +114,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			return err
 		}
 	default:
-		LOG.Critical("unknown sync mode %v", conf.Options.SyncMode)
-		return errors.New("unknown sync mode " + conf.Options.SyncMode)
+		return LOG.Critical("unknown sync mode %v", conf.Options.SyncMode)
 	}
 
 	return nil
@@ -205,16 +205,20 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	// oldestTs is the smallest of the all newest timestamp
 	tsMap, _, smallNewTs, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
 	if err != nil {
-		return syncMode, 0, nil
+		return syncMode, 0, err
 	}
 
 	needFull := false
-	ckptManager := NewCheckpointManager(0)
-	if err := ckptManager.Load(); err != nil {
-		return "", 0, err
+	ckptMap, err := docsyncer.LoadCheckpoint()
+	if err != nil {
+		return syncMode, 0, err
 	}
+
 	for replset, ts := range tsMap {
-		if ts.Oldest >= ckptManager.Get(replset) {
+		if _, ok := ckptMap[replset]; !ok {
+			continue
+		}
+		if ts.Oldest >= ckptMap[replset] {
 			// checkpoint less than the oldest timestamp
 			needFull = true
 			break
@@ -250,12 +254,15 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		return err
 	}
 
-	var ckptMap map[string]utils.TimestampNode
+	ckptMap := make(map[string]bson.MongoTimestamp)
 	// get all newest timestamp for each mongodb if sync mode isn't "document"
 	if conf.Options.SyncMode != SYNCMODE_DOCUMENT {
-		ckptMap, _, _, _, _, err = utils.GetAllTimestamp(coordinator.Sources)
+		tsMap, _, _, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
 		if err != nil {
 			return err
+		}
+		for replset, tsNode := range tsMap {
+			ckptMap[replset] = tsNode.Newest
 		}
 	}
 
@@ -321,8 +328,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// checkpoint after document syncer
 	if conf.Options.SyncMode != SYNCMODE_DOCUMENT {
 		LOG.Info("try to set checkpoint with map[%v]", ckptMap)
-		ckptManager := NewCheckpointManager(0)
-		if err := ckptManager.Flush(); err != nil {
+		if err := docsyncer.FlushCheckpoint(ckptMap); err != nil {
 			LOG.Error("document syncer flush checkpoint failed. %v", err)
 			return err
 		}
@@ -347,8 +353,12 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		// syncerGroup http api registry
 		syncer.init()
 		ckptManager.addOplogSyncer(syncer)
-		mvckManager.addOplogSyncer(syncer)
-		ddlManager.addOplogSyncer(syncer)
+		if conf.Options.MoveChunkEnable {
+			mvckManager.addOplogSyncer(syncer)
+		}
+		if DDLSupportForSharding() {
+			ddlManager.addOplogSyncer(syncer)
+		}
 		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)
 	}
 
@@ -373,11 +383,9 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		return err
 	}
 	ckptManager.start()
-
 	if conf.Options.MoveChunkEnable {
 		mvckManager.start()
 	}
-
 	if DDLSupportForSharding() {
 		ddlManager.start()
 	}

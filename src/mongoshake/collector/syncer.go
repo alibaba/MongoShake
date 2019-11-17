@@ -27,9 +27,9 @@ const (
 
 	WaitBarrierAckLogTimes = 10
 
-	DurationTime                  = 6000 // unit: ms.
-	DDLCheckpointGap              = 5    // unit: seconds.
-	FilterCheckpointGap           = 180  // unit: seconds. no checkpoint update, flush checkpoint mandatory
+	DurationTime        = 6000 // unit: ms.
+	DDLCheckpointGap    = 5    // unit: seconds.
+	FilterCheckpointGap = 180  // unit: seconds. no checkpoint update, flush checkpoint mandatory
 
 	ShardingWorkerId = 0
 )
@@ -226,12 +226,12 @@ func (sync *OplogSyncer) startBatcher() {
 				}
 			}
 		} else {
-			checkpointTs := sync.ckptManager.Get(sync.replset)
+			readerQueryTs := int64(sync.reader.GetQueryTimestamp())
 			syncTs := sync.batcher.syncTs
-			if utils.ExtractTimestamp(syncTs)-utils.ExtractTimestamp(checkpointTs) >= FilterCheckpointGap {
+			if utils.ExtractTimestamp(syncTs)-readerQueryTs >= FilterCheckpointGap {
 				sync.waitAllAck(false)
 				LOG.Info("oplog syncer %v force to update checkpointTs from %v to %v",
-					sync.replset, utils.TimestampToLog(checkpointTs), utils.TimestampToLog(syncTs))
+					sync.replset, utils.TimestampToLog(readerQueryTs), utils.TimestampToLog(syncTs))
 				// update latest fetched timestamp in memory
 				sync.reader.UpdateQueryTimestamp(syncTs)
 			}

@@ -28,14 +28,13 @@ const (
 )
 
 type Persist interface {
-	Load(conn *utils.MongoConn, db string, tablePrefix string) error
-	Flush(conn *utils.MongoConn, db string, tablePrefix string) error
+	Load() error
+	Flush() error
 }
 
 type CheckpointManager struct {
 	syncMap map[string]*OplogSyncer
 	mutex   sync.RWMutex
-
 	FlushChan chan bool
 
 	url           string
@@ -48,7 +47,6 @@ type CheckpointManager struct {
 }
 
 func NewCheckpointManager(startPosition int64) *CheckpointManager {
-	db := utils.AppDatabase()
 	// we can't insert Timestamp(0, 0) that will be treat as Now() inserted
 	// into mongo. so we use Timestamp(0, 1)
 	startPosition = int64(math.Max(float64(startPosition), 1))
@@ -56,7 +54,7 @@ func NewCheckpointManager(startPosition int64) *CheckpointManager {
 		syncMap:       make(map[string]*OplogSyncer),
 		FlushChan:     make(chan bool),
 		url:           conf.Options.ContextStorageUrl,
-		db:            db,
+		db:            utils.AppDatabase(),
 		table:         conf.Options.ContextStorageCollection,
 		startPosition: startPosition,
 	}
@@ -174,7 +172,7 @@ func (manager *CheckpointManager) Load() error {
 		}
 	}
 	for _, persist := range manager.persistList {
-		if err := persist.Load(manager.conn, manager.db, manager.table); err != nil {
+		if err := persist.Load(); err != nil {
 			LOG.Critical("CheckpointManager flush persist object error %v", err)
 			manager.conn.Close()
 			manager.conn = nil
@@ -214,7 +212,7 @@ func (manager *CheckpointManager) Flush() error {
 		}
 	}
 	for _, persist := range manager.persistList {
-		if err := persist.Flush(manager.conn, manager.db, manager.table); err != nil {
+		if err := persist.Flush(); err != nil {
 			manager.conn.Close()
 			manager.conn = nil
 			return err
@@ -230,6 +228,7 @@ func (manager *CheckpointManager) ensureNetwork() bool {
 			manager.conn = conn
 		} else {
 			LOG.Warn("CheckpointManager connect to %v failed. %v", manager.url, err)
+			manager.conn = nil
 			return false
 		}
 	}

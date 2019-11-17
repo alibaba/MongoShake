@@ -2,6 +2,7 @@ package collector
 
 import (
 	"encoding/json"
+	"fmt"
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
@@ -15,7 +16,12 @@ import (
 )
 
 const (
-	DDLCheckInterval   = 1 // s
+	CheckpointKeyNs     = "ns"
+	CheckpointKeyObject = "obj"
+	CheckpointBlocklog  = "blockLog"
+	CheckpointDBMap     = "dbMap"
+
+	DDLCheckInterval       = 1  // s
 	DDLUnResponseThreshold = 60 // s
 )
 
@@ -31,51 +37,59 @@ type DDLValue struct {
 }
 
 type DDLManager struct {
-	ckptManager   *CheckpointManager
-	ddlMap  map[DDLKey]*DDLValue
-	syncMap map[string]*OplogSyncer
+	ckptManager *CheckpointManager
+	ddlMap      map[DDLKey]*DDLValue
+	syncMap     map[string]*OplogSyncer
 
 	FromCsConn   *utils.MongoConn // share config server url
 	ToIsSharding bool
 
 	lastDDLValue *DDLValue // avoid multiple eliminate the same ddl
-	mutex        sync.Mutex
+	ddlLock      sync.Mutex
 }
 
 func NewDDLManager(ckptManager *CheckpointManager) *DDLManager {
+	if !DDLSupportForSharding() {
+		return nil
+	}
 	var fromCsConn *utils.MongoConn
 	var err error
-	if DDLSupportForSharding() {
-		if fromCsConn, err = utils.NewMongoConn(conf.Options.MongoCsUrl, utils.ConnectModePrimary, true); err != nil {
-			LOG.Crashf("Connect MongoCsUrl[%v] error[%v].", conf.Options.MongoCsUrl, err)
-		}
+	if fromCsConn, err = utils.NewMongoConn(conf.Options.MongoCsUrl, utils.ConnectModePrimary, true); err != nil {
+		LOG.Crashf("Connect MongoCsUrl[%v] error[%v].", conf.Options.MongoCsUrl, err)
 	}
-
 	var toConn *utils.MongoConn
 	if toConn, err = utils.NewMongoConn(conf.Options.TunnelAddress[0], utils.ConnectModePrimary, true); err != nil {
 		LOG.Crashf("Connect toUrl[%v] error[%v].", conf.Options.MongoCsUrl, err)
 	}
 	defer toConn.Close()
 
-	return &DDLManager{
+	manager := &DDLManager{
 		ckptManager:  ckptManager,
 		ddlMap:       make(map[DDLKey]*DDLValue),
 		syncMap:      make(map[string]*OplogSyncer),
 		FromCsConn:   fromCsConn,
 		ToIsSharding: utils.IsSharding(toConn.Session),
 	}
+	ckptManager.registerPersis(manager)
+	return manager
+}
+
+func (manager *DDLManager) addOplogSyncer(syncer *OplogSyncer) {
+	manager.syncMap[syncer.replset] = syncer
 }
 
 func (manager *DDLManager) start() {
 	nimo.GoRoutineInLoop(func() {
-		manager.eliminateBlock()
+		if ddlMinValue := manager.eliminateBlock(); ddlMinValue != nil {
+			ddlMinValue.blockChan <- true
+		}
 		time.Sleep(DDLCheckInterval * time.Second)
 	})
 }
 
 func (manager *DDLManager) addDDL(replset string, log *oplog.PartialLog) *DDLValue {
-	manager.mutex.Lock()
-	defer manager.mutex.Unlock()
+	manager.ddlLock.Lock()
+	defer manager.ddlLock.Unlock()
 	if objectStr, err := json.Marshal(log.Object); err == nil {
 		ddlKey := DDLKey{Namespace: log.Namespace, ObjectStr: string(objectStr)}
 		if _, ok := manager.ddlMap[ddlKey]; !ok {
@@ -106,12 +120,12 @@ func (manager *DDLManager) BlockDDL(replset string, log *oplog.PartialLog) bool 
 }
 
 func (manager *DDLManager) UnBlockDDL(replset string, log *oplog.PartialLog) {
-	manager.mutex.Lock()
-	defer manager.mutex.Unlock()
+	manager.ddlLock.Lock()
+	defer manager.ddlLock.Unlock()
 	if objectStr, err := json.Marshal(log.Object); err == nil {
 		ddlKey := DDLKey{Namespace: log.Namespace, ObjectStr: string(objectStr)}
-		if value, ok := manager.ddlMap[ddlKey]; ok {
-			close(value.blockChan)
+		if ddlValue, ok := manager.ddlMap[ddlKey]; ok {
+			close(ddlValue.blockChan)
 			delete(manager.ddlMap, ddlKey)
 		} else {
 			LOG.Crashf("DDLManager syncer %v ddlKey[%v] not in ddlMap error", replset, ddlKey)
@@ -121,9 +135,83 @@ func (manager *DDLManager) UnBlockDDL(replset string, log *oplog.PartialLog) {
 	}
 }
 
-func (manager *DDLManager) eliminateBlock() {
-	manager.mutex.Lock()
-	defer manager.mutex.Unlock()
+func (manager *DDLManager) Load() error {
+	manager.ddlLock.Lock()
+	defer manager.ddlLock.Unlock()
+	conn := manager.ckptManager.conn
+	db := manager.ckptManager.db
+	tablePrefix := manager.ckptManager.table
+
+	iter := conn.Session.DB(db).C(tablePrefix + "_ddl").Find(bson.M{}).Iter()
+	ckptDoc := make(map[string]interface{})
+	for iter.Next(ckptDoc) {
+		namespace, ok1 := ckptDoc[CheckpointKeyNs].(string)
+		object, ok2 := ckptDoc[CheckpointKeyObject].(string)
+		blockLogDoc, ok3 := ckptDoc[CheckpointBlocklog].(map[string]interface{})
+		dbMapDoc, ok4 := ckptDoc[CheckpointDBMap].(map[string]interface{})
+		blockLog := &oplog.PartialLog{}
+		err := utils.Map2Struct(blockLogDoc, "bson", blockLog)
+		if !ok1 || !ok2 || !ok3 || !ok4 || err != nil {
+			return fmt.Errorf("DDLManager load checkpoint illegal record %v. " +
+				"ok1[%v] ok2[%v] ok3[%v] ok4[%v] err[%v]",
+				ckptDoc, ok1, ok2, ok3, ok4, err)
+		}
+		dbMap := make(map[string]bson.MongoTimestamp)
+		for replset, ts := range dbMapDoc {
+			if ts, ok := ts.(bson.MongoTimestamp); ok {
+				dbMap[replset] = ts
+			} else {
+				return fmt.Errorf("DDLManager load checkpoint illegal dbMap %v", dbMap)
+			}
+		}
+		ddlKey := DDLKey{Namespace: namespace, ObjectStr: object}
+		manager.ddlMap[ddlKey] = &DDLValue{
+			blockLog:  blockLog,
+			blockChan: make(chan bool),
+			dbMap:     dbMap}
+		LOG.Info("DDLManager load ddlMap key %v", ddlKey)
+	}
+	LOG.Info("DDLManager load checkpoint ddlMap size[%v]", len(manager.ddlMap))
+	return nil
+}
+
+func (manager *DDLManager) Flush() error {
+	manager.ddlLock.Lock()
+	defer manager.ddlLock.Unlock()
+	conn := manager.ckptManager.conn
+	db := manager.ckptManager.db
+	tablePrefix := manager.ckptManager.table
+
+	table := tablePrefix + "_ddl"
+	if err := conn.Session.DB(db).C(table).DropCollection(); err != nil && err.Error() != "ns not found" {
+		return LOG.Critical("DDLManager flush checkpoint drop collection %v failed. %v", table, err)
+	}
+	var buffer []interface{}
+	for ddlKey, ddlValue := range manager.ddlMap {
+		blockLog, err := utils.Struct2Map(ddlValue.blockLog, "bson")
+		if err != nil {
+			return fmt.Errorf("DDLManager flush checkpoint json blockLog[%v] failed", ddlValue.blockLog)
+		}
+		ckptDoc := map[string]interface{}{
+			CheckpointKeyNs:     ddlKey.Namespace,
+			CheckpointKeyObject: ddlKey.ObjectStr,
+			CheckpointBlocklog:  blockLog,
+			CheckpointDBMap:     ddlValue.dbMap,
+		}
+		buffer = append(buffer, ckptDoc)
+	}
+	if len(buffer) > 0 {
+		if err := conn.Session.DB(db).C(table).Insert(buffer...); err != nil {
+			return LOG.Critical("DDLManager flush checkpoint ddlMap buffer %v insert failed. %v", buffer, err)
+		}
+	}
+	LOG.Info("DDLManager flush checkpoint ddlMap size[%v]", len(manager.ddlMap))
+	return nil
+}
+
+func (manager *DDLManager) eliminateBlock() *DDLValue {
+	manager.ddlLock.Lock()
+	defer manager.ddlLock.Unlock()
 	if len(manager.ddlMap) > 0 {
 		LOG.Info("ddl block map len=%v", len(manager.ddlMap))
 		for key := range manager.ddlMap {
@@ -133,8 +221,8 @@ func (manager *DDLManager) eliminateBlock() {
 	// get the earliest ddl operator
 	var ddlMinTs bson.MongoTimestamp = math.MaxInt64
 	var ddlMinKey DDLKey
-	for ddlKey, value := range manager.ddlMap {
-		for _, blockTs := range value.dbMap {
+	for ddlKey, ddlValue := range manager.ddlMap {
+		for _, blockTs := range ddlValue.dbMap {
 			if ddlMinTs > blockTs {
 				ddlMinTs = blockTs
 				ddlMinKey = ddlKey
@@ -142,12 +230,12 @@ func (manager *DDLManager) eliminateBlock() {
 		}
 	}
 	if ddlMinTs == math.MaxInt64 {
-		return
+		return nil
 	}
 	ddlMinValue := manager.ddlMap[ddlMinKey]
 	if ddlMinValue == manager.lastDDLValue {
 		LOG.Info("DDLManager already eliminate ddl %v", ddlMinKey)
-		return
+		return nil
 	}
 	// whether non sharding ddl
 	var shardColSpec *utils.ShardCollectionSpec
@@ -157,16 +245,14 @@ func (manager *DDLManager) eliminateBlock() {
 		if shardColSpec == nil {
 			LOG.Info("DDLManager eliminate block and run non sharding ddl %v", ddlMinKey)
 			manager.lastDDLValue = ddlMinValue
-			ddlMinValue.blockChan <- true
-			return
+			return ddlMinValue
 		}
 	}
 	// try to run the earliest ddl
 	if strings.HasSuffix(ddlMinKey.Namespace, "system.indexes") {
 		LOG.Info("DDLManager eliminate block and run ddl %v", ddlMinKey)
 		manager.lastDDLValue = ddlMinValue
-		ddlMinValue.blockChan <- true
-		return
+		return ddlMinValue
 	}
 	var object bson.D
 	if err := json.Unmarshal([]byte(ddlMinKey.ObjectStr), &object); err != nil {
@@ -182,7 +268,7 @@ func (manager *DDLManager) eliminateBlock() {
 	case "collMod":
 		LOG.Info("DDLManager eliminate block and run ddl %v", ddlMinKey)
 		manager.lastDDLValue = ddlMinValue
-		ddlMinValue.blockChan <- true
+		return ddlMinValue
 	case "deleteIndex":
 		fallthrough
 	case "deleteIndexes":
@@ -204,18 +290,18 @@ func (manager *DDLManager) eliminateBlock() {
 				continue
 			}
 			// if the syncer is un responsible for 1 minute, then the syncer has finished to sync
-			if current.After(syncer.batcher.lastResponseTime.Add(DDLUnResponseThreshold*time.Second)) {
+			if current.After(syncer.batcher.lastResponseTime.Add(DDLUnResponseThreshold * time.Second)) {
 				continue
 			}
 			LOG.Info("DDLManager eliminate cannot sync ddl %v with col spec %v. "+
 				"replset %v ddlMinTs[%v] syncTs[%v] UnResTimes[%v]",
 				ddlMinKey, shardColSpec, replset, utils.TimestampToLog(ddlMinTs),
 				utils.TimestampToLog(syncer.batcher.syncTs), utils.TimestampToLog(syncer.batcher.lastResponseTime))
-			return
+			return nil
 		}
 		LOG.Info("DDLManager eliminate block and force run ddl %v", ddlMinKey)
 		manager.lastDDLValue = ddlMinValue
-		ddlMinValue.blockChan <- true
+		return ddlMinValue
 	case "renameCollection":
 		fallthrough
 	case "convertToCapped":
@@ -227,12 +313,9 @@ func (manager *DDLManager) eliminateBlock() {
 	default:
 		LOG.Info("DDLManager eliminate block and run unsupported ddl %v", ddlMinKey)
 		manager.lastDDLValue = ddlMinValue
-		ddlMinValue.blockChan <- true
+		return ddlMinValue
 	}
-}
-
-func (manager *DDLManager) addOplogSyncer(syncer *OplogSyncer) {
-	manager.syncMap[syncer.replset] = syncer
+	return nil
 }
 
 func TransformDDL(replset string, log *oplog.PartialLog, shardColSpec *utils.ShardCollectionSpec, toIsSharding bool) []*oplog.PartialLog {
