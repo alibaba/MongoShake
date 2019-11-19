@@ -3,6 +3,7 @@ package docsyncer
 import (
 	"fmt"
 	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
 	"mongoshake/collector/configure"
 	utils "mongoshake/common"
@@ -51,6 +52,9 @@ func FlushCheckpoint(ckptMap map[string]bson.MongoTimestamp) error {
 	conn, err := utils.NewMongoConn(url, utils.ConnectModePrimary, true)
 	if err != nil {
 		return fmt.Errorf("FlushCheckpoint connect to %v failed. %v", url, err)
+	}
+	if conf.Options.IsShardCluster() {
+		conn.Session.EnsureSafe(&mgo.Safe{WMode: utils.MajorityWriteConcern})
 	}
 
 	for replset, ackTs := range ckptMap {

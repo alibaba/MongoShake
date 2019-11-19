@@ -23,7 +23,6 @@ const (
 	CheckpointAckTs  = "ackTs"
 	CheckpointSyncTs = "syncTs"
 
-	MajorityWriteConcern          = "majority"
 	CheckpointMoveChunkIntervalMS = 5000
 )
 
@@ -234,7 +233,7 @@ func (manager *CheckpointManager) ensureNetwork() bool {
 	}
 	// set WriteMajority while checkpoint is writing to ConfigServer
 	if conf.Options.IsShardCluster() {
-		manager.conn.Session.EnsureSafe(&mgo.Safe{WMode: MajorityWriteConcern})
+		manager.conn.Session.EnsureSafe(&mgo.Safe{WMode: utils.MajorityWriteConcern})
 	}
 	return true
 }

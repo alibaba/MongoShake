@@ -22,7 +22,7 @@ const (
 	CheckpointDBMap     = "dbMap"
 
 	DDLCheckInterval       = 1  // s
-	DDLUnResponseThreshold = 60 // s
+	DDLUnResponseThreshold = 30 // s
 )
 
 type DDLKey struct {

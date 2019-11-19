@@ -19,7 +19,7 @@ const (
 	MoveChunkInsertMap           = "insertMap"
 	MoveChunkDeleteItem          = "deleteItem"
 	MoveChunkBufferSize          = 1000
-	MoveChunkUnResponseThreshold = 10 // s
+	MoveChunkUnResponseThreshold = 30 // s
 )
 
 func NewMoveChunkManager(ckptManager *CheckpointManager) *MoveChunkManager {

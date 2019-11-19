@@ -21,19 +21,17 @@ const (
 	ConnectModePrimary            = "primary"
 	ConnectModeSecondaryPreferred = "secondaryPreferred"
 	ConnectModeStandalone         = "standalone"
+	MajorityWriteConcern          = "majority"
+
+	GlobalDiagnosticPath = "diagnostic"
+	// This is the time of golang was born to the world
+	GolangSecurityTime = "2006-01-02T15:04:05Z"
 )
 
 // Build info
 var BRANCH = "$"
 var SIGNALPROFILE = "$"
 var SIGNALSTACK = "$"
-
-const (
-	GlobalDiagnosticPath = "diagnostic"
-
-	// This is the time of golang was born to the world
-	GolangSecurityTime = "2006-01-02T15:04:05Z"
-)
 
 func init() {
 	// prepare global folders
