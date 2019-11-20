@@ -7,7 +7,6 @@
 	* IMPROVE: support different sharding key or index at destination mongodb
 	* IMPROVE: support global consistence checkpoint
 
-
 2019-09-30 Alibaba Cloud.
 	* version: 2.0.8
 	* BUGFIX: fetch data from kafka failed. update "sarama" driver, see #212.
