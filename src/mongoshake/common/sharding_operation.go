@@ -38,7 +38,11 @@ func GetBalancerStatusByUrl(url string) (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	return !retMap["stopped"].(bool), nil
+	if stopped, ok := retMap["stopped"].(bool); ok {
+		return !stopped, nil
+	} else {
+		return true, nil
+	}
 }
 
 type ChunkRange struct {

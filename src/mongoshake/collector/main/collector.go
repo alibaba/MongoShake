@@ -88,22 +88,14 @@ func startup() {
 
 	// initialize http api
 	utils.InitHttpApi(conf.Options.HTTPListenPort)
-	coordinator := &collector.ReplicationCoordinator{
-		Sources: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
-	}
 
 	utils.HttpApi.RegisterAPI("/conf", nimo.HttpGet, func([]byte) interface{} {
 		return &conf.Options
 	})
 
-	for i, src := range conf.Options.MongoUrls {
-		coordinator.Sources[i] = new(utils.MongoSource)
-		coordinator.Sources[i].URL = src
-		if len(conf.Options.OplogGIDS) != 0 {
-			coordinator.Sources[i].Gids = conf.Options.OplogGIDS
-		}
+	coordinator := &collector.ReplicationCoordinator{
+		Sources: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
 	}
-
 	// start mongodb replication
 	if err := coordinator.Run(); err != nil {
 		// initial or connection established failed

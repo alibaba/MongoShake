@@ -145,34 +145,46 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		conn.Close()
 	}
 
-	for i, src := range coordinator.Sources {
-		if conn, err = utils.NewMongoConn(src.URL, conf.Options.MongoConnectMode, true); conn == nil || !conn.IsGood() || err != nil {
-			LOG.Critical("Connect mongo server error. %v, url : %s. See https://github.com/alibaba/MongoShake/wiki/FAQ#q-how-to-solve-the-oplog-tailer-initialize-failed-no-reachable-servers-error", err, src.URL)
-			return err
+	for i, rawurl := range conf.Options.MongoUrls {
+		url, params := utils.ParseMongoUrl(rawurl)
+		coordinator.Sources[i] = new(utils.MongoSource)
+		coordinator.Sources[i].URL = url
+		if len(conf.Options.OplogGIDS) != 0 {
+			coordinator.Sources[i].Gids = conf.Options.OplogGIDS
+		}
+
+		if conn, err = utils.NewMongoConn(url, conf.Options.MongoConnectMode, true); conn == nil || !conn.IsGood() || err != nil {
+			return LOG.Critical("Connect mongo server from url[%v] error. %v. See https://github.com/alibaba/MongoShake/wiki/FAQ#q-how-to-solve-the-oplog-tailer-initialize-failed-no-reachable-servers-error", url, err)
 		}
 
 		// a conventional ReplicaSet should have local.oplog.rs collection
 		if conf.Options.SyncMode != SYNCMODE_DOCUMENT && !conn.HasOplogNs() {
-			LOG.Critical("There has no oplog collection in mongo db server")
 			conn.Close()
-			return errors.New("no oplog ns in mongo. See https://github.com/alibaba/MongoShake/wiki/FAQ#q-how-to-solve-the-oplog-tailer-initialize-failed-no-oplog-ns-in-mongo-error")
+			return LOG.Critical("no oplog ns in mongo. See https://github.com/alibaba/MongoShake/wiki/FAQ#q-how-to-solve-the-oplog-tailer-initialize-failed-no-oplog-ns-in-mongo-error")
 		}
 
 		// check if there has dup server every replica set in RS or Shard
-		rsName := conn.AcquireReplicaSetName()
+		rsName, err := conn.AcquireReplicaSetName()
 		// rsName will be set to default if empty
-		if rsName == "" {
-			rsName = fmt.Sprintf("default-%d", i)
-			LOG.Warn("Source mongodb have empty replica set name, url[%s], change to default[%s]", src.URL, rsName)
+		if err != nil {
+			if conf.Options.FilterOrphanDocument {
+				var ok bool
+				if rsName, ok = params["replicaSet"]; !ok {
+					conn.Close()
+					return LOG.Critical("acquire replica set name from url[%v] by replSetGetStatus failed. %v", url, err)
+				}
+			} else {
+				rsName = fmt.Sprintf("default-%d", i)
+				LOG.Warn("Source mongodb have empty replica set name, url[%s], change to default[%s]", url, rsName)
+			}
 		}
 
 		if _, exist := rs[rsName]; exist {
-			LOG.Critical("There has duplicate replica set name : %s", rsName)
 			conn.Close()
-			return errors.New("duplicated replica set source")
+			return LOG.Critical("There has duplicate replica set name : %s", rsName)
 		}
 		rs[rsName] = 1
-		src.Replset = rsName
+		coordinator.Sources[i].Replset = rsName
 
 		// look around if there has uniq index
 		if !hasUniqIndex {
@@ -243,9 +255,11 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 			LOG.Critical("source mongodb sharding need to stop balancer when document replication occur")
 			return errors.New("source mongodb sharding need to stop balancer when document replication occur")
 		}
-		var err error
-		if shardingChunkMap, err = utils.GetChunkMapByUrl(conf.Options.MongoCsUrl); err != nil {
-			return err
+		if conf.Options.FilterOrphanDocument {
+			var err error
+			if shardingChunkMap, err = utils.GetChunkMapByUrl(conf.Options.MongoCsUrl); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -293,13 +307,16 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	indexMap := make(map[utils.NS][]mgo.Index)
 
 	for _, src := range coordinator.Sources {
-		dbChunkMap := make(utils.DBChunkMap)
-		if chunkMap, ok := shardingChunkMap[src.Replset]; ok {
-			dbChunkMap = chunkMap
-		} else {
-			LOG.Warn("document syncer %v has no chunk map", src.Replset)
+		var orphanFilter *filter.OrphanFilter
+		if conf.Options.FilterOrphanDocument {
+			dbChunkMap := make(utils.DBChunkMap)
+			if chunkMap, ok := shardingChunkMap[src.Replset]; ok {
+				dbChunkMap = chunkMap
+			} else {
+				LOG.Warn("document syncer %v has no chunk map", src.Replset)
+			}
+			orphanFilter = filter.NewOrphanFilter(src.Replset, dbChunkMap)
 		}
-		orphanFilter := filter.NewOrphanFilter(src.Replset, dbChunkMap)
 
 		dbSyncer := docsyncer.NewDBSyncer(src.Replset, src.URL, toUrl, trans, orphanFilter)
 		LOG.Info("document syncer %v begin replication for url=%v", src.Replset, src.URL)

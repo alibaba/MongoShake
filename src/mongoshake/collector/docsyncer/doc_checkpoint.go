@@ -53,9 +53,7 @@ func FlushCheckpoint(ckptMap map[string]bson.MongoTimestamp) error {
 	if err != nil {
 		return fmt.Errorf("FlushCheckpoint connect to %v failed. %v", url, err)
 	}
-	if conf.Options.IsShardCluster() {
-		conn.Session.EnsureSafe(&mgo.Safe{WMode: utils.MajorityWriteConcern})
-	}
+	conn.Session.EnsureSafe(&mgo.Safe{WMode: utils.MajorityWriteConcern})
 
 	for replset, ackTs := range ckptMap {
 		ckptDoc := map[string]interface{}{
