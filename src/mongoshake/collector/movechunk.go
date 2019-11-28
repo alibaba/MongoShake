@@ -274,17 +274,16 @@ func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.
 	return barrier, resend, updateObj
 }
 
-func (manager *MoveChunkManager) Load() error {
+func (manager *MoveChunkManager) Load(tablePrefix string) error {
 	manager.moveChunkLock.Lock()
 	defer manager.moveChunkLock.Unlock()
 	conn := manager.ckptManager.conn
 	db := manager.ckptManager.db
-	tablePrefix := manager.ckptManager.table
 
 	iter := conn.Session.DB(db).C(tablePrefix + "_mvck_syncer").Find(bson.M{}).Iter()
 	ckptDoc := make(map[string]interface{})
 	for iter.Next(ckptDoc) {
-		replset, ok1 := ckptDoc[CheckpointName].(string)
+		replset, ok1 := ckptDoc[utils.CheckpointName].(string)
 		barrierKey, ok2 := ckptDoc[MoveChunkBarrierKey].(map[string]interface{})
 		if !ok1 || !ok2 {
 			return fmt.Errorf("MoveChunkManager load checkpoint illegal record %v", ckptDoc)
@@ -338,21 +337,15 @@ func (manager *MoveChunkManager) Load() error {
 			value.barrierMap[replset] = syncInfo.barrierChan
 		}
 	}
-	//for key, value := range manager.moveChunkMap {
-	//	LOG.Info("### MoveChunkManager load moveChunkMap key=%v insertMap=%v deleteItem=%v barrierMap=%v",
-	//		key, value.insertMap, value.deleteItem, value.barrierMap)
-	//}
-
 	LOG.Info("MoveChunkManager load checkpoint moveChunkMap size[%v]", len(manager.moveChunkMap))
 	return nil
 }
 
-func (manager *MoveChunkManager) Flush() error {
+func (manager *MoveChunkManager) Flush(tablePrefix string) error {
 	manager.moveChunkLock.Lock()
 	defer manager.moveChunkLock.Unlock()
 	conn := manager.ckptManager.conn
 	db := manager.ckptManager.db
-	tablePrefix := manager.ckptManager.table
 
 	checkpointBegin := time.Now()
 	for replset, syncInfo := range manager.syncInfoMap {
@@ -367,11 +360,11 @@ func (manager *MoveChunkManager) Flush() error {
 			}
 		}
 		ckptDoc := map[string]interface{}{
-			CheckpointName:      replset,
-			MoveChunkBarrierKey: barrierKey,
+			utils.CheckpointName: replset,
+			MoveChunkBarrierKey:  barrierKey,
 		}
 		if _, err = conn.Session.DB(db).C(tablePrefix+"_mvck_syncer").
-			Upsert(bson.M{CheckpointName: replset}, ckptDoc); err != nil {
+			Upsert(bson.M{utils.CheckpointName: replset}, ckptDoc); err != nil {
 			syncInfo.mutex.Unlock()
 			return fmt.Errorf("MoveChunkManager flush checkpoint syncer %v upsert failed. %v", ckptDoc, err)
 		}
@@ -379,8 +372,7 @@ func (manager *MoveChunkManager) Flush() error {
 	}
 	table := tablePrefix + "_mvck_map"
 	if err := conn.Session.DB(db).C(table).DropCollection(); err != nil && err.Error() != "ns not found" {
-		LOG.Critical("MoveChunkManager flush checkpoint drop collection %v failed. %v", table, err)
-		return err
+		return LOG.Critical("MoveChunkManager flush checkpoint drop collection %v failed. %v", table, err)
 	}
 	buffer := make([]interface{}, 0, MoveChunkBufferSize)
 	for key, value := range manager.moveChunkMap {
@@ -416,6 +408,10 @@ func (manager *MoveChunkManager) Flush() error {
 	LOG.Info("MoveChunkManager flush checkpoint moveChunkMap size[%v] cost %vs",
 		len(manager.moveChunkMap), time.Now().Sub(checkpointBegin).Seconds())
 	return nil
+}
+
+func (manager *MoveChunkManager) GetTableList(tablePrefix string) []string {
+	return []string{tablePrefix + "_mvck_syncer", tablePrefix + "_mvck_map"}
 }
 
 type SyncerMoveChunk struct {

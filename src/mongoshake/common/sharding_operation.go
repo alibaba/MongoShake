@@ -25,10 +25,10 @@ const (
 )
 
 // get balancer status from config server
-func GetBalancerStatusByUrl(url string) (bool, error) {
+func GetBalancerStatusByUrl(csUrl string) (bool, error) {
 	var conn *MongoConn
 	var err error
-	if conn, err = NewMongoConn(url, ConnectModePrimary, true); conn == nil || err != nil {
+	if conn, err = NewMongoConn(csUrl, ConnectModePrimary, true); conn == nil || err != nil {
 		return true, err
 	}
 	defer conn.Close()
@@ -63,10 +63,10 @@ type ShardingChunkMap map[string]map[string]*ShardCollection
 
 type DBChunkMap map[string]*ShardCollection
 
-func GetChunkMapByUrl(url string) (ShardingChunkMap, error) {
+func GetChunkMapByUrl(csUrl string) (ShardingChunkMap, error) {
 	var conn *MongoConn
 	var err error
-	if conn, err = NewMongoConn(url, ConnectModePrimary, true); conn == nil || err != nil {
+	if conn, err = NewMongoConn(csUrl, ConnectModePrimary, true); conn == nil || err != nil {
 		return nil, err
 	}
 	defer conn.Close()

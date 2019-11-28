@@ -228,7 +228,7 @@ func (sync *OplogSyncer) startBatcher() {
 		} else {
 			readerQueryTs := int64(sync.reader.GetQueryTimestamp())
 			syncTs := sync.batcher.syncTs
-			if utils.ExtractTimestamp(syncTs)-readerQueryTs >= FilterCheckpointGap {
+			if utils.ExtractTs32(syncTs)-readerQueryTs >= FilterCheckpointGap {
 				sync.waitAllAck(false)
 				LOG.Info("oplog syncer %v force to update checkpointTs from %v to %v",
 					sync.replset, utils.TimestampToLog(readerQueryTs), utils.TimestampToLog(syncTs))
@@ -421,14 +421,14 @@ func (sync *OplogSyncer) RestAPI() {
 			LogsSuccess: sync.replMetric.Success(),
 			Tps:         sync.replMetric.Tps(),
 			Lsn: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSN),
-				Time: Time{TimestampUnix: utils.ExtractTimestamp(sync.replMetric.LSN),
-					TimestampTime: utils.TimestampToString(utils.ExtractTimestamp(sync.replMetric.LSN))}},
+				Time: Time{TimestampUnix: utils.ExtractTs32(sync.replMetric.LSN),
+					TimestampTime: utils.TimestampToString(utils.ExtractTs32(sync.replMetric.LSN))}},
 			LsnCkpt: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSNCheckpoint),
-				Time: Time{TimestampUnix: utils.ExtractTimestamp(sync.replMetric.LSNCheckpoint),
-					TimestampTime: utils.TimestampToString(utils.ExtractTimestamp(sync.replMetric.LSNCheckpoint))}},
+				Time: Time{TimestampUnix: utils.ExtractTs32(sync.replMetric.LSNCheckpoint),
+					TimestampTime: utils.TimestampToString(utils.ExtractTs32(sync.replMetric.LSNCheckpoint))}},
 			LsnAck: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSNAck),
-				Time: Time{TimestampUnix: utils.ExtractTimestamp(sync.replMetric.LSNAck),
-					TimestampTime: utils.TimestampToString(utils.ExtractTimestamp(sync.replMetric.LSNAck))}},
+				Time: Time{TimestampUnix: utils.ExtractTs32(sync.replMetric.LSNAck),
+					TimestampTime: utils.TimestampToString(utils.ExtractTs32(sync.replMetric.LSNAck))}},
 			Now: &Time{TimestampUnix: time.Now().Unix(), TimestampTime: utils.TimestampToString(time.Now().Unix())},
 		}
 	})

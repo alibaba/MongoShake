@@ -159,7 +159,19 @@ func sanitizeOptions() error {
 		if len(conf.Options.MongoUrls) == 1 {
 			conf.Options.ContextStorageUrl = conf.Options.MongoUrls[0]
 		} else if len(conf.Options.MongoUrls) > 1 {
-			return errors.New("checkpoint url should be configured while using mongo shard servers")
+			return errors.New("checkpoint url should be configured when transfer from mongo sharding")
+		}
+	}
+
+	if conf.Options.ReplayerExecutorUpsert == true {
+		if len(conf.Options.MongoUrls) > 1 {
+			return errors.New("replayer.executor.upsert should be set false when transfer from mongo sharding")
+		}
+	}
+
+	if conf.Options.ReplayerExecutorInsertOnDupUpdate == true {
+		if len(conf.Options.MongoUrls) > 1 {
+			return errors.New("replayer.executor.insert_on_dup_update should be set false when transfer from mongo sharding")
 		}
 	}
 

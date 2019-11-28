@@ -73,15 +73,15 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 	}
 
 	// move chunk is disable when timestamp <= fullSyncFinishPosition
-	if moveChunkFilter.Filter(log) && utils.TimestampToInt64(log.Timestamp) <= batcher.syncer.fullSyncFinishPosition {
+	if moveChunkFilter.Filter(log) && int64(log.Timestamp) <= batcher.syncer.fullSyncFinishPosition {
 		LOG.Crashf("move chunk oplog found[%v] when oplog timestamp[%v] less than fullSyncFinishPosition[%v]",
-			log, log.Timestamp, batcher.syncer.fullSyncFinishPosition)
+			log, utils.TimestampToLog(log.Timestamp), utils.TimestampToLog(batcher.syncer.fullSyncFinishPosition))
 	}
 
 	// DDL is disable when timestamp <= fullSyncFinishPosition
-	if ddlFilter.Filter(log) && utils.TimestampToInt64(log.Timestamp) <= batcher.syncer.fullSyncFinishPosition {
+	if ddlFilter.Filter(log) && int64(log.Timestamp) <= batcher.syncer.fullSyncFinishPosition {
 		LOG.Crashf("ddl oplog found[%v] when oplog timestamp[%v] less than fullSyncFinishPosition[%v]",
-			log, log.Timestamp, batcher.syncer.fullSyncFinishPosition)
+			log, utils.TimestampToLog(log.Timestamp), utils.TimestampToLog(batcher.syncer.fullSyncFinishPosition))
 		return false
 	}
 	return false

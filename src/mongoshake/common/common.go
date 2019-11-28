@@ -26,6 +26,15 @@ const (
 	GlobalDiagnosticPath = "diagnostic"
 	// This is the time of golang was born to the world
 	GolangSecurityTime = "2006-01-02T15:04:05Z"
+
+	CheckpointStage = "ckptStage"
+	StageOriginal   = "original"
+	StageFlushed    = "flushed"
+	StageRename     = "rename"
+
+	CheckpointName   = "name"
+	CheckpointAckTs  = "ackTs"
+	CheckpointSyncTs = "syncTs"
 )
 
 // Build info

@@ -135,12 +135,11 @@ func (manager *DDLManager) UnBlockDDL(replset string, log *oplog.PartialLog) {
 	}
 }
 
-func (manager *DDLManager) Load() error {
+func (manager *DDLManager) Load(tablePrefix string) error {
 	manager.ddlLock.Lock()
 	defer manager.ddlLock.Unlock()
 	conn := manager.ckptManager.conn
 	db := manager.ckptManager.db
-	tablePrefix := manager.ckptManager.table
 
 	iter := conn.Session.DB(db).C(tablePrefix + "_ddl").Find(bson.M{}).Iter()
 	ckptDoc := make(map[string]interface{})
@@ -175,12 +174,11 @@ func (manager *DDLManager) Load() error {
 	return nil
 }
 
-func (manager *DDLManager) Flush() error {
+func (manager *DDLManager) Flush(tablePrefix string) error {
 	manager.ddlLock.Lock()
 	defer manager.ddlLock.Unlock()
 	conn := manager.ckptManager.conn
 	db := manager.ckptManager.db
-	tablePrefix := manager.ckptManager.table
 
 	table := tablePrefix + "_ddl"
 	if err := conn.Session.DB(db).C(table).DropCollection(); err != nil && err.Error() != "ns not found" {
@@ -207,6 +205,10 @@ func (manager *DDLManager) Flush() error {
 	}
 	LOG.Info("DDLManager flush checkpoint ddlMap size[%v]", len(manager.ddlMap))
 	return nil
+}
+
+func (manager *DDLManager) GetTableList(tablePrefix string) []string {
+	return []string{tablePrefix + "_ddl"}
 }
 
 func (manager *DDLManager) eliminateBlock() *DDLValue {

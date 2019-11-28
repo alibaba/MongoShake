@@ -63,7 +63,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	 * each shard match one in sharding mode.
 	 * TODO
 	 */
-	LOG.Info("start running with mode[%v], fullBeginTs[%v]", syncMode, fullBeginTs)
+	LOG.Info("start running with mode[%v], fullBeginTs[%v]", syncMode, utils.ExtractTs32(fullBeginTs))
 
 	switch syncMode {
 	case SYNCMODE_ALL:
@@ -78,16 +78,17 @@ func (coordinator *ReplicationCoordinator) Run() error {
 		}
 		LOG.Info("------------------------full sync done!------------------------")
 
-		LOG.Info("bigOldTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractTimestamp(bigOldTs),
-			utils.ExtractTimestamp(fullBeginTs), utils.ExtractTimestamp(fullFinishTs))
+		LOG.Info("bigOldTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractTs32(bigOldTs),
+			utils.ExtractTs32(fullBeginTs), utils.ExtractTs32(fullFinishTs))
 		// the oldest oplog is lost
-		if utils.ExtractTimestamp(bigOldTs) >= fullBeginTs {
-			return LOG.Critical("incr sync fullBeginTs[%v] is less than current bigOldTs[%v], this error means user's "+
-				"oplog collection size is too small or full sync continues too long", fullBeginTs, bigOldTs)
+		if utils.ExtractTs32(bigOldTs) >= utils.ExtractTs32(fullBeginTs) {
+			return LOG.Critical("incr sync fullBeginTs[%v] is less than current bigOldTs[%v], "+
+				"this error means user's oplog collection size is too small or full sync continues too long",
+				utils.ExtractTs32(fullBeginTs), utils.ExtractTs32(bigOldTs))
 		}
 
 		LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
-			utils.ExtractTimestamp(fullBeginTs), utils.ExtractTimestamp(fullFinishTs))
+			utils.ExtractTs32(fullBeginTs), utils.ExtractTs32(fullFinishTs))
 
 		if err := coordinator.startOplogReplication(fullBeginTs, utils.TimestampToInt64(fullFinishTs)); err != nil {
 			return err
@@ -97,20 +98,23 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			return err
 		}
 	case SYNCMODE_OPLOG:
-		beginTs := conf.Options.ContextStartPosition
-		if beginTs != 0 {
+		beginTs32 := conf.Options.ContextStartPosition
+		if beginTs32 != 0 {
 			// get current oldest timestamp
 			_, _, _, bigOldTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
 			if err != nil {
 				return LOG.Critical("get oldest timestamp failed[%v]", err)
 			}
 			// the oldest oplog is lost
-			if utils.ExtractTimestamp(bigOldTs) >= beginTs {
+			if utils.ExtractTs32(bigOldTs) >= beginTs32 {
 				return LOG.Critical("incr sync beginTs[%v] is less than current bigOldTs[%v], this error means user's "+
-					"oplog collection size is too small or full sync continues too long", beginTs, bigOldTs)
+					"oplog collection size is too small or full sync continues too long", beginTs32, utils.ExtractTs32(bigOldTs))
 			}
+		} else {
+			// we can't insert Timestamp(0, 0) that will be treat as Now(), so we use Timestamp(1, 0)
+			beginTs32 = 1
 		}
-		if err := coordinator.startOplogReplication(beginTs, beginTs); err != nil {
+		if err := coordinator.startOplogReplication(beginTs32<<32, beginTs32<<32); err != nil {
 			return err
 		}
 	default:
@@ -397,7 +401,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	}
 
 	// initialize checkpoint timestamp of oplog syncer
-	if err := ckptManager.Load(); err != nil {
+	if err := ckptManager.LoadAll(); err != nil {
 		return err
 	}
 	ckptManager.start()
