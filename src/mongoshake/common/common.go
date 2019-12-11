@@ -80,9 +80,6 @@ func InitialLogger(logDir, logFile, level string, logBuffer bool, verbose bool) 
 		LOG.AddFilter("console", logLevel, LOG.NewConsoleLogWriter())
 	}
 
-	if len(logDir) == 0 {
-		logDir = "logs"
-	}
 	// check directory exists
 	if _, err := os.Stat(logDir); err != nil && os.IsNotExist(err) {
 		if err := os.MkdirAll(logDir, os.ModeDir|os.ModePerm); err != nil {

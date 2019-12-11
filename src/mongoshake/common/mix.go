@@ -189,7 +189,7 @@ func Welcome() {
 	LOG.Warn(fmt.Sprintf("\n%s\n%s\n", welcome, startMsg))
 }
 
-func Goodbye() {
+func Goodbye(needLog func() bool) {
 	goodbye := `
                 ##### | #####
 Ohh we crash ? # _ _ #|# _ _ #
@@ -210,6 +210,7 @@ Ohh we crash ? # _ _ #|# _ _ #
                    #     #
                     #####
 `
-
-	LOG.Warn(goodbye)
+	if needLog() {
+		LOG.Warn(goodbye)
+	}
 }

@@ -19,7 +19,7 @@ const (
 	StorageTypeAPI = "api"
 	StorageTypeDB  = "database"
 
-	CheckpointMoveChunkIntervalMS = 5000
+	NonDirectCheckpointInterval = 180 // s
 )
 
 type Persist interface {
@@ -33,23 +33,23 @@ type CheckpointManager struct {
 	mutex     sync.RWMutex
 	FlushChan chan bool
 
-	url           string
-	db            string
-	table         string
-	startPosition int64
-	conn          *utils.MongoConn
+	url            string
+	db             string
+	table          string
+	defaultBeginTs int64
+	conn           *utils.MongoConn
 
 	persistList []Persist
 }
 
-func NewCheckpointManager(startPosition int64) *CheckpointManager {
+func NewCheckpointManager(defaultBeginTs int64) *CheckpointManager {
 	manager := &CheckpointManager{
-		syncMap:       make(map[string]*OplogSyncer),
-		FlushChan:     make(chan bool),
-		url:           conf.Options.ContextStorageUrl,
-		db:            utils.AppDatabase(),
-		table:         conf.Options.ContextStorageCollection,
-		startPosition: startPosition,
+		syncMap:        make(map[string]*OplogSyncer),
+		FlushChan:      make(chan bool),
+		url:            conf.Options.ContextStorageUrl,
+		db:             utils.AppDatabase(),
+		table:          conf.Options.ContextStorageCollection,
+		defaultBeginTs: defaultBeginTs,
 	}
 	manager.persistList = append(manager.persistList, manager)
 	return manager
@@ -66,12 +66,6 @@ func (manager *CheckpointManager) registerPersis(persist Persist) {
 func (manager *CheckpointManager) start() {
 	startTime := time.Now()
 	checkTime := time.Now()
-	var intervalMs int64
-	if conf.Options.MoveChunkEnable && conf.Options.CheckpointInterval < CheckpointMoveChunkIntervalMS {
-		intervalMs = CheckpointMoveChunkIntervalMS
-	} else {
-		intervalMs = conf.Options.CheckpointInterval
-	}
 
 	nimo.GoRoutineInLoop(func() {
 		now := time.Now()
@@ -88,10 +82,10 @@ func (manager *CheckpointManager) start() {
 			// in AckRequired() tunnel. such as "rpc". While collector is restarted,
 			// we can't get the correct worker ack offset since collector have lost
 			// the unack offset...
-			if conf.Options.Tunnel != "direct" && now.Before(startTime.Add(3*time.Minute)) {
+			if conf.Options.Tunnel != "direct" && now.Before(startTime.Add(NonDirectCheckpointInterval*time.Second)) {
 				return
 			}
-			if now.Before(checkTime.Add(time.Duration(intervalMs) * time.Millisecond)) {
+			if now.Before(checkTime.Add(time.Duration(conf.Options.CheckpointInterval) * time.Second)) {
 				return
 			}
 			LOG.Info("CheckpointManager flush periodically begin")
@@ -221,7 +215,7 @@ func (manager *CheckpointManager) Load(tablePrefix string) error {
 	for replset, syncer := range manager.syncMap {
 		// there is no checkpoint before or this is a new node
 		if syncer.batcher.syncTs == 0 {
-			startTs := manager.startPosition
+			startTs := manager.defaultBeginTs
 			syncer.batcher.syncTs = bson.MongoTimestamp(startTs)
 			syncer.batcher.unsyncTs = bson.MongoTimestamp(startTs)
 			for _, worker := range syncer.batcher.workerGroup {

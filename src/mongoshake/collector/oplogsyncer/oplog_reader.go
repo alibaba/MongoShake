@@ -3,17 +3,17 @@ package oplogsyncer
 import (
 	"errors"
 	"fmt"
+	nimo "github.com/gugemichael/nimo4go"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"mongoshake/collector/configure"
-	"mongoshake/common"
-	"mongoshake/oplog"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
+	"mongoshake/collector/configure"
+	"mongoshake/common"
 )
 
 const (
@@ -25,12 +25,14 @@ const (
 	tailTimeout   = 7
 	oplogChanSize = 0
 
-	LocalDB = "local"
-)
-
-const (
+	LocalDB                    = "local"
 	CollectionCapped           = "CollectionScan died due to position in capped" // bigger than 3.0
 	CollectionCappedLowVersion = "UnknownError"                                  // <= 3.0 version
+
+	FetchStatusStoreDiskNoApply int32 = 1
+	FetchStatusStoreDiskApply   int32 = 2
+	FetchStatusStoreMemoryApply int32 = 3
+	FetchStatusHang             int32 = 10
 )
 
 // TimeoutError. mongodb query executed timeout
@@ -53,6 +55,11 @@ type OplogReader struct {
 	conn           *utils.MongoConn
 	oplogsIterator *mgo.Iter
 
+	// status of fetch and store oplog
+	fetchStatus int32
+	// disk queue used to store oplog temporarily
+	diskQueue *utils.DiskQueue
+
 	// query statement and current max cursor
 	query bson.M
 
@@ -65,14 +72,21 @@ type OplogReader struct {
 }
 
 // NewOplogReader creates reader with mongodb url
-func NewOplogReader(src, replset string) *OplogReader {
-	return &OplogReader{
-		src:       src,
-		replset:   replset,
-		query:     bson.M{},
-		oplogChan: make(chan *retOplog, oplogChanSize),
-		firstRead: true,
+func NewOplogReader(src, replset string, fetchStatus int32) *OplogReader {
+	reader := &OplogReader{
+		src:         src,
+		replset:     replset,
+		fetchStatus: fetchStatus,
+		query:       bson.M{},
+		oplogChan:   make(chan *retOplog, oplogChanSize),
+		firstRead:   true,
 	}
+	if fetchStatus != FetchStatusStoreMemoryApply {
+		dpName := fmt.Sprintf("mongoshake-%v-%v", replset, time.Now().Format("20060102-150405"))
+		reader.diskQueue = utils.NewDiskQueue(dpName, conf.Options.LogDirectory, 1<<30, 0, 1<<26,
+			2500, 2*time.Second, LOG.Global.Logf)
+	}
+	return reader
 }
 
 // SetQueryTimestampOnEmpty set internal timestamp if
@@ -91,26 +105,14 @@ func (reader *OplogReader) GetQueryTimestamp() bson.MongoTimestamp {
 	return reader.query[QueryTs].(bson.M)[QueryOpGT].(bson.MongoTimestamp)
 }
 
-// Next returns an oplog by raw bytes which is []byte
-func (reader *OplogReader) Next() (*bson.Raw, error) {
-	return reader.get()
+func (reader *OplogReader) UpdateFetchStatus(fetchStatus int32) {
+	LOG.Info("reader replset %v update fetch status to %v", reader.replset, logFetchStatus(fetchStatus))
+	atomic.StoreInt32(&reader.fetchStatus, fetchStatus)
 }
 
-// NextOplog returns an oplog by oplog.GenericOplog struct
-func (reader *OplogReader) NextOplog() (log *oplog.GenericOplog, err error) {
-	var raw *bson.Raw
-	if raw, err = reader.Next(); err != nil {
-		return nil, err
-	}
-
-	log = &oplog.GenericOplog{Raw: raw.Data, Parsed: new(oplog.PartialLog)}
-	bson.Unmarshal(raw.Data, log.Parsed)
-	return log, nil
-}
-
-// internal get next oplog. Used in Next() and NextOplog(). The channel and current function may both return
+// internal get next oplog. The channel and current function may both return
 // timeout which is acceptable.
-func (reader *OplogReader) get() (log *bson.Raw, err error) {
+func (reader *OplogReader) Next() (log *bson.Raw, err error) {
 	select {
 	case ret := <-reader.oplogChan:
 		return ret.log, ret.err
@@ -128,29 +130,34 @@ func (reader *OplogReader) StartFetcher() {
 	reader.fetcherLock.Lock()
 	if reader.fetcherExist == false { // double check
 		reader.fetcherExist = true
-		go reader.fetcher()
+		go reader.fetch()
+		if atomic.LoadInt32(&reader.fetchStatus) != FetchStatusStoreMemoryApply {
+			go reader.retrieve()
+		}
 	}
 	reader.fetcherLock.Unlock()
 }
 
-// fetch oplog and put into channel, must be started manually
-func (reader *OplogReader) fetcher() {
+// fetch oplog and put into queue
+func (reader *OplogReader) fetch() {
 	var log *bson.Raw
 	for {
 		if err := reader.ensureNetwork(); err != nil {
+			if err == CollectionCappedError {
+				LOG.Crashf("reader fetch for replset %v encounter collection oplog.rs capped. %v", reader.replset, err)
+			}
 			reader.oplogChan <- &retOplog{nil, err}
 			continue
 		}
-
 		log = new(bson.Raw)
 		if !reader.oplogsIterator.Next(log) {
 			if err := reader.oplogsIterator.Err(); err != nil {
 				// some internal error. need rebuild the oplogsIterator
 				reader.releaseIterator()
 				if reader.isCollectionCappedError(err) { // print it
-					LOG.Crashf("oplog sync replset %v collection oplog.rs capped may happen: %v", reader.replset, err)
+					LOG.Crashf("reader fetch for replset %v encounter collection oplog.rs capped. %v", reader.replset, err)
 				} else {
-					reader.oplogChan <- &retOplog{nil, fmt.Errorf("get next oplog failed. release oplogsIterator, %s", err.Error())}
+					reader.oplogChan <- &retOplog{nil, fmt.Errorf("get next oplog error, release oplogsIterator. %v", err)}
 				}
 			} else {
 				// query timeout
@@ -158,7 +165,71 @@ func (reader *OplogReader) fetcher() {
 			}
 			continue
 		}
-		reader.oplogChan <- &retOplog{log, nil}
+
+		fetchStatus := atomic.LoadInt32(&reader.fetchStatus)
+		// block fetch operator until retrieve thread finish processing all oplogs in disk queue
+		if fetchStatus == FetchStatusHang {
+			LOG.Info("reader fetch for replset %v block with fetch status hang", reader.replset)
+			for {
+				time.Sleep(time.Second)
+				fetchStatus = atomic.LoadInt32(&reader.fetchStatus)
+				if fetchStatus != FetchStatusHang {
+					break
+				}
+			}
+			LOG.Info("reader fetch for replset %v end block with fetch status[%v]",
+				reader.replset, logFetchStatus(fetchStatus))
+		}
+		// put oplog to the corresponding queue
+		if fetchStatus == FetchStatusStoreMemoryApply {
+			reader.oplogChan <- &retOplog{log, nil}
+		} else if reader.diskQueue != nil {
+			if err := reader.diskQueue.Put(log.Data); err != nil {
+				LOG.Crashf("reader fetch for replset %v put oplog to disk queue error. %v", reader.replset, err)
+			}
+		} else {
+			LOG.Crashf("reader fetch for replset %v has no diskqueue with fetch status[%v]. %v",
+				reader.replset, logFetchStatus(fetchStatus))
+		}
+	}
+}
+
+// retrieve oplog from disk queue when fetch status is store disk
+func (reader *OplogReader) retrieve() {
+	for {
+		if atomic.LoadInt32(&reader.fetchStatus) != FetchStatusStoreDiskNoApply {
+			break
+		}
+		time.Sleep(time.Second)
+	}
+	LOG.Info("reader retrieve for replset %v begin to read from disk queue with depth[%v]",
+		reader.replset, reader.diskQueue.Depth())
+	readExitChan := make(chan int)
+	nimo.GoRoutine(func() {
+		for {
+			select {
+			case data := <-reader.diskQueue.ReadChan():
+				reader.oplogChan <- &retOplog{&bson.Raw{Kind: 3, Data: data}, nil}
+			case <-readExitChan:
+				LOG.Info("reader retrieve for replset %v end", reader.replset)
+				return
+			}
+		}
+	})
+	for {
+		time.Sleep(10 * time.Second)
+		if reader.diskQueue.Depth() <= 10 {
+			reader.UpdateFetchStatus(FetchStatusHang)
+		}
+		LOG.Info("###reader retrieve depth %v", reader.diskQueue.Depth())
+		if reader.diskQueue.Depth() == 0 {
+			close(readExitChan)
+			reader.UpdateFetchStatus(FetchStatusStoreMemoryApply)
+			break
+		}
+	}
+	if err := reader.diskQueue.Delete(); err != nil {
+		LOG.Warn("reader retrieve for replset %v close disk queue error. %v", reader.replset, err)
 	}
 }
 
@@ -241,6 +312,21 @@ func (reader *OplogReader) isCollectionCappedError(err error) bool {
 		return true
 	}
 	return false
+}
+
+func logFetchStatus(status int32) string {
+	switch status {
+	case FetchStatusStoreDiskNoApply:
+		return "store disk and no apply"
+	case FetchStatusStoreDiskApply:
+		return "store disk and apply"
+	case FetchStatusStoreMemoryApply:
+		return "store memory and apply"
+	case FetchStatusHang:
+		return "hang"
+	default:
+		return fmt.Sprintf("invalid[%v]", status)
+	}
 }
 
 // GidOplogReader. query along with gid

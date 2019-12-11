@@ -17,21 +17,14 @@ import (
 )
 
 const (
-	// FetcherBufferCapacity   = 256
-	// AdaptiveBatchingMaxSize = 16384 // 16k
-
 	// bson deserialize workload is CPU-intensive task
 	PipelineQueueMaxNr = 4
 	PipelineQueueMinNr = 1
 	PipelineQueueLen   = 64
 
-	WaitBarrierAckLogTimes = 10
-
 	DurationTime        = 6000 // unit: ms.
 	DDLCheckpointGap    = 5    // unit: seconds.
-	FilterCheckpointGap = 180  // unit: seconds. no checkpoint update, flush checkpoint mandatory
-
-	ShardingWorkerId = 0
+	FilterCheckpointGap = 60  // unit: seconds. no checkpoint update, flush checkpoint mandatory
 )
 
 type OplogHandler interface {
@@ -48,7 +41,7 @@ type OplogSyncer struct {
 	// source mongodb replica set name
 	replset string
 	// full sync finish position, used to check DDL between full sync and incr sync
-	fullSyncFinishPosition int64
+	docSyncEndTs int64
 
 	ckptManager *CheckpointManager
 	mvckManager *MoveChunkManager
@@ -85,19 +78,24 @@ type OplogSyncer struct {
 func NewOplogSyncer(
 	coordinator *ReplicationCoordinator,
 	replset string,
-	fullSyncFinishPosition int64,
+	docSyncEndTs int64,
 	mongoUrl string,
 	gids []string,
 	ckptManager *CheckpointManager,
 	mvckManager *MoveChunkManager,
 	ddlManager *DDLManager) *OplogSyncer {
+
+	fetchStatus := oplogsyncer.FetchStatusStoreMemoryApply
+	if docSyncEndTs == DocSyncRunning {
+		fetchStatus = oplogsyncer.FetchStatusStoreDiskNoApply
+	}
 	syncer := &OplogSyncer{
-		coordinator:            coordinator,
-		replset:                replset,
-		fullSyncFinishPosition: fullSyncFinishPosition,
+		coordinator:  coordinator,
+		replset:      replset,
+		docSyncEndTs: docSyncEndTs,
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
-		reader:      oplogsyncer.NewOplogReader(mongoUrl, replset),
+		reader:      oplogsyncer.NewOplogReader(mongoUrl, replset, fetchStatus),
 		ckptManager: ckptManager,
 		mvckManager: mvckManager,
 		ddlManager:  ddlManager,
@@ -143,6 +141,13 @@ func (sync *OplogSyncer) init() {
 // bind different worker
 func (sync *OplogSyncer) bind(w *Worker) {
 	sync.batcher.workerGroup = append(sync.batcher.workerGroup, w)
+}
+
+func (sync *OplogSyncer) updateDocSyncEndTs(docSyncEndTs int64) {
+	if sync.docSyncEndTs == DocSyncRunning && docSyncEndTs > 0 {
+		sync.docSyncEndTs = docSyncEndTs
+		sync.reader.UpdateFetchStatus(oplogsyncer.FetchStatusStoreDiskApply)
+	}
 }
 
 // start to polling oplog
@@ -246,6 +251,8 @@ func (sync *OplogSyncer) waitAllAck(flushCheckpoint bool) {
 	beginTs := time.Now()
 	if flushCheckpoint {
 		LOG.Info("oplog syncer %v prepare for checkpoint", sync.replset)
+		sync.ckptManager.mutex.RUnlock()
+		defer sync.ckptManager.mutex.RLock()
 		sync.ckptManager.FlushChan <- true
 	}
 	sync.batcher.WaitAllAck()
@@ -330,7 +337,6 @@ func (sync *OplogSyncer) poll() {
 			utils.DelayFor(100)
 			continue
 		}
-
 		// only get one
 		sync.next()
 	}
@@ -352,10 +358,8 @@ func (sync *OplogSyncer) next() bool {
 		// return false. so we regardless that
 		sync.replMetric.ReplStatus.Update(utils.FetchBad)
 		utils.YieldInMs(DurationTime)
-
 		// alarm
 	}
-
 	// buffered oplog or trigger to flush. log is nil
 	// means that we need to flush buffer right now
 	return sync.transfer(log)
@@ -375,7 +379,6 @@ func (sync *OplogSyncer) transfer(log *bson.Raw) bool {
 		selected := int(sync.nextQueuePosition % uint64(len(sync.pendingQueue)))
 		sync.pendingQueue[selected] <- sync.buffer
 		sync.buffer = make([]*bson.Raw, 0, conf.Options.FetcherBufferCapacity)
-
 		sync.nextQueuePosition++
 		return true
 	}

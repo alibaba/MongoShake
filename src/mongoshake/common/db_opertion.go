@@ -11,10 +11,6 @@ import (
 )
 
 const (
-	DBRefRef = "$ref"
-	DBRefId  = "$id"
-	DBRefDb  = "$db"
-
 	LocalDB = "local"
 	QueryTs = "ts"
 )
