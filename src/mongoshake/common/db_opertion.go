@@ -28,24 +28,30 @@ func GetDBVersion(session *mgo.Session) (string, error) {
 
 // get current db version and compare to threshold. Return whether the result
 // is bigger or equal to the input threshold.
-func GetAndCompareVersion(session *mgo.Session, threshold string) bool {
+func GetAndCompareVersion(session *mgo.Session, threshold string) (bool, error) {
 	compare, err := GetDBVersion(session)
 	if err != nil {
-		return false
+		return false, err
 	}
 
 	compareArr := strings.Split(compare, ".")
 	thresholdArr := strings.Split(threshold, ".")
 	if len(compareArr) < 2 || len(thresholdArr) < 2 {
-		return false
+		return false, err
 	}
 
 	for i := 0; i < 2; i++ {
 		compareEle, errC := strconv.Atoi(compareArr[i])
 		thresholdEle, errT := strconv.Atoi(thresholdArr[i])
-		if errC != nil || errT != nil || compareEle < thresholdEle {
-			return false
+		if errC != nil || errT != nil {
+			return false, fmt.Errorf("errC:[%v], errT:[%v]", errC, errT)
+		}
+
+		if compareEle > thresholdEle {
+			return true, nil
+		} else if compareEle < thresholdEle {
+			return false, fmt.Errorf("compareEle[%v] < thresholdEle[%v]", compareEle, thresholdEle)
 		}
 	}
-	return true
+	return true, nil
 }

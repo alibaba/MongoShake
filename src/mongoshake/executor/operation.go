@@ -46,7 +46,9 @@ func (exec *Executor) ensureConnection() bool {
 			return false
 		} else {
 			exec.session = conn.Session
-			exec.bulkInsert = utils.GetAndCompareVersion(exec.session, ThresholdVersion)
+			if exec.bulkInsert, err = utils.GetAndCompareVersion(exec.session, ThresholdVersion); err != nil {
+				LOG.Info("compare version with return[%v], bulkInsert disable", err)
+			}
 		}
 	}
 
