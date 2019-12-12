@@ -1,3 +1,8 @@
+2019-12-12 Alibaba Cloud.
+	* version: 1.4.7
+	* BUGFIX: merge bugfix from v2.0 of version judgement so that use
+	bulkWriter instead of singleWriter. 
+
 2019-04-12 Alibaba Cloud.
 	* version: 1.4.6
 	* BUGFIX: fix bug of batched oplog size exceeding 16MB.
