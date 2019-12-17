@@ -72,16 +72,16 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 		return true
 	}
 
-	// move chunk is disable when timestamp <= docSyncEndTs
-	if moveChunkFilter.Filter(log) && int64(log.Timestamp) <= batcher.syncer.docSyncEndTs {
-		LOG.Crashf("move chunk oplog found[%v] when oplog timestamp[%v] less than docSyncEndTs[%v]",
-			log, utils.TimestampToLog(log.Timestamp), utils.TimestampToLog(batcher.syncer.docSyncEndTs))
+	// move chunk is disable when timestamp <= docEndTs
+	if moveChunkFilter.Filter(log) && log.Timestamp <= batcher.syncer.docEndTs {
+		LOG.Crashf("move chunk oplog found[%v] when oplog timestamp[%v] less than docEndTs[%v]",
+			log, utils.TimestampToLog(log.Timestamp), utils.TimestampToLog(batcher.syncer.docEndTs))
 	}
 
-	// DDL is disable when timestamp <= docSyncEndTs
-	//if ddlFilter.Filter(log) && int64(log.Timestamp) <= batcher.syncer.docSyncEndTs {
-	//	LOG.Crashf("ddl oplog found[%v] when oplog timestamp[%v] less than docSyncEndTs[%v]",
-	//		log, utils.TimestampToLog(log.Timestamp), utils.TimestampToLog(batcher.syncer.docSyncEndTs))
+	// DDL is disable when timestamp <= docEndTs
+	//if ddlFilter.Filter(log) && log.Timestamp <= batcher.syncer.docEndTs {
+	//	LOG.Crashf("ddl oplog found[%v] when oplog timestamp[%v] less than docEndTs[%v]",
+	//		log, utils.TimestampToLog(log.Timestamp), utils.TimestampToLog(batcher.syncer.docEndTs))
 	//	return false
 	//}
 	return false

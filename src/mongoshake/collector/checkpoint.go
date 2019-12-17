@@ -33,23 +33,23 @@ type CheckpointManager struct {
 	mutex     sync.RWMutex
 	FlushChan chan bool
 
-	url            string
-	db             string
-	table          string
-	defaultBeginTs int64
-	conn           *utils.MongoConn
+	url   string
+	db    string
+	table string
+	conn  *utils.MongoConn
 
+	beginTsMap  map[string]bson.MongoTimestamp
 	persistList []Persist
 }
 
-func NewCheckpointManager(defaultBeginTs int64) *CheckpointManager {
+func NewCheckpointManager(beginTsMap map[string]bson.MongoTimestamp) *CheckpointManager {
 	manager := &CheckpointManager{
-		syncMap:        make(map[string]*OplogSyncer),
-		FlushChan:      make(chan bool),
-		url:            conf.Options.ContextStorageUrl,
-		db:             utils.AppDatabase(),
-		table:          conf.Options.ContextStorageCollection,
-		defaultBeginTs: defaultBeginTs,
+		syncMap:    make(map[string]*OplogSyncer),
+		FlushChan:  make(chan bool),
+		url:        conf.Options.ContextStorageUrl,
+		db:         utils.AppDatabase(),
+		table:      conf.Options.ContextStorageCollection,
+		beginTsMap: beginTsMap,
 	}
 	manager.persistList = append(manager.persistList, manager)
 	return manager
@@ -215,15 +215,15 @@ func (manager *CheckpointManager) Load(tablePrefix string) error {
 	for replset, syncer := range manager.syncMap {
 		// there is no checkpoint before or this is a new node
 		if syncer.batcher.syncTs == 0 {
-			startTs := manager.defaultBeginTs
-			syncer.batcher.syncTs = bson.MongoTimestamp(startTs)
-			syncer.batcher.unsyncTs = bson.MongoTimestamp(startTs)
+			beginTs := manager.beginTsMap[replset]
+			syncer.batcher.syncTs = bson.MongoTimestamp(beginTs)
+			syncer.batcher.unsyncTs = bson.MongoTimestamp(beginTs)
 			for _, worker := range syncer.batcher.workerGroup {
-				worker.unack = startTs
-				worker.ack = startTs
+				worker.unack = int64(beginTs)
+				worker.ack = int64(beginTs)
 			}
 			LOG.Info("CheckpointManager load checkpoint set replset[%v] checkpoint to start position %v",
-				replset, utils.TimestampToLog(startTs))
+				replset, utils.TimestampToLog(beginTs))
 		}
 	}
 	return nil

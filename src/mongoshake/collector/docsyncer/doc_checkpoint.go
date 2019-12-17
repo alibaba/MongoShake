@@ -7,7 +7,32 @@ import (
 	"github.com/vinllen/mgo/bson"
 	"mongoshake/collector/configure"
 	utils "mongoshake/common"
+	"strings"
 )
+
+func CleanCheckpoint() error {
+	url := conf.Options.ContextStorageUrl
+	db := utils.AppDatabase()
+	table := conf.Options.ContextStorageCollection
+	conn, err := utils.NewMongoConn(url, utils.ConnectModePrimary, true)
+	if err != nil {
+		return fmt.Errorf("CleanCheckpoint connect to %v failed. %v", url, err)
+	}
+	defer conn.Close()
+	colNames, err := conn.Session.DB(db).CollectionNames()
+	if err != nil {
+		return LOG.Critical("CleanCheckpoint obtain collection names error. %v", err)
+	}
+	for _, col := range colNames {
+		if strings.HasPrefix(col, table) {
+			if err = conn.Session.DB(db).C(col).DropCollection(); err != nil {
+				return LOG.Critical("CleanCheckpoint drop collection %v.%v error. %v",
+					db, col, err)
+			}
+		}
+	}
+	return nil
+}
 
 func LoadCheckpoint() (map[string]bson.MongoTimestamp, error) {
 	url := conf.Options.ContextStorageUrl

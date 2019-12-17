@@ -49,7 +49,10 @@ type Configuration struct {
 	ReplayerCollectionParallel int  `config:"replayer.collection_parallel"`
 	ReplayerDocumentParallel   int  `config:"replayer.document_parallel"`
 	ReplayerDocumentBatchSize  int  `config:"replayer.document_batch_size"`
+
 	FilterOrphanDocument       bool `config:"filter.orphan_document"`
+	ReplayerOplogBackup        bool `config:"replayer.oplog_backup"`
+	ReplayerOplogBackupMaxsize int  `config:"replayer.oplog_backup_maxsize"`
 
 	/*---------------------------------------------------------*/
 	// inner variables

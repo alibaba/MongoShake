@@ -340,7 +340,7 @@ func mockNamespaceFilter(nsWhite []string, nsBlack []string) *filter.NamespaceFi
 }
 
 func mockFilterPartialLog(op, ns string, logObject bson.D) *oplog.PartialLog {
-	// log.Timestamp > docSyncEndTs
+	// log.Timestamp > docEndTs
 	return &oplog.PartialLog{
 		Timestamp: bson.MongoTimestamp(1),
 		Namespace: ns,

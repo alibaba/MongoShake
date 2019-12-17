@@ -24,7 +24,9 @@ const (
 
 	DurationTime        = 6000 // unit: ms.
 	DDLCheckpointGap    = 5    // unit: seconds.
-	FilterCheckpointGap = 60  // unit: seconds. no checkpoint update, flush checkpoint mandatory
+	FilterCheckpointGap = 60   // unit: seconds. no checkpoint update, flush checkpoint mandatory
+
+	DocSyncRunning = 0
 )
 
 type OplogHandler interface {
@@ -41,7 +43,7 @@ type OplogSyncer struct {
 	// source mongodb replica set name
 	replset string
 	// full sync finish position, used to check DDL between full sync and incr sync
-	docSyncEndTs int64
+	docEndTs bson.MongoTimestamp
 
 	ckptManager *CheckpointManager
 	mvckManager *MoveChunkManager
@@ -78,21 +80,31 @@ type OplogSyncer struct {
 func NewOplogSyncer(
 	coordinator *ReplicationCoordinator,
 	replset string,
-	docSyncEndTs int64,
+	docEndTsMap map[string]bson.MongoTimestamp,
 	mongoUrl string,
 	gids []string,
 	ckptManager *CheckpointManager,
 	mvckManager *MoveChunkManager,
 	ddlManager *DDLManager) *OplogSyncer {
 
-	fetchStatus := oplogsyncer.FetchStatusStoreMemoryApply
-	if docSyncEndTs == DocSyncRunning {
+	var fetchStatus int32
+	var docEndTs bson.MongoTimestamp
+	if docEndTsMap == nil {
 		fetchStatus = oplogsyncer.FetchStatusStoreDiskNoApply
+		docEndTs = DocSyncRunning
+	} else {
+		fetchStatus = oplogsyncer.FetchStatusStoreMemoryApply
+		if ts, ok := docEndTsMap[replset]; !ok {
+			LOG.Crashf("new oplog syncer %v has no docEndTs. docEndTsMap %v", replset, docEndTsMap)
+		} else {
+			docEndTs = ts
+		}
 	}
+
 	syncer := &OplogSyncer{
-		coordinator:  coordinator,
-		replset:      replset,
-		docSyncEndTs: docSyncEndTs,
+		coordinator: coordinator,
+		replset:     replset,
+		docEndTs:    docEndTs,
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
 		reader:      oplogsyncer.NewOplogReader(mongoUrl, replset, fetchStatus),
@@ -143,9 +155,9 @@ func (sync *OplogSyncer) bind(w *Worker) {
 	sync.batcher.workerGroup = append(sync.batcher.workerGroup, w)
 }
 
-func (sync *OplogSyncer) updateDocSyncEndTs(docSyncEndTs int64) {
-	if sync.docSyncEndTs == DocSyncRunning && docSyncEndTs > 0 {
-		sync.docSyncEndTs = docSyncEndTs
+func (sync *OplogSyncer) updateDocEndTs(docEndTs bson.MongoTimestamp) {
+	if sync.docEndTs == DocSyncRunning && docEndTs > 0 {
+		sync.docEndTs = docEndTs
 		sync.reader.UpdateFetchStatus(oplogsyncer.FetchStatusStoreDiskApply)
 	}
 }

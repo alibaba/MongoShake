@@ -23,8 +23,6 @@ const (
 	SyncModeAll      = "all"
 	SyncModeDocument = "document"
 	SyncModeOplog    = "oplog"
-
-	DocSyncRunning = 0
 )
 
 // ReplicationCoordinator global coordinator instance. consist of
@@ -55,102 +53,174 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	coordinator.sentinel = &utils.Sentinel{}
 	coordinator.sentinel.Register()
 
-	syncMode, docSyncBeginTs, err := coordinator.selectSyncMode(conf.Options.SyncMode)
+	syncMode, beginAllTsMap, err := coordinator.selectSyncMode(conf.Options.SyncMode)
 	if err != nil {
 		return err
 	}
+	beginTsMap := make(map[string]bson.MongoTimestamp)
+	for replset, ts := range beginAllTsMap {
+		beginTsMap[replset] = ts.Newest
+	}
 
-	/*
-	 * Generally speaking, it's better to use several bridge timestamp so that
-	 * each shard match one in sharding mode.
-	 * TODO
-	 */
-	LOG.Info("start running with mode[%v], docSyncBeginTs[%v]", syncMode, utils.ExtractTs32(docSyncBeginTs))
-
+	LOG.Info("start running with mode[%v]", syncMode)
 	switch syncMode {
 	case SyncModeAll:
-		var docSyncError, oplogSyncError error
-		var docSyncEndTs int64
-		var docWg, oplogWg sync.WaitGroup
-		docWg.Add(1)
-		oplogWg.Add(1)
-		nimo.GoRoutine(func() {
-			defer docWg.Done()
-			if err := coordinator.startDocumentReplication(); err != nil {
-				docSyncError = LOG.Critical("Document Replication error. %v", err)
-				return
-			}
+		if err := docsyncer.CleanCheckpoint(); err != nil {
+			return LOG.Critical("document replication clean checkpoint error. %v", err)
+		}
 
-			// get current newest timestamp
-			_, bigNewTs, _, bigOldTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
-			if err != nil {
-				docSyncError = LOG.Critical("get document sync finish timestamp failed[%v]", err)
-				return
-			}
-			LOG.Info("------------------------document sync done!------------------------")
+		for replset, beginTs := range beginTsMap {
+			LOG.Info("replset %v replication start with beginTs[%v]",
+				replset, utils.ExtractTs32(beginTs))
+		}
 
-			LOG.Info("bigOldTs[%v] docSyncBeginTs[%v] bigNewTs[%v]", utils.ExtractTs32(bigOldTs),
-				utils.ExtractTs32(docSyncBeginTs), utils.ExtractTs32(bigNewTs))
-			// the oldest oplog is lost
-			if utils.ExtractTs32(bigOldTs) >= utils.ExtractTs32(docSyncBeginTs) {
-				docSyncError = LOG.Critical("oplog sync docSyncBeginTs[%v] is less than current bigOldTs[%v], "+
-					"this error means user's oplog collection size is too small or full sync continues too long",
-					utils.ExtractTs32(docSyncBeginTs), utils.ExtractTs32(bigOldTs))
-				return
+		if conf.Options.ReplayerOplogBackup {
+			if err := coordinator.parallelDocumentOplog(beginTsMap, beginAllTsMap); err != nil {
+				return err
 			}
-			docSyncEndTs = utils.TimestampToInt64(bigNewTs)
-		})
-		// during document replication, oplog syncer fetch oplog and store on disk, in order to avoid oplog roll up
-		nimo.GoRoutine(func() {
-			defer oplogWg.Done()
-			if err := coordinator.startOplogReplication(docSyncBeginTs, DocSyncRunning); err != nil {
-				oplogSyncError = LOG.Critical("Oplog Replication error. %v", err)
-				return
+		} else {
+			if err := coordinator.serializeDocumentOplog(beginTsMap, beginAllTsMap); err != nil {
+				return err
 			}
-		})
-		// wait for document replication to finish, set docSyncEndTs to oplog syncer, start oplog replication
-		docWg.Wait()
-		if docSyncError != nil || docSyncEndTs == DocSyncRunning {
-			return docSyncError
 		}
-		LOG.Info("finish document sync, start oplog sync with docSyncBeginTs[%v], docSyncEndTs[%v]",
-			utils.ExtractTs32(docSyncBeginTs), utils.ExtractTs32(docSyncEndTs))
-		for _, oplogSyncer := range coordinator.oplogSyncerGroup {
-			oplogSyncer.updateDocSyncEndTs(docSyncEndTs)
-		}
-		// wait for oplog replication to finish
-		oplogWg.Wait()
-		if oplogSyncError != nil {
-			return oplogSyncError
-		}
+
 	case SyncModeDocument:
 		if err := coordinator.startDocumentReplication(); err != nil {
 			return err
 		}
+		// checkpoint after document syncer
+		LOG.Info("document syncer do checkpoint with map[%v]", beginTsMap)
+		if err := docsyncer.FlushCheckpoint(beginTsMap); err != nil {
+			return LOG.Error("document syncer flush checkpoint failed. %v", err)
+		}
+		LOG.Info("document syncer sync end")
 	case SyncModeOplog:
 		beginTs32 := conf.Options.ContextStartPosition
 		if beginTs32 != 0 {
-			// get current oldest timestamp
-			_, _, _, bigOldTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
-			if err != nil {
-				return LOG.Critical("get oldest timestamp failed[%v]", err)
-			}
-			// the oldest oplog is lost
-			if utils.ExtractTs32(bigOldTs) >= beginTs32 {
-				return LOG.Critical("oplog sync beginTs[%v] is less than current bigOldTs[%v], this error means user's "+
-					"oplog collection size is too small or full sync continues too long", beginTs32, utils.ExtractTs32(bigOldTs))
+			// get current oldest timestamp, the oldest oplog is lost
+			for replset, beginTs := range beginAllTsMap {
+				if beginTs32 >= utils.ExtractTs32(beginTs.Oldest) {
+					return LOG.Critical("oplog replication replset %v startPosition[%v] is less than current beginTs.Oldest[%v], "+
+						"this error means user's oplog collection size is too small or document replication continues too long",
+						replset, beginTs32, utils.ExtractTs32(beginTs.Oldest))
+				}
 			}
 		} else {
 			// we can't insert Timestamp(0, 0) that will be treat as Now(), so we use Timestamp(1, 0)
 			beginTs32 = 1
 		}
-		if err := coordinator.startOplogReplication(beginTs32<<32, beginTs32<<32); err != nil {
+		for replset := range beginTsMap {
+			beginTsMap[replset] = bson.MongoTimestamp(beginTs32 << 32)
+		}
+		if err := coordinator.startOplogReplication(beginTsMap, beginTsMap); err != nil {
 			return err
 		}
 	default:
 		return LOG.Critical("unknown sync mode %v", conf.Options.SyncMode)
 	}
 
+	return nil
+}
+
+func (coordinator *ReplicationCoordinator) parallelDocumentOplog(
+		beginTsMap map[string]bson.MongoTimestamp, beginAllTsMap map[string]utils.TimestampNode) error {
+	LOG.Info("parallel run document and oplog replication")
+	var docError, oplogError error
+	docEndTsMap := make(map[string]bson.MongoTimestamp)
+	var docWg, oplogWg sync.WaitGroup
+	docWg.Add(1)
+	oplogWg.Add(1)
+
+	nimo.GoRoutine(func() {
+		defer docWg.Done()
+		if err := coordinator.startDocumentReplication(); err != nil {
+			docError = LOG.Critical("Document Replication error. %v", err)
+			return
+		}
+
+		// get current newest timestamp
+		endAllTsMap, _, _, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
+		if err != nil {
+			docError = LOG.Critical("document replication get end timestamp failed[%v]", err)
+			return
+		}
+		LOG.Info("------------------------document replication done!------------------------")
+		for replset, endTs := range endAllTsMap {
+			beginTs := beginAllTsMap[replset]
+			LOG.Info("document replication replset %v beginTs[%v] endTs[%v]",
+				replset, utils.ExtractTs32(beginTs.Newest), utils.ExtractTs32(endTs.Newest))
+			// the oldest oplog is lost
+			if utils.ExtractTs32(endTs.Oldest) >= utils.ExtractTs32(beginTs.Newest) {
+				docError = LOG.Critical("oplog replication replset %v beginTs.Newest[%v] is less than endTs.Oldest[%v], "+
+					"this error means user's oplog collection size is too small or document replication continues too long",
+					replset, utils.ExtractTs32(beginTs.Newest), utils.ExtractTs32(endTs.Oldest))
+				return
+			}
+			docEndTsMap[replset] = endTs.Newest
+		}
+	})
+	// during document replication, oplog syncer fetch oplog and store on disk, in order to avoid oplog roll up
+	nimo.GoRoutine(func() {
+		defer oplogWg.Done()
+		if err := coordinator.startOplogReplication(beginTsMap, nil); err != nil {
+			oplogError = LOG.Critical("Oplog Replication error. %v", err)
+			return
+		}
+	})
+	// wait for document replication to finish, set docEndTs to oplog syncer, start oplog replication
+	docWg.Wait()
+	if docError != nil {
+		return docError
+	}
+	LOG.Info("finish document replication, start oplog replication")
+	for _, oplogSyncer := range coordinator.oplogSyncerGroup {
+		oplogSyncer.updateDocEndTs(docEndTsMap[oplogSyncer.replset])
+	}
+	// wait for oplog replication to finish
+	oplogWg.Wait()
+	if oplogError != nil {
+		return oplogError
+	}
+	return nil
+}
+
+func (coordinator *ReplicationCoordinator) serializeDocumentOplog(
+		beginTsMap map[string]bson.MongoTimestamp, beginAllTsMap map[string]utils.TimestampNode) error {
+	LOG.Info("serially run document and oplog replication")
+	if err := coordinator.startDocumentReplication(); err != nil {
+		return LOG.Critical("Document Replication error. %v", err)
+	}
+
+	// checkpoint after document syncer
+	LOG.Info("document syncer do checkpoint with map[%v]", beginTsMap)
+	if err := docsyncer.FlushCheckpoint(beginTsMap); err != nil {
+		return LOG.Error("document syncer flush checkpoint failed. %v", err)
+	}
+	LOG.Info("document syncer sync end")
+
+	// get current newest timestamp
+	endAllTsMap, _, _, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
+	if err != nil {
+		return LOG.Critical("document replication get end timestamp failed[%v]", err)
+	}
+	LOG.Info("------------------------document replication done!------------------------")
+	docEndTsMap := make(map[string]bson.MongoTimestamp)
+	for replset, endTs := range endAllTsMap {
+		beginTs := beginAllTsMap[replset]
+		LOG.Info("document replication replset %v beginTs[%v] endTs[%v]",
+			replset, utils.ExtractTs32(beginTs.Newest), utils.ExtractTs32(endTs.Newest))
+		// the oldest oplog is lost
+		if utils.ExtractTs32(endTs.Oldest) >= utils.ExtractTs32(beginTs.Newest) {
+			return LOG.Critical("oplog replication replset %v beginTs.Newest[%v] is less than endTs.Oldest[%v], "+
+				"this error means user's oplog collection size is too small or document replication continues too long",
+				replset, utils.ExtractTs32(beginTs.Newest), utils.ExtractTs32(endTs.Oldest))
+		}
+		docEndTsMap[replset] = endTs.Newest
+	}
+
+	if err := coordinator.startOplogReplication(beginTsMap, docEndTsMap); err != nil {
+		return LOG.Critical("Oplog Replication error. %v", err)
+	}
 	return nil
 }
 
@@ -240,21 +310,21 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 
 // TODO, add UT
 // if the oplog of checkpoint timestamp exist in all source db, then only do oplog replication instead of document replication
-func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, int64, error) {
-	if syncMode != SyncModeAll {
-		return syncMode, 0, nil
+func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, map[string]utils.TimestampNode, error) {
+	// oldestTs is the smallest of the all newest timestamp
+	tsMap, _, _, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
+	if err != nil {
+		return syncMode, nil, err
 	}
 
-	// oldestTs is the smallest of the all newest timestamp
-	tsMap, _, smallNewTs, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
-	if err != nil {
-		return syncMode, 0, err
+	if syncMode != SyncModeAll {
+		return syncMode, tsMap, nil
 	}
 
 	needFull := false
 	ckptMap, err := docsyncer.LoadCheckpoint()
 	if err != nil {
-		return syncMode, 0, err
+		return syncMode, nil, err
 	}
 
 	for replset, ts := range tsMap {
@@ -270,10 +340,10 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	}
 
 	if needFull {
-		return SyncModeAll, utils.TimestampToInt64(smallNewTs), nil
+		return SyncModeAll, tsMap, nil
 	} else {
 		LOG.Info("sync mode change from 'all' to 'oplog'")
-		return SyncModeOplog, 0, nil
+		return SyncModeOplog, tsMap, nil
 	}
 }
 
@@ -299,18 +369,6 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	nsSet, err := docsyncer.GetAllNamespace(coordinator.Sources)
 	if err != nil {
 		return err
-	}
-
-	ckptMap := make(map[string]bson.MongoTimestamp)
-	// get all newest timestamp for each mongodb if sync mode isn't "document"
-	if conf.Options.SyncMode != SyncModeDocument {
-		tsMap, _, _, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
-		if err != nil {
-			return err
-		}
-		for replset, tsNode := range tsMap {
-			ckptMap[replset] = tsNode.Newest
-		}
 	}
 
 	toUrl := conf.Options.TunnelAddress[0]
@@ -372,30 +430,21 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	if replError != nil {
 		return replError
 	}
-
-	// checkpoint after document syncer
-	if conf.Options.SyncMode != SyncModeDocument {
-		LOG.Info("try to set checkpoint with map[%v]", ckptMap)
-		if err := docsyncer.FlushCheckpoint(ckptMap); err != nil {
-			return LOG.Error("document syncer flush checkpoint failed. %v", err)
-		}
-	}
-	LOG.Info("document syncer sync end")
 	return nil
 }
 
-func (coordinator *ReplicationCoordinator) startOplogReplication(oplogSyncBeginTs, docSyncEndTs int64) error {
+func (coordinator *ReplicationCoordinator) startOplogReplication(beginTsMap, docEndTsMap map[string]bson.MongoTimestamp) error {
 	// replicate speed limit on all syncer
 	coordinator.rateController = nimo.NewSimpleRateController()
 
-	ckptManager := NewCheckpointManager(oplogSyncBeginTs)
+	ckptManager := NewCheckpointManager(beginTsMap)
 	mvckManager := NewMoveChunkManager(ckptManager)
 	ddlManager := NewDDLManager(ckptManager)
 
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
 	for _, src := range coordinator.Sources {
-		syncer := NewOplogSyncer(coordinator, src.Replset, docSyncEndTs,
+		syncer := NewOplogSyncer(coordinator, src.Replset, docEndTsMap,
 			src.URL, src.Gids, ckptManager, mvckManager, ddlManager)
 		// oplogSyncerGroup http api registry
 		syncer.init()

@@ -21,7 +21,7 @@ const (
 	HashedShard = "hashed"
 	RangedShard = "ranged"
 
-	ConifgShardLogInterval = 1 // s
+	ConifgShardLogInterval = 3 // s
 )
 
 // get balancer status from config server
