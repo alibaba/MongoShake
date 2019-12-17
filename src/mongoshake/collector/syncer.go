@@ -25,8 +25,6 @@ const (
 	DurationTime        = 6000 // unit: ms.
 	DDLCheckpointGap    = 5    // unit: seconds.
 	FilterCheckpointGap = 60   // unit: seconds. no checkpoint update, flush checkpoint mandatory
-
-	DocSyncRunning = 0
 )
 
 type OplogHandler interface {
@@ -90,8 +88,8 @@ func NewOplogSyncer(
 	var fetchStatus int32
 	var docEndTs bson.MongoTimestamp
 	if docEndTsMap == nil {
+		// means syc mode[all] and store oplog to disk
 		fetchStatus = oplogsyncer.FetchStatusStoreDiskNoApply
-		docEndTs = DocSyncRunning
 	} else {
 		fetchStatus = oplogsyncer.FetchStatusStoreMemoryApply
 		if ts, ok := docEndTsMap[replset]; !ok {
@@ -155,11 +153,9 @@ func (sync *OplogSyncer) bind(w *Worker) {
 	sync.batcher.workerGroup = append(sync.batcher.workerGroup, w)
 }
 
-func (sync *OplogSyncer) updateDocEndTs(docEndTs bson.MongoTimestamp) {
-	if sync.docEndTs == DocSyncRunning && docEndTs > 0 {
-		sync.docEndTs = docEndTs
-		sync.reader.UpdateFetchStatus(oplogsyncer.FetchStatusStoreDiskApply)
-	}
+func (sync *OplogSyncer) startDiskApply(docEndTs bson.MongoTimestamp) {
+	sync.docEndTs = docEndTs
+	sync.reader.UpdateFetchStatus(oplogsyncer.FetchStatusStoreDiskApply)
 }
 
 // start to polling oplog
@@ -313,19 +309,7 @@ func (sync *OplogSyncer) deserializer(index int) {
 
 // only master(maybe several mongo-shake starts) can poll oplog.
 func (sync *OplogSyncer) poll() {
-	// we should reload checkpoint. in case of other collector
-	//	// has fetched oplogs when master quorum leader election
-	//	// happens frequently. so we simply reload.
-	checkpointTs := sync.ckptManager.Get(sync.replset)
-	if checkpointTs == 0 {
-		// we doesn't continue working on ckpt fetched failed. because we should
-		// confirm the exist checkpoint value or exactly knows that it doesn't exist
-		LOG.Critical("Acquire the existing checkpoint from remote[%s] failed !", conf.Options.ContextStorageCollection)
-		return
-	}
-	sync.reader.SetQueryTimestampOnEmpty(checkpointTs)
 	sync.reader.StartFetcher() // start reader fetcher if not exist
-
 	// every syncer should under the control of global rate limiter
 	rc := sync.coordinator.rateController
 

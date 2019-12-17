@@ -64,6 +64,11 @@ func (manager *CheckpointManager) registerPersis(persist Persist) {
 }
 
 func (manager *CheckpointManager) start() {
+	// initialize checkpoint timestamp of oplog syncer
+	if err := manager.loadAll(); err != nil {
+		LOG.Crash(err)
+	}
+
 	startTime := time.Now()
 	checkTime := time.Now()
 
@@ -72,7 +77,7 @@ func (manager *CheckpointManager) start() {
 		select {
 		case <-manager.FlushChan:
 			LOG.Info("CheckpointManager flush immediately begin")
-			if err := manager.FlushAll(); err != nil {
+			if err := manager.flushAll(); err != nil {
 				LOG.Warn("CheckpointManager flush immediately failed. %v", err)
 			} else {
 				LOG.Info("CheckpointManager flush immediately successful")
@@ -89,7 +94,7 @@ func (manager *CheckpointManager) start() {
 				return
 			}
 			LOG.Info("CheckpointManager flush periodically begin")
-			if err := manager.FlushAll(); err != nil {
+			if err := manager.flushAll(); err != nil {
 				LOG.Warn("CheckpointManager flush periodically failed. %v", err)
 			} else {
 				LOG.Info("CheckpointManager flush periodically successful")
@@ -108,7 +113,7 @@ func (manager *CheckpointManager) Get(replset string) bson.MongoTimestamp {
 }
 
 // firstly load checkpoit info to CheckpointManager without concurrent access
-func (manager *CheckpointManager) LoadAll() error {
+func (manager *CheckpointManager) loadAll() error {
 	if !manager.ensureNetwork() {
 		return fmt.Errorf("CheckpointManager connect to %v failed", manager.url)
 	}
@@ -123,7 +128,7 @@ func (manager *CheckpointManager) LoadAll() error {
 		Find(bson.M{}).One(&versionDoc); err != nil && err != mgo.ErrNotFound {
 		manager.conn.Close()
 		manager.conn = nil
-		return LOG.Critical("CheckpointManager LoadAll versionDoc error. %v", err)
+		return LOG.Critical("CheckpointManager loadAll versionDoc error. %v", err)
 	}
 	stage, ok := versionDoc[utils.CheckpointStage]
 	if ok {
@@ -136,7 +141,7 @@ func (manager *CheckpointManager) LoadAll() error {
 					if err := conn.Session.DB(db).C(tmpTable).DropCollection(); err != nil && err.Error() != "ns not found" {
 						manager.conn.Close()
 						manager.conn = nil
-						return LOG.Critical("CheckpointManager LoadAll drop collection %v failed. %v", tmpTable, err)
+						return LOG.Critical("CheckpointManager loadAll drop collection %v failed. %v", tmpTable, err)
 					}
 				}
 			}
@@ -147,7 +152,7 @@ func (manager *CheckpointManager) LoadAll() error {
 					if err := conn.Session.DB(db).C(origTable).DropCollection(); err != nil && err.Error() != "ns not found" {
 						manager.conn.Close()
 						manager.conn = nil
-						return LOG.Critical("CheckpointManager LoadAll drop collection %v failed. %v", origTable, err)
+						return LOG.Critical("CheckpointManager loadAll drop collection %v failed. %v", origTable, err)
 					}
 				}
 			}
@@ -162,26 +167,26 @@ func (manager *CheckpointManager) LoadAll() error {
 						Run(bson.D{{"renameCollection", tmpNs}, {"to", origNs}}, nil); err != nil && err.Error() != "source namespace does not exist" {
 						manager.conn.Close()
 						manager.conn = nil
-						return LOG.Critical("CheckpointManager LoadAll rename collection %v to %v failed. %v", tmpNs, origNs, err)
+						return LOG.Critical("CheckpointManager loadAll rename collection %v to %v failed. %v", tmpNs, origNs, err)
 					}
 				}
 			}
 		default:
-			return LOG.Critical("CheckpointManager LoadAll no checkpoint")
+			return LOG.Critical("CheckpointManager loadAll no checkpoint")
 		}
 	}
 	for _, persist := range manager.persistList {
 		if err := persist.Load(manager.table); err != nil {
 			manager.conn.Close()
 			manager.conn = nil
-			return LOG.Critical("CheckpointManager LoadAll persist load error %v", err)
+			return LOG.Critical("CheckpointManager loadAll persist load error %v", err)
 		}
 	}
 	if _, err := manager.conn.Session.DB(manager.db).C(manager.table).
 		Upsert(bson.M{}, bson.M{utils.CheckpointStage: utils.StageOriginal}); err != nil {
 		manager.conn.Close()
 		manager.conn = nil
-		return LOG.Critical("CheckpointManager LoadAll upsert versionDoc error. %v", err)
+		return LOG.Critical("CheckpointManager loadAll upsert versionDoc error. %v", err)
 	}
 	return nil
 }
@@ -205,6 +210,7 @@ func (manager *CheckpointManager) Load(tablePrefix string) error {
 				worker.unack = int64(ackTs)
 				worker.ack = int64(ackTs)
 			}
+			syncer.reader.SetQueryTimestampOnEmpty(ackTs)
 			LOG.Info("CheckpointManager load checkpoint set replset[%v] checkpoint to exist ackTs[%v] syncTs[%v]",
 				replset, utils.TimestampToLog(ackTs), utils.TimestampToLog(syncTs))
 		}
@@ -216,12 +222,14 @@ func (manager *CheckpointManager) Load(tablePrefix string) error {
 		// there is no checkpoint before or this is a new node
 		if syncer.batcher.syncTs == 0 {
 			beginTs := manager.beginTsMap[replset]
+			syncer.reader.SetQueryTimestampOnEmpty(beginTs)
 			syncer.batcher.syncTs = bson.MongoTimestamp(beginTs)
 			syncer.batcher.unsyncTs = bson.MongoTimestamp(beginTs)
 			for _, worker := range syncer.batcher.workerGroup {
 				worker.unack = int64(beginTs)
 				worker.ack = int64(beginTs)
 			}
+			syncer.reader.SetQueryTimestampOnEmpty(beginTs)
 			LOG.Info("CheckpointManager load checkpoint set replset[%v] checkpoint to start position %v",
 				replset, utils.TimestampToLog(beginTs))
 		}
@@ -229,7 +237,7 @@ func (manager *CheckpointManager) Load(tablePrefix string) error {
 	return nil
 }
 
-func (manager *CheckpointManager) FlushAll() error {
+func (manager *CheckpointManager) flushAll() error {
 	if !manager.ensureNetwork() {
 		return fmt.Errorf("CheckpointManager connect to %v failed", manager.url)
 	}
@@ -243,7 +251,7 @@ func (manager *CheckpointManager) FlushAll() error {
 		Upsert(bson.M{}, bson.M{utils.CheckpointStage: utils.StageOriginal}); err != nil {
 		manager.conn.Close()
 		manager.conn = nil
-		return LOG.Critical("CheckpointManager FlushAll upsert versionDoc error. %v", err)
+		return LOG.Critical("CheckpointManager flushAll upsert versionDoc error. %v", err)
 	}
 	for _, persist := range manager.persistList {
 		tablePrefix := "tmp_" + manager.table
@@ -251,13 +259,13 @@ func (manager *CheckpointManager) FlushAll() error {
 			if err := conn.Session.DB(db).C(tmpTable).DropCollection(); err != nil && err.Error() != "ns not found" {
 				manager.conn.Close()
 				manager.conn = nil
-				return LOG.Critical("CheckpointManager FlushAll drop collection %v failed. %v", tmpTable, err)
+				return LOG.Critical("CheckpointManager flushAll drop collection %v failed. %v", tmpTable, err)
 			}
 		}
 		if err := persist.Flush(tablePrefix); err != nil {
 			manager.conn.Close()
 			manager.conn = nil
-			return LOG.Critical("CheckpointManager FlushAll persist flush error %v", err)
+			return LOG.Critical("CheckpointManager flushAll persist flush error %v", err)
 		}
 	}
 	// Flushed Stage: drop original table
@@ -265,14 +273,14 @@ func (manager *CheckpointManager) FlushAll() error {
 		Upsert(bson.M{}, bson.M{utils.CheckpointStage: utils.StageFlushed}); err != nil {
 		manager.conn.Close()
 		manager.conn = nil
-		return LOG.Critical("CheckpointManager FlushAll upsert versionDoc error. %v", err)
+		return LOG.Critical("CheckpointManager flushAll upsert versionDoc error. %v", err)
 	}
 	for _, persist := range manager.persistList {
 		for _, origTable := range persist.GetTableList(manager.table) {
 			if err := conn.Session.DB(db).C(origTable).DropCollection(); err != nil && err.Error() != "ns not found" {
 				manager.conn.Close()
 				manager.conn = nil
-				return LOG.Critical("CheckpointManager FlushAll drop collection %v failed. %v", origTable, err)
+				return LOG.Critical("CheckpointManager flushAll drop collection %v failed. %v", origTable, err)
 			}
 		}
 	}
@@ -281,7 +289,7 @@ func (manager *CheckpointManager) FlushAll() error {
 		Upsert(bson.M{}, bson.M{utils.CheckpointStage: utils.StageRename}); err != nil {
 		manager.conn.Close()
 		manager.conn = nil
-		return LOG.Critical("CheckpointManager FlushAll upsert versionDoc error. %v", err)
+		return LOG.Critical("CheckpointManager flushAll upsert versionDoc error. %v", err)
 	}
 	for _, persist := range manager.persistList {
 		for _, origTable := range persist.GetTableList(manager.table) {
@@ -291,7 +299,7 @@ func (manager *CheckpointManager) FlushAll() error {
 				Run(bson.D{{"renameCollection", tmpNs}, {"to", origNs}}, nil); err != nil && err.Error() != "source namespace does not exist" {
 				manager.conn.Close()
 				manager.conn = nil
-				return LOG.Critical("CheckpointManager FlushAll rename collection %v to %v failed. %v", tmpNs, origNs, err)
+				return LOG.Critical("CheckpointManager flushAll rename collection %v to %v failed. %v", tmpNs, origNs, err)
 			}
 		}
 	}
@@ -299,7 +307,7 @@ func (manager *CheckpointManager) FlushAll() error {
 		Upsert(bson.M{}, bson.M{utils.CheckpointStage: utils.StageOriginal}); err != nil {
 		manager.conn.Close()
 		manager.conn = nil
-		return LOG.Critical("CheckpointManager FlushAll upsert versionDoc error. %v", err)
+		return LOG.Critical("CheckpointManager flushAll upsert versionDoc error. %v", err)
 	}
 	return nil
 }

@@ -74,7 +74,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 				replset, utils.ExtractTs32(beginTs))
 		}
 
-		if conf.Options.ReplayerOplogBackup {
+		if conf.Options.ReplayerOplogStoreDisk {
 			if err := coordinator.parallelDocumentOplog(beginTsMap, beginAllTsMap); err != nil {
 				return err
 			}
@@ -83,17 +83,10 @@ func (coordinator *ReplicationCoordinator) Run() error {
 				return err
 			}
 		}
-
 	case SyncModeDocument:
-		if err := coordinator.startDocumentReplication(); err != nil {
+		if err := coordinator.startDocumentReplication(beginTsMap); err != nil {
 			return err
 		}
-		// checkpoint after document syncer
-		LOG.Info("document syncer do checkpoint with map[%v]", beginTsMap)
-		if err := docsyncer.FlushCheckpoint(beginTsMap); err != nil {
-			return LOG.Error("document syncer flush checkpoint failed. %v", err)
-		}
-		LOG.Info("document syncer sync end")
 	case SyncModeOplog:
 		beginTs32 := conf.Options.ContextStartPosition
 		if beginTs32 != 0 {
@@ -133,11 +126,10 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(
 
 	nimo.GoRoutine(func() {
 		defer docWg.Done()
-		if err := coordinator.startDocumentReplication(); err != nil {
+		if err := coordinator.startDocumentReplication(beginTsMap); err != nil {
 			docError = LOG.Critical("Document Replication error. %v", err)
 			return
 		}
-
 		// get current newest timestamp
 		endAllTsMap, _, _, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
 		if err != nil {
@@ -174,7 +166,7 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(
 	}
 	LOG.Info("finish document replication, start oplog replication")
 	for _, oplogSyncer := range coordinator.oplogSyncerGroup {
-		oplogSyncer.updateDocEndTs(docEndTsMap[oplogSyncer.replset])
+		oplogSyncer.startDiskApply(docEndTsMap[oplogSyncer.replset])
 	}
 	// wait for oplog replication to finish
 	oplogWg.Wait()
@@ -187,16 +179,9 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(
 func (coordinator *ReplicationCoordinator) serializeDocumentOplog(
 		beginTsMap map[string]bson.MongoTimestamp, beginAllTsMap map[string]utils.TimestampNode) error {
 	LOG.Info("serially run document and oplog replication")
-	if err := coordinator.startDocumentReplication(); err != nil {
+	if err := coordinator.startDocumentReplication(beginTsMap); err != nil {
 		return LOG.Critical("Document Replication error. %v", err)
 	}
-
-	// checkpoint after document syncer
-	LOG.Info("document syncer do checkpoint with map[%v]", beginTsMap)
-	if err := docsyncer.FlushCheckpoint(beginTsMap); err != nil {
-		return LOG.Error("document syncer flush checkpoint failed. %v", err)
-	}
-	LOG.Info("document syncer sync end")
 
 	// get current newest timestamp
 	endAllTsMap, _, _, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
@@ -347,7 +332,7 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	}
 }
 
-func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
+func (coordinator *ReplicationCoordinator) startDocumentReplication(beginTsMap map[string]bson.MongoTimestamp) error {
 	shardingChunkMap := make(utils.ShardingChunkMap)
 	fromIsSharding := len(coordinator.Sources) > 1
 	if fromIsSharding {
@@ -430,6 +415,13 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	if replError != nil {
 		return replError
 	}
+
+	// checkpoint after document syncer
+	LOG.Info("document syncer do checkpoint with map[%v]", beginTsMap)
+	if err := docsyncer.FlushCheckpoint(beginTsMap); err != nil {
+		return LOG.Error("document syncer flush checkpoint failed. %v", err)
+	}
+	LOG.Info("document syncer sync end")
 	return nil
 }
 
@@ -473,12 +465,10 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(beginTsMap, doc
 		syncer.bind(w)
 		go w.startWorker()
 	}
-
-	// initialize checkpoint timestamp of oplog syncer
-	if err := ckptManager.LoadAll(); err != nil {
-		return err
+	if docEndTsMap != nil {
+		// oplog start applying oplog
+		ckptManager.start()
 	}
-	ckptManager.start()
 	if conf.Options.MoveChunkEnable {
 		mvckManager.start()
 	}
