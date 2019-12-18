@@ -465,6 +465,11 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(beginTsMap, doc
 		syncer.bind(w)
 		go w.startWorker()
 	}
+
+	// initialize checkpoint timestamp of oplog syncer
+	if err := ckptManager.loadAll(); err != nil {
+		return err
+	}
 	if docEndTsMap != nil {
 		// oplog start applying oplog
 		ckptManager.start()

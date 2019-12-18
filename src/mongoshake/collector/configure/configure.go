@@ -52,7 +52,7 @@ type Configuration struct {
 
 	FilterOrphanDocument          bool `config:"filter.orphan_document"`
 	ReplayerOplogStoreDisk        bool `config:"replayer.oplog_store_disk"`
-	ReplayerOplogStoreDiskMaxSize int  `config:"replayer.oplog_store_disk_maxsize"`
+	ReplayerOplogStoreDiskMaxSize int  `config:"replayer.oplog_store_disk_max_size"`
 
 	/*---------------------------------------------------------*/
 	// inner variables

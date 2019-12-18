@@ -64,11 +64,6 @@ func (manager *CheckpointManager) registerPersis(persist Persist) {
 }
 
 func (manager *CheckpointManager) start() {
-	// initialize checkpoint timestamp of oplog syncer
-	if err := manager.loadAll(); err != nil {
-		LOG.Crash(err)
-	}
-
 	startTime := time.Now()
 	checkTime := time.Now()
 
