@@ -17,15 +17,15 @@ type GenericOplog struct {
 }
 
 type PartialLog struct {
-	Timestamp     bson.MongoTimestamp `bson:"ts"`
-	Operation     string              `bson:"op"`
-	Gid           string              `bson:"g"`
-	Namespace     string              `bson:"ns"`
-	Object        bson.D              `bson:"o"`
-	Query         bson.M              `bson:"o2"`
-	UniqueIndexes bson.M              `bson:"uk"`
-	Lsid          interface{}         `bson:"lsid"`        // mark the session id, used in transaction
-	FromMigrate   bool                `bson:"fromMigrate"` // move chunk
+	Timestamp     bson.MongoTimestamp `bson:"ts" json:"ts"`
+	Operation     string              `bson:"op" json:"op"`
+	Gid           string              `bson:"g" json:"g"`
+	Namespace     string              `bson:"ns" json:"ns"`
+	Object        bson.D              `bson:"o" json:"o"`
+	Query         bson.M              `bson:"o2" json:"o2"`
+	UniqueIndexes bson.M              `bson:"uk" json:"uk"`
+	Lsid          interface{}         `bson:"lsid" json:"lsid"`               // mark the session id, used in transaction
+	FromMigrate   bool                `bson:"fromMigrate" json:"fromMigrate"` // move chunk
 
 	/*
 	 * Every field subsequent declared is NEVER persistent or

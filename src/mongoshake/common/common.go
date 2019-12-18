@@ -9,19 +9,6 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
-const (
-	WorkGood       uint64 = 0
-	GetReady       uint64 = 1
-	FetchBad       uint64 = 2
-	TunnelSendBad  uint64 = 4
-	TunnelSyncBad  uint64 = 8
-	ReplicaExecBad uint64 = 16
-
-	ConnectModePrimary            = "primary"
-	ConnectModeSecondaryPreferred = "secondaryPreferred"
-	ConnectModeStandalone         = "standalone"
-)
-
 // Build info
 var BRANCH = "$"
 var SIGNALPROFILE = "$"
@@ -33,9 +20,23 @@ const (
 	AppDatabase          = APPNAME
 	APPConflictDatabase  = APPNAME + "_conflict"
 	GlobalDiagnosticPath = "diagnostic"
-
 	// This is the time of golang was born to the world
 	GolangSecurityTime = "2006-01-02T15:04:05Z"
+
+	WorkGood       uint64 = 0
+	GetReady       uint64 = 1
+	FetchBad       uint64 = 2
+	TunnelSendBad  uint64 = 4
+	TunnelSyncBad  uint64 = 8
+	ReplicaExecBad uint64 = 16
+
+	ConnectModePrimary            = "primary"
+	ConnectModeSecondaryPreferred = "secondaryPreferred"
+	ConnectModeStandalone         = "standalone"
+
+	TunnelMessageRaw  = "raw"
+	TunnelMessageJson = "json"
+	TunnelMessageBson = "bson"
 )
 
 func init() {
