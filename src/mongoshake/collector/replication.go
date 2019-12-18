@@ -36,6 +36,8 @@ type ReplicationCoordinator struct {
 	// 1:1 while replicated in shard cluster
 	oplogSyncerGroup []*OplogSyncer
 
+	ckptManager *CheckpointManager
+
 	rateController *nimo.SimpleRateController
 }
 
@@ -108,6 +110,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 		if err := coordinator.startOplogReplication(beginTsMap, beginTsMap); err != nil {
 			return err
 		}
+		coordinator.ckptManager.start()
 	default:
 		return LOG.Critical("unknown sync mode %v", conf.Options.SyncMode)
 	}
@@ -118,11 +121,10 @@ func (coordinator *ReplicationCoordinator) Run() error {
 func (coordinator *ReplicationCoordinator) parallelDocumentOplog(
 		beginTsMap map[string]bson.MongoTimestamp, beginAllTsMap map[string]utils.TimestampNode) error {
 	LOG.Info("parallel run document and oplog replication")
-	var docError, oplogError error
+	var docError error
 	docEndTsMap := make(map[string]bson.MongoTimestamp)
-	var docWg, oplogWg sync.WaitGroup
+	var docWg sync.WaitGroup
 	docWg.Add(1)
-	oplogWg.Add(1)
 
 	nimo.GoRoutine(func() {
 		defer docWg.Done()
@@ -152,13 +154,9 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(
 		}
 	})
 	// during document replication, oplog syncer fetch oplog and store on disk, in order to avoid oplog roll up
-	nimo.GoRoutine(func() {
-		defer oplogWg.Done()
-		if err := coordinator.startOplogReplication(beginTsMap, nil); err != nil {
-			oplogError = LOG.Critical("Oplog Replication error. %v", err)
-			return
-		}
-	})
+	if err := coordinator.startOplogReplication(beginTsMap, nil); err != nil {
+		return LOG.Critical("Oplog Replication error. %v", err)
+	}
 	// wait for document replication to finish, set docEndTs to oplog syncer, start oplog replication
 	docWg.Wait()
 	if docError != nil {
@@ -168,11 +166,7 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(
 	for _, oplogSyncer := range coordinator.oplogSyncerGroup {
 		oplogSyncer.startDiskApply(docEndTsMap[oplogSyncer.replset])
 	}
-	// wait for oplog replication to finish
-	oplogWg.Wait()
-	if oplogError != nil {
-		return oplogError
-	}
+	coordinator.ckptManager.start()
 	return nil
 }
 
@@ -206,6 +200,7 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(
 	if err := coordinator.startOplogReplication(beginTsMap, docEndTsMap); err != nil {
 		return LOG.Critical("Oplog Replication error. %v", err)
 	}
+	coordinator.ckptManager.start()
 	return nil
 }
 
@@ -466,13 +461,9 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(beginTsMap, doc
 		go w.startWorker()
 	}
 
-	// initialize checkpoint timestamp of oplog syncer
+	// load checkpoint before other components start
 	if err := ckptManager.loadAll(); err != nil {
 		return err
-	}
-	if docEndTsMap != nil {
-		// oplog start applying oplog
-		ckptManager.start()
 	}
 	if conf.Options.MoveChunkEnable {
 		mvckManager.start()
@@ -484,6 +475,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(beginTsMap, doc
 	for _, syncer := range coordinator.oplogSyncerGroup {
 		go syncer.start()
 	}
+	coordinator.ckptManager = ckptManager
 	return nil
 }
 

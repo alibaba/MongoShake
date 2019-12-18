@@ -72,6 +72,10 @@ type OplogReader struct {
 }
 
 // NewOplogReader creates reader with mongodb url
+//
+// fetchStatus: FetchStatusStoreDiskNoApply -> FetchStatusStoreDiskApply -> FetchStatusHang -> FetchStatusStoreMemoryApply
+//			  : FetchStatusStoreMemoryApply
+//
 func NewOplogReader(src, replset string, fetchStatus int32) *OplogReader {
 	reader := &OplogReader{
 		src:         src,
