@@ -229,6 +229,17 @@ func (d *DiskQueue) skipToNextRWFile() error {
 	return err
 }
 
+func (d *DiskQueue) FileSizeMB() int64 {
+	var fileSizeMB int64
+	for i:= d.readFileNum; i<= d.writeFileNum; i++ {
+		fn := d.fileName(i)
+		if fileInfo, err := os.Stat(fn); err == nil {
+			fileSizeMB += fileInfo.Size()/1024/1024
+		}
+	}
+	return fileSizeMB
+}
+
 // readOne performs a low level filesystem read for a single []byte
 // while advancing read positions and rolling files, if necessary
 func (d *DiskQueue) readOne() ([]byte, error) {

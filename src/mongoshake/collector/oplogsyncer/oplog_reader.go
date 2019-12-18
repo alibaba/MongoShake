@@ -32,7 +32,8 @@ const (
 	FetchStatusStoreDiskNoApply int32 = 1
 	FetchStatusStoreDiskApply   int32 = 2
 	FetchStatusStoreMemoryApply int32 = 3
-	FetchStatusHang             int32 = 10
+
+	BlockFetchDepth = 10
 )
 
 // TimeoutError. mongodb query executed timeout
@@ -59,6 +60,8 @@ type OplogReader struct {
 	fetchStatus int32
 	// disk queue used to store oplog temporarily
 	diskQueue *utils.DiskQueue
+
+	mutex sync.Mutex
 
 	// query statement and current max cursor
 	query bson.M
@@ -142,9 +145,10 @@ func (reader *OplogReader) StartFetcher() {
 	reader.fetcherLock.Unlock()
 }
 
-// fetch oplog and put into queue
+// fetch oplog tp store disk queue or memory
 func (reader *OplogReader) fetch() {
 	var log *bson.Raw
+	checkTime := time.Now()
 	for {
 		if err := reader.ensureNetwork(); err != nil {
 			if err == CollectionCappedError {
@@ -170,38 +174,36 @@ func (reader *OplogReader) fetch() {
 			continue
 		}
 
+		reader.mutex.Lock()
 		fetchStatus := atomic.LoadInt32(&reader.fetchStatus)
-		// block fetch operator until retrieve thread finish processing all oplogs in disk queue
-		if fetchStatus == FetchStatusHang {
-			LOG.Info("reader fetch for replset %v block with fetch status hang", reader.replset)
-			for {
-				time.Sleep(time.Second)
-				fetchStatus = atomic.LoadInt32(&reader.fetchStatus)
-				if fetchStatus != FetchStatusHang {
-					break
-				}
-			}
-			LOG.Info("reader fetch for replset %v end block with fetch status[%v]",
-				reader.replset, logFetchStatus(fetchStatus))
-		}
 		// put oplog to the corresponding queue
 		if fetchStatus == FetchStatusStoreMemoryApply {
 			reader.oplogChan <- &retOplog{log, nil}
 		} else if reader.diskQueue != nil {
+			// store oplog to disk queue
 			if err := reader.diskQueue.Put(log.Data); err != nil {
 				LOG.Crashf("reader fetch for replset %v put oplog to disk queue error. %v", reader.replset, err)
+			}
+			if time.Now().After(checkTime.Add(5 * time.Second)) {
+				// avoid disk queue size too much
+				fileSizeMB := reader.diskQueue.FileSizeMB()
+				if fileSizeMB > conf.Options.ReplayerOplogStoreDiskMaxSize {
+					LOG.Crashf("reader fetch for replset %v disk queue[%v] reach the max size[%v]",
+						reader.replset, fileSizeMB, conf.Options.ReplayerOplogStoreDiskMaxSize)
+				}
+				checkTime = time.Now()
 			}
 		} else {
 			LOG.Crashf("reader fetch for replset %v has no diskqueue with fetch status[%v]. %v",
 				reader.replset, logFetchStatus(fetchStatus))
 		}
+		reader.mutex.Unlock()
 	}
 }
 
-// retrieve oplog from disk queue when fetch status is store disk
 func (reader *OplogReader) retrieve() {
 	for {
-		if atomic.LoadInt32(&reader.fetchStatus) != FetchStatusStoreDiskNoApply {
+		if atomic.LoadInt32(&reader.fetchStatus) == FetchStatusStoreDiskApply {
 			break
 		}
 		time.Sleep(time.Second)
@@ -220,20 +222,28 @@ func (reader *OplogReader) retrieve() {
 			}
 		}
 	})
+	// wait to block fetch
 	for {
-		time.Sleep(10 * time.Second)
-		if reader.diskQueue.Depth() <= 10 {
-			reader.UpdateFetchStatus(FetchStatusHang)
+		if reader.diskQueue.Depth() <= BlockFetchDepth {
+			break
 		}
-		LOG.Info("###reader retrieve depth %v", reader.diskQueue.Depth())
+		time.Sleep(time.Second)
+	}
+	LOG.Info("reader retrieve for replset %v block fetch with disk queue depth[%v]",
+		reader.replset, reader.diskQueue.Depth())
+	// wait to finish retrieve and continue fetch to store to memory
+	reader.mutex.Lock()
+	for {
 		if reader.diskQueue.Depth() == 0 {
 			close(readExitChan)
 			reader.UpdateFetchStatus(FetchStatusStoreMemoryApply)
 			break
 		}
+		time.Sleep(time.Second)
 	}
+	reader.mutex.Unlock()
 	if err := reader.diskQueue.Delete(); err != nil {
-		LOG.Warn("reader retrieve for replset %v close disk queue error. %v", reader.replset, err)
+		LOG.Critical("reader retrieve for replset %v close disk queue error. %v", reader.replset, err)
 	}
 }
 
@@ -326,8 +336,6 @@ func logFetchStatus(status int32) string {
 		return "store disk and apply"
 	case FetchStatusStoreMemoryApply:
 		return "store memory and apply"
-	case FetchStatusHang:
-		return "hang"
 	default:
 		return fmt.Sprintf("invalid[%v]", status)
 	}
