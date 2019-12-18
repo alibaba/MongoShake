@@ -22,6 +22,7 @@ type Configuration struct {
 	FetcherBufferCapacity    int      `config:"fetcher.buffer_capacity"`
 	Tunnel                   string   `config:"tunnel"`
 	TunnelAddress            []string `config:"tunnel.address"`
+	TunnelMessage            string   `config:"tunnel.message"`
 	MasterQuorum             bool     `config:"master_quorum"`
 	ContextStorage           string   `config:"context.storage"`
 	ContextStorageUrl        string   `config:"context.storage.url"`

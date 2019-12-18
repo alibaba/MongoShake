@@ -2,7 +2,7 @@ package utils
 
 import (
 	"fmt"
-	conf "mongoshake/collector/configure"
+	"mongoshake/collector/configure"
 	"os"
 	"strings"
 
@@ -35,6 +35,10 @@ const (
 	CheckpointName   = "name"
 	CheckpointAckTs  = "ackTs"
 	CheckpointSyncTs = "syncTs"
+
+	TunnelMessageRaw  = "raw"
+	TunnelMessageJson = "json"
+	TunnelMessageBson = "bson"
 )
 
 // Build info
