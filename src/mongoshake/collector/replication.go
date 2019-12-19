@@ -77,11 +77,11 @@ func (coordinator *ReplicationCoordinator) Run() error {
 		}
 
 		if conf.Options.ReplayerOplogStoreDisk {
-			if err := coordinator.parallelDocumentOplog(beginTsMap, beginAllTsMap); err != nil {
+			if err := coordinator.parallelDocumentOplog(beginTsMap); err != nil {
 				return err
 			}
 		} else {
-			if err := coordinator.serializeDocumentOplog(beginTsMap, beginAllTsMap); err != nil {
+			if err := coordinator.serializeDocumentOplog(beginTsMap); err != nil {
 				return err
 			}
 		}
@@ -118,8 +118,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	return nil
 }
 
-func (coordinator *ReplicationCoordinator) parallelDocumentOplog(
-		beginTsMap map[string]bson.MongoTimestamp, beginAllTsMap map[string]utils.TimestampNode) error {
+func (coordinator *ReplicationCoordinator) parallelDocumentOplog(beginTsMap map[string]bson.MongoTimestamp) error {
 	LOG.Info("parallel run document and oplog replication")
 	var docError error
 	docEndTsMap := make(map[string]bson.MongoTimestamp)
@@ -140,16 +139,9 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(
 		}
 		LOG.Info("------------------------document replication done!------------------------")
 		for replset, endTs := range endAllTsMap {
-			beginTs := beginAllTsMap[replset]
+			beginTs := beginTsMap[replset]
 			LOG.Info("document replication replset %v beginTs[%v] endTs[%v]",
-				replset, utils.ExtractTs32(beginTs.Newest), utils.ExtractTs32(endTs.Newest))
-			// the oldest oplog is lost
-			if utils.ExtractTs32(endTs.Oldest) >= utils.ExtractTs32(beginTs.Newest) {
-				docError = LOG.Critical("oplog replication replset %v beginTs.Newest[%v] is less than endTs.Oldest[%v], "+
-					"this error means user's oplog collection size is too small or document replication continues too long",
-					replset, utils.ExtractTs32(beginTs.Newest), utils.ExtractTs32(endTs.Oldest))
-				return
-			}
+				replset, utils.ExtractTs32(beginTs), utils.ExtractTs32(endTs.Newest))
 			docEndTsMap[replset] = endTs.Newest
 		}
 	})
@@ -170,8 +162,7 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(
 	return nil
 }
 
-func (coordinator *ReplicationCoordinator) serializeDocumentOplog(
-		beginTsMap map[string]bson.MongoTimestamp, beginAllTsMap map[string]utils.TimestampNode) error {
+func (coordinator *ReplicationCoordinator) serializeDocumentOplog(beginTsMap map[string]bson.MongoTimestamp) error {
 	LOG.Info("serially run document and oplog replication")
 	if err := coordinator.startDocumentReplication(beginTsMap); err != nil {
 		return LOG.Critical("Document Replication error. %v", err)
@@ -185,15 +176,9 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(
 	LOG.Info("------------------------document replication done!------------------------")
 	docEndTsMap := make(map[string]bson.MongoTimestamp)
 	for replset, endTs := range endAllTsMap {
-		beginTs := beginAllTsMap[replset]
+		beginTs := beginTsMap[replset]
 		LOG.Info("document replication replset %v beginTs[%v] endTs[%v]",
-			replset, utils.ExtractTs32(beginTs.Newest), utils.ExtractTs32(endTs.Newest))
-		// the oldest oplog is lost
-		if utils.ExtractTs32(endTs.Oldest) >= utils.ExtractTs32(beginTs.Newest) {
-			return LOG.Critical("oplog replication replset %v beginTs.Newest[%v] is less than endTs.Oldest[%v], "+
-				"this error means user's oplog collection size is too small or document replication continues too long",
-				replset, utils.ExtractTs32(beginTs.Newest), utils.ExtractTs32(endTs.Oldest))
-		}
+			replset, utils.ExtractTs32(beginTs), utils.ExtractTs32(endTs.Newest))
 		docEndTsMap[replset] = endTs.Newest
 	}
 

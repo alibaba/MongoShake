@@ -1,8 +1,11 @@
 package collector
 
 import (
+	"errors"
 	"fmt"
 	"mongoshake/collector/oplogsyncer"
+	"sort"
+	"sync/atomic"
 	"time"
 
 	"mongoshake/collector/configure"
@@ -25,6 +28,9 @@ const (
 	DurationTime        = 6000 // unit: ms.
 	DDLCheckpointGap    = 5    // unit: seconds.
 	FilterCheckpointGap = 60   // unit: seconds. no checkpoint update, flush checkpoint mandatory
+
+	DiskQueueName    = "dqName"
+	DiskQueueFetchTs = "dqFetchTs"
 )
 
 type OplogHandler interface {
@@ -379,6 +385,119 @@ func (sync *OplogSyncer) transfer(log *bson.Raw) bool {
 		return true
 	}
 	return false
+}
+
+func (sync *OplogSyncer) LoadByDoc(ckptDoc map[string]interface{}, ts time.Time) error {
+	ackTs, ok1 := ckptDoc[utils.CheckpointAckTs].(bson.MongoTimestamp)
+	syncTs, ok2 := ckptDoc[utils.CheckpointSyncTs].(bson.MongoTimestamp)
+	if !ok1 || !ok2 {
+		return LOG.Critical("OplogSyncer load checkpoint illegal record %v. ok1[%v] ok2[%v]",
+			ckptDoc, ok1, ok2)
+	}
+	sync.batcher.syncTs = syncTs
+	sync.batcher.unsyncTs = syncTs
+	for _, worker := range sync.batcher.workerGroup {
+		worker.unack = int64(ackTs)
+		worker.ack = int64(ackTs)
+	}
+	sync.reader.InitQueryTimestamp(ackTs)
+	dqName, ok3 := ckptDoc[DiskQueueName].(string)
+	fetchTs, ok4 := ckptDoc[DiskQueueFetchTs].(bson.MongoTimestamp)
+	if sync.reader.UseDiskQueue() {
+		// parallel run document and oplog replication
+		sync.reader.InitDiskQueue(fmt.Sprintf("mongoshake-%v-%v", sync.replset, ts.Format("20060102-150405")))
+	} else if ok3 && ok4 {
+		// oplog replication with disk queue remained
+		sync.reader.UpdateFetchStatus(oplogsyncer.FetchStatusStoreDiskApply)
+		sync.reader.InitDiskQueue(dqName)
+		sync.reader.InitQueryTimestamp(fetchTs)
+	}
+
+	LOG.Info("OplogSyncer load checkpoint set syncer %v checkpoint to ackTs[%v] syncTs[%v] dqName[%v]",
+		sync.replset, utils.TimestampToLog(ackTs), utils.TimestampToLog(syncTs), dqName)
+	return nil
+}
+
+func (sync *OplogSyncer) FlushByDoc() map[string]interface{} {
+	ackTs, err := sync.calculateSyncerAckTs()
+	if err != nil {
+		LOG.Crashf("OplogSyncer flush checkpoint get ackTs of sycner %v failed. %v", sync.replset, err)
+	}
+
+	syncTs := sync.batcher.syncTs
+	unsyncTs := sync.batcher.unsyncTs
+	nimo.AssertTrue(syncTs == unsyncTs, "OplogSyncer flush checkpoint panic when syncTs != unsyncTs")
+	for _, worker := range sync.batcher.workerGroup {
+		ack := bson.MongoTimestamp(atomic.LoadInt64(&worker.ack))
+		unack := bson.MongoTimestamp(atomic.LoadInt64(&worker.unack))
+		LOG.Info("OplogSyncer flush checkpoint syncer %v ack[%v] unack[%v] syncTs[%v]", sync.replset,
+			utils.TimestampToLog(ack), utils.TimestampToLog(unack), utils.TimestampToLog(syncTs))
+	}
+	sync.replMetric.AddCheckpoint(1)
+	sync.replMetric.SetLSNCheckpoint(int64(ackTs))
+
+	ckptDoc := map[string]interface{}{
+		utils.CheckpointName:   sync.replset,
+		utils.CheckpointAckTs:  ackTs,
+		utils.CheckpointSyncTs: syncTs,
+	}
+	if sync.reader.UseDiskQueue() {
+		ckptDoc[DiskQueueName] = sync.reader.GetDiskQueueName()
+		ckptDoc[DiskQueueFetchTs] = sync.reader.GetDiskQueueFetchTs()
+	}
+	return ckptDoc
+}
+
+func (sync *OplogSyncer) calculateSyncerAckTs() (v bson.MongoTimestamp, err error) {
+	// no need to lock and eventually consistence is acceptable
+	allAcked := true
+	candidates := make([]int64, 0, len(sync.batcher.workerGroup))
+	allAckValues := make([]int64, 0, len(sync.batcher.workerGroup))
+	for _, worker := range sync.batcher.workerGroup {
+		// read ack value first because of we don't wanna
+		// a result of ack > unack. There wouldn't be cpu
+		// reorder under atomic !
+		ack := atomic.LoadInt64(&worker.ack)
+		unack := atomic.LoadInt64(&worker.unack)
+		if ack == 0 && unack == 0 {
+			// have no oplogs synced in this worker. skip
+		} else if ack == unack || worker.IsAllAcked() {
+			// all oplogs have been acked for right now or previous status
+			worker.AllAcked(true)
+			allAckValues = append(allAckValues, ack)
+		} else if unack > ack {
+			// most likely. partial oplogs acked (0 is possible)
+			candidates = append(candidates, ack)
+			allAcked = false
+		} else if unack < ack && unack == 0 {
+			// collector restarts. receiver unack value if from buffer
+			// this is rarely happened. However we have delayed for
+			// a bit log time. so we could use it
+			allAcked = false
+		} else if unack < ack && unack != 0 {
+			// we should wait the bigger unack follows up the ack
+			// they (unack and ack) will be equivalent soon !
+			return 0, fmt.Errorf("candidates should follow up unack[%d] ack[%d]", unack, ack)
+		}
+	}
+	if allAcked && len(allAckValues) != 0 {
+		// free to choose the maximum value. ascend order
+		// the last one is the biggest
+		sort.Sort(utils.Int64Slice(allAckValues))
+		return bson.MongoTimestamp(allAckValues[len(allAckValues)-1]), nil
+	}
+
+	if len(candidates) == 0 {
+		return 0, errors.New("no candidates ack values found")
+	}
+	// ascend order. first is the smallest
+	sort.Sort(utils.Int64Slice(candidates))
+
+	if candidates[0] == 0 {
+		return 0, errors.New("smallest candidates is zero")
+	}
+	LOG.Info("calculateSyncerAckTs worker offset %v use lowest %d", candidates, candidates[0])
+	return bson.MongoTimestamp(candidates[0]), nil
 }
 
 func (sync *OplogSyncer) Handle(log *oplog.PartialLog) {

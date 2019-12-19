@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	nimo "github.com/gugemichael/nimo4go"
+	"mongoshake/oplog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -60,6 +61,8 @@ type OplogReader struct {
 	fetchStatus int32
 	// disk queue used to store oplog temporarily
 	diskQueue *utils.DiskQueue
+	// fetch timestamp of disk queue
+	diskQueueFetchTs bson.MongoTimestamp
 
 	mutex sync.Mutex
 
@@ -76,7 +79,7 @@ type OplogReader struct {
 
 // NewOplogReader creates reader with mongodb url
 //
-// fetchStatus: FetchStatusStoreDiskNoApply -> FetchStatusStoreDiskApply -> FetchStatusHang -> FetchStatusStoreMemoryApply
+// fetchStatus: FetchStatusStoreDiskNoApply -> FetchStatusStoreDiskApply -> mutex -> FetchStatusStoreMemoryApply
 //			  : FetchStatusStoreMemoryApply
 //
 func NewOplogReader(src, replset string, fetchStatus int32) *OplogReader {
@@ -88,17 +91,19 @@ func NewOplogReader(src, replset string, fetchStatus int32) *OplogReader {
 		oplogChan:   make(chan *retOplog, oplogChanSize),
 		firstRead:   true,
 	}
-	if fetchStatus != FetchStatusStoreMemoryApply {
-		dpName := fmt.Sprintf("mongoshake-%v-%v", replset, time.Now().Format("20060102-150405"))
-		reader.diskQueue = utils.NewDiskQueue(dpName, conf.Options.LogDirectory, 1<<30, 0, 1<<26,
-			2500, 2*time.Second, LOG.Global.Logf)
-	}
 	return reader
 }
 
-// SetQueryTimestampOnEmpty set internal timestamp if
+func (reader *OplogReader) InitDiskQueue(dqName string) {
+	if reader.fetchStatus != FetchStatusStoreMemoryApply {
+		reader.diskQueue = utils.NewDiskQueue(dqName, conf.Options.LogDirectory, 1<<30, 0, 1<<26,
+			2500, 2*time.Second, LOG.Global.Logf)
+	}
+}
+
+// InitQueryTimestamp set internal timestamp if
 // not exist in this reader. initial stage most of the time
-func (reader *OplogReader) SetQueryTimestampOnEmpty(ts bson.MongoTimestamp) {
+func (reader *OplogReader) InitQueryTimestamp(ts bson.MongoTimestamp) {
 	if _, exist := reader.query[QueryTs]; !exist {
 		reader.UpdateQueryTimestamp(ts)
 	}
@@ -110,6 +115,18 @@ func (reader *OplogReader) UpdateQueryTimestamp(ts bson.MongoTimestamp) {
 
 func (reader *OplogReader) GetQueryTimestamp() bson.MongoTimestamp {
 	return reader.query[QueryTs].(bson.M)[QueryOpGT].(bson.MongoTimestamp)
+}
+
+func (reader *OplogReader) UseDiskQueue() bool {
+	return reader.fetchStatus != FetchStatusStoreMemoryApply
+}
+
+func (reader *OplogReader) GetDiskQueueName() string {
+	return reader.diskQueue.Name()
+}
+
+func (reader *OplogReader) GetDiskQueueFetchTs() bson.MongoTimestamp {
+	return reader.diskQueueFetchTs
 }
 
 func (reader *OplogReader) UpdateFetchStatus(fetchStatus int32) {
@@ -132,6 +149,16 @@ func (reader *OplogReader) Next() (log *bson.Raw, err error) {
 func (reader *OplogReader) StartFetcher() {
 	if reader.fetcherExist == true {
 		return
+	}
+
+	// the oldest oplog is lost
+	queryTs := reader.GetQueryTimestamp()
+	if oldTs, err := utils.GetOldestTimestampByUrl(reader.src); err != nil {
+		LOG.Crashf("reader fetch for replset %v connect to %v failed. %v", reader.replset, err)
+	} else if oldTs > queryTs {
+		LOG.Crashf("reader fetch for replset %v queryTs[%v] is less than oldTs[%v], "+
+			"this error means user's oplog collection size is too small or document replication continues too long",
+			reader.replset, utils.TimestampToLog(queryTs), utils.TimestampToLog(oldTs))
 	}
 
 	reader.fetcherLock.Lock()
@@ -185,6 +212,14 @@ func (reader *OplogReader) fetch() {
 				LOG.Crashf("reader fetch for replset %v put oplog to disk queue error. %v", reader.replset, err)
 			}
 			if time.Now().After(checkTime.Add(5 * time.Second)) {
+				// update fetch timestamp of disk queue
+				partialLog := new(oplog.PartialLog)
+				if err := bson.Unmarshal(log.Data, partialLog); err != nil {
+					// impossible switch, need panic and exit
+					LOG.Crashf("reader fetch for replset %v unmarshal oplog[%v] failed[%v]",
+						reader.replset, log.Data, err)
+				}
+				reader.diskQueueFetchTs = partialLog.Timestamp
 				// avoid disk queue size too much
 				fileSizeMB := reader.diskQueue.FileSizeMB()
 				if fileSizeMB > conf.Options.ReplayerOplogStoreDiskMaxSize {
@@ -214,6 +249,7 @@ func (reader *OplogReader) retrieve() {
 	nimo.GoRoutine(func() {
 		for {
 			select {
+			// TODO: remove disk queue file after all oplog have acked
 			case data := <-reader.diskQueue.ReadChan():
 				reader.oplogChan <- &retOplog{&bson.Raw{Kind: 3, Data: data}, nil}
 			case <-readExitChan:

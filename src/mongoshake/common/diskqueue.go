@@ -102,6 +102,10 @@ func NewDiskQueue(name string, dataPath string, maxBytesPerFile int64,
 	return &d
 }
 
+func (d *DiskQueue) Name() string {
+	return d.name
+}
+
 // Depth returns the depth of the queue
 func (d *DiskQueue) Depth() int64 {
 	return atomic.LoadInt64(&d.depth)
@@ -231,10 +235,10 @@ func (d *DiskQueue) skipToNextRWFile() error {
 
 func (d *DiskQueue) FileSizeMB() int64 {
 	var fileSizeMB int64
-	for i:= d.readFileNum; i<= d.writeFileNum; i++ {
+	for i := d.readFileNum; i <= d.writeFileNum; i++ {
 		fn := d.fileName(i)
 		if fileInfo, err := os.Stat(fn); err == nil {
-			fileSizeMB += fileInfo.Size()/1024/1024
+			fileSizeMB += fileInfo.Size() / 1024 / 1024
 		}
 	}
 	return fileSizeMB
