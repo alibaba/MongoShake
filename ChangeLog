@@ -1,3 +1,12 @@
+2019-11-20 Alibaba Cloud.
+	* version: 2.2.0
+	* this is a important version for sharding replication
+	* IMRPOVE: support filter orphan document in full synchronization for mongodb sharding
+	* IMPROVE: support move chunk in incremental synchronization for mongodb sharding
+	* IMPROVE: support ddl in incremental synchronization for mongodb sharding
+	* IMPROVE: support different sharding key or index at destination mongodb
+	* IMPROVE: support global consistence checkpoint
+
 2019-09-30 Alibaba Cloud.
 	* version: 2.0.8
 	* BUGFIX: fetch data from kafka failed. update "sarama" driver, see #212.

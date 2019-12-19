@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+const (
+	VersionMark = "$v"
+	UuidMark    = "ui"
+)
+
 type CommandOperation struct {
 	concernSyncData bool
 	runOnAdmin      bool // some commands like `renameCollection` need run on admin database
@@ -24,6 +29,10 @@ var opsMap = map[string]*CommandOperation{
 	"convertToCapped":  {concernSyncData: false, runOnAdmin: false},
 	"emptycapped":      {concernSyncData: false, runOnAdmin: false},
 	"applyOps":         {concernSyncData: true, runOnAdmin: false},
+
+	// sharding command
+	"enableSharding":	{concernSyncData: false, runOnAdmin: true},
+	"shardCollection":	{concernSyncData: false, runOnAdmin: true},
 }
 
 func ExtraCommandName(o bson.D) (string, bool) {

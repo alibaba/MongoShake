@@ -1,4 +1,4 @@
-package collector
+package oplogsyncer
 
 import (
 	"errors"
@@ -25,7 +25,7 @@ const (
 	tailTimeout   = 7
 	oplogChanSize = 0
 
-	localDB = "local"
+	LocalDB = "local"
 )
 
 const (
@@ -47,7 +47,8 @@ type retOplog struct {
 // by an url. And with query options. user can iterate oplogs.
 type OplogReader struct {
 	// source mongo address url
-	src string
+	src     string
+	replset string
 	// mongo oplog reader
 	conn           *utils.MongoConn
 	oplogsIterator *mgo.Iter
@@ -64,9 +65,10 @@ type OplogReader struct {
 }
 
 // NewOplogReader creates reader with mongodb url
-func NewOplogReader(src string) *OplogReader {
+func NewOplogReader(src, replset string) *OplogReader {
 	return &OplogReader{
 		src:       src,
+		replset:   replset,
 		query:     bson.M{},
 		oplogChan: make(chan *retOplog, oplogChanSize),
 		firstRead: true,
@@ -85,7 +87,7 @@ func (reader *OplogReader) UpdateQueryTimestamp(ts bson.MongoTimestamp) {
 	reader.query[QueryTs] = bson.M{QueryOpGT: ts}
 }
 
-func (reader *OplogReader) getQueryTimestamp() bson.MongoTimestamp {
+func (reader *OplogReader) GetQueryTimestamp() bson.MongoTimestamp {
 	return reader.query[QueryTs].(bson.M)[QueryOpGT].(bson.MongoTimestamp)
 }
 
@@ -146,8 +148,7 @@ func (reader *OplogReader) fetcher() {
 				// some internal error. need rebuild the oplogsIterator
 				reader.releaseIterator()
 				if reader.isCollectionCappedError(err) { // print it
-					LOG.Error("oplog collection capped may happen: %v", err)
-					reader.oplogChan <- &retOplog{nil, CollectionCappedError}
+					LOG.Crashf("oplog sync replset %v collection oplog.rs capped may happen: %v", reader.replset, err)
 				} else {
 					reader.oplogChan <- &retOplog{nil, fmt.Errorf("get next oplog failed. release oplogsIterator, %s", err.Error())}
 				}
@@ -173,7 +174,7 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 		}
 		// reconnect
 		if reader.conn, err = utils.NewMongoConn(reader.src, conf.Options.MongoConnectMode, true); reader.conn == nil || err != nil {
-			err = fmt.Errorf("reconnect mongo instance [%s] error. %s", reader.src, err.Error())
+			err = fmt.Errorf("reconnect mongo instance [%s] error. %s", reader.src, err)
 			return err
 		}
 	}
@@ -183,10 +184,10 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 	if reader.firstRead == true {
 		// check whether the starting fetching timestamp is less than the newest timestamp exist in the oplog
 		newestTs := reader.getNewestTimestamp()
-		queryTs = reader.getQueryTimestamp()
+		queryTs = reader.GetQueryTimestamp()
 		if newestTs < queryTs {
 			LOG.Warn("current starting point[%v] is bigger than the newest timestamp[%v]!",
-				utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(newestTs))
+				utils.TimestampToLog(queryTs), utils.TimestampToLog(newestTs))
 			queryTs = newestTs
 		}
 	}
@@ -196,13 +197,13 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 	 * this may happen when collection capped.
 	 */
 	oldestTs := reader.getOldestTimestamp()
-	queryTs = reader.getQueryTimestamp()
+	queryTs = reader.GetQueryTimestamp()
 	if oldestTs > queryTs {
 		if !reader.firstRead {
 			return CollectionCappedError
 		} else {
 			LOG.Warn("current starting point[%v] is smaller than the oldest timestamp[%v]!",
-				utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(oldestTs))
+				utils.TimestampToLog(queryTs), utils.TimestampToLog(oldestTs))
 		}
 	}
 	reader.firstRead = false
@@ -210,7 +211,7 @@ func (reader *OplogReader) ensureNetwork() (err error) {
 	// rebuild syncerGroup condition statement with current checkpoint timestamp
 	reader.conn.Session.SetBatch(8192) //
 	reader.conn.Session.SetPrefetch(0.2)
-	reader.oplogsIterator = reader.conn.Session.DB(localDB).C(utils.OplogNS).
+	reader.oplogsIterator = reader.conn.Session.DB(LocalDB).C(utils.OplogNS).
 		Find(reader.query).LogReplay().Tail(time.Second * tailTimeout) // this timeout is useless
 	return
 }

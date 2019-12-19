@@ -2,9 +2,9 @@ package collector
 
 import (
 	"fmt"
+	"mongoshake/collector/oplogsyncer"
 	"time"
 
-	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
 	"mongoshake/collector/filter"
 	"mongoshake/common"
@@ -25,10 +25,13 @@ const (
 	PipelineQueueMinNr = 1
 	PipelineQueueLen   = 64
 
-	DurationTime                  = 6000 // unit: ms.
-	DDLCheckpointInterval         = 300  // unit: ms.
-	FilterCheckpointGap           = 180  // unit: seconds. no checkpoint update, flush checkpoint mandatory
-	FilterCheckpointCheckInterval = 180  // unit: seconds.
+	WaitBarrierAckLogTimes = 10
+
+	DurationTime        = 6000 // unit: ms.
+	DDLCheckpointGap    = 5    // unit: seconds.
+	FilterCheckpointGap = 180  // unit: seconds. no checkpoint update, flush checkpoint mandatory
+
+	ShardingWorkerId = 0
 )
 
 type OplogHandler interface {
@@ -44,12 +47,12 @@ type OplogSyncer struct {
 	coordinator *ReplicationCoordinator
 	// source mongodb replica set name
 	replset string
-	// oplog start position of source mongodb
-	startPosition int64
 	// full sync finish position, used to check DDL between full sync and incr sync
 	fullSyncFinishPosition int64
 
-	ckptManager *ckpt.CheckpointManager
+	ckptManager *CheckpointManager
+	mvckManager *MoveChunkManager
+	ddlManager  *DDLManager
 
 	// oplog hash strategy
 	hasher oplog.Hasher
@@ -63,15 +66,11 @@ type OplogSyncer struct {
 	nextQueuePosition uint64
 
 	// source mongo oplog reader
-	reader *OplogReader
+	reader *oplogsyncer.OplogReader
 	// journal log that records all oplogs
 	journal *utils.Journal
 	// oplogs dispatcher
 	batcher *Batcher
-
-	// timers for inner event
-	startTime time.Time
-	ckptTime  time.Time
 
 	replMetric *utils.ReplicationMetric
 }
@@ -86,18 +85,22 @@ type OplogSyncer struct {
 func NewOplogSyncer(
 	coordinator *ReplicationCoordinator,
 	replset string,
-	startPosition int64,
 	fullSyncFinishPosition int64,
 	mongoUrl string,
-	gids []string) *OplogSyncer {
+	gids []string,
+	ckptManager *CheckpointManager,
+	mvckManager *MoveChunkManager,
+	ddlManager *DDLManager) *OplogSyncer {
 	syncer := &OplogSyncer{
 		coordinator:            coordinator,
 		replset:                replset,
-		startPosition:          startPosition,
 		fullSyncFinishPosition: fullSyncFinishPosition,
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
-		reader: NewOplogReader(mongoUrl),
+		reader:      oplogsyncer.NewOplogReader(mongoUrl, replset),
+		ckptManager: ckptManager,
+		mvckManager: mvckManager,
+		ddlManager:  ddlManager,
 	}
 
 	// concurrent level hasher
@@ -108,7 +111,7 @@ func NewOplogSyncer(
 		syncer.hasher = &oplog.PrimaryKeyHasher{}
 	}
 
-	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter), filter.NewGidFilter(gids)}
+	filterList := filter.OplogFilterChain{filter.NewAutologousFilter(), filter.NewGidFilter(gids)}
 
 	// DDL filter
 	if conf.Options.ReplayerDMLOnly {
@@ -130,8 +133,8 @@ func NewOplogSyncer(
 
 func (sync *OplogSyncer) init() {
 	sync.replMetric = utils.NewMetric(sync.replset, utils.METRIC_CKPT_TIMES|
-		utils.METRIC_TUNNEL_TRAFFIC| utils.METRIC_LSN_CKPT| utils.METRIC_SUCCESS|
-		utils.METRIC_TPS| utils.METRIC_RETRANSIMISSION)
+		utils.METRIC_TUNNEL_TRAFFIC|utils.METRIC_LSN_CKPT|utils.METRIC_SUCCESS|
+		utils.METRIC_TPS|utils.METRIC_RETRANSIMISSION)
 	sync.replMetric.ReplStatus.Update(utils.WorkGood)
 
 	sync.RestAPI()
@@ -147,14 +150,11 @@ func (sync *OplogSyncer) start() {
 	LOG.Info("Poll oplog syncer start. ckpt_interval[%dms], gid[%s], shard_key[%s]",
 		conf.Options.CheckpointInterval, conf.Options.OplogGIDS, conf.Options.ShardKey)
 
-	sync.startTime = time.Now()
-
 	// process about the checkpoint :
 	//
 	// 1. create checkpoint manager
 	// 2. load existing ckpt from remote storage
 	// 3. start checkpoint persist routine
-	sync.newCheckpointManager(sync.replset, sync.startPosition)
 
 	// start deserializer: parse data from pending queue, and then push into logs queue.
 	sync.startDeserializer()
@@ -164,7 +164,6 @@ func (sync *OplogSyncer) start() {
 	// forever fetching oplog from mongodb into oplog_reader
 	for {
 		sync.poll()
-
 		// error or exception occur
 		LOG.Warn("Oplog syncer polling yield. master:%t, yield:%dms", quorum.IsMaster(), DurationTime)
 		utils.YieldInMs(DurationTime)
@@ -174,108 +173,85 @@ func (sync *OplogSyncer) start() {
 // fetch all oplog from logs queue, batched together and then send to different workers.
 func (sync *OplogSyncer) startBatcher() {
 	var batcher = sync.batcher
-	filterCheckTs := time.Now()
-	filterFlag := false // marks whether previous log is filter
-
+	barrier := false
 	nimo.GoRoutineInLoop(func() {
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
 		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
-		batchedOplog, barrier, allEmpty := batcher.batchMore()
+		nextBatch := batcher.Next()
 
-		var newestTs bson.MongoTimestamp
-		if log, filterLog := batcher.getLastOplog(); log != nil && !allEmpty {
-			newestTs = log.Timestamp
+		// avoid to do checkpoint when syncer update ackTs or syncTs
+		sync.ckptManager.mutex.RLock()
+		filteredNextBatch, nextBarrier, flushCheckpoint, lastOplog := batcher.filterAndBlockMoveChunk(nextBatch, barrier)
+		barrier = nextBarrier
 
-			// push to worker
-			if worked := batcher.dispatchBatches(batchedOplog); worked {
-				sync.replMetric.SetLSN(utils.TimestampToInt64(newestTs))
-				// update latest fetched timestamp in memory
-				sync.reader.UpdateQueryTimestamp(newestTs)
+		if lastOplog != nil {
+			needDispatch := true
+			needUnBlock := false
+			// DDL operate at sharded collection of mongodb sharding
+			if DDLSupportForSharding() && ddlFilter.Filter(lastOplog) {
+				needDispatch = sync.ddlManager.BlockDDL(sync.replset, lastOplog)
+				if needDispatch {
+					// ddl need to run, when not all but majority oplog syncer received ddl oplog
+					LOG.Info("Oplog syncer %v prepare to dispatch ddl log %v", sync.replset, lastOplog)
+					// transform ddl to run at mongos of dest sharding
+					// number of worker of sharding instance and number of ddl command must be 1
+					shardColSpec := utils.GetShardCollectionSpec(sync.ddlManager.FromCsConn.Session, lastOplog)
+					if shardColSpec != nil {
+						logRaw := filteredNextBatch[0].Raw
+						filteredNextBatch = []*oplog.GenericOplog{}
+						transOplogs := TransformDDL(sync.replset, lastOplog, shardColSpec, sync.ddlManager.ToIsSharding)
+						for _, tlog := range transOplogs {
+							filteredNextBatch = append(filteredNextBatch, &oplog.GenericOplog{Raw: logRaw, Parsed: tlog})
+						}
+					}
+					needUnBlock = true
+				}
 			}
-
-			filterFlag = false
-
-			// flush checkpoint value
-			sync.checkpoint(barrier, 0)
-			sync.checkCheckpointUpdate(barrier, newestTs) // check if need
+			if needDispatch {
+				// push to worker to run
+				if worked := batcher.dispatchBatch(filteredNextBatch); worked {
+					sync.replMetric.SetLSN(utils.TimestampToInt64(lastOplog.Timestamp))
+					// update latest fetched timestamp in memory
+					sync.reader.UpdateQueryTimestamp(lastOplog.Timestamp)
+				}
+				if barrier {
+					// wait for ddl operation finish, and flush checkpoint value
+					sync.waitAllAck(flushCheckpoint)
+					if needUnBlock {
+						LOG.Info("Oplog syncer %v Unblock at ddl log %v", sync.replset, lastOplog)
+						// unblock other shard nodes when sharding ddl has finished
+						sync.ddlManager.UnBlockDDL(sync.replset, lastOplog)
+					}
+				}
+			}
 		} else {
-			// if log is nil, check whether filterLog is empty
-			if filterLog == nil {
-				return
-			} else {
-				now := time.Now()
-
-				// return if filterFlag == false
-				if filterFlag == false {
-					filterFlag = true
-					filterCheckTs = now
-					return
-				}
-
-				// pass only if all received oplog are filtered for {FilterCheckpointCheckInterval} seconds.
-				if now.After(filterCheckTs.Add(FilterCheckpointCheckInterval*time.Second)) == false {
-					return
-				}
-
-				checkpointTs := utils.ExtractMongoTimestamp(sync.ckptManager.Get().Timestamp)
-				filterNewestTs := utils.ExtractMongoTimestamp(filterLog.Timestamp)
-				if filterNewestTs-FilterCheckpointGap > checkpointTs {
-					// if checkpoint has not been update for {FilterCheckpointGap} seconds, update
-					// checkpoint mandatory.
-					newestTs = filterLog.Timestamp
-					LOG.Info("try to update checkpoint mandatory from %v(%v) to %v(%v)", sync.ckptManager.Get().Timestamp,
-						checkpointTs, filterLog.Timestamp, filterNewestTs)
-				} else {
-					return
-				}
+			readerQueryTs := int64(sync.reader.GetQueryTimestamp())
+			syncTs := sync.batcher.syncTs
+			if utils.ExtractTs32(syncTs)-readerQueryTs >= FilterCheckpointGap {
+				sync.waitAllAck(false)
+				LOG.Info("oplog syncer %v force to update checkpointTs from %v to %v",
+					sync.replset, utils.TimestampToLog(readerQueryTs), utils.TimestampToLog(syncTs))
+				// update latest fetched timestamp in memory
+				sync.reader.UpdateQueryTimestamp(syncTs)
 			}
-
-			filterFlag = false
-
-			if log != nil {
-				newestTsLog := utils.ExtractTimestampForLog(newestTs)
-				if newestTs <= log.Timestamp {
-					LOG.Crashf("filter newestTs[%v] smaller than previous timestamp[%v]",
-						newestTsLog, utils.ExtractTimestampForLog(log.Timestamp))
-				}
-
-				LOG.Info("waiting last checkpoint[%v] updated", newestTsLog)
-				// check last checkpoint updated
-
-				sync.checkCheckpointUpdate(true, log.Timestamp)
-
-				LOG.Info("last checkpoint[%v] updated ok", newestTsLog)
-			} else {
-				LOG.Info("last log is empty, skip waiting checkpoint updated")
-			}
-
-			// update latest fetched timestamp in memory
-			sync.reader.UpdateQueryTimestamp(newestTs)
-			// flush checkpoint by the newest filter oplog value
-			sync.checkpoint(false, newestTs)
-			return
 		}
+		// update syncTs of batcher
+		sync.batcher.syncTs = sync.batcher.unsyncTs
+		sync.ckptManager.mutex.RUnlock()
 	})
 }
 
-func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.MongoTimestamp) {
-	// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
-	if barrier && newestTs > 0 && conf.Options.WorkerNum > 1 {
-		LOG.Info("find barrier")
-		for {
-			checkpointTs := sync.ckptManager.Get().Timestamp
-			LOG.Info("compare remote checkpoint[%v(%v)] to local newestTs[%v(%v)]",
-				checkpointTs, utils.ExtractMongoTimestamp(checkpointTs), newestTs, utils.ExtractMongoTimestamp(newestTs))
-			if checkpointTs >= newestTs {
-				LOG.Info("barrier checkpoint updated")
-				break
-			}
-			utils.YieldInMs(DDLCheckpointInterval)
-
-			// re-flush
-			sync.checkpoint(true, 0)
-		}
+func (sync *OplogSyncer) waitAllAck(flushCheckpoint bool) {
+	beginTs := time.Now()
+	if flushCheckpoint {
+		LOG.Info("oplog syncer %v prepare for checkpoint", sync.replset)
+		sync.ckptManager.FlushChan <- true
+	}
+	sync.batcher.WaitAllAck()
+	if flushCheckpoint && time.Now().After(beginTs.Add(DDLCheckpointGap*time.Second)) {
+		LOG.Info("oplog syncer %v prepare for checkpoint.", sync.replset)
+		sync.ckptManager.FlushChan <- true
 	}
 }
 
@@ -319,16 +295,16 @@ func (sync *OplogSyncer) deserializer(index int) {
 // only master(maybe several mongo-shake starts) can poll oplog.
 func (sync *OplogSyncer) poll() {
 	// we should reload checkpoint. in case of other collector
-	// has fetched oplogs when master quorum leader election
-	// happens frequently. so we simply reload.
-	checkpoint := sync.ckptManager.Get()
-	if checkpoint == nil {
+	//	// has fetched oplogs when master quorum leader election
+	//	// happens frequently. so we simply reload.
+	checkpointTs := sync.ckptManager.Get(sync.replset)
+	if checkpointTs == 0 {
 		// we doesn't continue working on ckpt fetched failed. because we should
 		// confirm the exist checkpoint value or exactly knows that it doesn't exist
-		LOG.Critical("Acquire the existing checkpoint from remote[%s] failed !", conf.Options.ContextAddress)
+		LOG.Critical("Acquire the existing checkpoint from remote[%s] failed !", conf.Options.ContextStorageCollection)
 		return
 	}
-	sync.reader.SetQueryTimestampOnEmpty(checkpoint.Timestamp)
+	sync.reader.SetQueryTimestampOnEmpty(checkpointTs)
 	sync.reader.StartFetcher() // start reader fetcher if not exist
 
 	// every syncer should under the control of global rate limiter
@@ -370,10 +346,7 @@ func (sync *OplogSyncer) next() bool {
 		sync.replMetric.SetOplogMax(payload)
 		sync.replMetric.SetOplogAvg(payload)
 		sync.replMetric.ReplStatus.Clear(utils.FetchBad)
-	} else if err == CollectionCappedError {
-		LOG.Error("oplog collection capped error, users should fix it manually")
-		return false
-	} else if err != nil && err != TimeoutError {
+	} else if err != nil && err != oplogsyncer.TimeoutError {
 		LOG.Error("oplog syncer internal error: %v", err)
 		// error is nil indicate that only timeout incur syncer.next()
 		// return false. so we regardless that
@@ -448,14 +421,14 @@ func (sync *OplogSyncer) RestAPI() {
 			LogsSuccess: sync.replMetric.Success(),
 			Tps:         sync.replMetric.Tps(),
 			Lsn: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSN),
-				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSN),
-					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSN))}},
+				Time: Time{TimestampUnix: utils.ExtractTs32(sync.replMetric.LSN),
+					TimestampTime: utils.TimestampToString(utils.ExtractTs32(sync.replMetric.LSN))}},
 			LsnCkpt: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSNCheckpoint),
-				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSNCheckpoint),
-					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSNCheckpoint))}},
+				Time: Time{TimestampUnix: utils.ExtractTs32(sync.replMetric.LSNCheckpoint),
+					TimestampTime: utils.TimestampToString(utils.ExtractTs32(sync.replMetric.LSNCheckpoint))}},
 			LsnAck: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSNAck),
-				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSNAck),
-					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSNAck))}},
+				Time: Time{TimestampUnix: utils.ExtractTs32(sync.replMetric.LSNAck),
+					TimestampTime: utils.TimestampToString(utils.ExtractTs32(sync.replMetric.LSNAck))}},
 			Now: &Time{TimestampUnix: time.Now().Unix(), TimestampTime: utils.TimestampToString(time.Now().Unix())},
 		}
 	})

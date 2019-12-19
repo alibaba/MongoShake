@@ -7,7 +7,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
 	"mongoshake/collector/filter"
 	"mongoshake/collector/transform"
@@ -24,14 +23,7 @@ const (
 )
 
 func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
-	var toIsSharding bool
-	var result interface{}
-	err := toConn.Session.DB("config").C("version").Find(bson.M{}).One(&result)
-	if err != nil {
-		toIsSharding = false
-	} else {
-		toIsSharding = true
-	}
+	toIsSharding := utils.IsSharding(toConn.Session)
 
 	if fromIsSharding && toIsSharding {
 		LOG.Info("replication from sharding to sharding")
@@ -56,12 +48,10 @@ func StartDropDestCollection(nsSet map[utils.NS]bool, toConn *utils.MongoConn,
 		if !conf.Options.ReplayerCollectionDrop {
 			colNames, err := toConn.Session.DB(toNS.Database).CollectionNames()
 			if err != nil {
-				LOG.Critical("Get collection names of db %v of dest mongodb failed. %v", toNS.Database, err)
-				return nil, err
+				return nil, LOG.Critical("Get collection names of db %v of dest mongodb failed. %v", toNS.Database, err)
 			}
 			for _, colName := range colNames {
 				if colName == ns.Collection {
-					//return errors.New(fmt.Sprintf("ns %v to be synced already exists in dest mongodb", toNS))
 					LOG.Warn("ns %v to be synced already exists in dest mongodb, collection and index info will not be synced", toNS)
 					nsExistedSet[ns.Str()] = true
 					break
@@ -114,16 +104,14 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 				}
 				err = toConn.Session.DB("admin").Run(bson.D{{"enablesharding", todb}}, nil)
 				if err != nil {
-					LOG.Critical("Enable sharding for db %v of dest mongodb failed. %v", todb, err)
-					return errors.New(fmt.Sprintf("Enable sharding for db %v of dest mongodb failed. %v",
-						todb, err))
+					return LOG.Critical("Enable sharding for db %v of dest mongodb failed. %v", todb, err)
 				}
 				LOG.Info("Enable sharding for db %v of dest mongodb successful", todb)
 			}
 		}
 	}
 	if err := dbSpecIter.Close(); err != nil {
-		LOG.Critical("Close iterator of config.database failed. %v", err)
+		return LOG.Critical("Close iterator of config.database failed. %v", err)
 	}
 
 	type colSpec struct {
@@ -142,22 +130,20 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 		}
 		if !colSpecDoc.Dropped {
 			if filterList.IterateFilter(colSpecDoc.Ns) {
-				LOG.Debug("Namespace is filtered. %v", colSpecDoc.Ns)
+				LOG.Debug("Namespace spec sync is filtered. %v", colSpecDoc.Ns)
 				continue
 			}
 			toNs := nsTrans.Transform(colSpecDoc.Ns)
 			err = toConn.Session.DB("admin").Run(bson.D{{"shardCollection", toNs},
 				{"key", colSpecDoc.Key}, {"unique", colSpecDoc.Unique}}, nil)
 			if err != nil {
-				LOG.Critical("Shard collection for ns %v of dest mongodb failed. %v", toNs, err)
-				return errors.New(fmt.Sprintf("Shard collection for ns %v of dest mongodb failed. %v",
-					toNs, err))
+				return LOG.Critical("Shard collection for ns %v of dest mongodb failed. %v", toNs, err)
 			}
 			LOG.Info("Shard collection for ns %v of dest mongodb successful", toNs)
 		}
 	}
 	if err = colSpecIter.Close(); err != nil {
-		LOG.Critical("Close iterator of config.collections failed. %v", err)
+		return LOG.Critical("Close iterator of config.collections failed. %v", err)
 	}
 
 	LOG.Info("document syncer namespace spec for sharding successful")
@@ -240,20 +226,8 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 	return syncError
 }
 
-func Checkpoint(ckptMap map[string]utils.TimestampNode) error {
-	for name, ts := range ckptMap {
-		ckptManager := ckpt.NewCheckpointManager(name, 0)
-		ckptManager.Get()
-		if err := ckptManager.Update(ts.Newest); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 type DBSyncer struct {
-	// syncer id
-	id int
+	replset string
 	// source mongodb url
 	FromMongoUrl string
 	// destination mongodb url
@@ -262,8 +236,10 @@ type DBSyncer struct {
 	indexMap map[utils.NS][]mgo.Index
 	// start time of sync
 	startTime time.Time
-
+	// namespace transform
 	nsTrans *transform.NamespaceTransform
+	// filter orphan duplicate record
+	orphanFilter *filter.OrphanFilter
 
 	mutex sync.Mutex
 
@@ -271,17 +247,19 @@ type DBSyncer struct {
 }
 
 func NewDBSyncer(
-	id int,
+	replset string,
 	fromMongoUrl string,
 	toMongoUrl string,
-	nsTrans *transform.NamespaceTransform) *DBSyncer {
+	nsTrans *transform.NamespaceTransform,
+	orphanFilter *filter.OrphanFilter) *DBSyncer {
 
 	syncer := &DBSyncer{
-		id:           id,
+		replset:      replset,
 		FromMongoUrl: fromMongoUrl,
 		ToMongoUrl:   toMongoUrl,
 		indexMap:     make(map[utils.NS][]mgo.Index),
 		nsTrans:      nsTrans,
+		orphanFilter: orphanFilter,
 	}
 
 	return syncer
@@ -297,7 +275,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	}
 
 	if len(nsList) == 0 {
-		LOG.Info("document syncer-%d finish, but no data", syncer.id)
+		LOG.Info("document syncer %v finish, but no data", syncer.replset)
 	}
 
 	collExecutorParallel := conf.Options.ReplayerCollectionParallel
@@ -323,24 +301,22 @@ func (syncer *DBSyncer) Start() (syncError error) {
 
 				toNS := utils.NewNS(syncer.nsTrans.Transform(ns.Str()))
 
-				LOG.Info("document syncer-%d collExecutor-%d sync ns %v to %v begin",
-					syncer.id, collExecutorId, ns, toNS)
+				LOG.Info("document syncer %v collExecutor-%d sync ns %v to %v begin",
+					syncer.replset, collExecutorId, ns, toNS)
 				err := syncer.collectionSync(collExecutorId, ns, toNS)
 				atomic.AddInt32(&nsDoneCount, 1)
 
 				if err != nil {
-					LOG.Critical("document syncer-%d collExecutor-%d sync ns %v to %v failed. %v",
-						syncer.id, collExecutorId, ns, toNS, err)
-					syncError = errors.New(fmt.Sprintf("document syncer sync ns %v to %v failed. %v",
-						ns, toNS, err))
+					syncError = LOG.Critical("document syncer %v collExecutor-%d sync ns %v to %v failed. %v",
+						syncer.replset, collExecutorId, ns, toNS, err)
 				} else {
 					process := int(atomic.LoadInt32(&nsDoneCount)) * 100 / len(nsList)
-					LOG.Info("document syncer-%d collExecutor-%d sync ns %v to %v successful. db syncer-%d progress %v%%",
-						syncer.id, collExecutorId, ns, toNS, syncer.id, process)
+					LOG.Info("document syncer %v collExecutor-%d sync ns %v to %v successful. db syncer %v progress %v%%",
+						syncer.replset, collExecutorId, ns, toNS, syncer.replset, process)
 				}
 				wg.Done()
 			}
-			LOG.Info("document syncer-%d collExecutor-%d finish", syncer.id, collExecutorId)
+			LOG.Info("document syncer %v collExecutor-%d finish", syncer.replset, collExecutorId)
 		})
 	}
 
@@ -379,20 +355,17 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
 			buffer = make([]*bson.Raw, 0, bufferSize)
 			bufferByteSize = 0
 		}
-		// transform dbref for document
-		if len(conf.Options.TransformNamespace) > 0 && conf.Options.DBRef {
-			var docData bson.D
-			if err := bson.Unmarshal(doc.Data, docData); err != nil {
-				LOG.Warn("collectionSync do bson unmarshal %v failed. %v", doc.Data, err)
-			} else {
-				docData = transform.TransformDBRef(docData, ns.Database, syncer.nsTrans)
-				if v, err := bson.Marshal(docData); err != nil {
-					LOG.Warn("collectionSync do bson marshal %v failed. %v", docData, err)
-				} else {
-					doc.Data = v
-				}
-			}
+
+		// filter orphan document of chunk
+		if conf.Options.FilterOrphanDocument && syncer.orphanFilter.Filter(doc, ns.Str()) {
+			continue
 		}
+
+		// transform dbref
+		if len(conf.Options.TransformNamespace) > 0 && conf.Options.DBRef {
+			doc = transform.TransformDBRef(doc, ns.Database, syncer.nsTrans)
+		}
+
 		buffer = append(buffer, doc)
 		bufferByteSize += len(doc.Data)
 	}

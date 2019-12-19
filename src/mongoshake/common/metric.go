@@ -130,7 +130,7 @@ func (metric *ReplicationMetric) startup() {
 				verbose += fmt.Sprintf(", tunnel_traffic=%s", metric.getTunnelTraffic())
 			}
 			if metric.SUBSCRIBE&METRIC_LSN_CKPT != 0 {
-				verbose += fmt.Sprintf(", lsn_ckpt={%d,%s}", ExtractMongoTimestamp(lsnCkpt), TimestampToString(ExtractMongoTimestamp(lsnCkpt)))
+				verbose += fmt.Sprintf(", lsn_ckpt={%d,%s}", ExtractTs32(lsnCkpt), TimestampToString(ExtractTs32(lsnCkpt)))
 			}
 			verbose += ", lsn_ack={%d,%s}]"
 
@@ -140,8 +140,8 @@ func (metric *ReplicationMetric) startup() {
 				atomic.LoadUint64(&metric.OplogConsume.Value),
 				atomic.LoadUint64(&metric.OplogApply.Value),
 				atomic.LoadUint64(&metric.OplogFail.Value),
-				ExtractMongoTimestamp(atomic.LoadInt64(&metric.LSNAck)),
-				TimestampToString(ExtractMongoTimestamp(atomic.LoadInt64(&metric.LSNAck))))
+				ExtractTs32(atomic.LoadInt64(&metric.LSNAck)),
+				TimestampToString(ExtractTs32(atomic.LoadInt64(&metric.LSNAck))))
 		}
 	}()
 }

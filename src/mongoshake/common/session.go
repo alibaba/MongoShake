@@ -31,6 +31,22 @@ type MongoConn struct {
 	URL     string
 }
 
+func ParseMongoUrl(rawurl string) (string, map[string]string) {
+	params := make(map[string]string)
+	urls := strings.Split(rawurl, "?")
+	if len(urls) == 2 {
+		for _, u := range strings.Split(urls[1], "&") {
+			ps := strings.Split(u, "=")
+			if len(ps) != 2 {
+				continue
+			}
+			params[ps[0]] = ps[1]
+		}
+		return rawurl, params
+	}
+	return rawurl, params
+}
+
 func NewMongoConn(url string, connectMode string, timeout bool) (*MongoConn, error) {
 	if connectMode == ConnectModeStandalone {
 		url += "?connect=direct"
@@ -87,14 +103,14 @@ func (conn *MongoConn) IsGood() bool {
 	return true
 }
 
-func (conn *MongoConn) AcquireReplicaSetName() string {
+func (conn *MongoConn) AcquireReplicaSetName() (string, error) {
 	var replicaset struct {
 		Id string `bson:"set"`
 	}
 	if err := conn.Session.DB("admin").Run(bson.M{"replSetGetStatus": 1}, &replicaset); err != nil {
-		LOG.Warn("Replica set name not found in system.replset, %v", err)
+		return "", err
 	}
-	return replicaset.Id
+	return replicaset.Id, nil
 }
 
 func (conn *MongoConn) HasOplogNs() bool {

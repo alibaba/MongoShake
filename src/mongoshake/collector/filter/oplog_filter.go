@@ -2,8 +2,10 @@ package filter
 
 import (
 	"fmt"
+	utils "mongoshake/common"
 	"strings"
 
+	conf "mongoshake/collector/configure"
 	"mongoshake/oplog"
 
 	LOG "github.com/vinllen/log4go"
@@ -54,12 +56,40 @@ func (filter *GidFilter) Filter(log *oplog.PartialLog) bool {
 }
 
 type AutologousFilter struct {
+	nsShouldBeIgnore map[string]bool
 }
 
 func (filter *AutologousFilter) Filter(log *oplog.PartialLog) bool {
 	// for namespace. we filter noop operation and collection name
 	// that are admin, local, mongoshake, mongoshake_conflict
 	return filter.FilterNs(log.Namespace)
+}
+
+func NewAutologousFilter() *AutologousFilter {
+	// key: ns, value: true means prefix, false means contain
+	var nsShouldBeIgnore = map[string]bool{
+		"admin.":                          true,
+		"local.":                          true,
+		"config.":                         true,
+		utils.AppDatabase() + ".":         true,
+		utils.APPConflictDatabase() + ".": true,
+		"system.views":                    false,
+	}
+
+	if len(conf.Options.FilterPassSpecialDb) != 0 {
+		// init ns
+		for _, ns := range conf.Options.FilterPassSpecialDb {
+			if _, ok := nsShouldBeIgnore[ns]; ok {
+				delete(nsShouldBeIgnore, ns)
+			}
+			newNs := fmt.Sprintf("%s.", ns)
+			if _, ok := nsShouldBeIgnore[newNs]; ok {
+				delete(nsShouldBeIgnore, newNs)
+			}
+		}
+	}
+
+	return &AutologousFilter{nsShouldBeIgnore: nsShouldBeIgnore}
 }
 
 type NoopFilter struct {
@@ -195,7 +225,7 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 			return filter.filter(log)
 		case "applyOps":
 			var ops []bson.D
-			var filterOps []interface{} // return []interface{}
+			var filteredOps []interface{} // return []interface{}
 
 			// it's very strange, some documents are []interface, some are []bson.D
 			switch v := oplog.GetKey(log.Object, "applyOps").(type) {
@@ -212,11 +242,11 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 				m, _ := oplog.ConvertBsonD2M(ele)
 				subLog := oplog.NewPartialLog(m)
 				if ok := filter.Filter(subLog); !ok {
-					filterOps = append(filterOps, ele)
+					filteredOps = append(filteredOps, ele)
 				}
 			}
-			oplog.SetFiled(log.Object, "applyOps", filterOps)
-			return len(filterOps) > 0
+			oplog.SetFiled(log.Object, "applyOps", filteredOps)
+			return len(filteredOps) == 0
 		default:
 			// such as: dropDatabase
 			return filter.filter(log)

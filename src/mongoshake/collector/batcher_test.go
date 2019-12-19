@@ -38,6 +38,7 @@ func mockOplogs(length int, ddlGiven []int) []*oplog.GenericOplog {
 			Parsed: &oplog.PartialLog{
 				Namespace: "a.b",
 				Operation: op,
+				Timestamp: 1,
 			},
 		}
 	}
@@ -54,7 +55,7 @@ func TestBatchMore(t *testing.T) {
 		nr++
 
 		syncer := mockSyncer()
-		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		filterList := filter.OplogFilterChain{filter.NewAutologousFilter(), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 100
@@ -64,7 +65,7 @@ func TestBatchMore(t *testing.T) {
 		syncer.logsQueue[1] <- mockOplogs(6, nil)
 		syncer.logsQueue[2] <- mockOplogs(7, nil)
 
-		batchedOplog, barrier := batcher.batchMore()
+		batchedOplog, barrier, _, _, _ := batcher.batchMore()
 		assert.Equal(t, false, barrier, "should be equal")
 		assert.Equal(t, 18, len(batchedOplog[0]), "should be equal")
 	}
@@ -75,7 +76,7 @@ func TestBatchMore(t *testing.T) {
 		nr++
 
 		syncer := mockSyncer()
-		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		filterList := filter.OplogFilterChain{filter.NewAutologousFilter(), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 10
@@ -85,10 +86,10 @@ func TestBatchMore(t *testing.T) {
 		syncer.logsQueue[1] <- mockOplogs(6, nil)
 		syncer.logsQueue[2] <- mockOplogs(7, nil)
 
-		batchedOplog, barrier := batcher.batchMore()
+		batchedOplog, barrier, _, _, _ := batcher.batchMore()
 		assert.Equal(t, false, barrier, "should be equal")
 		assert.Equal(t, 11, len(batchedOplog[0]), "should be equal")
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, false, barrier, "should be equal")
 		assert.Equal(t, 7, len(batchedOplog[0]), "should be equal")
 	}
@@ -99,7 +100,7 @@ func TestBatchMore(t *testing.T) {
 		nr++
 
 		syncer := mockSyncer()
-		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		filterList := filter.OplogFilterChain{filter.NewAutologousFilter(), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 100
@@ -109,15 +110,15 @@ func TestBatchMore(t *testing.T) {
 		syncer.logsQueue[1] <- mockOplogs(6, []int{2})
 		syncer.logsQueue[2] <- mockOplogs(7, nil)
 
-		batchedOplog, barrier := batcher.batchMore()
+		batchedOplog, barrier, _, _, _ := batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 7, len(batchedOplog[0]), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, false, barrier, "should be equal")
 		assert.Equal(t, 10, len(batchedOplog[0]), "should be equal")
 	}
@@ -128,7 +129,7 @@ func TestBatchMore(t *testing.T) {
 		nr++
 
 		syncer := mockSyncer()
-		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		filterList := filter.OplogFilterChain{filter.NewAutologousFilter(), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 100
@@ -138,39 +139,39 @@ func TestBatchMore(t *testing.T) {
 		syncer.logsQueue[1] <- mockOplogs(6, []int{2})
 		syncer.logsQueue[2] <- mockOplogs(7, []int{4, 5})
 
-		batchedOplog, barrier := batcher.batchMore()
+		batchedOplog, barrier, _, _, _ := batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 3, len(batchedOplog[0]), "should be equal")
 
 		// 3 in logsQ[0]
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 3, len(batchedOplog[0]), "should be equal")
 
 		// 2 in logsQ[1]
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 7, len(batchedOplog[0]), "should be equal")
 
 		// 4 in logsQ[2]
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
 
 		// 5 in logsQ[2]
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, false, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
 	}
@@ -181,7 +182,7 @@ func TestBatchMore(t *testing.T) {
 		nr++
 
 		syncer := mockSyncer()
-		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		filterList := filter.OplogFilterChain{filter.NewAutologousFilter(), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 100
@@ -191,22 +192,22 @@ func TestBatchMore(t *testing.T) {
 		syncer.logsQueue[1] <- mockOplogs(6, nil)
 		syncer.logsQueue[2] <- mockOplogs(7, []int{6})
 
-		batchedOplog, barrier := batcher.batchMore()
+		batchedOplog, barrier, _, _, _ := batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, uint64(0), batcher.currentQueue(), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, uint64(0), batcher.currentQueue(), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 16, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, uint64(0), batcher.currentQueue(), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
@@ -215,7 +216,7 @@ func TestBatchMore(t *testing.T) {
 		// push again
 		syncer.logsQueue[0] <- mockOplogs(80, nil)
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, false, barrier, "should be equal")
 		assert.Equal(t, 80, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, uint64(1), batcher.currentQueue(), "should be equal")
@@ -227,7 +228,7 @@ func TestBatchMore(t *testing.T) {
 		nr++
 
 		syncer := mockSyncer()
-		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		filterList := filter.OplogFilterChain{filter.NewAutologousFilter(), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 100
@@ -237,37 +238,37 @@ func TestBatchMore(t *testing.T) {
 		syncer.logsQueue[1] <- mockOplogs(1, []int{0})
 		syncer.logsQueue[2] <- mockOplogs(1, []int{0})
 
-		batchedOplog, barrier := batcher.batchMore()
+		batchedOplog, barrier, _, _, _ := batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, uint64(0), batcher.currentQueue(), "should be equal")
 		assert.Equal(t, 5, len(batcher.remainLogs), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, uint64(0), batcher.currentQueue(), "should be equal")
 		assert.Equal(t, 4, len(batcher.remainLogs), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, uint64(0), batcher.currentQueue(), "should be equal")
 		assert.Equal(t, 3, len(batcher.remainLogs), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, uint64(0), batcher.currentQueue(), "should be equal")
 		assert.Equal(t, 2, len(batcher.remainLogs), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, uint64(0), batcher.currentQueue(), "should be equal")
 		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
@@ -276,7 +277,7 @@ func TestBatchMore(t *testing.T) {
 		// push again
 		syncer.logsQueue[0] <- mockOplogs(80, nil)
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, false, barrier, "should be equal")
 		assert.Equal(t, 80, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
@@ -289,7 +290,7 @@ func TestBatchMore(t *testing.T) {
 		nr++
 
 		syncer := mockSyncer()
-		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		filterList := filter.OplogFilterChain{filter.NewAutologousFilter(), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
 		conf.Options.AdaptiveBatchingMaxSize = 8
@@ -299,31 +300,31 @@ func TestBatchMore(t *testing.T) {
 		syncer.logsQueue[1] <- mockOplogs(6, []int{5}) // last is ddl
 		syncer.logsQueue[2] <- mockOplogs(7, []int{3})
 
-		batchedOplog, barrier := batcher.batchMore()
+		batchedOplog, barrier, _, _, _ := batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 10, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, uint64(2), batcher.currentQueue(), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, uint64(2), batcher.currentQueue(), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 3, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, 4, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, uint64(0), batcher.currentQueue(), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, 3, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, uint64(0), batcher.currentQueue(), "should be equal")
 
-		batchedOplog, barrier = batcher.batchMore()
+		batchedOplog, barrier, _, _, _ = batcher.batchMore()
 		assert.Equal(t, false, barrier, "should be equal")
 		assert.Equal(t, 3, len(batchedOplog[0]), "should be equal")
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
@@ -331,19 +332,11 @@ func TestBatchMore(t *testing.T) {
 	}
 }
 
-func mockBatcher(nsWhite []string, nsBlack []string) *Batcher {
-	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
-	// namespace filter
+func mockNamespaceFilter(nsWhite []string, nsBlack []string) *filter.NamespaceFilter {
 	if len(nsWhite) != 0 || len(nsBlack) != 0 {
-		namespaceFilter := filter.NewNamespaceFilter(nsWhite, nsBlack)
-		filterList = append(filterList, namespaceFilter)
+		return filter.NewNamespaceFilter(nsWhite, nsBlack)
 	}
-	return &Batcher{
-		syncer: &OplogSyncer{
-			fullSyncFinishPosition: 0,
-		},
-		filterList: filterList,
-	}
+	return nil
 }
 
 func mockFilterPartialLog(op, ns string, logObject bson.D) *oplog.PartialLog {
@@ -366,11 +359,11 @@ func TestFilterPartialLog(t *testing.T) {
 		fmt.Printf("TestFilterPartialLog case %d.\n", nr)
 		nr++
 
-		batcher := mockBatcher([]string{"fdb1"}, []string{})
+		nsFilter := mockNamespaceFilter([]string{"fdb1"}, []string{})
 		log := mockFilterPartialLog("i", "fdb1.fcol1", bson.D{bson.DocElem{"a", 1}})
-		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		assert.Equal(t, false, nsFilter.Filter(log), "should be equal")
 		log = mockFilterPartialLog("c", "fdb1.$cmd", bson.D{bson.DocElem{"dropDatabase", 1}})
-		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		assert.Equal(t, false, nsFilter.Filter(log), "should be equal")
 		log = mockFilterPartialLog("c", "fdb1.$cmd", bson.D{
 			bson.DocElem{"create", "fcol1"},
 			bson.DocElem{"idIndex", bson.D{
@@ -378,22 +371,22 @@ func TestFilterPartialLog(t *testing.T) {
 				bson.DocElem{"ns", "fdb1.fcol1"},
 			}},
 		})
-		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		assert.Equal(t, false, nsFilter.Filter(log), "should be equal")
 		log = mockFilterPartialLog("c", "fdb1.$cmd", bson.D{
 			bson.DocElem{"renameCollection", "fdb1.fcol1"},
 			bson.DocElem{"to", "fdb2.fcol2"}})
-		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		assert.Equal(t, false, nsFilter.Filter(log), "should be equal")
 	}
 
 	{
 		fmt.Printf("TestFilterPartialLog case %d.\n", nr)
 		nr++
 
-		batcher := mockBatcher([]string{"fdb1.fcol1"}, []string{})
+		nsFilter := mockNamespaceFilter([]string{"fdb1.fcol1"}, []string{})
 		log := mockFilterPartialLog("i", "fdb1.fcol1", bson.D{bson.DocElem{"a", 1}})
-		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		assert.Equal(t, false, nsFilter.Filter(log), "should be equal")
 		log = mockFilterPartialLog("c", "fdb1.$cmd", bson.D{bson.DocElem{"dropDatabase", 1}})
-		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		assert.Equal(t, false, nsFilter.Filter(log), "should be equal")
 		log = mockFilterPartialLog("c", "fdb1.$cmd", bson.D{
 			bson.DocElem{"create", "fcol1"},
 			bson.DocElem{"idIndex", bson.D{
@@ -401,10 +394,91 @@ func TestFilterPartialLog(t *testing.T) {
 				bson.DocElem{"ns", "fdb1.fcol1"},
 			}},
 		})
-		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		assert.Equal(t, false, nsFilter.Filter(log), "should be equal")
 		log = mockFilterPartialLog("c", "fdb1.$cmd", bson.D{
 			bson.DocElem{"renameCollection", "fdb1.fcol1"},
 			bson.DocElem{"to", "fdb2.fcol2"}})
-		assert.Equal(t, false, filterPartialLog(log, batcher), "should be equal")
+		assert.Equal(t, false, nsFilter.Filter(log), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestFilterPartialLog case %d.\n", nr)
+		nr++
+		nsFilter := mockNamespaceFilter([]string{"fdb1.fcol1"}, []string{})
+		log := mockFilterPartialLog("c", "admin.$cmd", bson.D{
+			bson.DocElem{
+				Name: "applyOps",
+				Value: []bson.D{
+					{
+						bson.DocElem{"op", "i"},
+						bson.DocElem{"ns", "fdb1.fcol1"},
+						bson.DocElem{"o", bson.D{
+							bson.DocElem{"$ref", "fdb2"},
+							bson.DocElem{"$id", "id2"},
+						}},
+					},
+					{
+						bson.DocElem{"op", "i"},
+						bson.DocElem{"ns", "fdb1.fcol2"},
+						bson.DocElem{"o", bson.D{
+							bson.DocElem{"$ref", "fdb2"},
+							bson.DocElem{"$id", "id2"},
+						}},
+					},
+				},
+			},
+		})
+		assert.Equal(t, false, nsFilter.Filter(log), "should be equal")
+		assert.Equal(t, mockFilterPartialLog("c", "admin.$cmd", bson.D{
+			bson.DocElem{
+				Name: "applyOps",
+				Value: []interface {}{
+					bson.D{
+						bson.DocElem{"op", "i"},
+						bson.DocElem{"ns", "fdb1.fcol1"},
+						bson.DocElem{"o", bson.D{
+							bson.DocElem{"$ref", "fdb2"},
+							bson.DocElem{"$id", "id2"},
+						}},
+					},
+				},
+			},
+		}), log, "should be equal")
+	}
+
+	{
+		fmt.Printf("TestFilterPartialLog case %d.\n", nr)
+		nr++
+		nsFilter := mockNamespaceFilter([]string{"fdb2"}, []string{})
+		log := mockFilterPartialLog("c", "admin.$cmd", bson.D{
+			bson.DocElem{
+				Name: "applyOps",
+				Value: []bson.D{
+					{
+						bson.DocElem{"op", "i"},
+						bson.DocElem{"ns", "fdb1.fcol1"},
+						bson.DocElem{"o", bson.D{
+							bson.DocElem{"$ref", "fdb2"},
+							bson.DocElem{"$id", "id2"},
+						}},
+					},
+					{
+						bson.DocElem{"op", "i"},
+						bson.DocElem{"ns", "fdb1.fcol2"},
+						bson.DocElem{"o", bson.D{
+							bson.DocElem{"$ref", "fdb2"},
+							bson.DocElem{"$id", "id2"},
+						}},
+					},
+				},
+			},
+		})
+		assert.Equal(t, true, nsFilter.Filter(log), "should be equal")
+		assert.Equal(t, mockFilterPartialLog("c", "admin.$cmd", bson.D{
+			bson.DocElem{
+				Name: "applyOps",
+				Value: []interface {}(nil),
+			},
+		}), log, "should be equal")
 	}
 }

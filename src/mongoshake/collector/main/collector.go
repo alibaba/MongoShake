@@ -7,22 +7,19 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"syscall"
 	"strconv"
+	"syscall"
 
+	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/mgo/bson"
 	"mongoshake/collector"
-	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
 	"mongoshake/common"
 	"mongoshake/executor"
 	"mongoshake/modules"
 	"mongoshake/oplog"
 	"mongoshake/quorum"
-	"mongoshake/collector/filter"
-
-	"github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 type Exit struct{ Code int }
@@ -67,7 +64,7 @@ func main() {
 
 	conf.Options.Version = utils.BRANCH
 
-	nimo.Profiling(int(conf.Options.SystemProfile))
+	nimo.Profiling(conf.Options.SystemProfile)
 	signalProfile, _ := strconv.Atoi(utils.SIGNALPROFILE)
 	signalStack, _ := strconv.Atoi(utils.SIGNALSTACK)
 	if signalProfile > 0 {
@@ -91,22 +88,14 @@ func startup() {
 
 	// initialize http api
 	utils.InitHttpApi(conf.Options.HTTPListenPort)
-	coordinator := &collector.ReplicationCoordinator{
-		Sources: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
-	}
 
 	utils.HttpApi.RegisterAPI("/conf", nimo.HttpGet, func([]byte) interface{} {
 		return &conf.Options
 	})
 
-	for i, src := range conf.Options.MongoUrls {
-		coordinator.Sources[i] = new(utils.MongoSource)
-		coordinator.Sources[i].URL = src
-		if len(conf.Options.OplogGIDS) != 0 {
-			coordinator.Sources[i].Gids = conf.Options.OplogGIDS
-		}
+	coordinator := &collector.ReplicationCoordinator{
+		Sources: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
 	}
-
 	// start mongodb replication
 	if err := coordinator.Run(); err != nil {
 		// initial or connection established failed
@@ -123,10 +112,10 @@ func startup() {
 
 func selectLeader() {
 	// first of all. ensure we are the Master
-	if conf.Options.MasterQuorum && conf.Options.ContextStorage == ckpt.StorageTypeDB {
+	if conf.Options.MasterQuorum && conf.Options.ContextStorage == collector.StorageTypeDB {
 		// election become to Master. keep waiting if we are the candidate. election id is must fixed
 		quorum.UseElectionObjectId(bson.ObjectIdHex("5204af979955496907000001"))
-		go quorum.BecomeMaster(conf.Options.ContextStorageUrl, utils.AppDatabase)
+		go quorum.BecomeMaster(conf.Options.ContextStorageUrl, utils.AppDatabase())
 
 		// wait until become to a real master
 		<-quorum.MasterPromotionNotifier
@@ -152,24 +141,40 @@ func sanitizeOptions() error {
 
 	if len(conf.Options.MongoUrls) == 0 {
 		return errors.New("mongo_urls were empty")
-	}
-	if conf.Options.ContextStorageUrl == "" {
-		if len(conf.Options.MongoUrls) == 1 {
-			conf.Options.ContextStorageUrl = conf.Options.MongoUrls[0]
-		} else if len(conf.Options.MongoUrls) > 1 {
-			return errors.New("storage server should be configured while using mongo shard servers")
-		}
-	}
-	if len(conf.Options.MongoUrls) > 1 {
+	} else if len(conf.Options.MongoUrls) > 1 {
 		if conf.Options.WorkerNum != len(conf.Options.MongoUrls) {
 			//LOG.Warn("replication worker should be equal to count of mongo_urls while multi sources (shard), set worker = %v",
 			//	len(conf.Options.MongoUrls))
 			conf.Options.WorkerNum = len(conf.Options.MongoUrls)
 		}
-		if conf.Options.ReplayerDMLOnly == false {
-			return errors.New("DDL is not support for sharding, pleasing waiting")
+		if conf.Options.MongoCsUrl == "" {
+			return errors.New("config server url should be configured when transfer from mongo sharding")
+		}
+	} else {
+		if conf.Options.MongoCsUrl != "" {
+			return errors.New("config server url should not be configured when transfer from mongo replica set")
 		}
 	}
+	if conf.Options.ContextStorageUrl == "" {
+		if len(conf.Options.MongoUrls) == 1 {
+			conf.Options.ContextStorageUrl = conf.Options.MongoUrls[0]
+		} else if len(conf.Options.MongoUrls) > 1 {
+			return errors.New("checkpoint url should be configured when transfer from mongo sharding")
+		}
+	}
+
+	if conf.Options.ReplayerExecutorUpsert == true {
+		if len(conf.Options.MongoUrls) > 1 {
+			return errors.New("replayer.executor.upsert should be set false when transfer from mongo sharding")
+		}
+	}
+
+	if conf.Options.ReplayerExecutorInsertOnDupUpdate == true {
+		if len(conf.Options.MongoUrls) > 1 {
+			return errors.New("replayer.executor.insert_on_dup_update should be set false when transfer from mongo sharding")
+		}
+	}
+
 	// avoid the typo of mongo urls
 	if utils.HasDuplicated(conf.Options.MongoUrls) {
 		return errors.New("mongo urls were duplicated")
@@ -199,9 +204,10 @@ func sanitizeOptions() error {
 	if conf.Options.WorkerBatchQueueSize <= 0 {
 		return errors.New("worker queue numeric is negative")
 	}
-	if conf.Options.ContextStorage == "" || conf.Options.ContextAddress == "" ||
-		(conf.Options.ContextStorage != ckpt.StorageTypeAPI &&
-			conf.Options.ContextStorage != ckpt.StorageTypeDB) {
+	if conf.Options.ContextStorage == "" || conf.Options.ContextStorageDB == "" ||
+		conf.Options.ContextStorageCollection == "" ||
+		(conf.Options.ContextStorage != collector.StorageTypeAPI &&
+			conf.Options.ContextStorage != collector.StorageTypeDB) {
 		return errors.New("context storage type or address is invalid")
 	}
 	if conf.Options.WorkerOplogCompressor != module.CompressionNone &&
@@ -210,16 +216,12 @@ func sanitizeOptions() error {
 		conf.Options.WorkerOplogCompressor != module.CompressionDeflate {
 		return errors.New("compressor is not supported")
 	}
-	if conf.Options.MasterQuorum && conf.Options.ContextStorage != ckpt.StorageTypeDB {
+	if conf.Options.MasterQuorum && conf.Options.ContextStorage != collector.StorageTypeDB {
 		return errors.New("context storage should set to 'database' while master election enabled")
 	}
 	if len(conf.Options.FilterNamespaceBlack) != 0 &&
 		len(conf.Options.FilterNamespaceWhite) != 0 {
 		return errors.New("at most one of black lists and white lists option can be given")
-	}
-	if len(conf.Options.FilterPassSpecialDb) != 0 {
-		// init ns
-		filter.InitNs(conf.Options.FilterPassSpecialDb)
 	}
 
 	conf.Options.HTTPListenPort = utils.MayBeRandom(conf.Options.HTTPListenPort)

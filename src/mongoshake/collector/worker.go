@@ -14,7 +14,10 @@ import (
 	"time"
 )
 
-const MaxUnAckListLength = 128 * 256
+const (
+	MaxUnAckListLength    = 128 * 256
+	DDLCheckpointInterval = 300 // unit: ms
+)
 
 type Worker struct {
 	// parent transfer

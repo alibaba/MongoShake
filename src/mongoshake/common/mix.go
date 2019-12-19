@@ -71,19 +71,30 @@ func TimestampToString(ts int64) string {
 	return time.Unix(ts, 0).Format(TimeFormat)
 }
 
-func ExtractMongoTimestamp(ts interface{}) int64 {
-	switch src := ts.(type) {
+func TimestampToLog(ts interface{}) string {
+	var vr int64
+	switch v := ts.(type) {
 	case bson.MongoTimestamp:
-		return int64(src) >> 32
+		vr = int64(v)
 	case int64:
-		return src >> 32
+		vr = v
+	case time.Time:
+		vr = v.Unix()
+	default:
+		return ""
+	}
+	return fmt.Sprintf("Timestamp(%d, %d)", vr>>32, uint32(vr))
+}
+
+func ExtractTs32(ts interface{}) int64 {
+	switch v := ts.(type) {
+	case bson.MongoTimestamp:
+		return int64(v) >> 32
+	case int64:
+		return v >> 32
 	}
 
 	return 0
-}
-
-func ExtractTimestampForLog(ts interface{}) string {
-	return fmt.Sprintf("%v(%v)", ts, ExtractMongoTimestamp(ts))
 }
 
 func Int64ToString(v int64) string {

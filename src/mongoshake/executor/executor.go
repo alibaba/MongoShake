@@ -260,7 +260,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		}
 		partialLog.Namespace = nsTrans.Transform(partialLog.Namespace)
 		if transformRef {
-			partialLog.Object = transform.TransformDBRef(partialLog.Object, db, nsTrans)
+			partialLog.Object = transform.TransformDBRefByDocD(partialLog.Object, db, nsTrans)
 		}
 	} else {
 		operation, found := oplog.ExtraCommandName(partialLog.Object)
@@ -328,7 +328,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 						LOG.Warn("transformPartialLog sublog %v return nil, ignore!", subLog)
 						return nil
 					}
-					ops[i] = transSubLog.Dump(keys, false)
+					ops[i] = transSubLog.Dump(keys)
 				}
 			}
 		default:

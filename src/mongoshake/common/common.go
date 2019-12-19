@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	conf "mongoshake/collector/configure"
 	"os"
 	"strings"
 
@@ -20,6 +21,20 @@ const (
 	ConnectModePrimary            = "primary"
 	ConnectModeSecondaryPreferred = "secondaryPreferred"
 	ConnectModeStandalone         = "standalone"
+	MajorityWriteConcern          = "majority"
+
+	GlobalDiagnosticPath = "diagnostic"
+	// This is the time of golang was born to the world
+	GolangSecurityTime = "2006-01-02T15:04:05Z"
+
+	CheckpointStage = "ckptStage"
+	StageOriginal   = "original"
+	StageFlushed    = "flushed"
+	StageRename     = "rename"
+
+	CheckpointName   = "name"
+	CheckpointAckTs  = "ackTs"
+	CheckpointSyncTs = "syncTs"
 )
 
 // Build info
@@ -27,20 +42,17 @@ var BRANCH = "$"
 var SIGNALPROFILE = "$"
 var SIGNALSTACK = "$"
 
-const (
-	APPNAME = "mongoshake"
-
-	AppDatabase          = APPNAME
-	APPConflictDatabase  = APPNAME + "_conflict"
-	GlobalDiagnosticPath = "diagnostic"
-
-	// This is the time of golang was born to the world
-	GolangSecurityTime = "2006-01-02T15:04:05Z"
-)
-
 func init() {
 	// prepare global folders
 	Mkdirs(GlobalDiagnosticPath /*, GlobalStoragePath*/)
+}
+
+func AppDatabase() string {
+	return conf.Options.ContextStorageDB
+}
+
+func APPConflictDatabase() string {
+	return AppDatabase() + "_conflict"
 }
 
 func RunStatusMessage(status uint64) string {

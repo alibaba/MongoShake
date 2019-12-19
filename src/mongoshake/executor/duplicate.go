@@ -18,7 +18,7 @@ func HandleDuplicated(collection *mgo.Collection, records []*OplogRecord, op int
 			// general process : write record to specific database
 			session := collection.Database.Session
 			// discard conflict again
-			session.DB(utils.APPConflictDatabase).C(collection.Name).Insert(log.Object)
+			session.DB(utils.APPConflictDatabase()).C(collection.Name).Insert(log.Object)
 		case DumpConflictToSDK, NoDumpConflict:
 		}
 

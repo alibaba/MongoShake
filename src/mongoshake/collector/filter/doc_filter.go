@@ -2,33 +2,9 @@ package filter
 
 import (
 	"mongoshake/collector/configure"
-	"mongoshake/common"
 	"regexp"
 	"strings"
-	"fmt"
 )
-
-// key: ns, value: true means prefix, false means contain
-var NsShouldBeIgnore = map[string]bool{
-	"admin.":                        true,
-	"local.":                        true,
-	"config.":                       true,
-	utils.AppDatabase + ".":         true,
-	utils.APPConflictDatabase + ".": true,
-	"system.views":                  false,
-}
-
-func InitNs(specialNsList []string) {
-	for _, ns := range specialNsList {
-		if _, ok := NsShouldBeIgnore[ns]; ok {
-			delete(NsShouldBeIgnore, ns)
-		}
-		newNs := fmt.Sprintf("%s.", ns)
-		if _, ok := NsShouldBeIgnore[newNs]; ok {
-			delete(NsShouldBeIgnore, newNs)
-		}
-	}
-}
 
 // DocFilter: AutologousFilter, NamespaceFilter
 type DocFilter interface {
@@ -48,8 +24,7 @@ func (chain DocFilterChain) IterateFilter(namespace string) bool {
 
 func (filter *AutologousFilter) FilterNs(namespace string) bool {
 	// for namespace. we filter noop operation and collection name
-	// that are admin, local, config, mongoshake, mongoshake_conflict
-	for key, val := range NsShouldBeIgnore {
+	for key, val := range filter.nsShouldBeIgnore {
 		if val == true && strings.HasPrefix(namespace, key) {
 			return true
 		}
@@ -84,7 +59,7 @@ func (filter *NamespaceFilter) FilterNs(namespace string) bool {
 }
 
 func NewDocFilterList() DocFilterChain {
-	filterList := DocFilterChain{new(AutologousFilter)}
+	filterList := DocFilterChain{NewAutologousFilter()}
 	if len(conf.Options.FilterNamespaceWhite) != 0 || len(conf.Options.FilterNamespaceBlack) != 0 {
 		namespaceFilter := NewNamespaceFilter(conf.Options.FilterNamespaceWhite,
 			conf.Options.FilterNamespaceBlack)

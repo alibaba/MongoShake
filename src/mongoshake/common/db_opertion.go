@@ -10,21 +10,19 @@ import (
 	"github.com/vinllen/mgo/bson"
 )
 
-var (
-	QueryTs = "ts"
-	localDB = "local"
-)
-
 const (
 	DBRefRef = "$ref"
 	DBRefId  = "$id"
 	DBRefDb  = "$db"
+
+	LocalDB = "local"
+	QueryTs = "ts"
 )
 
 type MongoSource struct {
-	URL         string
-	ReplicaName string
-	Gids        []string
+	URL     string
+	Replset string
+	Gids    []string
 }
 
 // get db version, return string with format like "3.0.1"
@@ -94,7 +92,7 @@ func ApplyOpsFilter(key string) bool {
 // get newest oplog
 func GetNewestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, error) {
 	var retMap map[string]interface{}
-	err := session.DB(localDB).C(OplogNS).Find(bson.M{}).Sort("-$natural").Limit(1).One(&retMap)
+	err := session.DB(LocalDB).C(OplogNS).Find(bson.M{}).Sort("-$natural").Limit(1).One(&retMap)
 	if err != nil {
 		return 0, err
 	}
@@ -104,7 +102,7 @@ func GetNewestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, err
 // get oldest oplog
 func GetOldestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, error) {
 	var retMap map[string]interface{}
-	err := session.DB(localDB).C(OplogNS).Find(bson.M{}).Limit(1).One(&retMap)
+	err := session.DB(LocalDB).C(OplogNS).Find(bson.M{}).Limit(1).One(&retMap)
 	if err != nil {
 		return 0, err
 	}
@@ -163,7 +161,7 @@ func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.Mon
 		if err != nil {
 			return nil, 0, 0, 0, 0, err
 		}
-		tsMap[src.ReplicaName] = TimestampNode{
+		tsMap[src.Replset] = TimestampNode{
 			Oldest: oldest,
 			Newest: newest,
 		}
@@ -184,68 +182,4 @@ func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.Mon
 	return tsMap, biggestNew, smallestNew, biggestOld, smallestOld, nil
 }
 
-// adjust dbRef order: $ref, $id, $db, others
-func AdjustDBRef(input bson.M, dbRef bool) bson.M {
-	if dbRef {
-		doDfsDBRef(input)
-	}
-	return input
-}
 
-// change bson.M to bson.D when "$ref" find
-func doDfsDBRef(input interface{}) {
-	// only handle bson.M
-	if _, ok := input.(bson.M); !ok {
-		return
-	}
-
-	inputMap := input.(bson.M)
-
-	for k, v := range inputMap {
-		switch vr := v.(type) {
-		case bson.M:
-			doDfsDBRef(vr)
-			if HasDBRef(vr) {
-				inputMap[k] = SortDBRef(vr)
-			}
-		case bson.D:
-			for id, ele := range vr {
-				doDfsDBRef(ele)
-				if HasDBRef(ele.Value.(bson.M)) {
-					vr[id].Value = SortDBRef(ele.Value.(bson.M))
-				}
-			}
-		}
-	}
-}
-
-func HasDBRef(object bson.M) bool {
-	_, hasRef := object[DBRefRef]
-	_, hasId := object[DBRefId]
-	if hasRef && hasId {
-		return true
-	}
-	return false
-}
-
-func SortDBRef(input bson.M) bson.D {
-	var output bson.D
-	output = append(output, bson.DocElem{Name: DBRefRef, Value: input[DBRefRef]})
-
-	if _, ok := input[DBRefId]; ok {
-		output = append(output, bson.DocElem{Name: DBRefId, Value: input[DBRefId]})
-	}
-	if _, ok := input[DBRefDb]; ok {
-		output = append(output, bson.DocElem{Name: DBRefDb, Value: input[DBRefDb]})
-	}
-
-	// add the others
-	for key, val := range input {
-		if key == DBRefRef || key == DBRefId || key == DBRefDb {
-			continue
-		}
-
-		output = append(output, bson.DocElem{Name: key, Value: val})
-	}
-	return output
-}
