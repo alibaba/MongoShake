@@ -94,14 +94,17 @@ func GetChunkMapByUrl(csUrl string) (ShardingChunkMap, error) {
 	var chunkDoc ChunkDoc
 	chunkIter := conn.Session.DB(ConfigDB).C(ChunkCol).Find(bson.M{}).Sort("min").Iter()
 	for chunkIter.Next(&chunkDoc) {
-		replset := shardMap[chunkDoc.Shard]
-		if _, ok := chunkMap[replset][chunkDoc.Ns]; !ok {
-			keys, shardType, err := GetColShardType(conn.Session, chunkDoc.Ns)
-			if err != nil {
-				return nil, err
-			}
-			chunkMap[replset][chunkDoc.Ns] = &ShardCollection{Keys: keys, ShardType: shardType}
+		keys, shardType, err := GetColShardType(conn.Session, chunkDoc.Ns)
+		if err != nil {
+			return nil, err
 		}
+		// the namespace is sharded, chunk map of each shard need to initialize
+		for _, dbChunkMap := range chunkMap{
+			if _, ok := dbChunkMap[chunkDoc.Ns]; !ok {
+				dbChunkMap[chunkDoc.Ns] = &ShardCollection{Keys: keys, ShardType: shardType}
+			}
+		}
+		replset := shardMap[chunkDoc.Shard]
 		var minD, maxD bson.D
 		err1 := bson.Unmarshal(chunkDoc.Min.Data, &minD)
 		err2 := bson.Unmarshal(chunkDoc.Max.Data, &maxD)

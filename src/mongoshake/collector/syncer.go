@@ -207,24 +207,36 @@ func (sync *OplogSyncer) startBatcher() {
 		if lastOplog != nil {
 			needDispatch := true
 			needUnBlock := false
-			// DDL operate at sharded collection of mongodb sharding
-			if DDLSupportForSharding() && ddlFilter.Filter(lastOplog) {
-				needDispatch = sync.ddlManager.BlockDDL(sync.replset, lastOplog)
-				if needDispatch {
-					// ddl need to run, when not all but majority oplog syncer received ddl oplog
-					LOG.Info("Oplog syncer %v prepare to dispatch ddl log %v", sync.replset, lastOplog)
-					// transform ddl to run at mongos of dest sharding
-					// number of worker of sharding instance and number of ddl command must be 1
-					shardColSpec := utils.GetShardCollectionSpec(sync.ddlManager.FromCsConn.Session, lastOplog)
-					if shardColSpec != nil {
-						logRaw := filteredNextBatch[0].Raw
+			if ddlFilter.Filter(lastOplog) {
+				logRaw := filteredNextBatch[0].Raw
+				if DDLSupportForSharding() {
+					// DDL operate for mongodb sharding
+					needDispatch = sync.ddlManager.BlockDDL(sync.replset, lastOplog)
+					if needDispatch {
+						// ddl need to run, when not all but majority oplog syncer received ddl oplog
+						LOG.Info("Oplog syncer %v prepare to dispatch ddl log %v", sync.replset, lastOplog)
+						// transform ddl to run at mongos of dest sharding
+						// number of worker of sharding instance and number of ddl command must be 1
+						shardColSpec := utils.GetShardCollectionSpec(sync.ddlManager.FromCsConn.Session, lastOplog)
+						var transOplogs []*oplog.PartialLog
+						if shardColSpec != nil {
+							transOplogs = TransformShardingDDL(sync.replset, lastOplog, shardColSpec, sync.ddlManager.ToIsSharding)
+						} else {
+							transOplogs = TransformDbDDL(sync.replset, lastOplog)
+						}
 						filteredNextBatch = []*oplog.GenericOplog{}
-						transOplogs := TransformDDL(sync.replset, lastOplog, shardColSpec, sync.ddlManager.ToIsSharding)
 						for _, tlog := range transOplogs {
 							filteredNextBatch = append(filteredNextBatch, &oplog.GenericOplog{Raw: logRaw, Parsed: tlog})
 						}
+						needUnBlock = true
 					}
-					needUnBlock = true
+				} else if !conf.Options.ReplayerDMLOnly {
+					// DDL operate for normal mongodb
+					transOplogs := TransformDbDDL(sync.replset, lastOplog)
+					filteredNextBatch = []*oplog.GenericOplog{}
+					for _, tlog := range transOplogs {
+						filteredNextBatch = append(filteredNextBatch, &oplog.GenericOplog{Raw: logRaw, Parsed: tlog})
+					}
 				}
 			}
 			if needDispatch {

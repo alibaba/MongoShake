@@ -251,18 +251,7 @@ func transformLogs(logs []*OplogRecord, nsTrans *transform.NamespaceTransform, t
 }
 
 func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.NamespaceTransform, transformRef bool) *oplog.PartialLog {
-	db := strings.SplitN(partialLog.Namespace, ".", 2)[0]
-	if partialLog.Operation != "c" {
-		// {"op" : "i", "ns" : "my.system.indexes", "o" : { "v" : 2, "key" : { "date" : 1 }, "name" : "date_1", "ns" : "my.tbl", "expireAfterSeconds" : 3600 }
-		if strings.HasSuffix(partialLog.Namespace, "system.indexes") {
-			value := oplog.GetKey(partialLog.Object, "ns")
-			oplog.SetFiled(partialLog.Object, "ns", nsTrans.Transform(value.(string)))
-		}
-		partialLog.Namespace = nsTrans.Transform(partialLog.Namespace)
-		if transformRef {
-			partialLog.Object = transform.TransformDBRefByDocD(partialLog.Object, db, nsTrans)
-		}
-	} else {
+	if partialLog.Operation == "c" {
 		operation, found := oplog.ExtraCommandName(partialLog.Object)
 		if !found {
 			LOG.Warn("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
@@ -296,6 +285,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		case "convertToCapped":
 			fallthrough
 		case "emptycapped":
+			db := strings.SplitN(partialLog.Namespace, ".", 2)[0]
 			col, ok := oplog.GetKey(partialLog.Object, operation).(string)
 			if !ok {
 				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
