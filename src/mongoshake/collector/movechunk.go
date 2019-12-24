@@ -56,6 +56,31 @@ func (manager *MoveChunkManager) start() {
 			time.Sleep(time.Duration(conf.Options.MoveChunkInterval) * time.Millisecond)
 		}
 	})
+	// periodically log internal information to monitor
+	nimo.GoRoutine(func() {
+		manager.moveChunkLock.Lock()
+		if len(manager.moveChunkMap) > 0 {
+			LOG.Info("move chunk map len=%v", len(manager.moveChunkMap))
+			for key := range manager.moveChunkMap {
+				LOG.Info("move chunk key %v", key)
+				break
+			}
+		}
+		for replset, syncInfo := range manager.syncInfoMap {
+			syncInfo.mutex.Lock()
+			for _, worker := range syncInfo.syncer.batcher.workerGroup {
+				ack := bson.MongoTimestamp(atomic.LoadInt64(&worker.ack))
+				unack := bson.MongoTimestamp(atomic.LoadInt64(&worker.unack))
+				batcher := syncInfo.syncer.batcher
+				LOG.Info("syncer %v worker ack[%v] unack[%v] syncTs[%v] lastResponseTime[%v] barrierKey[%v]", replset,
+					utils.TimestampToLog(ack), utils.TimestampToLog(unack), utils.TimestampToLog(batcher.syncTs),
+					utils.TimestampToLog(batcher.lastResponseTime.Unix()), syncInfo.barrierKey)
+			}
+			syncInfo.mutex.Unlock()
+		}
+		manager.moveChunkLock.Unlock()
+		time.Sleep(60*time.Second)
+	})
 }
 
 func (manager *MoveChunkManager) barrierProbe(key MoveChunkKey, value *MoveChunkValue) bool {
@@ -107,25 +132,6 @@ func (manager *MoveChunkManager) minTsProbe(minTs bson.MongoTimestamp) bool {
 func (manager *MoveChunkManager) eliminateBarrier() bool {
 	manager.moveChunkLock.Lock()
 	defer manager.moveChunkLock.Unlock()
-	LOG.Info("move chunk map len=%v", len(manager.moveChunkMap))
-	if len(manager.moveChunkMap) > 0 {
-		for key := range manager.moveChunkMap {
-			LOG.Info("move chunk key %v", key)
-			break
-		}
-	}
-	for replset, syncInfo := range manager.syncInfoMap {
-		syncInfo.mutex.Lock()
-		for _, worker := range syncInfo.syncer.batcher.workerGroup {
-			ack := bson.MongoTimestamp(atomic.LoadInt64(&worker.ack))
-			unack := bson.MongoTimestamp(atomic.LoadInt64(&worker.unack))
-			batcher := syncInfo.syncer.batcher
-			LOG.Info("syncer %v worker ack[%v] unack[%v] syncTs[%v] lastResponseTime[%v] barrierKey[%v]", replset,
-				utils.TimestampToLog(ack), utils.TimestampToLog(unack), utils.TimestampToLog(batcher.syncTs),
-				utils.TimestampToLog(batcher.lastResponseTime.Unix()), syncInfo.barrierKey)
-		}
-		syncInfo.mutex.Unlock()
-	}
 	removeOK := false
 	var deleteKeyList []MoveChunkKey
 	for key, value := range manager.moveChunkMap {

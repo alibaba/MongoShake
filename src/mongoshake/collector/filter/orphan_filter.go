@@ -38,23 +38,19 @@ func (filter *OrphanFilter) Filter(doc *bson.Raw, namespace string) bool {
 	}
 	var docD bson.D
 	if err := bson.Unmarshal(doc.Data, &docD); err != nil {
-		LOG.Warn("OrphanFilter unmarshal bson %v from ns[%v] failed. %v", doc.Data, namespace, err)
-		return false
+		LOG.Crashf("OrphanFilter unmarshal bson %v from ns[%v] failed. %v", doc.Data, namespace, err)
 	}
+
 NextChunk:
 	for _, chunkRage := range shardCol.Chunks {
 		// check greater and equal than the minimum of the chunk range
 		for keyInd, keyName := range shardCol.Keys {
 			key := oplog.GetKey(docD, keyName)
 			if key == nil {
-				LOG.Warn("OrphanFilter find no key[%v] in doc %v", keyName, docD)
-				return false
+				LOG.Crashf("OrphanFilter find no shard key[%v] in doc %v", keyName, docD)
 			}
 			if shardCol.ShardType == utils.HashedShard {
-				var err error
-				if key, err = ComputeHash(key); err != nil {
-					return false
-				}
+				key = ComputeHash(key)
 			}
 			if chunkLt(key, chunkRage.Mins[keyInd]) {
 				continue NextChunk
@@ -67,14 +63,10 @@ NextChunk:
 		for keyInd, keyName := range shardCol.Keys {
 			key := oplog.GetKey(docD, keyName)
 			if key == nil {
-				LOG.Warn("OrphanFilter find no key[%v] in doc %v", keyName, docD)
-				return false
+				LOG.Crashf("OrphanFilter find no shard ke[%v] in doc %v", keyName, docD)
 			}
 			if shardCol.ShardType == utils.HashedShard {
-				var err error
-				if key, err = ComputeHash(key); err != nil {
-					return false
-				}
+				key = ComputeHash(key)
 			}
 			if chunkGt(key, chunkRage.Maxs[keyInd]) {
 				continue NextChunk
@@ -94,7 +86,7 @@ NextChunk:
 	return true
 }
 
-func ComputeHash(data interface{}) (int64, error) {
+func ComputeHash(data interface{}) int64 {
 	// refer to mongo/db/hasher.cpp of mongodb kernel 4.0
 	w := md5.New()
 	var buf = make([]byte, 4)
@@ -139,11 +131,11 @@ func ComputeHash(data interface{}) (int64, error) {
 		}
 		w.Write(buf)
 	default:
-		return 0, LOG.Error("ComputeHash unsupported bson type %T %#v\n", data, data)
+		LOG.Crashf("ComputeHash unsupported bson type %T %#v\n", data, data)
 	}
 	out := w.Sum(nil)
 	result := int64(binary.LittleEndian.Uint64(out))
-	return result, nil
+	return result
 }
 
 func fromHex(c byte) byte {

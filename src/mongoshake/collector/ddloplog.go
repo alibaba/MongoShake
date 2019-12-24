@@ -320,7 +320,7 @@ func (manager *DDLManager) eliminateBlock() *DDLValue {
 	return nil
 }
 
-func TransformDDL(replset string, log *oplog.PartialLog, shardColSpec *utils.ShardCollectionSpec, toIsSharding bool) []*oplog.PartialLog {
+func TransformShardingDDL(replset string, log *oplog.PartialLog, shardColSpec *utils.ShardCollectionSpec, toIsSharding bool) []*oplog.PartialLog {
 	logD := log.Dump(nil)
 	if strings.HasSuffix(log.Namespace, "system.indexes") {
 		// insert into system.indexes only create index at one shard, so need to transform
@@ -329,6 +329,8 @@ func TransformDDL(replset string, log *oplog.PartialLog, shardColSpec *utils.Sha
 		object = append(object, log.Object...)
 		tlog := &oplog.PartialLog{Timestamp: log.Timestamp, Operation: "c", Gid: log.Gid,
 			Namespace: shardColSpec.Ns, Object: object}
+		LOG.Info("TransformShardingDDL syncer %v transform DDL log %v to tlog %v",
+			replset, logD, tlog)
 		return []*oplog.PartialLog{tlog}
 	}
 
@@ -342,7 +344,7 @@ func TransformDDL(replset string, log *oplog.PartialLog, shardColSpec *utils.Sha
 			t2log := &oplog.PartialLog{Timestamp: log.Timestamp, Operation: log.Operation, Gid: log.Gid,
 				Namespace: log.Namespace, Object: bson.D{{"shardCollection", shardColSpec.Ns},
 					{"key", shardColSpec.Key}, {"unique", shardColSpec.Unique}}}
-			LOG.Info("TransformDDL syncer %v transform DDL log %v to t1log[%v] t2log[%v]",
+			LOG.Info("TransformShardingDDL syncer %v transform DDL log %v to t1log %v t2log %v",
 				replset, logD, t1log, t2log)
 			return []*oplog.PartialLog{t1log, t2log}
 		}
@@ -370,9 +372,31 @@ func TransformDDL(replset string, log *oplog.PartialLog, shardColSpec *utils.Sha
 	case "emptycapped":
 		fallthrough
 	case "applyOps":
-		LOG.Crashf("TransformDDL syncer %v illegal DDL log[%v]", replset, logD)
+		LOG.Crashf("TransformShardingDDL syncer %v illegal DDL log %v", replset, logD)
 	default:
-		LOG.Crashf("TransformDDL syncer %v meet unsupported DDL log[%s]", replset, logD)
+		LOG.Crashf("TransformShardingDDL syncer %v meet unsupported DDL log %s", replset, logD)
 	}
 	return nil
+}
+
+func TransformDbDDL(replset string, log *oplog.PartialLog) []*oplog.PartialLog {
+	if strings.HasSuffix(log.Namespace, "system.indexes") {
+		logD := log.Dump(nil)
+		// insert into system.indexes can not used in MongoDB 4.2, so need to transform
+		// {"op" : "i", "ns" : "my.system.indexes", "o" : { "v" : 2, "key" : { "date" : 1 }, "name" : "date_1", "ns" : "my.tbl", "expireAfterSeconds" : 3600 }
+		namespace, ok := oplog.GetKey(log.Object, "ns").(string)
+		if !ok {
+			LOG.Crashf("TransformDbDDL syncer %v illegal DDL log %v", replset, logD)
+		}
+		collection := strings.SplitN(namespace, ".", 2)[1]
+		object := bson.D{{"createIndexes", collection}}
+		object = append(object, log.Object...)
+		tlog := &oplog.PartialLog{Timestamp: log.Timestamp, Operation: "c", Gid: log.Gid,
+			Namespace: namespace, Object: object}
+		LOG.Info("TransformDbDDL syncer %v transform DDL log %v to tlog %v",
+			replset, logD, tlog)
+		return []*oplog.PartialLog{tlog}
+	} else {
+		return []*oplog.PartialLog{log}
+	}
 }
