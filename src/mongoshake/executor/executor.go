@@ -90,7 +90,7 @@ func (batchExecutor *BatchGroupExecutor) Sync(rawLogs []*oplog.PartialLog, callb
 
 func (batchExecutor *BatchGroupExecutor) replay(logs []*PartialLogWithCallbak) {
 	// TODO: skip the oplogRecords which has been replayed
-	//  lastTs := utils.TimestampToInt64(logs[len(logs)-1].partialLog.Timestamp)
+	//  lastTs := int64(logs[len(logs)-1].partialLog.Timestamp)
 	//	if batchExecutor.replayer.Ack >= lastTs {
 	//		// every oplog in buffer have been alread executed in previously
 	//		// so discard them simply. Even the smaller timestamp oplogRecords has

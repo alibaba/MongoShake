@@ -319,11 +319,13 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication(beginTsMap m
 		ok, err := utils.GetBalancerStatusByUrl(conf.Options.MongoCsUrl)
 		if ok {
 			if err != nil {
-				return LOG.Critical("obtain balance status from mongo_cs_url=%s error. %v", err)
+				return LOG.Critical("obtain balance status from mongo_cs_url=%s error. %v",
+					conf.Options.MongoCsUrl, err)
 			}
 			return LOG.Critical("source mongodb sharding need to stop balancer when document replication occur.")
 		}
 		if conf.Options.FilterOrphanDocument {
+			LOG.Info("begin to get chunk map from config.chunks of source mongodb sharding")
 			if shardingChunkMap, err = utils.GetChunkMapByUrl(conf.Options.MongoCsUrl); err != nil {
 				return err
 			}

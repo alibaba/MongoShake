@@ -13,10 +13,6 @@ import (
 	"github.com/vinllen/mgo/bson"
 )
 
-func YieldInMs(n int64) {
-	time.Sleep(time.Millisecond * time.Duration(n))
-}
-
 type ElapsedTask struct {
 	// timer trigger
 	TimeLimit int64
@@ -61,10 +57,6 @@ func (p Int64Slice) Less(i, j int) bool {
 }
 func (p Int64Slice) Swap(i, j int) {
 	p[i], p[j] = p[j], p[i]
-}
-
-func TimestampToInt64(ts bson.MongoTimestamp) int64 {
-	return int64(ts)
 }
 
 func TimestampToString(ts int64) string {

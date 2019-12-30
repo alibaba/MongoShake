@@ -5,6 +5,7 @@ import (
 	conf "mongoshake/collector/configure"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/nightlyone/lockfile"
 	LOG "github.com/vinllen/log4go"
@@ -134,5 +135,24 @@ func WritePid(id string) (err error) {
 }
 
 func DelayFor(ms int64) {
-	YieldInMs(ms)
+	time.Sleep(time.Millisecond * time.Duration(ms))
+}
+
+type StopError struct {
+	error
+}
+
+func Retry(attempts int, ms int64, fn func() error) error {
+	if err := fn(); err != nil {
+		if s, ok := err.(StopError); ok {
+			return s.error
+		}
+		if attempts--; attempts > 0 {
+			LOG.Warn("%v. retry %v times", err, attempts)
+			DelayFor(ms)
+			return Retry(attempts, 2*ms, fn)
+		}
+		return err
+	}
+	return nil
 }

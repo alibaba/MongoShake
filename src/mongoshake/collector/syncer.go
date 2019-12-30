@@ -185,7 +185,7 @@ func (sync *OplogSyncer) start() {
 		sync.poll()
 		// error or exception occur
 		LOG.Warn("Oplog syncer polling yield. master:%t, yield:%dms", quorum.IsMaster(), DurationTime)
-		utils.YieldInMs(DurationTime)
+		utils.DelayFor(DurationTime)
 	}
 }
 
@@ -242,13 +242,13 @@ func (sync *OplogSyncer) startBatcher() {
 			if needDispatch {
 				// push to worker to run
 				if worked := batcher.dispatchBatch(filteredNextBatch); worked {
-					sync.replMetric.SetLSN(utils.TimestampToInt64(lastOplog.Timestamp))
+					sync.replMetric.SetLSN(int64(lastOplog.Timestamp))
 					// update latest fetched timestamp in memory
 					sync.reader.UpdateQueryTimestamp(lastOplog.Timestamp)
 				}
 				if barrier {
 					// wait for ddl operation finish, and flush checkpoint value
-					sync.waitAllAck(flushCheckpoint)
+					sync.waitAckCheckpoint(flushCheckpoint)
 					if needUnBlock {
 						LOG.Info("Oplog syncer %v Unblock at ddl log %v", sync.replset, lastOplog)
 						// unblock other shard nodes when sharding ddl has finished
@@ -260,11 +260,12 @@ func (sync *OplogSyncer) startBatcher() {
 			readerQueryTs := int64(sync.reader.GetQueryTimestamp())
 			syncTs := sync.batcher.syncTs
 			if utils.ExtractTs32(syncTs)-readerQueryTs >= FilterCheckpointGap {
-				sync.waitAllAck(false)
+				sync.batcher.WaitAllAck()
 				LOG.Info("oplog syncer %v force to update checkpointTs from %v to %v",
 					sync.replset, utils.TimestampToLog(readerQueryTs), utils.TimestampToLog(syncTs))
 				// update latest fetched timestamp in memory
 				sync.reader.UpdateQueryTimestamp(syncTs)
+				sync.batcher.UpdateAckTs(syncTs)
 			}
 		}
 		// update syncTs of batcher
@@ -273,7 +274,7 @@ func (sync *OplogSyncer) startBatcher() {
 	})
 }
 
-func (sync *OplogSyncer) waitAllAck(flushCheckpoint bool) {
+func (sync *OplogSyncer) waitAckCheckpoint(flushCheckpoint bool) {
 	beginTs := time.Now()
 	if flushCheckpoint {
 		LOG.Info("oplog syncer %v prepare for checkpoint", sync.replset)
@@ -371,7 +372,7 @@ func (sync *OplogSyncer) next() bool {
 		// error is nil indicate that only timeout incur syncer.next()
 		// return false. so we regardless that
 		sync.replMetric.ReplStatus.Update(utils.FetchBad)
-		utils.YieldInMs(DurationTime)
+		utils.DelayFor(DurationTime)
 		// alarm
 	}
 	// buffered oplog or trigger to flush. log is nil

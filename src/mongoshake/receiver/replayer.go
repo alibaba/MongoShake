@@ -1,7 +1,6 @@
 package replayer
 
 import (
-	"mongoshake/common"
 	"mongoshake/modules"
 	"mongoshake/oplog"
 	"mongoshake/tunnel"
@@ -136,7 +135,7 @@ func (er *ExampleReplayer) handler() {
 
 		// get the newest timestamp
 		n := len(oplogs)
-		lastTs := utils.TimestampToInt64(oplogs[n-1].Timestamp)
+		lastTs := int64(oplogs[n-1].Timestamp)
 		er.Ack = lastTs
 
 		LOG.Debug("handle ack[%v]", er.Ack)

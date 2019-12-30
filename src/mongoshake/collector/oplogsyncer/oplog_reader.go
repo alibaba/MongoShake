@@ -97,7 +97,7 @@ func NewOplogReader(src, replset string, fetchStatus int32) *OplogReader {
 func (reader *OplogReader) InitDiskQueue(dqName string) {
 	if reader.fetchStatus != FetchStatusStoreMemoryApply {
 		reader.diskQueue = utils.NewDiskQueue(dqName, conf.Options.LogDirectory, 1<<30, 0, 1<<26,
-			2500, 2*time.Second, LOG.Global.Logf)
+			1000, 2*time.Second, LOG.Global.Logf)
 	}
 }
 
@@ -278,6 +278,7 @@ func (reader *OplogReader) retrieve() {
 		time.Sleep(time.Second)
 	}
 	reader.mutex.Unlock()
+	time.Sleep(180*time.Second)
 	if err := reader.diskQueue.Delete(); err != nil {
 		LOG.Critical("reader retrieve for replset %v close disk queue error. %v", reader.replset, err)
 	}

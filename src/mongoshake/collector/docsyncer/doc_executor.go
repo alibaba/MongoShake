@@ -135,18 +135,18 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 	}
 
 	ns := exec.colExecutor.ns
-
 	var docList []interface{}
 	for _, doc := range docs {
 		docList = append(docList, doc)
 	}
 
-	if err := exec.session.DB(ns.Database).C(ns.Collection).Insert(docList...); err != nil {
-		printLog := new(oplog.PartialLog)
-		bson.Unmarshal(docs[0].Data, printLog)
-		return fmt.Errorf("insert docs with length[%v] into ns %v of dest mongo failed[%v]. first doc: %v",
-			len(docList), ns, err, printLog)
-	}
-
-	return nil
+	return utils.Retry(5, 100, func() error {
+		if err := exec.session.DB(ns.Database).C(ns.Collection).Insert(docList...); err != nil {
+			printLog := new(oplog.PartialLog)
+			bson.Unmarshal(docs[0].Data, printLog)
+			return fmt.Errorf("insert docs with length[%v] into ns %v of dest mongo failed[%v]. first doc: %v",
+				len(docList), ns, err, printLog)
+		}
+		return nil
+	})
 }

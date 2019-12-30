@@ -35,7 +35,7 @@ func GetBalancerStatusByUrl(csUrl string) (bool, error) {
 
 	var retMap map[string]interface{}
 	err = conn.Session.DB(ConfigDB).C(SettingsCol).Find(bson.M{"_id": "balancer"}).Limit(1).One(&retMap)
-	if err != nil {
+	if err != nil && err != mgo.ErrNotFound {
 		return true, err
 	}
 	if stopped, ok := retMap["stopped"].(bool); ok {
@@ -115,7 +115,6 @@ func GetChunkMapByUrl(csUrl string) (ShardingChunkMap, error) {
 		shardCol := chunkMap[replset][chunkDoc.Ns]
 		var mins, maxs []interface{}
 		for i, item := range minD {
-
 			if item.Name != shardCol.Keys[i] {
 				return nil, fmt.Errorf("GetChunkMapByUrl get illegal chunk doc min[%v] keys[%v]",
 					minD, shardCol.Keys)

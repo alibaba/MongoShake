@@ -237,7 +237,13 @@ func (batcher *Batcher) WaitAllAck() {
 		if batcher.isAllAcked() {
 			break
 		}
-		utils.YieldInMs(WaitAckIntervalMS)
+		utils.DelayFor(WaitAckIntervalMS)
+	}
+}
+
+func (batcher *Batcher) UpdateAckTs(ts bson.MongoTimestamp) {
+	for _, worker := range batcher.workerGroup {
+		atomic.StoreInt64(&worker.ack, int64(ts))
 	}
 }
 
