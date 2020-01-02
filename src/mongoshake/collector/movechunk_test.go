@@ -6,7 +6,6 @@ import (
 	"github.com/vinllen/mgo/bson"
 	"mongoshake/collector/configure"
 	"mongoshake/collector/filter"
-	utils "mongoshake/common"
 	"mongoshake/oplog"
 	"sync/atomic"
 	"testing"

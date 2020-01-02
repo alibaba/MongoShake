@@ -172,11 +172,13 @@ func (manager *CheckpointManager) loadAll() error {
 			return LOG.Critical("CheckpointManager loadAll persist load error %v", err)
 		}
 	}
-	if _, err := manager.conn.Session.DB(manager.db).C(manager.table).
-		Upsert(bson.M{}, bson.M{utils.CheckpointStage: utils.StageOriginal}); err != nil {
-		manager.conn.Close()
-		manager.conn = nil
-		return LOG.Critical("CheckpointManager loadAll upsert versionDoc error. %v", err)
+	if ok {
+		if _, err := manager.conn.Session.DB(manager.db).C(manager.table).
+			Upsert(bson.M{}, bson.M{utils.CheckpointStage: utils.StageOriginal}); err != nil {
+			manager.conn.Close()
+			manager.conn = nil
+			return LOG.Critical("CheckpointManager loadAll upsert versionDoc error. %v", err)
+		}
 	}
 	return nil
 }

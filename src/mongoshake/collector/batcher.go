@@ -243,6 +243,7 @@ func (batcher *Batcher) WaitAllAck() {
 
 func (batcher *Batcher) UpdateAckTs(ts bson.MongoTimestamp) {
 	for _, worker := range batcher.workerGroup {
+		atomic.StoreInt64(&worker.unack, int64(ts))
 		atomic.StoreInt64(&worker.ack, int64(ts))
 	}
 }

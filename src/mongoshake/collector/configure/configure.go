@@ -50,9 +50,10 @@ type Configuration struct {
 	ReplayerDocumentParallel   int  `config:"replayer.document_parallel"`
 	ReplayerDocumentBatchSize  int  `config:"replayer.document_batch_size"`
 
-	FilterOrphanDocument          bool  `config:"filter.orphan_document"`
-	ReplayerOplogStoreDisk        bool  `config:"replayer.oplog_store_disk"`
-	ReplayerOplogStoreDiskMaxSize int64 `config:"replayer.oplog_store_disk_max_size"`
+	FilterOrphanDocument            bool  `config:"filter.orphan_document"`
+	ReplayerOplogStoreDisk          bool  `config:"replayer.oplog_store_disk"`
+	ReplayerOplogStoreDiskMaxSize   int64 `config:"replayer.oplog_store_disk_max_size"`
+	ReplayerOplogStoreDiskReadBatch int64 `config:"replayer.oplog_store_disk_read_batch"`
 
 	/*---------------------------------------------------------*/
 	// inner variables

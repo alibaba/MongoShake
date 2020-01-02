@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	MaxUnAckListLength    = 128 * 256
-	DDLCheckpointInterval = 300 // unit: ms
+	MaxUnAckListLength = 128 * 256
+	AckUpdateInterval  = 300 // unit: ms
 )
 
 type Worker struct {
@@ -104,7 +104,7 @@ func (worker *Worker) findFirstAvailableBatch() []*oplog.GenericOplog {
 	for {
 		select {
 		case batch = <-worker.queue:
-		case <-time.After(DDLCheckpointInterval * time.Millisecond): // timeout, add probe message here
+		case <-time.After(AckUpdateInterval * time.Millisecond): // timeout, add probe message here
 			return nil
 		}
 

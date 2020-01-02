@@ -3,7 +3,6 @@ package collector
 import (
 	"errors"
 	"fmt"
-	"mongoshake/collector/oplogsyncer"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -29,8 +28,7 @@ const (
 	DDLCheckpointGap    = 5    // unit: seconds.
 	FilterCheckpointGap = 60   // unit: seconds. no checkpoint update, flush checkpoint mandatory
 
-	DiskQueueName    = "dqName"
-	DiskQueueFetchTs = "dqFetchTs"
+	DiskQueueName = "dqName"
 )
 
 type OplogHandler interface {
@@ -65,7 +63,7 @@ type OplogSyncer struct {
 	nextQueuePosition uint64
 
 	// source mongo oplog reader
-	reader *oplogsyncer.OplogReader
+	reader *OplogReader
 	// journal log that records all oplogs
 	journal *utils.Journal
 	// oplogs dispatcher
@@ -91,13 +89,8 @@ func NewOplogSyncer(
 	mvckManager *MoveChunkManager,
 	ddlManager *DDLManager) *OplogSyncer {
 
-	var fetchStatus int32
 	var docEndTs bson.MongoTimestamp
-	if docEndTsMap == nil {
-		// means syc mode[all] and store oplog to disk
-		fetchStatus = oplogsyncer.FetchStatusStoreDiskNoApply
-	} else {
-		fetchStatus = oplogsyncer.FetchStatusStoreMemoryApply
+	if docEndTsMap != nil {
 		if ts, ok := docEndTsMap[replset]; !ok {
 			LOG.Crashf("new oplog syncer %v has no docEndTs. docEndTsMap %v", replset, docEndTsMap)
 		} else {
@@ -111,11 +104,11 @@ func NewOplogSyncer(
 		docEndTs:    docEndTs,
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
-		reader:      oplogsyncer.NewOplogReader(mongoUrl, replset, fetchStatus),
 		ckptManager: ckptManager,
 		mvckManager: mvckManager,
 		ddlManager:  ddlManager,
 	}
+	syncer.reader = NewOplogReader(mongoUrl, syncer)
 
 	// concurrent level hasher
 	switch conf.Options.ShardKey {
@@ -161,7 +154,7 @@ func (sync *OplogSyncer) bind(w *Worker) {
 
 func (sync *OplogSyncer) startDiskApply(docEndTs bson.MongoTimestamp) {
 	sync.docEndTs = docEndTs
-	sync.reader.UpdateFetchStatus(oplogsyncer.FetchStatusStoreDiskApply)
+	sync.reader.UpdateFetchStatus(FetchStatusStoreDiskApply)
 }
 
 // start to polling oplog
@@ -184,7 +177,7 @@ func (sync *OplogSyncer) start() {
 	for {
 		sync.poll()
 		// error or exception occur
-		LOG.Warn("Oplog syncer polling yield. master:%t, yield:%dms", quorum.IsMaster(), DurationTime)
+		LOG.Warn("oplog syncer polling yield. master:%t, yield:%dms", quorum.IsMaster(), DurationTime)
 		utils.DelayFor(DurationTime)
 	}
 }
@@ -214,7 +207,7 @@ func (sync *OplogSyncer) startBatcher() {
 					needDispatch = sync.ddlManager.BlockDDL(sync.replset, lastOplog)
 					if needDispatch {
 						// ddl need to run, when not all but majority oplog syncer received ddl oplog
-						LOG.Info("Oplog syncer %v prepare to dispatch ddl log %v", sync.replset, lastOplog)
+						LOG.Info("oplog syncer %v prepare to dispatch ddl log %v", sync.replset, lastOplog)
 						// transform ddl to run at mongos of dest sharding
 						// number of worker of sharding instance and number of ddl command must be 1
 						shardColSpec := utils.GetShardCollectionSpec(sync.ddlManager.FromCsConn.Session, lastOplog)
@@ -248,45 +241,55 @@ func (sync *OplogSyncer) startBatcher() {
 				}
 				if barrier {
 					// wait for ddl operation finish, and flush checkpoint value
-					sync.waitAckCheckpoint(flushCheckpoint)
+					sync.batcher.WaitAllAck()
+					if flushCheckpoint {
+						sync.ckptManager.mutex.RUnlock()
+						sync.ckptManager.FlushChan <- true
+						sync.ckptManager.mutex.RLock()
+					}
 					if needUnBlock {
-						LOG.Info("Oplog syncer %v Unblock at ddl log %v", sync.replset, lastOplog)
+						LOG.Info("oplog syncer %v Unblock at ddl log %v", sync.replset, lastOplog)
 						// unblock other shard nodes when sharding ddl has finished
 						sync.ddlManager.UnBlockDDL(sync.replset, lastOplog)
 					}
 				}
 			}
 		} else {
+			// sync.batcher.unsyncTs >= sync.batcher.syncTs, because oplog have been filtered
+			syncTs := sync.batcher.unsyncTs
 			readerQueryTs := int64(sync.reader.GetQueryTimestamp())
-			syncTs := sync.batcher.syncTs
 			if utils.ExtractTs32(syncTs)-readerQueryTs >= FilterCheckpointGap {
 				sync.batcher.WaitAllAck()
-				LOG.Info("oplog syncer %v force to update checkpointTs from %v to %v",
+				LOG.Info("oplog syncer %v batcher update ackTs from %v to %v",
 					sync.replset, utils.TimestampToLog(readerQueryTs), utils.TimestampToLog(syncTs))
 				// update latest fetched timestamp in memory
 				sync.reader.UpdateQueryTimestamp(syncTs)
 				sync.batcher.UpdateAckTs(syncTs)
 			}
 		}
+
 		// update syncTs of batcher
 		sync.batcher.syncTs = sync.batcher.unsyncTs
 		sync.ckptManager.mutex.RUnlock()
 	})
 }
 
-func (sync *OplogSyncer) waitAckCheckpoint(flushCheckpoint bool) {
-	beginTs := time.Now()
-	if flushCheckpoint {
-		LOG.Info("oplog syncer %v prepare for checkpoint", sync.replset)
-		sync.ckptManager.mutex.RUnlock()
-		defer sync.ckptManager.mutex.RLock()
-		sync.ckptManager.FlushChan <- true
+func (sync *OplogSyncer) WaitAckTsUntil(logData []byte) {
+	log := new(oplog.PartialLog)
+	if err := bson.Unmarshal(logData, log); err != nil {
+		LOG.Crashf("unmarshal oplog[%v] failed[%v]", logData, err)
 	}
-	sync.batcher.WaitAllAck()
-	if flushCheckpoint && time.Now().After(beginTs.Add(DDLCheckpointGap*time.Second)) {
-		LOG.Info("oplog syncer %v prepare for checkpoint.", sync.replset)
-		sync.ckptManager.FlushChan <- true
+	LOG.Info("oplog syncer %v wait to ackTs[%v]", sync.replset, utils.TimestampToLog(log.Timestamp))
+	for {
+		syncTs := sync.batcher.syncTs
+		if syncTs >= log.Timestamp {
+			sync.batcher.WaitAllAck()
+			sync.batcher.UpdateAckTs(syncTs)
+			break
+		}
+		time.Sleep(AckUpdateInterval * time.Millisecond)
 	}
+	LOG.Info("oplog syncer %v finish wait to ackTs[%v]", sync.replset, utils.TimestampToLog(log.Timestamp))
 }
 
 // how many pending queue we create
@@ -367,7 +370,7 @@ func (sync *OplogSyncer) next() bool {
 		sync.replMetric.SetOplogMax(payload)
 		sync.replMetric.SetOplogAvg(payload)
 		sync.replMetric.ReplStatus.Clear(utils.FetchBad)
-	} else if err != nil && err != oplogsyncer.TimeoutError {
+	} else if err != nil && err != TimeoutError {
 		LOG.Error("oplog syncer internal error: %v", err)
 		// error is nil indicate that only timeout incur syncer.next()
 		// return false. so we regardless that
@@ -404,8 +407,8 @@ func (sync *OplogSyncer) LoadByDoc(ckptDoc map[string]interface{}, ts time.Time)
 	ackTs, ok1 := ckptDoc[utils.CheckpointAckTs].(bson.MongoTimestamp)
 	syncTs, ok2 := ckptDoc[utils.CheckpointSyncTs].(bson.MongoTimestamp)
 	if !ok1 || !ok2 {
-		return LOG.Critical("OplogSyncer load checkpoint illegal record %v. ok1[%v] ok2[%v]",
-			ckptDoc, ok1, ok2)
+		return LOG.Critical("oplog syncer %v load checkpoint illegal record %v. ok1[%v] ok2[%v]",
+			sync.replset, ckptDoc, ok1, ok2)
 	}
 	sync.batcher.syncTs = syncTs
 	sync.batcher.unsyncTs = syncTs
@@ -413,28 +416,40 @@ func (sync *OplogSyncer) LoadByDoc(ckptDoc map[string]interface{}, ts time.Time)
 		worker.unack = int64(ackTs)
 		worker.ack = int64(ackTs)
 	}
-	sync.reader.InitQueryTimestamp(ackTs)
 	dqName, ok3 := ckptDoc[DiskQueueName].(string)
-	fetchTs, ok4 := ckptDoc[DiskQueueFetchTs].(bson.MongoTimestamp)
-	if sync.reader.UseDiskQueue() {
+	if sync.docEndTs == 0 {
 		// parallel run document and oplog replication
-		sync.reader.InitDiskQueue(fmt.Sprintf("mongoshake-%v-%v", sync.replset, ts.Format("20060102-150405")))
-	} else if ok3 && ok4 {
+		sync.reader.UpdateFetchStatus(FetchStatusStoreDiskNoApply)
+		sync.reader.InitDiskQueue(fmt.Sprintf("diskqueue-%v-%v", sync.replset, ts.Format("20060102-150405")))
+		sync.reader.InitQueryTimestamp(ackTs)
+	} else if ok3 {
 		// oplog replication with disk queue remained
-		sync.reader.UpdateFetchStatus(oplogsyncer.FetchStatusStoreDiskApply)
+		sync.reader.UpdateFetchStatus(FetchStatusStoreDiskApply)
 		sync.reader.InitDiskQueue(dqName)
-		sync.reader.InitQueryTimestamp(fetchTs)
+		queryTs := sync.reader.GetQueryTsFromDiskQueue()
+		if queryTs == 0 {
+			// disk queue has finished and deleted
+			LOG.Warn("oplog syncer %v load checkpoint disk queue[%v] has deleted", sync.replset, dqName)
+			sync.reader.InitQueryTimestamp(ackTs)
+		} else {
+			sync.reader.InitQueryTimestamp(queryTs)
+		}
+	} else {
+		// serially run document and oplog replication
+		sync.reader.UpdateFetchStatus(FetchStatusStoreMemoryApply)
+		sync.reader.InitQueryTimestamp(ackTs)
 	}
 
-	LOG.Info("OplogSyncer load checkpoint set syncer %v checkpoint to ackTs[%v] syncTs[%v] dqName[%v]",
-		sync.replset, utils.TimestampToLog(ackTs), utils.TimestampToLog(syncTs), dqName)
+	LOG.Info("oplog syncer %v load checkpoint set checkpoint to ackTs[%v] syncTs[%v] fetchStatus[%v] dqName[%v]",
+		sync.replset, utils.TimestampToLog(ackTs), utils.TimestampToLog(syncTs),
+		logFetchStatus(sync.reader.fetchStatus), dqName)
 	return nil
 }
 
 func (sync *OplogSyncer) FlushByDoc() map[string]interface{} {
 	ackTs, err := sync.calculateSyncerAckTs()
 	if err != nil {
-		LOG.Crashf("OplogSyncer flush checkpoint get ackTs of sycner %v failed. %v", sync.replset, err)
+		LOG.Crashf("OplogSyncer flush checkpoint get ackTs of syncer %v failed. %v", sync.replset, err)
 	}
 
 	syncTs := sync.batcher.syncTs
@@ -454,9 +469,9 @@ func (sync *OplogSyncer) FlushByDoc() map[string]interface{} {
 		utils.CheckpointAckTs:  ackTs,
 		utils.CheckpointSyncTs: syncTs,
 	}
-	if sync.reader.UseDiskQueue() {
+	fetchStatus := sync.reader.fetchStatus
+	if fetchStatus == FetchStatusStoreDiskNoApply || fetchStatus == FetchStatusStoreDiskApply {
 		ckptDoc[DiskQueueName] = sync.reader.GetDiskQueueName()
-		ckptDoc[DiskQueueFetchTs] = sync.reader.GetDiskQueueFetchTs()
 	}
 	return ckptDoc
 }

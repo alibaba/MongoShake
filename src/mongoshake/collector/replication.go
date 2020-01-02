@@ -159,6 +159,7 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(beginTsMap map[
 		oplogSyncer.startDiskApply(docEndTsMap[oplogSyncer.replset])
 	}
 	coordinator.ckptManager.start()
+	coordinator.ckptManager.FlushChan <- true
 	return nil
 }
 
