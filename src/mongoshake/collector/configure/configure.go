@@ -4,6 +4,8 @@ type Configuration struct {
 	MongoUrls                []string `config:"mongo_urls"`
 	MongoCsUrl               string   `config:"mongo_cs_url"`
 	MongoConnectMode         string   `config:"mongo_connect_mode"`
+	MajorityWriteFull        bool     `config:"majority_write.full"`
+	MajorityWriteIncr        bool     `config:"majority_write.incr"`
 	CollectorId              string   `config:"collector.id"`
 	CheckpointInterval       int64    `config:"checkpoint.interval"`
 	HTTPListenPort           int      `config:"http_profile"`
