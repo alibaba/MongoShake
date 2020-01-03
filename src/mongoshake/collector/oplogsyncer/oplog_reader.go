@@ -152,6 +152,8 @@ func (reader *OplogReader) fetcher() {
 				} else {
 					reader.oplogChan <- &retOplog{nil, fmt.Errorf("get next oplog failed. release oplogsIterator, %s", err.Error())}
 				}
+				// wait a moment
+				time.Sleep(1 * time.Second)
 			} else {
 				// query timeout
 				reader.oplogChan <- &retOplog{nil, TimeoutError}
