@@ -410,6 +410,23 @@ func (sync *OplogSyncer) LoadByDoc(ckptDoc map[string]interface{}, ts time.Time)
 		return LOG.Critical("oplog syncer %v load checkpoint illegal record %v. ok1[%v] ok2[%v]",
 			sync.replset, ckptDoc, ok1, ok2)
 	}
+
+	if ackTs != 0 {
+		// the oldest oplog is lost
+		if oldTs, err := utils.GetOldestTimestampByUrl(sync.reader.src); err != nil {
+			LOG.Crashf("oplog syncer %v load checkpoint connect to %v failed. %v", sync.replset, err)
+		} else if oldTs > ackTs {
+			LOG.Crashf("oplog syncer %v load checkpoint queryTs[%v] is less than oldTs[%v], "+
+				"this error means user's oplog collection size is too small or document replication continues too long",
+				sync.replset, utils.TimestampToLog(ackTs), utils.TimestampToLog(oldTs))
+		}
+	} else {
+		// oplog replication with context.start_position = 1970-01-01T00:00:00Z
+		syncTs = bson.MongoTimestamp(1 << 32)
+		ackTs = bson.MongoTimestamp(1 << 32)
+		sync.docEndTs = bson.MongoTimestamp(1 << 32)
+	}
+
 	sync.batcher.syncTs = syncTs
 	sync.batcher.unsyncTs = syncTs
 	for _, worker := range sync.batcher.workerGroup {

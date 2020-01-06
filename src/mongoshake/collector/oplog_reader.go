@@ -159,19 +159,6 @@ func (reader *OplogReader) StartFetcher() {
 		return
 	}
 
-	// the oldest oplog is lost
-	queryTs := reader.GetQueryTimestamp()
-	if oldTs, err := utils.GetOldestTimestampByUrl(reader.src); err != nil {
-		LOG.Crashf("reader fetch for replset %v connect to %v failed. %v", reader.syncer.replset, err)
-	} else if queryTs == 0 {
-		// we can't insert Timestamp(0, 0) that will be treat as Now(), so we use Timestamp(1, 0)
-		queryTs = bson.MongoTimestamp(1 << 32)
-	} else if oldTs > queryTs {
-		LOG.Crashf("reader fetch for replset %v queryTs[%v] is less than oldTs[%v], "+
-			"this error means user's oplog collection size is too small or document replication continues too long",
-			reader.syncer.replset, utils.TimestampToLog(queryTs), utils.TimestampToLog(oldTs))
-	}
-
 	reader.fetcherLock.Lock()
 	if reader.fetcherExist == false { // double check
 		reader.fetcherExist = true
