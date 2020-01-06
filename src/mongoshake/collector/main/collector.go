@@ -265,6 +265,11 @@ func sanitizeOptions() error {
 		}
 	}
 
+	if (conf.Options.Tunnel != "file" && conf.Options.Tunnel != "kafka") &&
+		conf.Options.TunnelMessage != utils.TunnelMessageRaw {
+		return fmt.Errorf("tunnel.message should be 'raw' if tunnel type is not 'kafka' or 'file'")
+	}
+
 	if conf.Options.SyncMode != "oplog" && conf.Options.SyncMode != "document" && conf.Options.SyncMode != "all" {
 		return fmt.Errorf("unknown sync_mode[%v]", conf.Options.SyncMode)
 	}

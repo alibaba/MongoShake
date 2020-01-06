@@ -29,6 +29,9 @@ func (exec *Executor) ensureConnection() bool {
 			if exec.bulkInsert, err = utils.GetAndCompareVersion(exec.session, ThresholdVersion); err != nil {
 				LOG.Info("compare version with return[%v], bulkInsert disable", err)
 			}
+			if conf.Options.MajorityWriteIncr {
+				exec.session.EnsureSafe(&mgo.Safe{WMode: utils.MajorityWriteConcern})
+			}
 		}
 	}
 
