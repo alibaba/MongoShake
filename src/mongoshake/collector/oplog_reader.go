@@ -30,6 +30,7 @@ const (
 	CollectionCapped           = "CollectionScan died due to position in capped" // bigger than 3.0
 	CollectionCappedLowVersion = "UnknownError"                                  // <= 3.0 version
 
+	FetchStatusStoreInvalid     int32 = 0
 	FetchStatusStoreDiskNoApply int32 = 1
 	FetchStatusStoreDiskApply   int32 = 2
 	FetchStatusStoreMemoryApply int32 = 3
@@ -97,20 +98,25 @@ func NewOplogReader(src string, syncer *OplogSyncer) *OplogReader {
 	return reader
 }
 
-func (reader *OplogReader) InitFetchStatus(fetchStatus int32) {
-	reader.fetchStatus = fetchStatus
+func (reader *OplogReader) UpdateFetchStatus(fetchStatus int32) {
+	LOG.Info("reader replset %v update fetch status to %v", reader.syncer.replset, logFetchStatus(fetchStatus))
+	atomic.StoreInt32(&reader.fetchStatus, fetchStatus)
 }
 
 func (reader *OplogReader) InitDiskQueue(dqName string) {
 	fetchStatus := reader.fetchStatus
 	if fetchStatus != FetchStatusStoreDiskNoApply && fetchStatus != FetchStatusStoreDiskApply {
-		LOG.Crashf("reader replset %v init disk queue in illegal fetch status %v",
+		LOG.Crashf("reader replset %v init disk queue in illegal fetchStatus %v",
 			reader.syncer.replset, logFetchStatus(fetchStatus))
 	}
 	reader.diskQueue = utils.NewDiskQueue(dqName, conf.Options.LogDirectory,
 		conf.Options.ReplayerOplogStoreDiskMaxSize, conf.Options.ReplayerOplogStoreDiskReadBatch,
 		1<<30, 0, 1<<26,
 		1000, 2*time.Second)
+}
+
+func (reader *OplogReader) GetDiskQueueName() string {
+	return reader.diskQueue.Name()
 }
 
 func (reader *OplogReader) GetQueryTsFromDiskQueue() bson.MongoTimestamp {
@@ -128,29 +134,12 @@ func (reader *OplogReader) GetQueryTsFromDiskQueue() bson.MongoTimestamp {
 	return log.Timestamp
 }
 
-// InitQueryTimestamp set internal timestamp if
-// not exist in this reader. initial stage most of the time
-func (reader *OplogReader) InitQueryTimestamp(ts bson.MongoTimestamp) {
-	if _, exist := reader.query[QueryTs]; !exist {
-		reader.UpdateQueryTimestamp(ts)
-	}
-}
-
 func (reader *OplogReader) UpdateQueryTimestamp(ts bson.MongoTimestamp) {
 	reader.query[QueryTs] = bson.M{QueryOpGT: ts}
 }
 
 func (reader *OplogReader) GetQueryTimestamp() bson.MongoTimestamp {
 	return reader.query[QueryTs].(bson.M)[QueryOpGT].(bson.MongoTimestamp)
-}
-
-func (reader *OplogReader) GetDiskQueueName() string {
-	return reader.diskQueue.Name()
-}
-
-func (reader *OplogReader) UpdateFetchStatus(fetchStatus int32) {
-	LOG.Info("reader replset %v update fetch status to %v", reader.syncer.replset, logFetchStatus(fetchStatus))
-	atomic.StoreInt32(&reader.fetchStatus, fetchStatus)
 }
 
 // internal get next oplog. The channel and current function may both return
@@ -174,6 +163,9 @@ func (reader *OplogReader) StartFetcher() {
 	queryTs := reader.GetQueryTimestamp()
 	if oldTs, err := utils.GetOldestTimestampByUrl(reader.src); err != nil {
 		LOG.Crashf("reader fetch for replset %v connect to %v failed. %v", reader.syncer.replset, err)
+	} else if queryTs == 0 {
+		// we can't insert Timestamp(0, 0) that will be treat as Now(), so we use Timestamp(1, 0)
+		queryTs = bson.MongoTimestamp(1 << 32)
 	} else if oldTs > queryTs {
 		LOG.Crashf("reader fetch for replset %v queryTs[%v] is less than oldTs[%v], "+
 			"this error means user's oplog collection size is too small or document replication continues too long",
@@ -184,7 +176,8 @@ func (reader *OplogReader) StartFetcher() {
 	if reader.fetcherExist == false { // double check
 		reader.fetcherExist = true
 		go reader.fetch()
-		if atomic.LoadInt32(&reader.fetchStatus) != FetchStatusStoreMemoryApply {
+		fetchStatus := atomic.LoadInt32(&reader.fetchStatus)
+		if fetchStatus == FetchStatusStoreDiskNoApply || fetchStatus == FetchStatusStoreDiskApply {
 			go reader.retrieve()
 		}
 	}

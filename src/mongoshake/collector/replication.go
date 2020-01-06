@@ -91,19 +91,6 @@ func (coordinator *ReplicationCoordinator) Run() error {
 		}
 	case SyncModeOplog:
 		beginTs32 := conf.Options.ContextStartPosition
-		if beginTs32 != 0 {
-			// get current oldest timestamp, the oldest oplog is lost
-			for replset, beginTs := range beginAllTsMap {
-				if beginTs32 >= utils.ExtractTs32(beginTs.Oldest) {
-					return LOG.Critical("oplog replication replset %v startPosition[%v] is less than current beginTs.Oldest[%v], "+
-						"this error means user's oplog collection size is too small or document replication continues too long",
-						replset, beginTs32, utils.ExtractTs32(beginTs.Oldest))
-				}
-			}
-		} else {
-			// we can't insert Timestamp(0, 0) that will be treat as Now(), so we use Timestamp(1, 0)
-			beginTs32 = 1
-		}
 		for replset := range beginTsMap {
 			beginTsMap[replset] = bson.MongoTimestamp(beginTs32 << 32)
 		}

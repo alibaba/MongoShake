@@ -421,7 +421,7 @@ func (sync *OplogSyncer) LoadByDoc(ckptDoc map[string]interface{}, ts time.Time)
 		// parallel run document and oplog replication
 		sync.reader.UpdateFetchStatus(FetchStatusStoreDiskNoApply)
 		sync.reader.InitDiskQueue(fmt.Sprintf("diskqueue-%v-%v", sync.replset, ts.Format("20060102-150405")))
-		sync.reader.InitQueryTimestamp(ackTs)
+		sync.reader.UpdateQueryTimestamp(ackTs)
 	} else if ok3 {
 		// oplog replication with disk queue remained
 		sync.reader.UpdateFetchStatus(FetchStatusStoreDiskApply)
@@ -430,14 +430,14 @@ func (sync *OplogSyncer) LoadByDoc(ckptDoc map[string]interface{}, ts time.Time)
 		if queryTs == 0 {
 			// disk queue has finished and deleted
 			LOG.Warn("oplog syncer %v load checkpoint disk queue[%v] has deleted", sync.replset, dqName)
-			sync.reader.InitQueryTimestamp(ackTs)
+			sync.reader.UpdateQueryTimestamp(ackTs)
 		} else {
-			sync.reader.InitQueryTimestamp(queryTs)
+			sync.reader.UpdateQueryTimestamp(queryTs)
 		}
 	} else {
 		// serially run document and oplog replication
 		sync.reader.UpdateFetchStatus(FetchStatusStoreMemoryApply)
-		sync.reader.InitQueryTimestamp(ackTs)
+		sync.reader.UpdateQueryTimestamp(ackTs)
 	}
 
 	LOG.Info("oplog syncer %v load checkpoint set checkpoint to ackTs[%v] syncTs[%v] fetchStatus[%v] dqName[%v]",
@@ -469,7 +469,7 @@ func (sync *OplogSyncer) FlushByDoc() map[string]interface{} {
 		utils.CheckpointAckTs:  ackTs,
 		utils.CheckpointSyncTs: syncTs,
 	}
-	fetchStatus := sync.reader.fetchStatus
+	fetchStatus := atomic.LoadInt32(&sync.reader.fetchStatus)
 	if fetchStatus == FetchStatusStoreDiskNoApply || fetchStatus == FetchStatusStoreDiskApply {
 		ckptDoc[DiskQueueName] = sync.reader.GetDiskQueueName()
 	}
