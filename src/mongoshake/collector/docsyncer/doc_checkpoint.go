@@ -56,7 +56,7 @@ func LoadCheckpoint() (map[string]bson.MongoTimestamp, error) {
 		switch stage {
 		case utils.StageFlushed:
 			oplogTable = "tmp_" + oplogTable
-		case utils.StageRename:
+		case utils.StageDropped:
 			// rename tmp table to original table
 			colNames, err := conn.Session.DB(db).CollectionNames()
 			if err != nil {

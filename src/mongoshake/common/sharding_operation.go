@@ -225,8 +225,6 @@ func GetDDLNamespace(log *oplog.PartialLog) string {
 		fallthrough
 	case "createIndexes":
 		fallthrough
-	case "dropDatabase":
-		fallthrough
 	case "collMod":
 		fallthrough
 	case "drop":
@@ -248,6 +246,8 @@ func GetDDLNamespace(log *oplog.PartialLog) string {
 			LOG.Crashf("GetDDLNamespace meet illegal DDL log[%s]", logD)
 		}
 		return fmt.Sprintf("%s.%s", db, collection)
+	case "dropDatabase":
+		return log.Namespace
 	case "renameCollection":
 		ns, ok := oplog.GetKey(log.Object, operation).(string)
 		if !ok {

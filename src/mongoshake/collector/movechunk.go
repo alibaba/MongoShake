@@ -116,6 +116,7 @@ func (manager *MoveChunkManager) barrierProbe(key MoveChunkKey, value *MoveChunk
 }
 
 func (manager *MoveChunkManager) minTsProbe(minTs bson.MongoTimestamp) bool {
+	// syncTs of all syncer must not less than minTs, except for un responsible syncer
 	current := time.Now()
 	for _, syncInfo := range manager.syncInfoMap {
 		syncInfo.mutex.Lock()

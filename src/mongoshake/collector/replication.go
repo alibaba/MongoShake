@@ -91,10 +91,13 @@ func (coordinator *ReplicationCoordinator) Run() error {
 		}
 	case SyncModeOplog:
 		beginTs32 := conf.Options.ContextStartPosition
+		docEndTsMap := make(map[string]bson.MongoTimestamp)
 		for replset := range beginTsMap {
 			beginTsMap[replset] = bson.MongoTimestamp(beginTs32 << 32)
+			// oplog replication has no docEndTs, but it cannot be 0
+			docEndTsMap[replset] = bson.MongoTimestamp(1 << 32)
 		}
-		if err := coordinator.startOplogReplication(beginTsMap, beginTsMap); err != nil {
+		if err := coordinator.startOplogReplication(beginTsMap, docEndTsMap); err != nil {
 			return err
 		}
 		coordinator.ckptManager.start()

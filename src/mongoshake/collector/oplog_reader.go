@@ -3,7 +3,6 @@ package collector
 import (
 	"errors"
 	"fmt"
-	nimo "github.com/gugemichael/nimo4go"
 	"mongoshake/oplog"
 	"strings"
 	"sync"
@@ -229,39 +228,31 @@ func (reader *OplogReader) retrieve() {
 	}
 	LOG.Info("reader retrieve for replset %v begin to read from disk queue with depth[%v]",
 		reader.syncer.replset, reader.diskQueue.Depth())
-	readExitChan := make(chan int)
-	nimo.GoRoutine(func() {
-		for {
-			select {
-			case readData := <-reader.diskQueue.ReadChan():
-				if len(readData) > 0 {
-					for _, data := range readData {
-						reader.oplogChan <- &retOplog{&bson.Raw{Kind: 3, Data: data}, nil}
-					}
-					reader.syncer.WaitAckTsUntil(readData[len(readData)-1])
-					if err := reader.diskQueue.Next(); err != nil {
-						LOG.Crash(err)
-					}
+	ticker := time.NewTicker(time.Second)
+	Loop:
+	for {
+		select {
+		case readData := <-reader.diskQueue.ReadChan():
+			if len(readData) > 0 {
+				for _, data := range readData {
+					reader.oplogChan <- &retOplog{&bson.Raw{Kind: 3, Data: data}, nil}
 				}
-			case <-readExitChan:
-				LOG.Info("reader retrieve for replset %v end", reader.syncer.replset)
-				return
+				reader.syncer.WaitAckTsUntil(readData[len(readData)-1])
+				if err := reader.diskQueue.Next(); err != nil {
+					LOG.Crash(err)
+				}
+			}
+		case <-ticker.C:
+			if reader.diskQueue.Depth() < reader.diskQueue.BatchCount() {
+				break Loop
 			}
 		}
-	})
-	// wait to block fetch
-	for {
-		if reader.diskQueue.Depth() < reader.diskQueue.BatchCount() {
-			break
-		}
-		time.Sleep(time.Second)
 	}
 	LOG.Info("reader retrieve for replset %v block fetch with disk queue depth[%v]",
 		reader.syncer.replset, reader.diskQueue.Depth())
 
 	// wait to finish retrieve and continue fetch to store to memory
 	reader.mutex.Lock()
-	close(readExitChan)
 	readData := reader.diskQueue.ReadAll()
 	if len(readData) > 0 {
 		for _, data := range readData {

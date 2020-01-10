@@ -145,7 +145,7 @@ func (manager *CheckpointManager) loadAll() error {
 				}
 			}
 			fallthrough
-		case utils.StageRename:
+		case utils.StageDropped:
 			// rename tmp table to original table
 			for _, persist := range manager.persistList {
 				for _, origTable := range persist.GetTableList(manager.table) {
@@ -272,7 +272,7 @@ func (manager *CheckpointManager) flushAll() error {
 	}
 	// Rename Stage: rename tmp table to original table
 	if _, err := manager.conn.Session.DB(manager.db).C(manager.table).
-		Upsert(bson.M{}, bson.M{utils.CheckpointStage: utils.StageRename}); err != nil {
+		Upsert(bson.M{}, bson.M{utils.CheckpointStage: utils.StageDropped}); err != nil {
 		manager.conn.Close()
 		manager.conn = nil
 		return LOG.Critical("CheckpointManager flushAll upsert versionDoc error. %v", err)

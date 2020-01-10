@@ -3,6 +3,7 @@ package collector
 import (
 	"errors"
 	"fmt"
+	"path"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -424,7 +425,6 @@ func (sync *OplogSyncer) LoadByDoc(ckptDoc map[string]interface{}, ts time.Time)
 		// oplog replication with context.start_position = 1970-01-01T00:00:00Z
 		syncTs = bson.MongoTimestamp(1 << 32)
 		ackTs = bson.MongoTimestamp(1 << 32)
-		sync.docEndTs = bson.MongoTimestamp(1 << 32)
 	}
 
 	sync.batcher.syncTs = syncTs
@@ -434,12 +434,13 @@ func (sync *OplogSyncer) LoadByDoc(ckptDoc map[string]interface{}, ts time.Time)
 		worker.ack = int64(ackTs)
 	}
 	dqName, ok3 := ckptDoc[DiskQueueName].(string)
+	dqPath := fmt.Sprintf(path.Join(conf.Options.LogDirectory, "%s.meta.dat"), dqName)
 	if sync.docEndTs == 0 {
 		// parallel run document and oplog replication
 		sync.reader.UpdateFetchStatus(FetchStatusStoreDiskNoApply)
 		sync.reader.InitDiskQueue(fmt.Sprintf("diskqueue-%v-%v", sync.replset, ts.Format("20060102-150405")))
 		sync.reader.UpdateQueryTimestamp(ackTs)
-	} else if ok3 {
+	} else if ok3 && utils.FileExist(dqPath) {
 		// oplog replication with disk queue remained
 		sync.reader.UpdateFetchStatus(FetchStatusStoreDiskApply)
 		sync.reader.InitDiskQueue(dqName)

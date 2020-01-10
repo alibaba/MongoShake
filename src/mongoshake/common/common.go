@@ -31,7 +31,7 @@ const (
 	CheckpointStage = "ckptStage"
 	StageOriginal   = "original"
 	StageFlushed    = "flushed"
-	StageRename     = "rename"
+	StageDropped    = "dropped"
 
 	CheckpointName   = "name"
 	CheckpointAckTs  = "ackTs"
@@ -159,4 +159,9 @@ func Retry(attempts int, ms int64, fn func() error) error {
 		return err
 	}
 	return nil
+}
+
+func FileExist(filePath string) bool {
+	_, err := os.Stat(filePath)
+	return err == nil || os.IsExist(err)
 }
