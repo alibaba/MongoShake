@@ -625,6 +625,8 @@ func (d *DiskQueue) ioLoop() {
 	var err error
 	var count int64
 	var r chan [][]byte
+	var w chan []byte
+	writeStop := false
 
 	syncTicker := time.NewTicker(d.syncTimeout)
 	checkTicker := time.NewTicker(time.Second)
@@ -657,6 +659,12 @@ func (d *DiskQueue) ioLoop() {
 			r = nil
 		}
 
+		if writeStop {
+			w = nil
+		} else {
+			w = d.writeChan
+		}
+
 		select {
 		// the Go channel spec dictates that nil channel operations (read or write)
 		// in a select are skipped, we set r to d.readChan only when there is data to read
@@ -678,7 +686,7 @@ func (d *DiskQueue) ioLoop() {
 		case <-d.emptyChan:
 			d.emptyResponseChan <- d.deleteAllFiles()
 			count = 0
-		case dataWrite := <-d.writeChan:
+		case dataWrite := <- w:
 			count++
 			d.writeResponseChan <- d.writeOne(dataWrite)
 		case <-syncTicker.C:
@@ -691,9 +699,10 @@ func (d *DiskQueue) ioLoop() {
 			goto exit
 		case <-checkTicker.C:
 			fileSizeMB := d.fileSizeMB()
-			if fileSizeMB > d.maxBytesMB {
-				LOG.Crashf("DISKQUEUE(%s) total size %vMB reach the max size %vMB",
-					d.name, fileSizeMB, d.maxBytesMB)
+			if fileSizeMB >= d.maxBytesMB {
+				writeStop = true
+			} else {
+				writeStop = false
 			}
 		}
 	}
