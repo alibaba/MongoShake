@@ -7,6 +7,9 @@ import (
 	"mongoshake/tunnel/kafka"
 
 	LOG "github.com/vinllen/log4go"
+	"mongoshake/collector/configure"
+	"mongoshake/common"
+	"encoding/json"
 )
 
 type KafkaWriter struct {
@@ -35,29 +38,57 @@ func (tunnel *KafkaWriter) Send(message *WMessage) int64 {
 
 	message.Tag |= MsgPersistent
 
-	byteBuffer := bytes.NewBuffer([]byte{})
-	// checksum
-	binary.Write(byteBuffer, binary.BigEndian, uint32(message.Checksum))
-	// tag
-	binary.Write(byteBuffer, binary.BigEndian, uint32(message.Tag))
-	// shard
-	binary.Write(byteBuffer, binary.BigEndian, uint32(message.Shard))
-	// compressor
-	binary.Write(byteBuffer, binary.BigEndian, uint32(message.Compress))
-	// serialize log count
-	binary.Write(byteBuffer, binary.BigEndian, uint32(len(message.RawLogs)))
+	switch conf.Options.TunnelMessage {
+	case utils.TunnelMessageBson:
+		// write the raw oplog directly
+		for _, log := range message.RawLogs {
+			if err := tunnel.writer.SimpleWrite(log); err != nil {
+				LOG.Error("KafkaWriter send [%v] with type[%v] error[%v]", tunnel.RemoteAddr,
+					conf.Options.TunnelMessage, err)
+				return ReplyError
+			}
+		}
+	case utils.TunnelMessageJson:
+		for _, log := range message.ParsedLogs {
+			// json marshal
+			if encode, err := json.Marshal(log); err != nil {
+				LOG.Error("KafkaWriter json marshal data[%v] error[%v]", log, err)
+				return ReplyError
+			} else {
+				if err := tunnel.writer.SimpleWrite(encode); err != nil {
+					LOG.Error("KafkaWriter send [%v] with type[%v] error[%v]", tunnel.RemoteAddr,
+						conf.Options.TunnelMessage, err)
+					return ReplyError
+				}
+			}
+		}
+	case utils.TunnelMessageRaw:
+		byteBuffer := bytes.NewBuffer([]byte{})
+		// checksum
+		binary.Write(byteBuffer, binary.BigEndian, uint32(message.Checksum))
+		// tag
+		binary.Write(byteBuffer, binary.BigEndian, uint32(message.Tag))
+		// shard
+		binary.Write(byteBuffer, binary.BigEndian, uint32(message.Shard))
+		// compressor
+		binary.Write(byteBuffer, binary.BigEndian, uint32(message.Compress))
+		// serialize log count
+		binary.Write(byteBuffer, binary.BigEndian, uint32(len(message.RawLogs)))
 
-	// serialize logs
-	for _, log := range message.RawLogs {
-		binary.Write(byteBuffer, binary.BigEndian, uint32(len(log)))
-		binary.Write(byteBuffer, binary.BigEndian, log)
-	}
+		// serialize logs
+		for _, log := range message.RawLogs {
+			binary.Write(byteBuffer, binary.BigEndian, uint32(len(log)))
+			binary.Write(byteBuffer, binary.BigEndian, log)
+		}
 
-	err := tunnel.writer.SimpleWrite(byteBuffer.Bytes())
+		if err := tunnel.writer.SimpleWrite(byteBuffer.Bytes()); err != nil {
+			LOG.Error("KafkaWriter send [%v] with type[%v] error[%v]", tunnel.RemoteAddr,
+				conf.Options.TunnelMessage, err)
+			return ReplyError
+		}
 
-	if err != nil {
-		LOG.Error("KafkaWriter send[%v] error[%v]", tunnel.RemoteAddr, err)
-		return ReplyError
+	default:
+		LOG.Crash("unknown tunnel.message type: ", conf.Options.TunnelMessage)
 	}
 
 	// KafkaWriter.AckRequired() is always false, return 0 directly

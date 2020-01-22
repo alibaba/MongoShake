@@ -2,9 +2,10 @@ package utils
 
 import (
 	"fmt"
-	conf "mongoshake/collector/configure"
+	"mongoshake/collector/configure"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/nightlyone/lockfile"
 	LOG "github.com/vinllen/log4go"
@@ -30,11 +31,15 @@ const (
 	CheckpointStage = "ckptStage"
 	StageOriginal   = "original"
 	StageFlushed    = "flushed"
-	StageRename     = "rename"
+	StageDropped    = "dropped"
 
 	CheckpointName   = "name"
 	CheckpointAckTs  = "ackTs"
 	CheckpointSyncTs = "syncTs"
+
+	TunnelMessageRaw  = "raw"
+	TunnelMessageJson = "json"
+	TunnelMessageBson = "bson"
 )
 
 // Build info
@@ -80,9 +85,6 @@ func InitialLogger(logDir, logFile, level string, logBuffer bool, verbose bool) 
 		LOG.AddFilter("console", logLevel, LOG.NewConsoleLogWriter())
 	}
 
-	if len(logDir) == 0 {
-		logDir = "logs"
-	}
 	// check directory exists
 	if _, err := os.Stat(logDir); err != nil && os.IsNotExist(err) {
 		if err := os.MkdirAll(logDir, os.ModeDir|os.ModePerm); err != nil {
@@ -137,5 +139,29 @@ func WritePid(id string) (err error) {
 }
 
 func DelayFor(ms int64) {
-	YieldInMs(ms)
+	time.Sleep(time.Millisecond * time.Duration(ms))
+}
+
+type StopError struct {
+	error
+}
+
+func Retry(attempts int, ms int64, fn func() error) error {
+	if err := fn(); err != nil {
+		if s, ok := err.(StopError); ok {
+			return s.error
+		}
+		if attempts--; attempts > 0 {
+			LOG.Warn("%v. retry %v times", err, attempts)
+			DelayFor(ms)
+			return Retry(attempts, 2*ms, fn)
+		}
+		return err
+	}
+	return nil
+}
+
+func FileExist(filePath string) bool {
+	_, err := os.Stat(filePath)
+	return err == nil || os.IsExist(err)
 }

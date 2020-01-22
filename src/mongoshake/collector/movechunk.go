@@ -79,7 +79,7 @@ func (manager *MoveChunkManager) start() {
 			syncInfo.mutex.Unlock()
 		}
 		manager.moveChunkLock.Unlock()
-		time.Sleep(60*time.Second)
+		time.Sleep(60 * time.Second)
 	})
 }
 
@@ -116,6 +116,7 @@ func (manager *MoveChunkManager) barrierProbe(key MoveChunkKey, value *MoveChunk
 }
 
 func (manager *MoveChunkManager) minTsProbe(minTs bson.MongoTimestamp) bool {
+	// syncTs of all syncer must not less than minTs, except for un responsible syncer
 	current := time.Now()
 	for _, syncInfo := range manager.syncInfoMap {
 		syncInfo.mutex.Lock()
@@ -221,7 +222,7 @@ func (manager *MoveChunkManager) BarrierOplog(replset string, partialLog *oplog.
 					LOG.Info("syncer %v meet delete barrier ts[%v] when %v move chunk oplog found[%v %v]",
 						replset, utils.TimestampToLog(value.deleteItem.Timestamp), partialLog.Operation,
 						key.string(), utils.TimestampToLog(partialLog.Timestamp))
-					//value.barrierOplog(syncInfo, key, partialLog)
+					// value.barrierOplog(syncInfo, key, partialLog)
 					barrier = true
 					// if move chunk fail and retry, the dest oplog list will be I -> D -> I,
 					// so D & I will be eliminate at the same syncer

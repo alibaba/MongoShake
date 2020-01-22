@@ -52,6 +52,9 @@ func (colExecutor *CollectionExecutor) Start() error {
 	if colExecutor.conn, err = utils.NewMongoConn(colExecutor.mongoUrl, utils.ConnectModePrimary, true); err != nil {
 		return err
 	}
+	if conf.Options.MajorityWriteFull {
+		colExecutor.conn.Session.EnsureSafe(&mgo.Safe{WMode: utils.MajorityWriteConcern})
+	}
 
 	parallel := conf.Options.ReplayerDocumentParallel
 	colExecutor.docBatch = make(chan []*bson.Raw, parallel)
@@ -135,18 +138,18 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 	}
 
 	ns := exec.colExecutor.ns
-
 	var docList []interface{}
 	for _, doc := range docs {
 		docList = append(docList, doc)
 	}
 
-	if err := exec.session.DB(ns.Database).C(ns.Collection).Insert(docList...); err != nil {
-		printLog := new(oplog.PartialLog)
-		bson.Unmarshal(docs[0].Data, printLog)
-		return fmt.Errorf("insert docs with length[%v] into ns %v of dest mongo failed[%v]. first doc: %v",
-			len(docList), ns, err, printLog)
-	}
-
-	return nil
+	return utils.Retry(5, 100, func() error {
+		if err := exec.session.DB(ns.Database).C(ns.Collection).Insert(docList...); err != nil {
+			printLog := new(oplog.PartialLog)
+			bson.Unmarshal(docs[0].Data, printLog)
+			return fmt.Errorf("insert docs with length[%v] into ns %v of dest mongo failed[%v]. first doc: %v",
+				len(docList), ns, err, printLog)
+		}
+		return nil
+	})
 }

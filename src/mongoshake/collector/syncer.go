@@ -1,8 +1,11 @@
 package collector
 
 import (
+	"errors"
 	"fmt"
-	"mongoshake/collector/oplogsyncer"
+	"path"
+	"sort"
+	"sync/atomic"
 	"time"
 
 	"mongoshake/collector/configure"
@@ -17,21 +20,16 @@ import (
 )
 
 const (
-	// FetcherBufferCapacity   = 256
-	// AdaptiveBatchingMaxSize = 16384 // 16k
-
 	// bson deserialize workload is CPU-intensive task
 	PipelineQueueMaxNr = 4
 	PipelineQueueMinNr = 1
 	PipelineQueueLen   = 64
 
-	WaitBarrierAckLogTimes = 10
-
 	DurationTime        = 6000 // unit: ms.
 	DDLCheckpointGap    = 5    // unit: seconds.
-	FilterCheckpointGap = 180  // unit: seconds. no checkpoint update, flush checkpoint mandatory
+	FilterCheckpointGap = 60   // unit: seconds. no checkpoint update, flush checkpoint mandatory
 
-	ShardingWorkerId = 0
+	DiskQueueName = "dqName"
 )
 
 type OplogHandler interface {
@@ -48,7 +46,7 @@ type OplogSyncer struct {
 	// source mongodb replica set name
 	replset string
 	// full sync finish position, used to check DDL between full sync and incr sync
-	fullSyncFinishPosition int64
+	docEndTs bson.MongoTimestamp
 
 	ckptManager *CheckpointManager
 	mvckManager *MoveChunkManager
@@ -66,7 +64,7 @@ type OplogSyncer struct {
 	nextQueuePosition uint64
 
 	// source mongo oplog reader
-	reader *oplogsyncer.OplogReader
+	reader *OplogReader
 	// journal log that records all oplogs
 	journal *utils.Journal
 	// oplogs dispatcher
@@ -85,23 +83,33 @@ type OplogSyncer struct {
 func NewOplogSyncer(
 	coordinator *ReplicationCoordinator,
 	replset string,
-	fullSyncFinishPosition int64,
+	docEndTsMap map[string]bson.MongoTimestamp,
 	mongoUrl string,
 	gids []string,
 	ckptManager *CheckpointManager,
 	mvckManager *MoveChunkManager,
 	ddlManager *DDLManager) *OplogSyncer {
+
+	var docEndTs bson.MongoTimestamp
+	if docEndTsMap != nil {
+		if ts, ok := docEndTsMap[replset]; !ok {
+			LOG.Crashf("new oplog syncer %v has no docEndTs. docEndTsMap %v", replset, docEndTsMap)
+		} else {
+			docEndTs = ts
+		}
+	}
+
 	syncer := &OplogSyncer{
-		coordinator:            coordinator,
-		replset:                replset,
-		fullSyncFinishPosition: fullSyncFinishPosition,
+		coordinator: coordinator,
+		replset:     replset,
+		docEndTs:    docEndTs,
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
-		reader:      oplogsyncer.NewOplogReader(mongoUrl, replset),
 		ckptManager: ckptManager,
 		mvckManager: mvckManager,
 		ddlManager:  ddlManager,
 	}
+	syncer.reader = NewOplogReader(mongoUrl, syncer)
 
 	// concurrent level hasher
 	switch conf.Options.ShardKey {
@@ -145,6 +153,11 @@ func (sync *OplogSyncer) bind(w *Worker) {
 	sync.batcher.workerGroup = append(sync.batcher.workerGroup, w)
 }
 
+func (sync *OplogSyncer) startDiskApply(docEndTs bson.MongoTimestamp) {
+	sync.docEndTs = docEndTs
+	sync.reader.UpdateFetchStatus(FetchStatusStoreDiskApply)
+}
+
 // start to polling oplog
 func (sync *OplogSyncer) start() {
 	LOG.Info("Poll oplog syncer start. ckpt_interval[%dms], gid[%s], shard_key[%s]",
@@ -165,8 +178,8 @@ func (sync *OplogSyncer) start() {
 	for {
 		sync.poll()
 		// error or exception occur
-		LOG.Warn("Oplog syncer polling yield. master:%t, yield:%dms", quorum.IsMaster(), DurationTime)
-		utils.YieldInMs(DurationTime)
+		LOG.Warn("oplog syncer polling yield. master:%t, yield:%dms", quorum.IsMaster(), DurationTime)
+		utils.DelayFor(DurationTime)
 	}
 }
 
@@ -195,7 +208,7 @@ func (sync *OplogSyncer) startBatcher() {
 					needDispatch = sync.ddlManager.BlockDDL(sync.replset, lastOplog)
 					if needDispatch {
 						// ddl need to run, when not all but majority oplog syncer received ddl oplog
-						LOG.Info("Oplog syncer %v prepare to dispatch ddl log %v", sync.replset, lastOplog)
+						LOG.Info("oplog syncer %v prepare to dispatch ddl log %v", sync.replset, lastOplog)
 						// transform ddl to run at mongos of dest sharding
 						// number of worker of sharding instance and number of ddl command must be 1
 						shardColSpec := utils.GetShardCollectionSpec(sync.ddlManager.FromCsConn.Session, lastOplog)
@@ -223,48 +236,61 @@ func (sync *OplogSyncer) startBatcher() {
 			if needDispatch {
 				// push to worker to run
 				if worked := batcher.dispatchBatch(filteredNextBatch); worked {
-					sync.replMetric.SetLSN(utils.TimestampToInt64(lastOplog.Timestamp))
+					sync.replMetric.SetLSN(int64(lastOplog.Timestamp))
 					// update latest fetched timestamp in memory
 					sync.reader.UpdateQueryTimestamp(lastOplog.Timestamp)
 				}
 				if barrier {
 					// wait for ddl operation finish, and flush checkpoint value
-					sync.waitAllAck(flushCheckpoint)
+					sync.batcher.WaitAllAck()
+					if flushCheckpoint {
+						sync.ckptManager.mutex.RUnlock()
+						sync.ckptManager.FlushChan <- true
+						sync.ckptManager.mutex.RLock()
+					}
 					if needUnBlock {
-						LOG.Info("Oplog syncer %v Unblock at ddl log %v", sync.replset, lastOplog)
+						LOG.Info("oplog syncer %v Unblock at ddl log %v", sync.replset, lastOplog)
 						// unblock other shard nodes when sharding ddl has finished
 						sync.ddlManager.UnBlockDDL(sync.replset, lastOplog)
 					}
 				}
 			}
 		} else {
+			// sync.batcher.unsyncTs >= sync.batcher.syncTs, because oplog have been filtered
+			syncTs := sync.batcher.unsyncTs
 			readerQueryTs := int64(sync.reader.GetQueryTimestamp())
-			syncTs := sync.batcher.syncTs
 			if utils.ExtractTs32(syncTs)-readerQueryTs >= FilterCheckpointGap {
-				sync.waitAllAck(false)
-				LOG.Info("oplog syncer %v force to update checkpointTs from %v to %v",
+				sync.batcher.WaitAllAck()
+				LOG.Info("oplog syncer %v batcher update ackTs from %v to %v",
 					sync.replset, utils.TimestampToLog(readerQueryTs), utils.TimestampToLog(syncTs))
 				// update latest fetched timestamp in memory
 				sync.reader.UpdateQueryTimestamp(syncTs)
+				sync.batcher.UpdateAckTs(syncTs)
 			}
 		}
+
 		// update syncTs of batcher
 		sync.batcher.syncTs = sync.batcher.unsyncTs
 		sync.ckptManager.mutex.RUnlock()
 	})
 }
 
-func (sync *OplogSyncer) waitAllAck(flushCheckpoint bool) {
-	beginTs := time.Now()
-	if flushCheckpoint {
-		LOG.Info("oplog syncer %v prepare for checkpoint", sync.replset)
-		sync.ckptManager.FlushChan <- true
+func (sync *OplogSyncer) WaitAckTsUntil(logData []byte) {
+	log := new(oplog.PartialLog)
+	if err := bson.Unmarshal(logData, log); err != nil {
+		LOG.Crashf("unmarshal oplog[%v] failed[%v]", logData, err)
 	}
-	sync.batcher.WaitAllAck()
-	if flushCheckpoint && time.Now().After(beginTs.Add(DDLCheckpointGap*time.Second)) {
-		LOG.Info("oplog syncer %v prepare for checkpoint.", sync.replset)
-		sync.ckptManager.FlushChan <- true
+	LOG.Info("oplog syncer %v wait to ackTs[%v]", sync.replset, utils.TimestampToLog(log.Timestamp))
+	for {
+		syncTs := sync.batcher.syncTs
+		if syncTs >= log.Timestamp {
+			sync.batcher.WaitAllAck()
+			sync.batcher.UpdateAckTs(syncTs)
+			break
+		}
+		time.Sleep(AckUpdateInterval * time.Millisecond)
 	}
+	LOG.Info("oplog syncer %v finish wait to ackTs[%v]", sync.replset, utils.TimestampToLog(log.Timestamp))
 }
 
 // how many pending queue we create
@@ -306,19 +332,7 @@ func (sync *OplogSyncer) deserializer(index int) {
 
 // only master(maybe several mongo-shake starts) can poll oplog.
 func (sync *OplogSyncer) poll() {
-	// we should reload checkpoint. in case of other collector
-	//	// has fetched oplogs when master quorum leader election
-	//	// happens frequently. so we simply reload.
-	checkpointTs := sync.ckptManager.Get(sync.replset)
-	if checkpointTs == 0 {
-		// we doesn't continue working on ckpt fetched failed. because we should
-		// confirm the exist checkpoint value or exactly knows that it doesn't exist
-		LOG.Critical("Acquire the existing checkpoint from remote[%s] failed !", conf.Options.ContextStorageCollection)
-		return
-	}
-	sync.reader.SetQueryTimestampOnEmpty(checkpointTs)
 	sync.reader.StartFetcher() // start reader fetcher if not exist
-
 	// every syncer should under the control of global rate limiter
 	rc := sync.coordinator.rateController
 
@@ -342,7 +356,6 @@ func (sync *OplogSyncer) poll() {
 			utils.DelayFor(100)
 			continue
 		}
-
 		// only get one
 		sync.next()
 	}
@@ -358,16 +371,14 @@ func (sync *OplogSyncer) next() bool {
 		sync.replMetric.SetOplogMax(payload)
 		sync.replMetric.SetOplogAvg(payload)
 		sync.replMetric.ReplStatus.Clear(utils.FetchBad)
-	} else if err != nil && err != oplogsyncer.TimeoutError {
+	} else if err != nil && err != TimeoutError {
 		LOG.Error("oplog syncer internal error: %v", err)
 		// error is nil indicate that only timeout incur syncer.next()
 		// return false. so we regardless that
 		sync.replMetric.ReplStatus.Update(utils.FetchBad)
-		utils.YieldInMs(DurationTime)
-
+		utils.DelayFor(DurationTime)
 		// alarm
 	}
-
 	// buffered oplog or trigger to flush. log is nil
 	// means that we need to flush buffer right now
 	return sync.transfer(log)
@@ -387,11 +398,152 @@ func (sync *OplogSyncer) transfer(log *bson.Raw) bool {
 		selected := int(sync.nextQueuePosition % uint64(len(sync.pendingQueue)))
 		sync.pendingQueue[selected] <- sync.buffer
 		sync.buffer = make([]*bson.Raw, 0, conf.Options.FetcherBufferCapacity)
-
 		sync.nextQueuePosition++
 		return true
 	}
 	return false
+}
+
+func (sync *OplogSyncer) LoadByDoc(ckptDoc map[string]interface{}, ts time.Time) error {
+	ackTs, ok1 := ckptDoc[utils.CheckpointAckTs].(bson.MongoTimestamp)
+	syncTs, ok2 := ckptDoc[utils.CheckpointSyncTs].(bson.MongoTimestamp)
+	if !ok1 || !ok2 {
+		return LOG.Critical("oplog syncer %v load checkpoint illegal record %v. ok1[%v] ok2[%v]",
+			sync.replset, ckptDoc, ok1, ok2)
+	}
+
+	if ackTs != 0 {
+		// the oldest oplog is lost
+		if oldTs, err := utils.GetOldestTimestampByUrl(sync.reader.src); err != nil {
+			LOG.Crashf("oplog syncer %v load checkpoint connect to %v failed. %v", sync.replset, err)
+		} else if oldTs > ackTs {
+			LOG.Crashf("oplog syncer %v load checkpoint queryTs[%v] is less than oldTs[%v], "+
+				"this error means user's oplog collection size is too small or document replication continues too long",
+				sync.replset, utils.TimestampToLog(ackTs), utils.TimestampToLog(oldTs))
+		}
+	} else {
+		// oplog replication with context.start_position = 1970-01-01T00:00:00Z
+		syncTs = bson.MongoTimestamp(1 << 32)
+		ackTs = bson.MongoTimestamp(1 << 32)
+	}
+
+	sync.batcher.syncTs = syncTs
+	sync.batcher.unsyncTs = syncTs
+	for _, worker := range sync.batcher.workerGroup {
+		worker.unack = int64(ackTs)
+		worker.ack = int64(ackTs)
+	}
+	dqName, ok3 := ckptDoc[DiskQueueName].(string)
+	dqPath := fmt.Sprintf(path.Join(conf.Options.LogDirectory, "%s.meta.dat"), dqName)
+	if sync.docEndTs == 0 {
+		// parallel run document and oplog replication
+		sync.reader.UpdateFetchStatus(FetchStatusStoreDiskNoApply)
+		sync.reader.InitDiskQueue(fmt.Sprintf("diskqueue-%v-%v", sync.replset, ts.Format("20060102-150405")))
+		sync.reader.UpdateQueryTimestamp(ackTs)
+	} else if ok3 && utils.FileExist(dqPath) {
+		// oplog replication with disk queue remained
+		sync.reader.UpdateFetchStatus(FetchStatusStoreDiskApply)
+		sync.reader.InitDiskQueue(dqName)
+		queryTs := sync.reader.GetQueryTsFromDiskQueue()
+		if queryTs == 0 {
+			// disk queue has finished and deleted
+			LOG.Warn("oplog syncer %v load checkpoint disk queue[%v] has deleted", sync.replset, dqName)
+			sync.reader.UpdateQueryTimestamp(ackTs)
+		} else {
+			sync.reader.UpdateQueryTimestamp(queryTs)
+		}
+	} else {
+		// serially run document and oplog replication
+		sync.reader.UpdateFetchStatus(FetchStatusStoreMemoryApply)
+		sync.reader.UpdateQueryTimestamp(ackTs)
+	}
+
+	LOG.Info("oplog syncer %v load checkpoint set checkpoint to ackTs[%v] syncTs[%v] fetchStatus[%v] dqName[%v]",
+		sync.replset, utils.TimestampToLog(ackTs), utils.TimestampToLog(syncTs),
+		logFetchStatus(sync.reader.fetchStatus), dqName)
+	return nil
+}
+
+func (sync *OplogSyncer) FlushByDoc() map[string]interface{} {
+	ackTs, err := sync.calculateSyncerAckTs()
+	if err != nil {
+		LOG.Crashf("OplogSyncer flush checkpoint get ackTs of syncer %v failed. %v", sync.replset, err)
+	}
+
+	syncTs := sync.batcher.syncTs
+	unsyncTs := sync.batcher.unsyncTs
+	nimo.AssertTrue(syncTs == unsyncTs, "OplogSyncer flush checkpoint panic when syncTs != unsyncTs")
+	for _, worker := range sync.batcher.workerGroup {
+		ack := bson.MongoTimestamp(atomic.LoadInt64(&worker.ack))
+		unack := bson.MongoTimestamp(atomic.LoadInt64(&worker.unack))
+		LOG.Info("OplogSyncer flush checkpoint syncer %v ack[%v] unack[%v] syncTs[%v]", sync.replset,
+			utils.TimestampToLog(ack), utils.TimestampToLog(unack), utils.TimestampToLog(syncTs))
+	}
+	sync.replMetric.AddCheckpoint(1)
+	sync.replMetric.SetLSNCheckpoint(int64(ackTs))
+
+	ckptDoc := map[string]interface{}{
+		utils.CheckpointName:   sync.replset,
+		utils.CheckpointAckTs:  ackTs,
+		utils.CheckpointSyncTs: syncTs,
+	}
+	fetchStatus := atomic.LoadInt32(&sync.reader.fetchStatus)
+	if fetchStatus == FetchStatusStoreDiskNoApply || fetchStatus == FetchStatusStoreDiskApply {
+		ckptDoc[DiskQueueName] = sync.reader.GetDiskQueueName()
+	}
+	return ckptDoc
+}
+
+func (sync *OplogSyncer) calculateSyncerAckTs() (v bson.MongoTimestamp, err error) {
+	// no need to lock and eventually consistence is acceptable
+	allAcked := true
+	candidates := make([]int64, 0, len(sync.batcher.workerGroup))
+	allAckValues := make([]int64, 0, len(sync.batcher.workerGroup))
+	for _, worker := range sync.batcher.workerGroup {
+		// read ack value first because of we don't wanna
+		// a result of ack > unack. There wouldn't be cpu
+		// reorder under atomic !
+		ack := atomic.LoadInt64(&worker.ack)
+		unack := atomic.LoadInt64(&worker.unack)
+		if ack == 0 && unack == 0 {
+			// have no oplogs synced in this worker. skip
+		} else if ack == unack || worker.IsAllAcked() {
+			// all oplogs have been acked for right now or previous status
+			worker.AllAcked(true)
+			allAckValues = append(allAckValues, ack)
+		} else if unack > ack {
+			// most likely. partial oplogs acked (0 is possible)
+			candidates = append(candidates, ack)
+			allAcked = false
+		} else if unack < ack && unack == 0 {
+			// collector restarts. receiver unack value if from buffer
+			// this is rarely happened. However we have delayed for
+			// a bit log time. so we could use it
+			allAcked = false
+		} else if unack < ack && unack != 0 {
+			// we should wait the bigger unack follows up the ack
+			// they (unack and ack) will be equivalent soon !
+			return 0, fmt.Errorf("candidates should follow up unack[%d] ack[%d]", unack, ack)
+		}
+	}
+	if allAcked && len(allAckValues) != 0 {
+		// free to choose the maximum value. ascend order
+		// the last one is the biggest
+		sort.Sort(utils.Int64Slice(allAckValues))
+		return bson.MongoTimestamp(allAckValues[len(allAckValues)-1]), nil
+	}
+
+	if len(candidates) == 0 {
+		return 0, errors.New("no candidates ack values found")
+	}
+	// ascend order. first is the smallest
+	sort.Sort(utils.Int64Slice(candidates))
+
+	if candidates[0] == 0 {
+		return 0, errors.New("smallest candidates is zero")
+	}
+	LOG.Info("calculateSyncerAckTs worker offset %v use lowest %d", candidates, candidates[0])
+	return bson.MongoTimestamp(candidates[0]), nil
 }
 
 func (sync *OplogSyncer) Handle(log *oplog.PartialLog) {

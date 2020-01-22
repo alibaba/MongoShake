@@ -4,6 +4,8 @@ type Configuration struct {
 	MongoUrls                []string `config:"mongo_urls"`
 	MongoCsUrl               string   `config:"mongo_cs_url"`
 	MongoConnectMode         string   `config:"mongo_connect_mode"`
+	MajorityWriteFull        bool     `config:"majority_write.full"`
+	MajorityWriteIncr        bool     `config:"majority_write.incr"`
 	CollectorId              string   `config:"collector.id"`
 	CheckpointInterval       int64    `config:"checkpoint.interval"`
 	HTTPListenPort           int      `config:"http_profile"`
@@ -22,6 +24,7 @@ type Configuration struct {
 	FetcherBufferCapacity    int      `config:"fetcher.buffer_capacity"`
 	Tunnel                   string   `config:"tunnel"`
 	TunnelAddress            []string `config:"tunnel.address"`
+	TunnelMessage            string   `config:"tunnel.message"`
 	MasterQuorum             bool     `config:"master_quorum"`
 	ContextStorage           string   `config:"context.storage"`
 	ContextStorageUrl        string   `config:"context.storage.url"`
@@ -49,7 +52,11 @@ type Configuration struct {
 	ReplayerCollectionParallel int  `config:"replayer.collection_parallel"`
 	ReplayerDocumentParallel   int  `config:"replayer.document_parallel"`
 	ReplayerDocumentBatchSize  int  `config:"replayer.document_batch_size"`
-	FilterOrphanDocument       bool `config:"filter.orphan_document"`
+
+	FilterOrphanDocument            bool  `config:"filter.orphan_document"`
+	ReplayerOplogStoreDisk          bool  `config:"replayer.oplog_store_disk"`
+	ReplayerOplogStoreDiskMaxSize   int64 `config:"replayer.oplog_store_disk_max_size"`
+	ReplayerOplogStoreDiskReadBatch int64 `config:"replayer.oplog_store_disk_read_batch"`
 
 	/*---------------------------------------------------------*/
 	// inner variables

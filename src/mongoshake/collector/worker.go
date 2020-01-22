@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	MaxUnAckListLength    = 128 * 256
-	DDLCheckpointInterval = 300 // unit: ms
+	MaxUnAckListLength = 128 * 256
+	AckUpdateInterval  = 300 // unit: ms
 )
 
 type Worker struct {
@@ -77,8 +77,8 @@ func (worker *Worker) AllAcked(allAcked bool) {
 }
 
 func (worker *Worker) Offer(batch []*oplog.GenericOplog) {
-	if batch != nil {
-		atomic.StoreInt64(&worker.unack, utils.TimestampToInt64(batch[len(batch)-1].Parsed.Timestamp))
+	if len(batch) != 0 {
+		atomic.StoreInt64(&worker.unack, int64(batch[len(batch)-1].Parsed.Timestamp))
 	}
 	worker.queue <- batch
 }
@@ -104,7 +104,7 @@ func (worker *Worker) findFirstAvailableBatch() []*oplog.GenericOplog {
 	for {
 		select {
 		case batch = <-worker.queue:
-		case <-time.After(DDLCheckpointInterval * time.Millisecond): // timeout, add probe message here
+		case <-time.After(AckUpdateInterval * time.Millisecond): // timeout, add probe message here
 			return nil
 		}
 
@@ -232,7 +232,7 @@ func (worker *Worker) retain(batch []*oplog.GenericOplog) {
 
 func (worker *Worker) purgeACK() {
 	bigger := sort.Search(len(worker.listUnACK), func(i int) bool {
-		return utils.TimestampToInt64(worker.listUnACK[i].Parsed.Timestamp) > worker.ack
+		return int64(worker.listUnACK[i].Parsed.Timestamp) > worker.ack
 	})
 
 	if bigger != 0 {

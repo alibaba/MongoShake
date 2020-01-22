@@ -24,7 +24,7 @@ func (tunnel *RPCWriter) Send(message *WMessage) int64 {
 		// we try just one time as higher layer will handle this error
 		if tunnel.rpcConn, err = net.DialTCP("tcp", nil, tunnel.tcpAddr); err != nil {
 			LOG.Critical("Remote rpc server connect failed. %v", err)
-			utils.YieldInMs(3000)
+			utils.DelayFor(3000)
 			tunnel.rpcConn = nil
 			return ReplyNetworkOpFail
 		}

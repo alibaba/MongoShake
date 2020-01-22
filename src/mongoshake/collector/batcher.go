@@ -72,18 +72,18 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 		return true
 	}
 
-	// move chunk is disable when timestamp <= fullSyncFinishPosition
-	if moveChunkFilter.Filter(log) && int64(log.Timestamp) <= batcher.syncer.fullSyncFinishPosition {
-		LOG.Crashf("move chunk oplog found[%v] when oplog timestamp[%v] less than fullSyncFinishPosition[%v]",
-			log, utils.TimestampToLog(log.Timestamp), utils.TimestampToLog(batcher.syncer.fullSyncFinishPosition))
+	// move chunk is disable when timestamp <= docEndTs
+	if moveChunkFilter.Filter(log) && log.Timestamp <= batcher.syncer.docEndTs {
+		LOG.Crashf("move chunk oplog found[%v] when oplog timestamp[%v] less than docEndTs[%v]",
+			log, utils.TimestampToLog(log.Timestamp), utils.TimestampToLog(batcher.syncer.docEndTs))
 	}
 
-	// DDL is disable when timestamp <= fullSyncFinishPosition
-	if ddlFilter.Filter(log) && int64(log.Timestamp) <= batcher.syncer.fullSyncFinishPosition {
-		LOG.Crashf("ddl oplog found[%v] when oplog timestamp[%v] less than fullSyncFinishPosition[%v]",
-			log, utils.TimestampToLog(log.Timestamp), utils.TimestampToLog(batcher.syncer.fullSyncFinishPosition))
-		return false
-	}
+	// DDL is disable when timestamp <= docEndTs
+	//if ddlFilter.Filter(log) && log.Timestamp <= batcher.syncer.docEndTs {
+	//	LOG.Crashf("ddl oplog found[%v] when oplog timestamp[%v] less than docEndTs[%v]",
+	//		log, utils.TimestampToLog(log.Timestamp), utils.TimestampToLog(batcher.syncer.docEndTs))
+	//	return false
+	//}
 	return false
 }
 
@@ -237,7 +237,14 @@ func (batcher *Batcher) WaitAllAck() {
 		if batcher.isAllAcked() {
 			break
 		}
-		utils.YieldInMs(WaitAckIntervalMS)
+		utils.DelayFor(WaitAckIntervalMS)
+	}
+}
+
+func (batcher *Batcher) UpdateAckTs(ts bson.MongoTimestamp) {
+	for _, worker := range batcher.workerGroup {
+		atomic.StoreInt64(&worker.unack, int64(ts))
+		atomic.StoreInt64(&worker.ack, int64(ts))
 	}
 }
 

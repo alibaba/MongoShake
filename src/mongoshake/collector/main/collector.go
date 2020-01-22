@@ -28,7 +28,9 @@ func main() {
 	var err error
 	defer handleExit()
 	defer LOG.Close()
-	defer utils.Goodbye()
+	defer utils.Goodbye(func() bool {
+		return conf.Options.SyncMode != collector.SyncModeDocument
+	})
 
 	// argument options
 	configuration := flag.String("conf", "", "configure file absolute path")
@@ -77,7 +79,7 @@ func main() {
 	utils.Welcome()
 
 	// get exclusive process lock and write pid
-	if utils.WritePidById(conf.Options.LogDirectory, conf.Options.CollectorId) {
+	if utils.WritePidById("", conf.Options.CollectorId) {
 		startup()
 	}
 }
@@ -103,7 +105,7 @@ func startup() {
 	}
 
 	// if the sync mode is "document", mongoshake should exit here.
-	if conf.Options.SyncMode != collector.SYNCMODE_DOCUMENT {
+	if conf.Options.SyncMode != collector.SyncModeDocument {
 		if err := utils.HttpApi.Listen(); err != nil {
 			LOG.Critical("Coordinator http api listen failed. %v", err)
 		}
@@ -186,9 +188,14 @@ func sanitizeOptions() error {
 		return errors.New("http listen port too low numeric")
 	}
 	if conf.Options.CheckpointInterval < 0 {
-		return errors.New("checkpoint batch size is negative")
+		return errors.New("checkpoint interval is negative")
 	} else if conf.Options.CheckpointInterval  == 0 {
-		conf.Options.CheckpointInterval = 5000 // set default to 5 seconds
+		conf.Options.CheckpointInterval = 10 // set default to 10 seconds
+	}
+	if conf.Options.MoveChunkInterval < 0 {
+		return errors.New("move chunk interval is negative")
+	} else if conf.Options.MoveChunkInterval  == 0 {
+		conf.Options.MoveChunkInterval = 10 // set default to 10 seconds
 	}
 	if conf.Options.ShardKey != oplog.ShardByNamespace &&
 		conf.Options.ShardKey != oplog.ShardByID &&
@@ -258,6 +265,11 @@ func sanitizeOptions() error {
 		}
 	}
 
+	if (conf.Options.Tunnel != "file" && conf.Options.Tunnel != "kafka") &&
+		conf.Options.TunnelMessage != utils.TunnelMessageRaw {
+		return fmt.Errorf("tunnel.message should be 'raw' if tunnel type is not 'kafka' or 'file'")
+	}
+
 	if conf.Options.SyncMode != "oplog" && conf.Options.SyncMode != "document" && conf.Options.SyncMode != "all" {
 		return fmt.Errorf("unknown sync_mode[%v]", conf.Options.SyncMode)
 	}
@@ -268,6 +280,9 @@ func sanitizeOptions() error {
 		return fmt.Errorf("unknown mongo_connect_mode[%v]", conf.Options.MongoConnectMode)
 	}
 
+	if conf.Options.LogDirectory == "" {
+		conf.Options.LogDirectory = "logs"
+	}
 	return nil
 }
 

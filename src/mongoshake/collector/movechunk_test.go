@@ -6,7 +6,6 @@ import (
 	"github.com/vinllen/mgo/bson"
 	"mongoshake/collector/configure"
 	"mongoshake/collector/filter"
-	utils "mongoshake/common"
 	"mongoshake/oplog"
 	"sync/atomic"
 	"testing"
@@ -66,8 +65,8 @@ func mockTransfer(syncer *OplogSyncer, log *oplog.PartialLog) []interface{} {
 
 	worker := syncer.batcher.workerGroup[0]
 	if !barrier {
-		atomic.StoreInt64(&worker.unack, utils.TimestampToInt64(log.Timestamp))
-		atomic.StoreInt64(&worker.ack, utils.TimestampToInt64(log.Timestamp))
+		atomic.StoreInt64(&worker.unack, int64(log.Timestamp))
+		atomic.StoreInt64(&worker.ack, int64(log.Timestamp))
 
 		syncer.mvckManager.UpdateOfferTs(syncer.replset)
 	}

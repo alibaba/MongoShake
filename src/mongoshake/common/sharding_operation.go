@@ -35,7 +35,7 @@ func GetBalancerStatusByUrl(csUrl string) (bool, error) {
 
 	var retMap map[string]interface{}
 	err = conn.Session.DB(ConfigDB).C(SettingsCol).Find(bson.M{"_id": "balancer"}).Limit(1).One(&retMap)
-	if err != nil {
+	if err != nil && err != mgo.ErrNotFound {
 		return true, err
 	}
 	if stopped, ok := retMap["stopped"].(bool); ok {
@@ -115,7 +115,6 @@ func GetChunkMapByUrl(csUrl string) (ShardingChunkMap, error) {
 		shardCol := chunkMap[replset][chunkDoc.Ns]
 		var mins, maxs []interface{}
 		for i, item := range minD {
-
 			if item.Name != shardCol.Keys[i] {
 				return nil, fmt.Errorf("GetChunkMapByUrl get illegal chunk doc min[%v] keys[%v]",
 					minD, shardCol.Keys)
@@ -226,8 +225,6 @@ func GetDDLNamespace(log *oplog.PartialLog) string {
 		fallthrough
 	case "createIndexes":
 		fallthrough
-	case "dropDatabase":
-		fallthrough
 	case "collMod":
 		fallthrough
 	case "drop":
@@ -249,6 +246,8 @@ func GetDDLNamespace(log *oplog.PartialLog) string {
 			LOG.Crashf("GetDDLNamespace meet illegal DDL log[%s]", logD)
 		}
 		return fmt.Sprintf("%s.%s", db, collection)
+	case "dropDatabase":
+		return log.Namespace
 	case "renameCollection":
 		ns, ok := oplog.GetKey(log.Object, operation).(string)
 		if !ok {
