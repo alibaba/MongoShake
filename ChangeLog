@@ -1,3 +1,8 @@
+2020-01-22 Alibaba Cloud.
+	* version: 2.2.1
+	* IMPROVE: support oplog stored to disk during document replication.
+	* IMPROVE: support reading from kafka in by different tunnel message type.
+
 2019-11-20 Alibaba Cloud.
 	* version: 2.2.0
 	* this is a important version for sharding replication
