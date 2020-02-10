@@ -45,7 +45,7 @@ type OplogSyncer struct {
 	// source mongodb replica set name
 	replset string
 	// oplog start position of source mongodb
-	startPosition int64
+	startPosition int32
 	// full sync finish position, used to check DDL between full sync and incr sync
 	fullSyncFinishPosition int64
 
@@ -86,7 +86,7 @@ type OplogSyncer struct {
 func NewOplogSyncer(
 	coordinator *ReplicationCoordinator,
 	replset string,
-	startPosition int64,
+	startPosition int32,
 	fullSyncFinishPosition int64,
 	mongoUrl string,
 	gids []string) *OplogSyncer {
@@ -97,7 +97,7 @@ func NewOplogSyncer(
 		fullSyncFinishPosition: fullSyncFinishPosition,
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
-		reader: NewOplogReader(mongoUrl),
+		reader: NewOplogReader(mongoUrl, replset),
 	}
 
 	// concurrent level hasher
@@ -142,6 +142,10 @@ func (sync *OplogSyncer) bind(w *Worker) {
 	sync.batcher.workerGroup = append(sync.batcher.workerGroup, w)
 }
 
+func (sync *OplogSyncer) startDiskApply() {
+	sync.reader.UpdatefetchStage(utils.FetchStageStoreDiskApply)
+}
+
 // start to polling oplog
 func (sync *OplogSyncer) start() {
 	LOG.Info("Poll oplog syncer start. ckpt_interval[%dms], gid[%s], shard_key[%s]",
@@ -155,6 +159,10 @@ func (sync *OplogSyncer) start() {
 	// 2. load existing ckpt from remote storage
 	// 3. start checkpoint persist routine
 	sync.newCheckpointManager(sync.replset, sync.startPosition)
+	// load checkpoint and set stage
+	if err := sync.loadCheckpoint(); err != nil {
+		LOG.Crash(err)
+	}
 
 	// start deserializer: parse data from pending queue, and then push into logs queue.
 	sync.startDeserializer()
@@ -218,14 +226,14 @@ func (sync *OplogSyncer) startBatcher() {
 					return
 				}
 
-				checkpointTs := utils.ExtractMongoTimestamp(sync.ckptManager.Get().Timestamp)
+				checkpointTs := utils.ExtractMongoTimestamp(sync.ckptManager.GetInMemory().Timestamp)
 				filterNewestTs := utils.ExtractMongoTimestamp(filterLog.Timestamp)
 				if filterNewestTs-FilterCheckpointGap > checkpointTs {
 					// if checkpoint has not been update for {FilterCheckpointGap} seconds, update
 					// checkpoint mandatory.
 					newestTs = filterLog.Timestamp
-					LOG.Info("try to update checkpoint mandatory from %v(%v) to %v(%v)", sync.ckptManager.Get().Timestamp,
-						checkpointTs, filterLog.Timestamp, filterNewestTs)
+					LOG.Info("try to update checkpoint mandatory from %v(%v) to %v(%v)",
+						sync.ckptManager.GetInMemory().Timestamp, checkpointTs, filterLog.Timestamp, filterNewestTs)
 				} else {
 					return
 				}
@@ -264,7 +272,7 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.Mongo
 	if barrier && newestTs > 0 && conf.Options.WorkerNum > 1 {
 		LOG.Info("find barrier")
 		for {
-			checkpointTs := sync.ckptManager.Get().Timestamp
+			checkpointTs := sync.ckptManager.GetInMemory().Timestamp
 			LOG.Info("compare remote checkpoint[%v(%v)] to local newestTs[%v(%v)]",
 				checkpointTs, utils.ExtractMongoTimestamp(checkpointTs), newestTs, utils.ExtractMongoTimestamp(newestTs))
 			if checkpointTs >= newestTs {
@@ -316,13 +324,13 @@ func (sync *OplogSyncer) deserializer(index int) {
 	}
 }
 
-// only master(maybe several mongo-shake starts) can poll oplog.
+// only master(maybe several mongo-shake start) can poll oplog.
 func (sync *OplogSyncer) poll() {
 	// we should reload checkpoint. in case of other collector
 	// has fetched oplogs when master quorum leader election
 	// happens frequently. so we simply reload.
-	checkpoint := sync.ckptManager.Get()
-	if checkpoint == nil {
+	checkpoint, err := sync.ckptManager.Get()
+	if err != nil {
 		// we doesn't continue working on ckpt fetched failed. because we should
 		// confirm the exist checkpoint value or exactly knows that it doesn't exist
 		LOG.Critical("Acquire the existing checkpoint from remote[%s] failed !", conf.Options.ContextAddress)

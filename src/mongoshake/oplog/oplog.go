@@ -141,3 +141,11 @@ func SetFiled(input bson.D, key string, value interface{}) {
 		}
 	}
 }
+
+func ParseTimstampFromBson(intput []byte) bson.MongoTimestamp {
+	log := new(PartialLog)
+	if err := bson.Unmarshal(intput, log); err != nil {
+		return -1
+	}
+	return log.Timestamp
+}

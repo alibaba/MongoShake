@@ -224,7 +224,7 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 func Checkpoint(ckptMap map[string]utils.TimestampNode) error {
 	for name, ts := range ckptMap {
 		ckptManager := ckpt.NewCheckpointManager(name, 0)
-		ckptManager.Get()
+		ckptManager.Get() // load checkpoint in ckptManager
 		if err := ckptManager.Update(ts.Newest); err != nil {
 			return err
 		}

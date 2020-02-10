@@ -1,10 +1,12 @@
 package conf
 
+import "mongoshake/common"
+
 type Configuration struct {
 	MongoUrls               []string `config:"mongo_urls"`
 	MongoConnectMode        string   `config:"mongo_connect_mode"`
-	MajorityWriteFull        bool     `config:"majority_write.full"`
-	MajorityWriteIncr        bool     `config:"majority_write.incr"`
+	MajorityWriteFull       bool     `config:"majority_write.full"`
+	MajorityWriteIncr       bool     `config:"majority_write.incr"`
 	CollectorId             string   `config:"collector.id"`
 	CheckpointInterval      int64    `config:"checkpoint.interval"`
 	HTTPListenPort          int      `config:"http_profile"`
@@ -23,7 +25,7 @@ type Configuration struct {
 	FetcherBufferCapacity   int      `config:"fetcher.buffer_capacity"`
 	Tunnel                  string   `config:"tunnel"`
 	TunnelAddress           []string `config:"tunnel.address"`
-	TunnelMessage            string   `config:"tunnel.message"`
+	TunnelMessage           string   `config:"tunnel.message"`
 	MasterQuorum            bool     `config:"master_quorum"`
 	ContextStorage          string   `config:"context.storage"`
 	ContextStorageUrl       string   `config:"context.storage.url"`
@@ -44,10 +46,12 @@ type Configuration struct {
 	ReplayerConflictWriteTo           string `config:"replayer.conflict_write_to"`
 	ReplayerDurable                   bool   `config:"replayer.durable"`
 
-	ReplayerCollectionDrop     bool `config:"replayer.collection_drop"`
-	ReplayerCollectionParallel int  `config:"replayer.collection_parallel"`
-	ReplayerDocumentParallel   int  `config:"replayer.document_parallel"`
-	ReplayerDocumentBatchSize  int  `config:"replayer.document_batch_size"`
+	ReplayerCollectionDrop        bool  `config:"replayer.collection_drop"`
+	ReplayerCollectionParallel    int   `config:"replayer.collection_parallel"`
+	ReplayerDocumentParallel      int   `config:"replayer.document_parallel"`
+	ReplayerDocumentBatchSize     int   `config:"replayer.document_batch_size"`
+	ReplayerOplogStoreDisk        bool  `config:"replayer.oplog_store_disk"`
+	ReplayerOplogStoreDiskMaxSize int64 `config:"replayer.oplog_store_disk_max_size"`
 
 	/*---------------------------------------------------------*/
 	// inner variables
@@ -65,3 +69,20 @@ func (configuration *Configuration) IsShardCluster() bool {
 }
 
 var Options Configuration
+
+func GetSafeOptions() Configuration {
+	polish := Options
+
+	// modify mongo_ulrs
+	for i := range polish.MongoUrls {
+		polish.MongoUrls[i] = utils.BlockMongoUrlPassword(polish.MongoUrls[i], "***")
+	}
+	// modify tunnel.address
+	for i := range polish.TunnelAddress {
+		polish.TunnelAddress[i] = utils.BlockMongoUrlPassword(polish.TunnelAddress[i], "***")
+	}
+	// modify storage url
+	polish.ContextStorageUrl = utils.BlockMongoUrlPassword(polish.ContextStorageUrl, "***")
+
+	return polish
+}

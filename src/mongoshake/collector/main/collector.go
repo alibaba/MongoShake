@@ -96,7 +96,7 @@ func startup() {
 	}
 
 	utils.HttpApi.RegisterAPI("/conf", nimo.HttpGet, func([]byte) interface{} {
-		return &conf.Options
+		return conf.GetSafeOptions()
 	})
 
 	for i, src := range conf.Options.MongoUrls {

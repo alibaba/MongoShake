@@ -46,7 +46,8 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	LOG.Info("Collector startup. shard_by[%s] gids[%s]", conf.Options.ShardKey, conf.Options.OplogGIDS)
 
 	// all configurations has changed to immutable
-	opts, _ := json.Marshal(conf.Options)
+	// opts, _ := json.Marshal(conf.Options)
+	opts, _ := json.Marshal(conf.GetSafeOptions())
 	LOG.Info("Collector configuration %s", string(opts))
 
 	coordinator.sentinel = &utils.Sentinel{}
@@ -56,42 +57,27 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	if err != nil {
 		return err
 	}
+	fullBeginTs32 := utils.ExtractMongoTimestamp(fullBeginTs)
 
 	/*
 	 * Generally speaking, it's better to use several bridge timestamp so that
 	 * each shard match one in sharding mode.
 	 * TODO
 	 */
-	LOG.Info("start running with mode[%v], fullBeginTs[%v]", syncMode, fullBeginTs)
+	LOG.Info("start running with mode[%v], fullBeginTs[%v]", syncMode, fullBeginTs32)
 
 	switch syncMode {
 	case SYNCMODE_ALL:
-		if err := coordinator.startDocumentReplication(); err != nil {
-			return err
-		}
-
-		// get current newest timestamp
-		_, fullFinishTs, _, oldestTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
-		if err != nil {
-			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
-		}
-		LOG.Info("------------------------full sync done!------------------------")
-
-		LOG.Info("oldestTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractMongoTimestamp(oldestTs),
-			utils.ExtractMongoTimestamp(fullBeginTs), utils.ExtractMongoTimestamp(fullFinishTs))
-		// the oldest oplog is lost
-		if utils.ExtractMongoTimestamp(oldestTs) >= fullBeginTs {
-			err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's " +
-				"oplog collection size is too small or full sync continues too long", fullBeginTs, oldestTs)
-			LOG.Error(err)
-			return err
-		}
-
-		LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
-			utils.ExtractMongoTimestamp(fullBeginTs), utils.ExtractMongoTimestamp(fullFinishTs))
-
-		if err := coordinator.startOplogReplication(fullBeginTs, utils.TimestampToInt64(fullFinishTs)); err != nil {
-			return err
+		if conf.Options.ReplayerOplogStoreDisk {
+			LOG.Info("run parallel document oplog")
+			if err := coordinator.parallelDocumentOplog(fullBeginTs32); err != nil {
+				return err
+			}
+		} else {
+			LOG.Info("run serialize document oplog")
+			if err := coordinator.serializeDocumentOplog(fullBeginTs32); err != nil {
+				return err
+			}
 		}
 	case SYNCMODE_DOCUMENT:
 		if err := coordinator.startDocumentReplication(); err != nil {
@@ -191,9 +177,15 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	needFull := false
 	for replName, ts := range tsMap {
 		ckptManager := ckpt.NewCheckpointManager(replName, 0)
-		ckptTs := ckptManager.Get().Timestamp
-		if ts.Oldest >= ckptTs {
-			// checkpoint less than the oldest timestamp
+		ckpt, err := ckptManager.Get()
+		if err != nil {
+			return "", 0, err
+		}
+
+		// checkpoint less than the oldest timestamp, ckpt.OplogDiskQueue == "" means not enable
+		// disk persist
+		if ts.Oldest >= ckpt.Timestamp && ckpt.OplogDiskQueue == "" {
+			// check if disk queue enable
 			needFull = true
 			break
 		}
@@ -205,6 +197,81 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 		LOG.Info("sync mode change from 'all' to 'oplog'")
 		return SYNCMODE_OPLOG, 0, nil
 	}
+}
+
+// run incr-sync after full-sync
+func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs32 int64) error {
+	if err := coordinator.startDocumentReplication(); err != nil {
+		return fmt.Errorf("start document replication failed: %v", err)
+	}
+
+	// get current newest timestamp
+	_, fullFinishTs, _, oldestTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
+	if err != nil {
+		return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
+	}
+	LOG.Info("------------------------full sync done!------------------------")
+	oldestTs32 := utils.ExtractMongoTimestamp(oldestTs)
+	LOG.Info("oldestTs[%v] fullBeginTs[%v] fullFinishTs[%v]", oldestTs32, fullBeginTs32,
+		utils.ExtractMongoTimestamp(fullFinishTs))
+	// the oldest oplog is lost
+	if oldestTs32 >= fullBeginTs32 {
+		err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's " +
+			"oplog collection size is too small or full sync continues too long", fullBeginTs32, oldestTs32)
+		LOG.Error(err)
+		return err
+	}
+
+	LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
+		fullBeginTs32, utils.ExtractMongoTimestamp(fullFinishTs))
+
+	return coordinator.startOplogReplication(fullBeginTs32, utils.TimestampToInt64(fullFinishTs))
+}
+
+// run full-sync and incr-sync in parallel
+func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs32 int64) error {
+	var docError error
+	var docWg sync.WaitGroup
+	docWg.Add(1)
+	nimo.GoRoutine(func() {
+		defer docWg.Done()
+		if err := coordinator.startDocumentReplication(); err != nil {
+			docError = LOG.Critical("document Replication error. %v", err)
+			return
+		}
+		LOG.Info("------------------------document replication done!------------------------")
+
+		/*
+		// get current newest timestamp
+		endAllTsMap, _, _, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
+		if err != nil {
+			docError = LOG.Critical("document replication get end timestamp failed[%v]", err)
+			return
+		}
+
+		for replset, endTs := range endAllTsMap {
+			beginTs := beginTsMap[replset]
+			LOG.Info("document replication replset %v beginTs[%v] endTs[%v]",
+				replset, utils.ExtractTs32(beginTs), utils.ExtractTs32(endTs.Newest))
+			docEndTsMap[replset] = endTs.Newest
+		}*/
+	})
+	// during document replication, oplog syncer fetch oplog and store on disk, in order to avoid oplog roll up
+	// fullSyncFinishPosition means no need to check the end time to disable DDL
+	if err := coordinator.startOplogReplication(fullBeginTs32, 0); err != nil {
+		return LOG.Critical("start oplog replication failed: %v", err)
+	}
+	// wait for document replication to finish, set docEndTs to oplog syncer, start oplog replication
+	docWg.Wait()
+	if docError != nil {
+		return docError
+	}
+	LOG.Info("finish document replication, change oplog replication to %v", utils.FetchStageStoreDiskApply)
+	for _, syncer := range coordinator.syncerGroup {
+		syncer.startDiskApply()
+	}
+
+	return nil
 }
 
 func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
@@ -290,7 +357,8 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
 	for _, src := range coordinator.Sources {
-		syncer := NewOplogSyncer(coordinator, src.ReplicaName, oplogStartPosition, fullSyncFinishPosition, src.URL,
+		// oplogStartPosition is 32 bits
+		syncer := NewOplogSyncer(coordinator, src.ReplicaName, int32(oplogStartPosition), fullSyncFinishPosition, src.URL,
 			src.Gids)
 		// syncerGroup http api registry
 		syncer.init()

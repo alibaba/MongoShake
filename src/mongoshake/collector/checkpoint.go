@@ -15,10 +15,52 @@ import (
 	"github.com/vinllen/mgo/bson"
 )
 
-func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int64) {
-	LOG.Info("Oplog sync create checkpoint manager with [%s] [%s]",
-		conf.Options.ContextStorage, conf.Options.ContextAddress)
+func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int32) {
+	LOG.Info("Oplog sync[%v] create checkpoint manager with storage[%s] address[%s] start-position[%v]",
+		name, conf.Options.ContextStorage, conf.Options.ContextAddress, startPosition)
 	sync.ckptManager = ckpt.NewCheckpointManager(name, startPosition)
+}
+
+/*
+ * load checkpoint and do some checks
+ */
+func (sync *OplogSyncer) loadCheckpoint() error {
+	checkpoint, err := sync.ckptManager.Get()
+	if err != nil {
+		return fmt.Errorf("load checkpoint[%v] failed[%v]", sync.replset, err)
+	}
+
+	// enable oplog persist?
+	if !conf.Options.ReplayerOplogStoreDisk {
+		sync.reader.fetchStage = utils.FetchStageStoreMemoryApply
+		return nil
+	}
+
+	ts := time.Now()
+
+	// check if no checkpoint exists
+	if checkpoint.Timestamp == ckpt.InitCheckpoint {
+		sync.reader.fetchStage = utils.FetchStageStoreDiskNoApply
+		dqName := fmt.Sprintf("diskqueue-%v-%v", sync.replset, ts.Format("20060102-150405"))
+		sync.reader.InitDiskQueue(dqName)
+		sync.ckptManager.SetOplogDiskQueueName(dqName)
+		sync.ckptManager.SetOplogDiskFinishTs(0) // set as init
+		return nil
+	}
+
+	// check if checkpoint real ts >= checkpoint disk last ts
+	if checkpoint.OplogDiskQueueFinishTs > 0 && checkpoint.Timestamp >= checkpoint.OplogDiskQueueFinishTs {
+		// no need to init disk queue again
+		sync.reader.fetchStage = utils.FetchStageStoreMemoryApply
+		return nil
+	}
+
+	// TODO, there is a bug if MongoShake restarts
+
+	// need to init
+	sync.reader.fetchStage = utils.FetchStageStoreDiskNoApply
+	sync.reader.InitDiskQueue(checkpoint.OplogDiskQueue)
+	return nil
 }
 
 /*
@@ -55,21 +97,27 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 		lowest, err = sync.calculateWorkerLowestCheckpoint()
 	}
 
+	lowestInt64 := bson.MongoTimestamp(lowest)
+	// if all oplogs from disk has been replayed successfully, store the newest oplog timestamp
+	if conf.Options.ReplayerOplogStoreDisk && sync.reader.diskQueueLastTs != -1 && lowestInt64 > sync.reader.diskQueueLastTs {
+		sync.ckptManager.SetOplogDiskFinishTs(lowestInt64)
+	}
+
 	if lowest > 0 && err == nil {
 		switch {
-		case bson.MongoTimestamp(lowest) > inMemoryTs:
-			if err = sync.ckptManager.Update(bson.MongoTimestamp(lowest)); err == nil {
+		case lowestInt64 > inMemoryTs:
+			if err = sync.ckptManager.Update(lowestInt64); err == nil {
 				LOG.Info("CheckpointOperation write success. updated from %v to %v",
 					utils.ExtractTimestampForLog(inMemoryTs), utils.ExtractTimestampForLog(lowest))
 				sync.replMetric.AddCheckpoint(1)
 				sync.replMetric.SetLSNCheckpoint(lowest)
 				return
 			}
-		case bson.MongoTimestamp(lowest) < inMemoryTs:
+		case lowestInt64 < inMemoryTs:
 			LOG.Info("CheckpointOperation calculated is smaller than value in memory. lowest %v current %v",
 				utils.ExtractTimestampForLog(lowest), utils.ExtractTimestampForLog(inMemoryTs))
 			return
-		case bson.MongoTimestamp(lowest) == inMemoryTs:
+		case lowestInt64 == inMemoryTs:
 			return
 		}
 	}
@@ -130,3 +178,4 @@ func (sync *OplogSyncer) calculateWorkerLowestCheckpoint() (v int64, err error) 
 	LOG.Info("worker offset %v use lowest %d", candidates, candidates[0])
 	return candidates[0], nil
 }
+
