@@ -193,6 +193,7 @@ func (sync *OplogSyncer) startBatcher() {
 
 		var newestTs bson.MongoTimestamp
 		if log, filterLog := batcher.getLastOplog(); log != nil && !allEmpty {
+			// if all filtered, still update checkpoint
 			newestTs = log.Timestamp
 
 			// push to worker
@@ -273,8 +274,8 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.Mongo
 		LOG.Info("find barrier")
 		for {
 			checkpointTs := sync.ckptManager.GetInMemory().Timestamp
-			LOG.Info("compare remote checkpoint[%v(%v)] to local newestTs[%v(%v)]",
-				checkpointTs, utils.ExtractMongoTimestamp(checkpointTs), newestTs, utils.ExtractMongoTimestamp(newestTs))
+			LOG.Info("compare remote checkpoint[%v] to local newestTs[%v(%v)]",
+				utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
 			if checkpointTs >= newestTs {
 				LOG.Info("barrier checkpoint updated")
 				break
@@ -329,7 +330,7 @@ func (sync *OplogSyncer) poll() {
 	// we should reload checkpoint. in case of other collector
 	// has fetched oplogs when master quorum leader election
 	// happens frequently. so we simply reload.
-	checkpoint, err := sync.ckptManager.Get()
+	checkpoint, _, err := sync.ckptManager.Get()
 	if err != nil {
 		// we doesn't continue working on ckpt fetched failed. because we should
 		// confirm the exist checkpoint value or exactly knows that it doesn't exist

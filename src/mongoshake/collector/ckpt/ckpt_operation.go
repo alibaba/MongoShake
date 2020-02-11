@@ -1,7 +1,6 @@
 package ckpt
 
 import (
-	"math"
 	"net/http"
 	"io/ioutil"
 	"encoding/json"
@@ -17,20 +16,23 @@ import (
 )
 
 const (
-	InitCheckpoint = bson.MongoTimestamp(1 << 32)
+	// we can't insert Timestamp(0, 0) that will be treat as Now() inserted
+	// into mongo. so we use Timestamp(0, 1)
+	InitCheckpoint = bson.MongoTimestamp(1)
 )
 
 type CheckpointOperation interface {
 	// read checkpoint from remote storage. and encapsulation
 	// with CheckpointContext struct
-	Get() *CheckpointContext
+	// bool means whether exists on remote
+	Get() (*CheckpointContext, bool)
 
 	// save checkpoint
 	Insert(ckpt *CheckpointContext) error
 }
 
 type MongoCheckpoint struct {
-	Checkpoint
+	CheckpointContext
 
 	Conn        *utils.MongoConn
 	QueryHandle *mgo.Collection
@@ -64,32 +66,34 @@ func (ckpt *MongoCheckpoint) close() {
 	ckpt.Conn = nil
 }
 
-func (ckpt *MongoCheckpoint) Get() *CheckpointContext {
+func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 	if !ckpt.ensureNetwork() {
 		LOG.Warn("Reload ckpt ensure network failed. %v", ckpt.Conn)
-		return nil
+		return nil, false
 	}
 
 	var err error
 	value := new(CheckpointContext)
 	if err = ckpt.QueryHandle.Find(bson.M{CheckpointName: ckpt.Name}).One(value); err == nil {
 		LOG.Info("Load exist checkpoint. content %v", value)
-		return value
+		return value, true
 	} else if err == mgo.ErrNotFound {
-		// we can't insert Timestamp(0, 0) that will be treat as Now() inserted
-		// into mongo. so we use Timestamp(1, 0)
-		ckpt.StartPosition = int32(math.Max(float64(ckpt.StartPosition), 1))
+		if InitCheckpoint > ckpt.Timestamp {
+			ckpt.Timestamp = InitCheckpoint
+		}
 		value.Name = ckpt.Name
-		value.Timestamp = bson.MongoTimestamp(int64(ckpt.StartPosition) << 32)
+		value.Timestamp = ckpt.Timestamp
+		value.OplogDiskQueue = ckpt.OplogDiskQueue
+		value.OplogDiskQueueFinishTs = ckpt.OplogDiskQueueFinishTs
 		LOG.Info("Regenerate checkpoint but won't persist. content %v", value)
 		// insert current ckpt snapshot in memory
 		// ckpt.QueryHandle.Insert(value)
-		return value
+		return value, false
 	}
 
 	ckpt.close()
 	LOG.Warn("Reload ckpt find context fail. %v", err)
-	return nil
+	return nil, false
 }
 
 func (ckpt *MongoCheckpoint) Insert(updates *CheckpointContext) error {
@@ -109,36 +113,37 @@ func (ckpt *MongoCheckpoint) Insert(updates *CheckpointContext) error {
 }
 
 type HttpApiCheckpoint struct {
-	Checkpoint
+	CheckpointContext
 
 	URL string
 }
 
-func (ckpt *HttpApiCheckpoint) Get() *CheckpointContext {
+func (ckpt *HttpApiCheckpoint) Get() (*CheckpointContext, bool) {
 	var err error
 	var resp *http.Response
 	var stream []byte
 	value := new(CheckpointContext)
 	if resp, err = http.Get(ckpt.URL); err != nil {
 		LOG.Warn("Http api ckpt request failed, %v", err)
-		return nil
+		return nil, false
 	}
 
 	if stream, err = ioutil.ReadAll(resp.Body); err != nil {
-		return nil
+		return nil, false
 	}
 	if err = json.Unmarshal(stream, value); err != nil {
-		return nil
+		return nil, false
 	}
+	// TODO, may have problem
 	if value.Timestamp == 0 {
 		// use default start position
-		value.Timestamp = bson.MongoTimestamp(ckpt.StartPosition << 32)
-	}
-	if len(value.Name) == 0 {
-		// default name
+		value.Timestamp = ckpt.Timestamp
 		value.Name = ckpt.Name
+		value.OplogDiskQueueFinishTs = ckpt.OplogDiskQueueFinishTs
+		value.OplogDiskQueue = ckpt.OplogDiskQueue
+		return value, false
 	}
-	return value
+	return value, true
 }
 
 func (ckpt *HttpApiCheckpoint) Insert(insert *CheckpointContext) error {

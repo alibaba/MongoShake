@@ -25,10 +25,11 @@ func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int32) 
  * load checkpoint and do some checks
  */
 func (sync *OplogSyncer) loadCheckpoint() error {
-	checkpoint, err := sync.ckptManager.Get()
+	checkpoint, exists, err := sync.ckptManager.Get()
 	if err != nil {
 		return fmt.Errorf("load checkpoint[%v] failed[%v]", sync.replset, err)
 	}
+	LOG.Info("load checkpoint value: %v", checkpoint)
 
 	// enable oplog persist?
 	if !conf.Options.ReplayerOplogStoreDisk {
@@ -38,13 +39,13 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 
 	ts := time.Now()
 
-	// check if no checkpoint exists
-	if checkpoint.Timestamp == ckpt.InitCheckpoint {
+	// if no checkpoint exists
+	if !exists {
 		sync.reader.fetchStage = utils.FetchStageStoreDiskNoApply
 		dqName := fmt.Sprintf("diskqueue-%v-%v", sync.replset, ts.Format("20060102-150405"))
 		sync.reader.InitDiskQueue(dqName)
 		sync.ckptManager.SetOplogDiskQueueName(dqName)
-		sync.ckptManager.SetOplogDiskFinishTs(0) // set as init
+		sync.ckptManager.SetOplogDiskFinishTs(ckpt.InitCheckpoint) // set as init
 		return nil
 	}
 
@@ -99,8 +100,8 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 
 	lowestInt64 := bson.MongoTimestamp(lowest)
 	// if all oplogs from disk has been replayed successfully, store the newest oplog timestamp
-	if conf.Options.ReplayerOplogStoreDisk && sync.reader.diskQueueLastTs != -1 && lowestInt64 > sync.reader.diskQueueLastTs {
-		sync.ckptManager.SetOplogDiskFinishTs(lowestInt64)
+	if conf.Options.ReplayerOplogStoreDisk && sync.reader.diskQueueLastTs > 0 && lowestInt64 >= sync.reader.diskQueueLastTs {
+		sync.ckptManager.SetOplogDiskFinishTs(sync.reader.diskQueueLastTs)
 	}
 
 	if lowest > 0 && err == nil {

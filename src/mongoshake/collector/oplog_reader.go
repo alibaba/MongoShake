@@ -274,6 +274,7 @@ Loop:
 
 	// wait to finish retrieve and continue fetch to store to memory
 	reader.disQueueMutex.Lock()
+	defer reader.disQueueMutex.Unlock() // lock till the end
 	readData := reader.diskQueue.ReadAll()
 	if len(readData) > 0 {
 		for _, data := range readData {
@@ -292,11 +293,11 @@ Loop:
 			reader.replset, reader.diskQueue.Depth())
 	}
 	reader.UpdatefetchStage(utils.FetchStageStoreMemoryApply)
-	reader.disQueueMutex.Unlock()
 
 	if err := reader.diskQueue.Delete(); err != nil {
 		LOG.Critical("reader retrieve for replset %v close disk queue error. %v", reader.replset, err)
 	}
+	LOG.Info("reader retriever exits")
 }
 
 // ensureNetwork establish the mongodb connection at first

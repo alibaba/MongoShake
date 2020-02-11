@@ -30,21 +30,14 @@ type CheckpointContext struct {
 	Timestamp              bson.MongoTimestamp `bson:"ckpt" json:"ckpt"`
 	Version                int                 `bson:"version" json:"version"`
 	OplogDiskQueue         string              `bson:"oplog_disk_queue" json:"oplog_disk_queue"`
-	OplogDiskQueueFinishTs bson.MongoTimestamp `bson:"oplog_disk_queue_finish_ts" json:"oplog_disk_queue_finish_ts"`
-}
-
-type Checkpoint struct {
-	Name                   string
-	StartPosition          int32 // 32 bits timestamp
-	Version                int
-	OplogDiskQueue         string
-	OplogDiskQueueFinishTs int32
+	OplogDiskQueueFinishTs bson.MongoTimestamp `bson:"oplog_disk_queue_apply_finish_ts" json:"oplog_disk_queue_apply_finish_ts"`
 }
 
 type CheckpointManager struct {
 	Type string
 
 	ctx      *CheckpointContext
+	ctxRec   *CheckpointContext // only used to store temporary value that will be lazy load
 	delegate CheckpointOperation
 }
 
@@ -54,9 +47,12 @@ func NewCheckpointManager(name string, startPosition int32) *CheckpointManager {
 	switch conf.Options.ContextStorage {
 	case StorageTypeAPI:
 		newManager.delegate = &HttpApiCheckpoint{
-			Checkpoint: Checkpoint{
-				Name:          name,
-				StartPosition: startPosition,
+			CheckpointContext: CheckpointContext{
+				Name:                   name,
+				Timestamp:              bson.MongoTimestamp(int64(startPosition) << 32),
+				Version:                CurrentVersion,
+				OplogDiskQueue:         "",
+				OplogDiskQueueFinishTs: InitCheckpoint,
 			},
 			URL: conf.Options.ContextAddress,
 		}
@@ -66,9 +62,12 @@ func NewCheckpointManager(name string, startPosition int32) *CheckpointManager {
 			db = CheckpointAdminDatabase
 		}
 		newManager.delegate = &MongoCheckpoint{
-			Checkpoint: Checkpoint{
-				Name:          name,
-				StartPosition: startPosition,
+			CheckpointContext: CheckpointContext{
+				Name:                   name,
+				Timestamp:              bson.MongoTimestamp(int64(startPosition) << 32),
+				Version:                CurrentVersion,
+				OplogDiskQueue:         "",
+				OplogDiskQueueFinishTs: InitCheckpoint,
 			},
 			DB:    db,
 			URL:   conf.Options.ContextStorageUrl,
@@ -79,24 +78,24 @@ func NewCheckpointManager(name string, startPosition int32) *CheckpointManager {
 }
 
 // get persist checkpoint
-func (manager *CheckpointManager) Get() (*CheckpointContext, error) {
-	manager.ctx = manager.delegate.Get()
+func (manager *CheckpointManager) Get() (*CheckpointContext, bool, error) {
+	var exist bool
+	manager.ctx, exist = manager.delegate.Get()
 	if manager.ctx == nil {
-		return nil, fmt.Errorf("get by checkpoint manager[%v] failed", manager.Type)
+		return nil, exist, fmt.Errorf("get by checkpoint manager[%v] failed", manager.Type)
 	}
 
 	// check fcv
 	if manager.ctx.Version < FeatureCompatibleVersion || manager.ctx.Version > CurrentVersion {
-		return nil, fmt.Errorf("current checkpoint version is %v, should >= %d and <= %d", manager.ctx.Version,
+		return nil, exist, fmt.Errorf("current checkpoint version is %v, should >= %d and <= %d", manager.ctx.Version,
 			FeatureCompatibleVersion, CurrentVersion)
 	}
 
-	return manager.ctx, nil
+	return manager.ctx, exist, nil
 }
 
 // get in memory checkpoint
 func (manager *CheckpointManager) GetInMemory() *CheckpointContext {
-	// TODO, vinllen, 2020_02_06 judge version
 	return manager.ctx
 }
 
@@ -107,13 +106,28 @@ func (manager *CheckpointManager) Update(ts bson.MongoTimestamp) error {
 
 	manager.ctx.Timestamp = ts
 	manager.ctx.Version = CurrentVersion
+	// update OplogDiskQueueFinishTs if set
+	if manager.ctxRec != nil && manager.ctx.OplogDiskQueueFinishTs != manager.ctxRec.OplogDiskQueueFinishTs {
+		manager.ctx.OplogDiskQueueFinishTs = manager.ctxRec.OplogDiskQueueFinishTs
+	}
+	// update OplogDiskQueueFinishTs if set
+	if manager.ctxRec != nil && manager.ctx.OplogDiskQueue != manager.ctxRec.OplogDiskQueue {
+		manager.ctx.OplogDiskQueue = manager.ctxRec.OplogDiskQueue
+	}
 	return manager.delegate.Insert(manager.ctx)
 }
 
+// OplogDiskQueueFinishTs and OplogDiskQueue won't immediate effect, will be inserted in next Update call.
 func (manager *CheckpointManager) SetOplogDiskFinishTs(ts bson.MongoTimestamp) {
-	manager.ctx.OplogDiskQueueFinishTs = ts
+	if manager.ctxRec == nil {
+		manager.ctxRec = new(CheckpointContext)
+	}
+	manager.ctxRec.OplogDiskQueueFinishTs = ts
 }
 
 func (manager *CheckpointManager) SetOplogDiskQueueName(name string) {
-	manager.ctx.OplogDiskQueue = name
+	if manager.ctxRec == nil {
+		manager.ctxRec = new(CheckpointContext)
+	}
+	manager.ctxRec.OplogDiskQueue = name
 }

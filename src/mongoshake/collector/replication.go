@@ -177,7 +177,7 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	needFull := false
 	for replName, ts := range tsMap {
 		ckptManager := ckpt.NewCheckpointManager(replName, 0)
-		ckpt, err := ckptManager.Get()
+		ckpt, _, err := ckptManager.Get()
 		if err != nil {
 			return "", 0, err
 		}

@@ -1,12 +1,13 @@
 package collector
 
 import (
-	"github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
-	"mongoshake/collector/configure"
 	"mongoshake/collector/filter"
 	"mongoshake/common"
 	"mongoshake/oplog"
+	"mongoshake/collector/configure"
+
+	LOG "github.com/vinllen/log4go"
+	"github.com/gugemichael/nimo4go"
 )
 
 var (
@@ -97,7 +98,12 @@ func (batcher *Batcher) dispatchBatches(batchGroup [][]*oplog.GenericOplog) (wor
 	return
 }
 
-// return batched oplogs and barrier flag
+/**
+ * return batched oplogs and barrier flag.
+ * set barrier if find DDL.
+ * i d i c u i
+ *      | |
+ */
 func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool) {
 	// picked raw oplogs and batching in sequence
 	batchGroup := make([][]*oplog.GenericOplog, len(batcher.workerGroup))
@@ -131,6 +137,8 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool) {
 	// split batch if has DDL
 	allEmpty := true
 	for i, genericLog := range mergeBatch {
+		// TODO, 测试发现，这里可能有问题，导致勿以为是有DDL操作进行checkpoint的强刷barrier，2.4版本写完这里要再看看。
+		LOG.Info("xxxxxxxxx %s %v", genericLog.Parsed.Operation, genericLog.Parsed.Timestamp >> 32)
 		// filter oplog such like Noop or Gid-filtered
 		if batcher.filter(genericLog.Parsed) {
 			// doesn't push to worker, set lastFilterOplog
@@ -142,6 +150,7 @@ func (batcher *Batcher) batchMore() ([][]*oplog.GenericOplog, bool, bool) {
 
 		// current is ddl and barrier == false
 		if !conf.Options.ReplayerDMLOnly && ddlFilter.Filter(genericLog.Parsed) && !barrier {
+			// store and handle in the next call
 			batcher.remainLogs = mergeBatch[i:]
 			barrier = true
 			break
