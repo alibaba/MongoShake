@@ -52,7 +52,7 @@ func StartDropDestCollection(nsSet map[utils.NS]bool, toConn *utils.MongoConn,
 	nsTrans *transform.NamespaceTransform) error {
 	for ns := range nsSet {
 		toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
-		if !conf.Options.ReplayerCollectionDrop {
+		if !conf.Options.FullSyncCollectionDrop {
 			colNames, err := toConn.Session.DB(toNS.Database).CollectionNames()
 			if err != nil {
 				LOG.Critical("Get collection names of db %v of dest mongodb failed. %v", toNS.Database, err)
@@ -174,7 +174,7 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 	var wg sync.WaitGroup
 	wg.Add(len(indexMap))
 
-	collExecutorParallel := conf.Options.ReplayerCollectionParallel
+	collExecutorParallel := conf.Options.FullSyncCollectionParallel
 	namespaces := make(chan *IndexNS, collExecutorParallel)
 	nimo.GoRoutine(func() {
 		for ns, indexList := range indexMap {
@@ -245,6 +245,8 @@ type DBSyncer struct {
 	startTime time.Time
 
 	nsTrans *transform.NamespaceTransform
+	// filter orphan duplicate record
+	orphanFilter *filter.OrphanFilter
 
 	mutex sync.Mutex
 
@@ -255,7 +257,8 @@ func NewDBSyncer(
 	id int,
 	fromMongoUrl string,
 	toMongoUrl string,
-	nsTrans *transform.NamespaceTransform) *DBSyncer {
+	nsTrans *transform.NamespaceTransform,
+	orphanFilter *filter.OrphanFilter) *DBSyncer {
 
 	syncer := &DBSyncer{
 		id:           id,
@@ -263,6 +266,7 @@ func NewDBSyncer(
 		ToMongoUrl:   toMongoUrl,
 		indexMap:     make(map[utils.NS][]mgo.Index),
 		nsTrans:      nsTrans,
+		orphanFilter: orphanFilter,
 	}
 
 	return syncer
@@ -281,7 +285,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 		LOG.Info("document syncer-%d finish, but no data", syncer.id)
 	}
 
-	collExecutorParallel := conf.Options.ReplayerCollectionParallel
+	collExecutorParallel := conf.Options.FullSyncCollectionParallel
 	namespaces := make(chan utils.NS, collExecutorParallel)
 
 	wg.Add(len(nsList))
@@ -334,12 +338,12 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
 	toNS utils.NS) error {
 	reader := NewDocumentReader(syncer.FromMongoUrl, ns)
 
-	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS)
+	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS, syncer)
 	if err := colExecutor.Start(); err != nil {
 		return err
 	}
 
-	bufferSize := conf.Options.ReplayerDocumentBatchSize
+	bufferSize := conf.Options.FullSyncDocumentBatchSize
 	buffer := make([]*bson.Raw, 0, bufferSize)
 	bufferByteSize := 0
 
@@ -355,6 +359,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
 			}
 			break
 		}
+		
 		if bufferByteSize+len(doc.Data) > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
 			colExecutor.Sync(buffer)
 			buffer = make([]*bson.Raw, 0, bufferSize)

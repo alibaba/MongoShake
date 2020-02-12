@@ -12,11 +12,13 @@ import (
 
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
+	LOG "github.com/vinllen/log4go"
 )
 
-var GlobalCollExecutorId int32 = -1
-
-var GlobalDocExecutorId int32 = -1
+var (
+	GlobalCollExecutorId int32 = -1
+	GlobalDocExecutorId int32 = -1
+)
 
 type CollectionExecutor struct {
 	// multi executor
@@ -33,17 +35,21 @@ type CollectionExecutor struct {
 	conn *utils.MongoConn
 
 	docBatch chan []*bson.Raw
+
+	// not own
+	syncer *DBSyncer
 }
 
 func GenerateCollExecutorId() int {
 	return int(atomic.AddInt32(&GlobalCollExecutorId, 1))
 }
 
-func NewCollectionExecutor(id int, mongoUrl string, ns utils.NS) *CollectionExecutor {
+func NewCollectionExecutor(id int, mongoUrl string, ns utils.NS, syncer *DBSyncer) *CollectionExecutor {
 	return &CollectionExecutor{
 		id:       id,
 		mongoUrl: mongoUrl,
 		ns:       ns,
+		syncer:   syncer,
 	}
 }
 
@@ -56,13 +62,13 @@ func (colExecutor *CollectionExecutor) Start() error {
 		colExecutor.conn.Session.EnsureSafe(&mgo.Safe{WMode: utils.MajorityWriteConcern})
 	}
 
-	parallel := conf.Options.ReplayerDocumentParallel
+	parallel := conf.Options.FullSyncDocumentParallel
 	colExecutor.docBatch = make(chan []*bson.Raw, parallel)
 
 	executors := make([]*DocExecutor, parallel)
 	for i := 0; i != len(executors); i++ {
 		docSession := colExecutor.conn.Session.Clone()
-		executors[i] = NewDocExecutor(GenerateDocExecutorId(), colExecutor, docSession)
+		executors[i] = NewDocExecutor(GenerateDocExecutorId(), colExecutor, docSession, colExecutor.syncer)
 		go executors[i].start()
 	}
 	colExecutor.executors = executors
@@ -101,17 +107,21 @@ type DocExecutor struct {
 	session *mgo.Session
 
 	error error
+
+	// not own
+	syncer *DBSyncer
 }
 
 func GenerateDocExecutorId() int {
 	return int(atomic.AddInt32(&GlobalDocExecutorId, 1))
 }
 
-func NewDocExecutor(id int, colExecutor *CollectionExecutor, session *mgo.Session) *DocExecutor {
+func NewDocExecutor(id int, colExecutor *CollectionExecutor, session *mgo.Session, syncer *DBSyncer) *DocExecutor {
 	return &DocExecutor{
 		id:          id,
 		colExecutor: colExecutor,
 		session:     session,
+		syncer:      syncer,
 	}
 }
 
@@ -144,12 +154,58 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 		docList = append(docList, doc)
 	}
 
-	if err := exec.session.DB(ns.Database).C(ns.Collection).Insert(docList...); err != nil {
-		printLog := new(oplog.PartialLog)
-		bson.Unmarshal(docs[0].Data, printLog)
-		return fmt.Errorf("insert docs with length[%v] into ns %v of dest mongo failed[%v]. first doc: %v",
-			len(docList), ns, err, printLog)
+	collectionHandler := exec.session.DB(ns.Database).C(ns.Collection)
+
+	if err := collectionHandler.Insert(docList...); err != nil {
+		LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v], try to handle error",
+			len(docList), ns, err)
+		return exec.tryOneByOne(docList, collectionHandler)
 	}
 
+	return nil
+}
+
+// heavy operation. insert data one by one and handle the return error.
+func (exec *DocExecutor) tryOneByOne(input []interface{}, collectionHandler *mgo.Collection) error {
+	for _, raw := range input {
+		parsed := new(oplog.PartialLog)
+		if err := bson.Unmarshal(raw.(*bson.Raw).Data, parsed); err != nil {
+			return fmt.Errorf("unmarshal data[%v] failed[%v]", raw, err)
+		}
+
+		err := collectionHandler.Insert(parsed)
+		if err == nil {
+			continue
+		} else if !mgo.IsDup(err) {
+			return err
+		}
+
+		// only handle duplicate key error
+
+		// orphan document enable and source is sharding
+		if conf.Options.FullSyncExecutorFilterOrphanDocument && len(conf.Options.MongoUrls) > 1 {
+			// judge whether is orphan document, pass if so
+			if exec.syncer.orphanFilter.Filter(raw.(*bson.Raw), parsed.Namespace) {
+				continue
+			}
+		}
+
+		if !conf.Options.FullSyncExecutorInsertOnDupUpdate {
+			return fmt.Errorf("duplicate key error[%v], you can clean the document on the target mongodb, " +
+				"or enable %v to solve, but full-sync stage needs restart",
+				err, "full_sync.executor.insert_on_dup_update")
+		} else {
+			// convert insert operation to update operation
+			id := oplog.GetKey(parsed.Object, "")
+			if id == nil {
+				return fmt.Errorf("parse '_id' from oplog[%v] failed", parsed)
+			}
+			if err := collectionHandler.UpdateId(id, parsed); err != nil {
+				return fmt.Errorf("convert oplog[%v] from insert to update run failed[%v]", parsed, err)
+			}
+		}
+	}
+
+	// all finish
 	return nil
 }

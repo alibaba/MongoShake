@@ -3,7 +3,10 @@ package conf
 import "mongoshake/common"
 
 type Configuration struct {
+	ConfVersion             uint     `config:"conf.version"` // TODO
+
 	MongoUrls               []string `config:"mongo_urls"`
+	MongoCsUrl              string   `config:"mongo_cs_url"`
 	MongoConnectMode        string   `config:"mongo_connect_mode"`
 	MajorityWriteFull       bool     `config:"majority_write.full"`
 	MajorityWriteIncr       bool     `config:"majority_write.incr"`
@@ -46,12 +49,14 @@ type Configuration struct {
 	ReplayerConflictWriteTo           string `config:"replayer.conflict_write_to"`
 	ReplayerDurable                   bool   `config:"replayer.durable"`
 
-	ReplayerCollectionDrop        bool  `config:"replayer.collection_drop"`
-	ReplayerCollectionParallel    int   `config:"replayer.collection_parallel"`
-	ReplayerDocumentParallel      int   `config:"replayer.document_parallel"`
-	ReplayerDocumentBatchSize     int   `config:"replayer.document_batch_size"`
-	ReplayerOplogStoreDisk        bool  `config:"replayer.oplog_store_disk"`
-	ReplayerOplogStoreDiskMaxSize int64 `config:"replayer.oplog_store_disk_max_size"`
+	FullSyncCollectionDrop               bool  `config:"full_sync.collection_drop"`
+	FullSyncCollectionParallel           int   `config:"full_sync.collection_parallel"`
+	FullSyncDocumentParallel             int   `config:"full_sync.document_parallel"`
+	FullSyncDocumentBatchSize            int   `config:"full_sync.document_batch_size"`
+	FullSyncOplogStoreDisk               bool  `config:"full_sync.oplog_store_disk"`
+	FullSyncOplogStoreDiskMaxSize        int64 `config:"full_sync.oplog_store_disk_max_size"`
+	FullSyncExecutorInsertOnDupUpdate    bool  `config:"full_sync.executor.insert_on_dup_update"`
+	FullSyncExecutorFilterOrphanDocument bool  `config:"full_sync.executor.filter.orphan_document"`
 
 	/*---------------------------------------------------------*/
 	// inner variables

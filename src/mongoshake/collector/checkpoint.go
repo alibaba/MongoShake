@@ -32,7 +32,7 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 	LOG.Info("load checkpoint value: %v", checkpoint)
 
 	// enable oplog persist?
-	if !conf.Options.ReplayerOplogStoreDisk {
+	if !conf.Options.FullSyncOplogStoreDisk {
 		sync.reader.fetchStage = utils.FetchStageStoreMemoryApply
 		return nil
 	}
@@ -100,7 +100,7 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 
 	lowestInt64 := bson.MongoTimestamp(lowest)
 	// if all oplogs from disk has been replayed successfully, store the newest oplog timestamp
-	if conf.Options.ReplayerOplogStoreDisk && sync.reader.diskQueueLastTs > 0 && lowestInt64 >= sync.reader.diskQueueLastTs {
+	if conf.Options.FullSyncOplogStoreDisk && sync.reader.diskQueueLastTs > 0 && lowestInt64 >= sync.reader.diskQueueLastTs {
 		sync.ckptManager.SetOplogDiskFinishTs(sync.reader.diskQueueLastTs)
 	}
 

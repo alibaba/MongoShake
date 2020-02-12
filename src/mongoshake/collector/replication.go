@@ -16,6 +16,8 @@ import (
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
+	"mongoshake/sharding"
+	"mongoshake/collector/filter"
 )
 
 const (
@@ -68,7 +70,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 
 	switch syncMode {
 	case SYNCMODE_ALL:
-		if conf.Options.ReplayerOplogStoreDisk {
+		if conf.Options.FullSyncOplogStoreDisk {
 			LOG.Info("run parallel document oplog")
 			if err := coordinator.parallelDocumentOplog(fullBeginTs32); err != nil {
 				return err
@@ -275,6 +277,26 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs32 i
 }
 
 func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
+	// init orphan sharding chunk map if source is sharding
+	shardingChunkMap := make(sharding.ShardingChunkMap)
+	if len(coordinator.Sources) > 1 {
+		ok, err := sharding.GetBalancerStatusByUrl(conf.Options.MongoCsUrl)
+		if ok {
+			if err != nil {
+				return LOG.Critical("obtain balance status from mongo_cs_url=%s error. %v",
+					conf.Options.MongoCsUrl, err)
+			}
+			return LOG.Critical("source mongodb sharding need to stop balancer when document replication occur.")
+		}
+
+		if conf.Options.FullSyncExecutorFilterOrphanDocument {
+			LOG.Info("begin to get chunk map from config.chunks of source mongodb sharding")
+			if shardingChunkMap, err = sharding.GetChunkMapByUrl(conf.Options.MongoCsUrl); err != nil {
+				return err
+			}
+		}
+	}
+
 	// get all namespace need to sync
 	nsSet, err := docsyncer.GetAllNamespace(coordinator.Sources)
 	if err != nil {
@@ -316,7 +338,18 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	indexMap := make(map[utils.NS][]mgo.Index)
 
 	for i, src := range coordinator.Sources {
-		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl, trans)
+		var orphanFilter *filter.OrphanFilter
+		if conf.Options.FullSyncExecutorFilterOrphanDocument {
+			dbChunkMap := make(sharding.DBChunkMap)
+			if chunkMap, ok := shardingChunkMap[src.ReplicaName]; ok {
+				dbChunkMap = chunkMap
+			} else {
+				LOG.Warn("document syncer %v has no chunk map", src.ReplicaName)
+			}
+			orphanFilter = filter.NewOrphanFilter(src.ReplicaName, dbChunkMap)
+		}
+
+		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl, trans, orphanFilter)
 		LOG.Info("document syncer-%d do replication for url=%v", i, src.URL)
 		wg.Add(1)
 		nimo.GoRoutine(func() {

@@ -97,7 +97,7 @@ func (reader *OplogReader) InitDiskQueue(dqName string) {
 			reader.replset, utils.LogFetchStage(fetchStage))
 	}
 	reader.diskQueue = diskQueue.NewDiskQueue(dqName, conf.Options.LogDirectory,
-		conf.Options.ReplayerOplogStoreDiskMaxSize, ReplayerOplogStoreDiskReadBatch,
+		conf.Options.FullSyncOplogStoreDiskMaxSize, ReplayerOplogStoreDiskReadBatch,
 		1 << 30, 0, 1 << 26,
 		1000, 2 * time.Second)
 }
