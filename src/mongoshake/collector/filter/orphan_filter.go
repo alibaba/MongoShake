@@ -33,14 +33,10 @@ func NewOrphanFilter(replset string, chunkMap sharding.DBChunkMap) *OrphanFilter
 	}
 }
 
-func (filter *OrphanFilter) Filter(doc *bson.Raw, namespace string) bool {
+func (filter *OrphanFilter) Filter(docD bson.D, namespace string) bool {
 	shardCol, hasChunk := filter.chunkMap[namespace]
 	if !hasChunk {
 		return false
-	}
-	var docD bson.D
-	if err := bson.Unmarshal(doc.Data, &docD); err != nil {
-		LOG.Crashf("OrphanFilter unmarshal bson %v from ns[%v] failed. %v", doc.Data, namespace, err)
 	}
 
 NextChunk:

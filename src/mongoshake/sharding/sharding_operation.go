@@ -10,6 +10,7 @@ import (
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
+	"reflect"
 )
 
 const (
@@ -154,18 +155,22 @@ func GetColShardType(session *mgo.Session, namespace string) ([]string, string, 
 	var shardType string
 	var ok bool
 	if colDoc, ok = oplog.GetKey(colDoc, "key").(bson.D); !ok {
-		return nil, "", fmt.Errorf("GetColShardType has no key item in doc %v", colDoc)
+		return nil, "", fmt.Errorf("GetColShardType with namespace[%v] has no key item in doc %v", namespace, colDoc)
 	}
 
 	for _, item := range colDoc {
+		fmt.Println(item)
 		// either be a single hashed field, or a list of ascending fields
-		switch item.Value.(type) {
+		switch v := item.Value.(type) {
 		case string:
 			shardType = HashedShard
+		case int:
+			shardType = RangedShard
 		case float64:
 			shardType = RangedShard
 		default:
-			return nil, "", fmt.Errorf("GetColShardType meet unknown ShakeKey type %v", colDoc)
+			return nil, "", fmt.Errorf("GetColShardType with namespace[%v] doc[%v] meet unknown ShakeKey type[%v]",
+				namespace, colDoc, reflect.TypeOf(v))
 		}
 		keys = append(keys, item.Name)
 	}

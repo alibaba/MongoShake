@@ -155,25 +155,38 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 	}
 
 	collectionHandler := exec.session.DB(ns.Database).C(ns.Collection)
-
-	if err := collectionHandler.Insert(docList...); err != nil {
-		LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v], try to handle error",
+	bulk := collectionHandler.Bulk()
+	bulk.Insert(docList...)
+	if _, err := bulk.Run(); err != nil {
+		LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v]",
 			len(docList), ns, err)
-		return exec.tryOneByOne(docList, collectionHandler)
+		index, errMsg, dup := utils.FindFirstErrorIndexAndMessage(err.Error())
+		if index == -1 {
+			return fmt.Errorf("bulk run failed[%v]", err)
+		} else if !dup {
+			var docD bson.D
+			bson.Unmarshal(docs[index].Data, &docD)
+			return fmt.Errorf("bulk run message[%v], failed[%v], index[%v] dup[%v]", docD, errMsg, index, dup)
+		} else {
+			LOG.Warn("dup error found, try to solve error")
+		}
+
+		return exec.tryOneByOne(docList, index, collectionHandler)
 	}
 
 	return nil
 }
 
 // heavy operation. insert data one by one and handle the return error.
-func (exec *DocExecutor) tryOneByOne(input []interface{}, collectionHandler *mgo.Collection) error {
-	for _, raw := range input {
-		parsed := new(oplog.PartialLog)
-		if err := bson.Unmarshal(raw.(*bson.Raw).Data, parsed); err != nil {
+func (exec *DocExecutor) tryOneByOne(input []interface{}, index int, collectionHandler *mgo.Collection) error {
+	for i := index; i < len(input); i++ {
+		raw := input[i]
+		var docD bson.D
+		if err := bson.Unmarshal(raw.(*bson.Raw).Data, &docD); err != nil {
 			return fmt.Errorf("unmarshal data[%v] failed[%v]", raw, err)
 		}
 
-		err := collectionHandler.Insert(parsed)
+		err := collectionHandler.Insert(docD)
 		if err == nil {
 			continue
 		} else if !mgo.IsDup(err) {
@@ -181,11 +194,14 @@ func (exec *DocExecutor) tryOneByOne(input []interface{}, collectionHandler *mgo
 		}
 
 		// only handle duplicate key error
+		id := oplog.GetKey(docD, "")
 
 		// orphan document enable and source is sharding
 		if conf.Options.FullSyncExecutorFilterOrphanDocument && len(conf.Options.MongoUrls) > 1 {
 			// judge whether is orphan document, pass if so
-			if exec.syncer.orphanFilter.Filter(raw.(*bson.Raw), parsed.Namespace) {
+			if exec.syncer.orphanFilter.Filter(docD, collectionHandler.FullName) {
+				LOG.Info("orphan document with _id[%v] filter", id)
+				fmt.Printf("orphan document with _id[%v] filter\n", id)
 				continue
 			}
 		}
@@ -196,12 +212,11 @@ func (exec *DocExecutor) tryOneByOne(input []interface{}, collectionHandler *mgo
 				err, "full_sync.executor.insert_on_dup_update")
 		} else {
 			// convert insert operation to update operation
-			id := oplog.GetKey(parsed.Object, "")
 			if id == nil {
-				return fmt.Errorf("parse '_id' from oplog[%v] failed", parsed)
+				return fmt.Errorf("parse '_id' from document[%v] failed", docD)
 			}
-			if err := collectionHandler.UpdateId(id, parsed); err != nil {
-				return fmt.Errorf("convert oplog[%v] from insert to update run failed[%v]", parsed, err)
+			if err := collectionHandler.UpdateId(id, docD); err != nil {
+				return fmt.Errorf("convert oplog[%v] from insert to update run failed[%v]", docD, err)
 			}
 		}
 	}
