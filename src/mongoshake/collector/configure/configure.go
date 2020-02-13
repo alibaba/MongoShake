@@ -3,7 +3,7 @@ package conf
 import "mongoshake/common"
 
 type Configuration struct {
-	ConfVersion             uint     `config:"conf.version"` // TODO
+	ConfVersion uint `config:"conf.version"` // TODO
 
 	MongoUrls               []string `config:"mongo_urls"`
 	MongoCsUrl              string   `config:"mongo_cs_url"`
@@ -49,10 +49,11 @@ type Configuration struct {
 	ReplayerConflictWriteTo           string `config:"replayer.conflict_write_to"`
 	ReplayerDurable                   bool   `config:"replayer.durable"`
 
-	FullSyncCollectionDrop               bool  `config:"full_sync.collection_drop"`
 	FullSyncCollectionParallel           int   `config:"full_sync.collection_parallel"`
 	FullSyncDocumentParallel             int   `config:"full_sync.document_parallel"`
 	FullSyncDocumentBatchSize            int   `config:"full_sync.document_batch_size"`
+	FullSyncCollectionDrop               bool  `config:"full_sync.collection_drop"`
+	FullSyncCreateIndex                  bool  `config:"full_sync.create_index"`
 	FullSyncOplogStoreDisk               bool  `config:"full_sync.oplog_store_disk"`
 	FullSyncOplogStoreDiskMaxSize        int64 `config:"full_sync.oplog_store_disk_max_size"`
 	FullSyncExecutorInsertOnDupUpdate    bool  `config:"full_sync.executor.insert_on_dup_update"`

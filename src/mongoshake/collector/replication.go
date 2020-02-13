@@ -370,9 +370,12 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		return replError
 	}
 
-	if err := docsyncer.StartIndexSync(indexMap, toUrl, trans); err != nil {
-		return err
+	if conf.Options.FullSyncCreateIndex {
+		if err := docsyncer.StartIndexSync(indexMap, toUrl, trans); err != nil {
+			return fmt.Errorf("create index failed[%v]", err)
+		}
 	}
+
 	if conf.Options.SyncMode != SYNCMODE_DOCUMENT {
 		LOG.Info("try to set checkpoint with map[%v]", ckptMap)
 		if err := docsyncer.Checkpoint(ckptMap); err != nil {
