@@ -11,6 +11,7 @@ import (
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
+	"reflect"
 )
 
 func YieldInMs(n int64) {
@@ -88,6 +89,38 @@ func ExtractTimestampForLog(ts interface{}) string {
 
 func Int64ToString(v int64) string {
 	return strconv.FormatInt(v, 10)
+}
+
+func ParseIntFromInterface(input interface{}) (int64, error) {
+	switch src := input.(type) {
+	case int:
+		return int64(src), nil
+	case int8:
+		return int64(src), nil
+	case int16:
+		return int64(src), nil
+	case int32:
+		return int64(src), nil
+	case int64:
+		return src, nil
+	case uint:
+		return int64(src), nil
+	case uint8:
+		return int64(src), nil
+	case uint16:
+		return int64(src), nil
+	case uint32:
+		return int64(src), nil
+	case uint64:
+		return int64(src), nil
+	case string:
+		v, err := strconv.Atoi(src)
+		return int64(v), err
+	default:
+		return 0, fmt.Errorf("unknown type[%v] with input[%v]", reflect.TypeOf(src), src)
+	}
+
+	panic("can't see me!")
 }
 
 // one writer and multi readers

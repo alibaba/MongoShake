@@ -16,7 +16,7 @@ type GenericOplog struct {
 	Parsed *PartialLog
 }
 
-type PartialLog struct {
+type ParsedLog struct {
 	Timestamp     bson.MongoTimestamp `bson:"ts" json:"ts"`
 	Operation     string              `bson:"op" json:"op"`
 	Gid           string              `bson:"g" json:"g"`
@@ -26,6 +26,10 @@ type PartialLog struct {
 	UniqueIndexes bson.M              `bson:"uk" json:"uk"`
 	Lsid          interface{}         `bson:"lsid" json:"lsid"`               // mark the session id, used in transaction
 	FromMigrate   bool                `bson:"fromMigrate" json:"fromMigrate"` // move chunk
+}
+
+type PartialLog struct {
+	ParsedLog
 
 	/*
 	 * Every field subsequent declared is NEVER persistent or
@@ -35,6 +39,7 @@ type PartialLog struct {
 	UniqueIndexesUpdates bson.M // generate by CollisionMatrix
 	RawSize              int    // generate by Decorator
 	SourceId             int    // generate by Validator
+	ResumeToken          string // resume token only used in change stream
 }
 
 func LogEntryEncode(logs []*GenericOplog) [][]byte {

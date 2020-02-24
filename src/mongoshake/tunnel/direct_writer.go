@@ -34,6 +34,7 @@ func (writer *DirectWriter) Prepare() bool {
 }
 
 func (writer *DirectWriter) Send(message *WMessage) int64 {
+	// won't return when Sync has been finished which is a synchronous operation.
 	writer.batchExecutor.Sync(message.ParsedLogs, nil)
 	return 0
 }
