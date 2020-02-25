@@ -8,6 +8,7 @@ type Configuration struct {
 	MongoUrls               []string `config:"mongo_urls"`
 	MongoCsUrl              string   `config:"mongo_cs_url"`
 	MongoConnectMode        string   `config:"mongo_connect_mode"`
+	MongoFetchMethod        string   `config:"mongo_fetch_method"`
 	MajorityWriteFull       bool     `config:"majority_write.full"`
 	MajorityWriteIncr       bool     `config:"majority_write.incr"`
 	CollectorId             string   `config:"collector.id"`

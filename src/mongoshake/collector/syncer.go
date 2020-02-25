@@ -14,6 +14,7 @@ import (
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
+	"mongoshake/collector/reader"
 )
 
 const (
@@ -54,7 +55,7 @@ type OplogSyncer struct {
 	// oplog hash strategy
 	hasher oplog.Hasher
 
-	// pending queue. used by rawlog parsing. we buffered the
+	// pending queue. used by raw log parsing. we buffered the
 	// target raw oplogs in buffer and push them to pending queue
 	// when buffer is filled in. and transfer to log queue
 	buffer            []*bson.Raw
@@ -62,8 +63,8 @@ type OplogSyncer struct {
 	logsQueue         []chan []*oplog.GenericOplog
 	nextQueuePosition uint64
 
-	// source mongo oplog reader
-	reader *OplogReader
+	// source mongo oplog/event reader
+	reader sourceReader.Reader
 	// journal log that records all oplogs
 	journal *utils.Journal
 	// oplogs dispatcher
@@ -90,14 +91,21 @@ func NewOplogSyncer(
 	fullSyncFinishPosition int64,
 	mongoUrl string,
 	gids []string) *OplogSyncer {
+
+	reader, err := sourceReader.CreateReader(conf.Options.MongoFetchMethod, mongoUrl, replset)
+	if err != nil {
+		LOG.Critical("create reader with url[%v] replset[%v] failed[%v]", mongoUrl, replset, err)
+		return nil
+	}
+
 	syncer := &OplogSyncer{
 		coordinator:            coordinator,
 		replset:                replset,
 		startPosition:          startPosition,
 		fullSyncFinishPosition: fullSyncFinishPosition,
-		journal: utils.NewJournal(utils.JournalFileName(
+		journal:                utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
-		reader: NewOplogReader(mongoUrl, replset),
+		reader:                 reader,
 	}
 
 	// concurrent level hasher
@@ -143,7 +151,7 @@ func (sync *OplogSyncer) bind(w *Worker) {
 }
 
 func (sync *OplogSyncer) startDiskApply() {
-	sync.reader.UpdatefetchStage(utils.FetchStageStoreDiskApply)
+	sync.reader.UpdateFetchStage(utils.FetchStageStoreDiskApply)
 }
 
 // start to polling oplog
@@ -288,6 +296,9 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.Mongo
 	}
 }
 
+/********************************deserializer begin**********************************/
+// deserializer: pending_queue -> logs_queue
+
 // how many pending queue we create
 func calculatePendingQueueConcurrency() int {
 	// single {pending|logs}queue while it'is multi source shard
@@ -324,6 +335,9 @@ func (sync *OplogSyncer) deserializer(index int) {
 		sync.logsQueue[index] <- deserializeLogs
 	}
 }
+
+/********************************deserializer end**********************************/
+
 
 // only master(maybe several mongo-shake start) can poll oplog.
 func (sync *OplogSyncer) poll() {
@@ -371,18 +385,18 @@ func (sync *OplogSyncer) poll() {
 
 // fetch oplog from reader.
 func (sync *OplogSyncer) next() bool {
-	var log *bson.Raw
+	var log []byte
 	var err error
 	if log, err = sync.reader.Next(); log != nil {
-		payload := int64(len(log.Data))
+		payload := int64(len(log))
 		sync.replMetric.AddGet(1)
 		sync.replMetric.SetOplogMax(payload)
 		sync.replMetric.SetOplogAvg(payload)
 		sync.replMetric.ReplStatus.Clear(utils.FetchBad)
-	} else if err == CollectionCappedError {
+	} else if err == sourceReader.CollectionCappedError {
 		LOG.Error("oplog collection capped error, users should fix it manually")
 		return false
-	} else if err != nil && err != TimeoutError {
+	} else if err != nil && err != sourceReader.TimeoutError {
 		LOG.Error("oplog syncer internal error: %v", err)
 		// error is nil indicate that only timeout incur syncer.next()
 		// return false. so we regardless that

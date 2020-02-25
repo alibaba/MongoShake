@@ -19,6 +19,9 @@ const (
 	DBRefRef = "$ref"
 	DBRefId  = "$id"
 	DBRefDb  = "$db"
+
+	CollectionCapped           = "CollectionScan died due to position in capped" // bigger than 3.0
+	CollectionCappedLowVersion = "UnknownError"                                  // <= 3.0 version
 )
 
 type MongoSource struct {
@@ -182,6 +185,14 @@ func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.Mon
 		}
 	}
 	return tsMap, biggestNew, smallestNew, biggestOld, smallestOld, nil
+}
+
+func IsCollectionCappedError(err error) bool {
+	errMsg := err.Error()
+	if strings.Contains(errMsg, CollectionCapped) || strings.Contains(errMsg, CollectionCappedLowVersion) {
+		return true
+	}
+	return false
 }
 
 // adjust dbRef order: $ref, $id, $db, others

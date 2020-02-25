@@ -174,6 +174,13 @@ func sanitizeOptions() error {
 	if utils.HasDuplicated(conf.Options.MongoUrls) {
 		return errors.New("mongo urls were duplicated")
 	}
+
+	if conf.Options.MongoFetchMethod == "" {
+		conf.Options.MongoFetchMethod = "oplog"
+	} else if conf.Options.MongoFetchMethod != "oplog" && conf.Options.MongoFetchMethod != "change_stream" {
+		return errors.New("mongo_fetch_method must be 'oplog' or 'change_stream'")
+	}
+
 	if conf.Options.CollectorId == "" {
 		return errors.New("collector id should not be empty")
 	}
