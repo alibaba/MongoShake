@@ -3,7 +3,7 @@ package utils
 import "fmt"
 
 const (
-	FetchStageStoreInvalid     int32 = 0
+	FetchStageStoreUnknown     int32 = 0
 	FetchStageStoreDiskNoApply int32 = 1
 	FetchStageStoreDiskApply   int32 = 2
 	FetchStageStoreMemoryApply int32 = 3

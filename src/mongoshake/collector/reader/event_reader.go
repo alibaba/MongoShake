@@ -13,8 +13,6 @@ import (
 	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
 	"sync/atomic"
-	"mongoshake/oplog"
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type EventReader struct {
@@ -53,42 +51,6 @@ func NewEventReader(src string, replset string) *EventReader {
 		firstRead:            true,
 		diskQueueLastTs:      -1,
 	}
-}
-
-func (er *EventReader) InitDiskQueue(dqName string) {
-	fetchStage := er.fetchStage
-	if fetchStage != utils.FetchStageStoreDiskNoApply && fetchStage != utils.FetchStageStoreDiskApply {
-		LOG.Crashf("event_reader replset %v init disk queue in illegal fetchStage %v",
-			er.replset, utils.LogFetchStage(fetchStage))
-	}
-	er.diskQueue = diskQueue.NewDiskQueue(dqName, conf.Options.LogDirectory,
-		conf.Options.FullSyncOplogStoreDiskMaxSize, ReplayerOplogStoreDiskReadBatch,
-		1 << 30, 0, 1 << 26,
-		1000, 2 * time.Second)
-}
-
-func (er *EventReader) UpdateFetchStage(fetchStage int32) {
-	LOG.Info("event_reader replset[%v] update fetch status to: %v", er.replset, utils.LogFetchStage(fetchStage))
-	atomic.StoreInt32(&er.fetchStage, fetchStage)
-}
-
-func (er *EventReader) GetDiskQueueName() string {
-	return er.diskQueue.Name()
-}
-
-func (er *EventReader) GetQueryTsFromDiskQueue() bson.MongoTimestamp {
-	if er.diskQueue == nil {
-		LOG.Crashf("event_reader replset %v get query timestamp from nil disk queue", er.replset)
-	}
-	logData := er.diskQueue.GetLastWriteData()
-	if len(logData) == 0 {
-		return 0
-	}
-	log := new(oplog.Event)
-	if err := bson.Unmarshal(logData, log); err != nil {
-		LOG.Crashf("unmarshal oplog[%v] failed[%v]", logData, err)
-	}
-	return log.ClusterTime
 }
 
 // SetQueryTimestampOnEmpty set internal timestamp if
@@ -155,12 +117,8 @@ func (er *EventReader) fetcher() {
 			time.Sleep(1 * time.Second)
 		}
 
-		er.eventChan <-
+		er.eventChan <- &retOplog{data, nil}
 	}
-}
-
-func (er *EventReader) retrieve() {
-
 }
 
 func (er *EventReader) EnsureNetwork() error {

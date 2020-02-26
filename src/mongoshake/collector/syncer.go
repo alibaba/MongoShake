@@ -58,10 +58,10 @@ type OplogSyncer struct {
 	// pending queue. used by raw log parsing. we buffered the
 	// target raw oplogs in buffer and push them to pending queue
 	// when buffer is filled in. and transfer to log queue
-	buffer            []*bson.Raw
-	pendingQueue      []chan []*bson.Raw
+	// buffer            []*bson.Raw // move to persister
+	PendingQueue      []chan [][]byte
 	logsQueue         []chan []*oplog.GenericOplog
-	nextQueuePosition uint64
+	// nextQueuePosition uint64 // move to persister
 
 	// source mongo oplog/event reader
 	reader sourceReader.Reader
@@ -69,6 +69,8 @@ type OplogSyncer struct {
 	journal *utils.Journal
 	// oplogs dispatcher
 	batcher *Batcher
+	// data persist handler
+	persister *Persister
 
 	// timers for inner event
 	startTime time.Time
@@ -151,7 +153,7 @@ func (sync *OplogSyncer) bind(w *Worker) {
 }
 
 func (sync *OplogSyncer) startDiskApply() {
-	sync.reader.UpdateFetchStage(utils.FetchStageStoreDiskApply)
+	sync.persister.SetFetchStage(utils.FetchStageStoreDiskApply)
 }
 
 // start to polling oplog
@@ -160,6 +162,9 @@ func (sync *OplogSyncer) start() {
 		conf.Options.CheckpointInterval, conf.Options.OplogGIDS, conf.Options.ShardKey)
 
 	sync.startTime = time.Now()
+
+	// start persister
+	sync.persister = NewPersister(sync.replset, sync)
 
 	// process about the checkpoint :
 	//
@@ -311,26 +316,43 @@ func calculatePendingQueueConcurrency() int {
 // deserializer: fetch oplog from pending queue, parsed and then add into logs queue.
 func (sync *OplogSyncer) startDeserializer() {
 	parallel := calculatePendingQueueConcurrency()
-	sync.pendingQueue = make([]chan []*bson.Raw, parallel, parallel)
+	sync.PendingQueue = make([]chan [][]byte, parallel, parallel)
 	sync.logsQueue = make([]chan []*oplog.GenericOplog, parallel, parallel)
-	for index := 0; index != len(sync.pendingQueue); index++ {
-		sync.pendingQueue[index] = make(chan []*bson.Raw, PipelineQueueLen)
+	for index := 0; index != len(sync.PendingQueue); index++ {
+		sync.PendingQueue[index] = make(chan [][]byte, PipelineQueueLen)
 		sync.logsQueue[index] = make(chan []*oplog.GenericOplog, PipelineQueueLen)
 		go sync.deserializer(index)
 	}
 }
 
 func (sync *OplogSyncer) deserializer(index int) {
+	var parser func(input []byte) (*oplog.PartialLog, error)
+	if conf.Options.MongoFetchMethod == "change_stream" {
+		// parse []byte (change stream event format) -> oplog
+		parser = func(input []byte) (*oplog.PartialLog, error) {
+			return oplog.ConvertEvent2Oplog(input)
+		}
+	} else {
+		// parse []byte (oplog format) -> oplog
+		parser = func(input []byte) (*oplog.PartialLog, error) {
+			log := new(oplog.PartialLog)
+			err := bson.Unmarshal(input, log)
+			return log, err
+		}
+	}
+
 	for {
-		batchRawLogs := <-sync.pendingQueue[index]
+		batchRawLogs := <-sync.PendingQueue[index]
 		nimo.AssertTrue(len(batchRawLogs) != 0, "pending queue batch logs has zero length")
 		var deserializeLogs = make([]*oplog.GenericOplog, 0, len(batchRawLogs))
 
 		for _, rawLog := range batchRawLogs {
-			log := new(oplog.PartialLog)
-			bson.Unmarshal(rawLog.Data, log)
-			log.RawSize = len(rawLog.Data)
-			deserializeLogs = append(deserializeLogs, &oplog.GenericOplog{Raw: rawLog.Data, Parsed: log})
+			log, err := parser(rawLog)
+			if err != nil {
+				LOG.Crashf("deserializer parse data[%v] failed[%v]", rawLog, err)
+			}
+			log.RawSize = len(rawLog)
+			deserializeLogs = append(deserializeLogs, &oplog.GenericOplog{Raw: rawLog, Parsed: log})
 		}
 		sync.logsQueue[index] <- deserializeLogs
 	}
@@ -408,28 +430,10 @@ func (sync *OplogSyncer) next() bool {
 
 	// buffered oplog or trigger to flush. log is nil
 	// means that we need to flush buffer right now
-	return sync.transfer(log)
-}
 
-func (sync *OplogSyncer) transfer(log *bson.Raw) bool {
-	flush := false
-	if log != nil {
-		sync.buffer = append(sync.buffer, log)
-	} else {
-		flush = true
-	}
-
-	if len(sync.buffer) >= conf.Options.FetcherBufferCapacity || (flush && len(sync.buffer) != 0) {
-		// we could simply ++syncer.resolverIndex. The max uint64 is 9223372036854774807
-		// and discard the skip situation. we assume nextQueueCursor couldn't be overflow
-		selected := int(sync.nextQueuePosition % uint64(len(sync.pendingQueue)))
-		sync.pendingQueue[selected] <- sync.buffer
-		sync.buffer = make([]*bson.Raw, 0, conf.Options.FetcherBufferCapacity)
-
-		sync.nextQueuePosition++
-		return true
-	}
-	return false
+	// inject into persist handler
+	sync.persister.Inject(log)
+	return true
 }
 
 func (sync *OplogSyncer) Handle(log *oplog.PartialLog) {

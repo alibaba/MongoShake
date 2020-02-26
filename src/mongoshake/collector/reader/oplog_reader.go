@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"sync"
 	"time"
-	"sync/atomic"
-
 	"mongoshake/collector/configure"
 	"mongoshake/common"
 	"mongoshake/oplog"
@@ -16,7 +14,6 @@ import (
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-	"mongoshake/diskQueue"
 )
 
 const (
@@ -45,12 +42,6 @@ type OplogReader struct {
 	conn           *utils.MongoConn
 	oplogsIterator *mgo.Iter
 
-	// stage of fetch and store oplog
-	fetchStage int32
-	// disk queue used to store oplog temporarily
-	diskQueue     *diskQueue.DiskQueue
-	disQueueMutex sync.Mutex // disk queue mutex
-
 	// query statement and current max cursor
 	query bson.M
 
@@ -60,7 +51,6 @@ type OplogReader struct {
 	fetcherLock  sync.Mutex
 
 	firstRead       bool
-	diskQueueLastTs bson.MongoTimestamp // the last oplog timestamp in disk queue
 }
 
 // NewOplogReader creates reader with mongodb url
@@ -71,44 +61,7 @@ func NewOplogReader(src string, replset string) *OplogReader {
 		query:           bson.M{},
 		oplogChan:       make(chan *retOplog, oplogChanSize),
 		firstRead:       true,
-		diskQueueLastTs: -1,
 	}
-}
-
-func (or *OplogReader) InitDiskQueue(dqName string) {
-	fetchStage := or.fetchStage
-	if fetchStage != utils.FetchStageStoreDiskNoApply && fetchStage != utils.FetchStageStoreDiskApply {
-		LOG.Crashf("oplog_reader replset %v init disk queue in illegal fetchStage %v",
-			or.replset, utils.LogFetchStage(fetchStage))
-	}
-	or.diskQueue = diskQueue.NewDiskQueue(dqName, conf.Options.LogDirectory,
-		conf.Options.FullSyncOplogStoreDiskMaxSize, ReplayerOplogStoreDiskReadBatch,
-		1 << 30, 0, 1 << 26,
-		1000, 2 * time.Second)
-}
-
-func (or *OplogReader) UpdateFetchStage(fetchStage int32) {
-	LOG.Info("oplog_reader replset[%v] update fetch status to: %v", or.replset, utils.LogFetchStage(fetchStage))
-	atomic.StoreInt32(&or.fetchStage, fetchStage)
-}
-
-func (or *OplogReader) GetDiskQueueName() string {
-	return or.diskQueue.Name()
-}
-
-func (or *OplogReader) GetQueryTsFromDiskQueue() bson.MongoTimestamp {
-	if or.diskQueue == nil {
-		LOG.Crashf("oplog_reader replset %v get query timestamp from nil disk queue", or.replset)
-	}
-	logData := or.diskQueue.GetLastWriteData()
-	if len(logData) == 0 {
-		return 0
-	}
-	log := new(oplog.PartialLog)
-	if err := bson.Unmarshal(logData, log); err != nil {
-		LOG.Crashf("unmarshal oplog[%v] failed[%v]", logData, err)
-	}
-	return log.Timestamp
 }
 
 // SetQueryTimestampOnEmpty set internal timestamp if
@@ -165,10 +118,6 @@ func (or *OplogReader) StartFetcher() {
 	if or.fetcherExist == false { // double check
 		or.fetcherExist = true
 		go or.fetcher()
-		fetchStage := atomic.LoadInt32(&or.fetchStage)
-		if fetchStage == utils.FetchStageStoreDiskNoApply || fetchStage == utils.FetchStageStoreDiskApply {
-			go or.retrieve()
-		}
 	}
 	or.fetcherLock.Unlock()
 }
@@ -202,91 +151,8 @@ func (or *OplogReader) fetcher() {
 			continue
 		}
 
-		// fetch successfully
-		fetchStage := atomic.LoadInt32(&or.fetchStage)
-		// put oplog to the corresponding queue
-		if fetchStage == utils.FetchStageStoreMemoryApply {
-			or.oplogChan <- &retOplog{log, nil}
-		} else if or.diskQueue != nil {
-			or.disQueueMutex.Lock()
-			if or.diskQueue != nil { // double check
-				// should send to disQueue
-				if err := or.diskQueue.Put(log.Data); err != nil {
-					LOG.Crashf("oplog_reader fetch for replset %v put oplog to disk queue failed[%v]",
-						or.replset, err)
-				}
-			} else {
-				// should send to oplogChan
-				or.oplogChan <- &retOplog{log.Data, nil}
-			}
-
-			or.disQueueMutex.Unlock()
-		} else {
-			LOG.Crashf("oplog_reader fetch for replset %v has no diskQueue with fetch stage[%v]. %v",
-				or.replset, utils.LogFetchStage(fetchStage))
-		}
+		or.oplogChan <- &retOplog{log.Data, nil}
 	}
-}
-
-func (or *OplogReader) retrieve() {
-	for {
-		if atomic.LoadInt32(&or.fetchStage) == utils.FetchStageStoreDiskApply {
-			break
-		}
-		time.Sleep(3 * time.Second)
-	}
-
-	LOG.Info("oplog_reader retrieve for replset %v begin to read from disk queue with depth[%v]",
-		or.replset, or.diskQueue.Depth())
-	ticker := time.NewTicker(time.Second)
-Loop:
-	for {
-		select {
-		case readData := <-or.diskQueue.ReadChan():
-			if len(readData) > 0 {
-				for _, data := range readData {
-					or.oplogChan <- &retOplog{&bson.Raw{Kind: 3, Data: data}, nil}
-				}
-
-				if err := or.diskQueue.Next(); err != nil {
-					LOG.Crash(err)
-				}
-			}
-		case <-ticker.C:
-			if or.diskQueue.Depth() < or.diskQueue.BatchCount() {
-				break Loop
-			}
-		}
-	}
-	LOG.Info("oplog_reader retrieve for replset %v block fetch with disk queue depth[%v]",
-		or.replset, or.diskQueue.Depth())
-
-	// wait to finish retrieve and continue fetch to store to memory
-	or.disQueueMutex.Lock()
-	defer or.disQueueMutex.Unlock() // lock till the end
-	readData := or.diskQueue.ReadAll()
-	if len(readData) > 0 {
-		for _, data := range readData {
-			or.oplogChan <- &retOplog{&bson.Raw{Kind: 3, Data: data}, nil}
-		}
-
-		// parse the last oplog timestamp
-		or.diskQueueLastTs = oplog.ParseTimstampFromBson(readData[len(readData)-1])
-
-		if err := or.diskQueue.Next(); err != nil {
-			LOG.Crash(err)
-		}
-	}
-	if or.diskQueue.Depth() != 0 {
-		LOG.Crashf("oplog_reader retrieve for replset %v finish, but disk queue depth[%v] is not empty",
-			or.replset, or.diskQueue.Depth())
-	}
-	or.UpdateFetchStage(utils.FetchStageStoreMemoryApply)
-
-	if err := or.diskQueue.Delete(); err != nil {
-		LOG.Critical("oplog_reader retrieve for replset %v close disk queue error. %v", or.replset, err)
-	}
-	LOG.Info("oplog_reader retriever exits")
 }
 
 // ensureNetwork establish the mongodb connection at first

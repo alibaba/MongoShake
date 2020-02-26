@@ -1,7 +1,6 @@
 package oplog
 
 import (
-	mdBson "go.mongodb.org/mongo-driver/bson"
 	"github.com/vinllen/mgo/bson"
 	"fmt"
 )
@@ -61,7 +60,7 @@ type Event struct {
 	Lsid              bson.M              `bson:"lsid"`
 }
 
-func ConvertEvent2Oplog(input mdBson.Raw) (*PartialLog, error) {
+func ConvertEvent2Oplog(input []byte) (*PartialLog, error) {
 	event := new(Event)
 	if err := bson.Unmarshal(input, event); err != nil {
 		return nil, fmt.Errorf("unmarshal raw bson[%s] failed: %v", input, err)

@@ -9,13 +9,8 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
-const (
-	ReplayerOplogStoreDiskReadBatch = 10000
-)
-
 type Reader interface {
-	StartFetcher()                                // fetch data from source
-	GetQueryTsFromDiskQueue() bson.MongoTimestamp // get latest timestamp
+	StartFetcher()
 	SetQueryTimestampOnEmpty(bson.MongoTimestamp) // set query timestamp when first start
 	UpdateQueryTimestamp(bson.MongoTimestamp)     // update query timestamp
 	Next() ([]byte, error)                        // fetch next oplog/event
