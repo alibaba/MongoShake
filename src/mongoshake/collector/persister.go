@@ -210,7 +210,7 @@ Loop:
 
 		// parse the last oplog timestamp
 		// TODO, oplog or change stream event
-		p.diskQueueLastTs = oplog.ParseTimstampFromBson(readData[len(readData)-1])
+		p.diskQueueLastTs = oplog.ParseTimestampFromBson(readData[len(readData)-1])
 
 		if err := p.DiskQueue.Next(); err != nil {
 			LOG.Crash(err)

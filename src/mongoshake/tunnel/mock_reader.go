@@ -1,14 +1,13 @@
 package tunnel
 
 import (
-	"fmt"
 	"math/rand"
-	"time"
-
 	"mongoshake/oplog"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
+	"time"
+	"fmt"
 )
 
 const (
@@ -48,8 +47,10 @@ func (generator *FakeGenerator) start() {
 
 		for i := 0; i != BatchSize; i++ {
 			partialLog = &oplog.PartialLog{
-				Timestamp: bson.MongoTimestamp(time.Now().Unix() << 32),
-				Namespace: fmt.Sprintf("%s_%d", TableName, generator.index),
+				ParsedLog: oplog.ParsedLog{
+					Timestamp: bson.MongoTimestamp(time.Now().Unix() << 32),
+					Namespace: fmt.Sprintf("%s_%d", TableName, generator.index),
+				},
 			}
 			switch nr := rand.Uint32(); {
 			case nr%1000 == 0:

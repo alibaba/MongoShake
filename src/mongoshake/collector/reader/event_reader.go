@@ -6,13 +6,12 @@ import (
 	"sync"
 	"time"
 
-	"mongoshake/diskQueue"
+	"mongoshake/collector/diskQueue"
 	"mongoshake/common"
 	"mongoshake/collector/configure"
 
 	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
-	"sync/atomic"
 )
 
 type EventReader struct {
@@ -93,10 +92,6 @@ func (er *EventReader) StartFetcher() {
 	if er.fetcherExist == false { // double check
 		er.fetcherExist = true
 		go er.fetcher()
-		fetchStage := atomic.LoadInt32(&er.fetchStage)
-		if fetchStage == utils.FetchStageStoreDiskNoApply || fetchStage == utils.FetchStageStoreDiskApply {
-			go er.retrieve()
-		}
 	}
 	er.fetcherLock.Unlock()
 }

@@ -31,9 +31,9 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 	}
 	LOG.Info("load checkpoint value: %v", checkpoint)
 
-	// enable oplog persist?
+	// not enable oplog persist?
 	if !conf.Options.FullSyncOplogStoreDisk {
-		sync.reader.fetchStage = utils.FetchStageStoreMemoryApply
+		sync.persister.SetFetchStage(utils.FetchStageStoreMemoryApply)
 		return nil
 	}
 
@@ -41,9 +41,9 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 
 	// if no checkpoint exists
 	if !exists {
-		sync.reader.fetchStage = utils.FetchStageStoreDiskNoApply
+		sync.persister.SetFetchStage(utils.FetchStageStoreDiskNoApply)
 		dqName := fmt.Sprintf("diskqueue-%v-%v", sync.replset, ts.Format("20060102-150405"))
-		sync.reader.InitDiskQueue(dqName)
+		sync.persister.InitDiskQueue(dqName)
 		sync.ckptManager.SetOplogDiskQueueName(dqName)
 		sync.ckptManager.SetOplogDiskFinishTs(ckpt.InitCheckpoint) // set as init
 		return nil
@@ -52,15 +52,15 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 	// check if checkpoint real ts >= checkpoint disk last ts
 	if checkpoint.OplogDiskQueueFinishTs > 0 && checkpoint.Timestamp >= checkpoint.OplogDiskQueueFinishTs {
 		// no need to init disk queue again
-		sync.reader.fetchStage = utils.FetchStageStoreMemoryApply
+		sync.persister.SetFetchStage(utils.FetchStageStoreMemoryApply)
 		return nil
 	}
 
 	// TODO, there is a bug if MongoShake restarts
 
 	// need to init
-	sync.reader.fetchStage = utils.FetchStageStoreDiskNoApply
-	sync.reader.InitDiskQueue(checkpoint.OplogDiskQueue)
+	sync.persister.SetFetchStage(utils.FetchStageStoreDiskNoApply)
+	sync.persister.InitDiskQueue(checkpoint.OplogDiskQueue)
 	return nil
 }
 
@@ -100,8 +100,8 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 
 	lowestInt64 := bson.MongoTimestamp(lowest)
 	// if all oplogs from disk has been replayed successfully, store the newest oplog timestamp
-	if conf.Options.FullSyncOplogStoreDisk && sync.reader.diskQueueLastTs > 0 && lowestInt64 >= sync.reader.diskQueueLastTs {
-		sync.ckptManager.SetOplogDiskFinishTs(sync.reader.diskQueueLastTs)
+	if conf.Options.FullSyncOplogStoreDisk && sync.persister.diskQueueLastTs > 0 && lowestInt64 >= sync.persister.diskQueueLastTs {
+		sync.ckptManager.SetOplogDiskFinishTs(sync.persister.diskQueueLastTs)
 	}
 
 	if lowest > 0 && err == nil {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/gugemichael/nimo4go"
 	"github.com/vinllen/mgo/bson"
+	"fmt"
 )
 
 const (
@@ -39,7 +40,6 @@ type PartialLog struct {
 	UniqueIndexesUpdates bson.M // generate by CollisionMatrix
 	RawSize              int    // generate by Decorator
 	SourceId             int    // generate by Validator
-	ResumeToken          string // resume token only used in change stream
 }
 
 func LogEntryEncode(logs []*GenericOplog) [][]byte {
@@ -147,10 +147,53 @@ func SetFiled(input bson.D, key string, value interface{}) {
 	}
 }
 
-func ParseTimstampFromBson(intput []byte) bson.MongoTimestamp {
+func ParseTimestampFromBson(intput []byte) bson.MongoTimestamp {
 	log := new(PartialLog)
 	if err := bson.Unmarshal(intput, log); err != nil {
 		return -1
 	}
 	return log.Timestamp
+}
+
+func GatherApplyOps(input []*PartialLog) (*GenericOplog, error) {
+	if len(input) == 0 {
+		return nil, fmt.Errorf("input list is empty")
+	}
+
+	newOplog := &PartialLog{
+		ParsedLog: ParsedLog{
+			Timestamp:     input[0].Timestamp,
+			Operation:     "c",
+			Gid:           input[0].Gid,
+			Namespace:     "admin.$cmd",
+			UniqueIndexes: input[0].UniqueIndexes,
+			Lsid:          input[0].Lsid,
+			FromMigrate:   input[0].FromMigrate,
+		},
+	}
+
+	applyOpsList := make([]bson.M, 0, len(input))
+	for _, ele := range input {
+		applyOpsList = append(applyOpsList, bson.M{
+			"op": ele.Operation,
+			"ns": ele.Namespace,
+			"o":  ele.Object,
+			"o2": ele.Query,
+		})
+	}
+	newOplog.Object = bson.D{
+		bson.DocElem{
+			Name:  "applyOps",
+			Value: applyOpsList,
+		},
+	}
+
+	if out, err := bson.Marshal(newOplog); err != nil {
+		return nil, fmt.Errorf("marshal new oplog[%v] failed[%v]", newOplog, err)
+	} else {
+		return &GenericOplog{
+			Raw:    out,
+			Parsed: newOplog,
+		}, nil
+	}
 }
