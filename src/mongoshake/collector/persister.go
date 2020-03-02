@@ -3,7 +3,7 @@ package collector
 // persist oplog on disk
 
 import (
-	"mongoshake/collector/diskQueue"
+	"mongoshake/oplog"
 	"mongoshake/collector/configure"
 	"sync"
 	"mongoshake/common"
@@ -12,7 +12,7 @@ import (
 
 	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
-	"mongoshake/oplog"
+	"github.com/vinllen/go-diskqueue"
 )
 
 const (
@@ -20,8 +20,8 @@ const (
 )
 
 type Persister struct {
-	replset string // name
-	sync *OplogSyncer // not owned, inner call
+	replset string       // name
+	sync    *OplogSyncer // not owned, inner call
 
 	// batch data([]byte) together and send to downstream
 	buffer            [][]byte
@@ -33,20 +33,20 @@ type Persister struct {
 	// stage of fetch and store oplog
 	fetchStage int32
 	// disk queue used to store oplog temporarily
-	DiskQueue     *diskQueue.DiskQueue
-	diskQueueMutex sync.Mutex // disk queue mutex
+	DiskQueue       *diskQueue.DiskQueue
+	diskQueueMutex  sync.Mutex          // disk queue mutex
 	diskQueueLastTs bson.MongoTimestamp // the last oplog timestamp in disk queue
 }
 
 func NewPersister(replset string, sync *OplogSyncer) *Persister {
 	p := &Persister{
-		replset: replset,
-		sync: sync,
-		buffer: make([][]byte, 0, conf.Options.FetcherBufferCapacity),
+		replset:           replset,
+		sync:              sync,
+		buffer:            make([][]byte, 0, conf.Options.FetcherBufferCapacity),
 		nextQueuePosition: 0,
 		enableDiskPersist: conf.Options.FullSyncOplogStoreDisk,
-		fetchStage: utils.FetchStageStoreUnknown,
-		diskQueueLastTs: -1,
+		fetchStage:        utils.FetchStageStoreUnknown,
+		diskQueueLastTs:   -1, // initial set 1
 	}
 
 	if p.enableDiskPersist {
@@ -77,8 +77,8 @@ func (p *Persister) InitDiskQueue(dqName string) {
 
 	p.DiskQueue = diskQueue.NewDiskQueue(dqName, conf.Options.LogDirectory,
 		conf.Options.FullSyncOplogStoreDiskMaxSize, ReplayerOplogStoreDiskReadBatch,
-		1 << 30, 0, 1 << 26,
-		1000, 2 * time.Second)
+		1<<30, 0, 1<<26,
+		1000, 2*time.Second)
 }
 
 func (p *Persister) GetQueryTsFromDiskQueue() bson.MongoTimestamp {
@@ -91,12 +91,30 @@ func (p *Persister) GetQueryTsFromDiskQueue() bson.MongoTimestamp {
 		return 0
 	}
 
-	// TODO, oplog or change stream event?
-	log := new(oplog.PartialLog)
-	if err := bson.Unmarshal(logData, log); err != nil {
-		LOG.Crashf("unmarshal oplog[%v] failed[%v]", logData, err)
+	if conf.Options.MongoFetchMethod == "oplog" {
+		log := new(oplog.PartialLog)
+		if err := bson.Unmarshal(logData, log); err != nil {
+			LOG.Crashf("unmarshal oplog[%v] failed[%v]", logData, err)
+		}
+
+		// assert
+		if log.Namespace == "" {
+			LOG.Crashf("unmarshal data to oplog failed: %v", log)
+		}
+		return log.Timestamp
+	} else {
+		// change_stream
+		log := new(oplog.Event)
+		if err := bson.Unmarshal(logData, log); err != nil {
+			LOG.Crashf("unmarshal oplog[%v] failed[%v]", logData, err)
+		}
+
+		// assert
+		if log.OperationType == "" {
+			LOG.Crashf("unmarshal data to change stream event failed: %v", log)
+		}
+		return log.ClusterTime
 	}
-	return log.Timestamp
 }
 
 // inject data
@@ -178,17 +196,20 @@ Loop:
 	for {
 		select {
 		case readData := <-p.DiskQueue.ReadChan():
-			if len(readData) > 0 {
-				for _, data := range readData {
-					// or.oplogChan <- &retOplog{&bson.Raw{Kind: 3, Data: data}, nil}
-					p.PushToPendingQueue(data)
-				}
+			if len(readData) == 0 {
+				continue
+			}
 
-				if err := p.DiskQueue.Next(); err != nil {
-					LOG.Crashf("persister replset[%v] retrieve get next failed[%v]", p.replset, err)
-				}
+			for _, data := range readData {
+				p.PushToPendingQueue(data)
+			}
+
+			// move to next read
+			if err := p.DiskQueue.Next(); err != nil {
+				LOG.Crashf("persister replset[%v] retrieve get next failed[%v]", p.replset, err)
 			}
 		case <-ticker.C:
+			// check no more data batching?
 			if p.DiskQueue.Depth() < p.DiskQueue.BatchCount() {
 				break Loop
 			}
@@ -209,8 +230,7 @@ Loop:
 		}
 
 		// parse the last oplog timestamp
-		// TODO, oplog or change stream event
-		p.diskQueueLastTs = oplog.ParseTimestampFromBson(readData[len(readData)-1])
+		p.diskQueueLastTs = p.GetQueryTsFromDiskQueue()
 
 		if err := p.DiskQueue.Next(); err != nil {
 			LOG.Crash(err)

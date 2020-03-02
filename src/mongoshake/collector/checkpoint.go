@@ -100,8 +100,11 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 
 	lowestInt64 := bson.MongoTimestamp(lowest)
 	// if all oplogs from disk has been replayed successfully, store the newest oplog timestamp
-	if conf.Options.FullSyncOplogStoreDisk && sync.persister.diskQueueLastTs > 0 && lowestInt64 >= sync.persister.diskQueueLastTs {
-		sync.ckptManager.SetOplogDiskFinishTs(sync.persister.diskQueueLastTs)
+	if conf.Options.FullSyncOplogStoreDisk && sync.persister.diskQueueLastTs > 0 {
+		if lowestInt64 >= sync.persister.diskQueueLastTs {
+			sync.ckptManager.SetOplogDiskFinishTs(sync.persister.diskQueueLastTs)
+			sync.persister.diskQueueLastTs = -2 // mark -1 so next time won't call
+		}
 	}
 
 	if lowest > 0 && err == nil {

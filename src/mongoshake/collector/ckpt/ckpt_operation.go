@@ -18,8 +18,17 @@ import (
 const (
 	// we can't insert Timestamp(0, 0) that will be treat as Now() inserted
 	// into mongo. so we use Timestamp(0, 1)
-	InitCheckpoint = bson.MongoTimestamp(1)
+	InitCheckpoint  = bson.MongoTimestamp(1)
+	EmptyCheckpoint = bson.MongoTimestamp(0)
 )
+
+type CheckpointContext struct {
+	Name                   string              `bson:"name" json:"name"`
+	Timestamp              bson.MongoTimestamp `bson:"ckpt" json:"ckpt"`
+	Version                int                 `bson:"version" json:"version"`
+	OplogDiskQueue         string              `bson:"oplog_disk_queue" json:"oplog_disk_queue"`
+	OplogDiskQueueFinishTs bson.MongoTimestamp `bson:"oplog_disk_queue_apply_finish_ts" json:"oplog_disk_queue_apply_finish_ts"`
+}
 
 type CheckpointOperation interface {
 	// read checkpoint from remote storage. and encapsulation
@@ -31,6 +40,7 @@ type CheckpointOperation interface {
 	Insert(ckpt *CheckpointContext) error
 }
 
+// mongo
 type MongoCheckpoint struct {
 	CheckpointContext
 
@@ -83,6 +93,7 @@ func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 		}
 		value.Name = ckpt.Name
 		value.Timestamp = ckpt.Timestamp
+		value.Version = ckpt.Version
 		value.OplogDiskQueue = ckpt.OplogDiskQueue
 		value.OplogDiskQueueFinishTs = ckpt.OplogDiskQueueFinishTs
 		LOG.Info("Regenerate checkpoint but won't persist. content %v", value)
@@ -112,6 +123,7 @@ func (ckpt *MongoCheckpoint) Insert(updates *CheckpointContext) error {
 	return nil
 }
 
+// http
 type HttpApiCheckpoint struct {
 	CheckpointContext
 
