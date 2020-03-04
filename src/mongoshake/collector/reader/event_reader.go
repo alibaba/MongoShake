@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
-	"mongoshake/collector/diskQueue"
 	"mongoshake/common"
 	"mongoshake/collector/configure"
 
 	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/go-diskqueue"
 )
 
 type EventReader struct {

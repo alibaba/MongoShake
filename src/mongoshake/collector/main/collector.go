@@ -3,7 +3,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -14,12 +13,7 @@ import (
 	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
 	"mongoshake/common"
-	"mongoshake/executor"
-	"mongoshake/modules"
-	"mongoshake/oplog"
 	"mongoshake/quorum"
-	"mongoshake/collector/filter"
-
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
@@ -56,7 +50,7 @@ func main() {
 	}
 
 	// verify collector options and revise
-	if err = sanitizeOptions(); err != nil {
+	if err = SanitizeOptions(); err != nil {
 		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
 	}
 
@@ -133,152 +127,6 @@ func selectLeader() {
 	} else {
 		quorum.AlwaysMaster()
 	}
-}
-
-func sanitizeOptions() error {
-	// compatible with old version
-	if len(conf.Options.LogFileNameOld) != 0 {
-		conf.Options.LogFileName = conf.Options.LogFileNameOld
-	}
-	if len(conf.Options.LogLevelOld) != 0 {
-		conf.Options.LogLevel = conf.Options.LogLevelOld
-	}
-	if conf.Options.LogBufferOld == true {
-		conf.Options.LogBuffer = conf.Options.LogBufferOld
-	}
-	if len(conf.Options.LogFileName) == 0 {
-		return fmt.Errorf("log.name[%v] shouldn't be empty", conf.Options.LogFileName)
-	}
-
-	if len(conf.Options.MongoUrls) == 0 {
-		return errors.New("mongo_urls were empty")
-	}
-	if conf.Options.ContextStorageUrl == "" {
-		if len(conf.Options.MongoUrls) == 1 {
-			conf.Options.ContextStorageUrl = conf.Options.MongoUrls[0]
-		} else if len(conf.Options.MongoUrls) > 1 {
-			return errors.New("storage server should be configured while using mongo shard servers")
-		}
-	}
-	if len(conf.Options.MongoUrls) > 1 {
-		if conf.Options.WorkerNum != len(conf.Options.MongoUrls) {
-			//LOG.Warn("replication worker should be equal to count of mongo_urls while multi sources (shard), set worker = %v",
-			//	len(conf.Options.MongoUrls))
-			conf.Options.WorkerNum = len(conf.Options.MongoUrls)
-		}
-		if conf.Options.ReplayerDMLOnly == false {
-			return errors.New("DDL is not support for sharding, pleasing waiting")
-		}
-	}
-	// avoid the typo of mongo urls
-	if utils.HasDuplicated(conf.Options.MongoUrls) {
-		return errors.New("mongo urls were duplicated")
-	}
-
-	if conf.Options.MongoFetchMethod == "" {
-		conf.Options.MongoFetchMethod = "oplog"
-	} else if conf.Options.MongoFetchMethod != "oplog" && conf.Options.MongoFetchMethod != "change_stream" {
-		return errors.New("mongo_fetch_method must be 'oplog' or 'change_stream'")
-	}
-
-	if conf.Options.CollectorId == "" {
-		return errors.New("collector id should not be empty")
-	}
-	if conf.Options.HTTPListenPort <= 1024 && conf.Options.HTTPListenPort > 0 {
-		return errors.New("http listen port too low numeric")
-	}
-	if conf.Options.CheckpointInterval < 0 {
-		return errors.New("checkpoint batch size is negative")
-	} else if conf.Options.CheckpointInterval  == 0 {
-		conf.Options.CheckpointInterval = 5000 // set default to 5 seconds
-	}
-	if conf.Options.ShardKey != oplog.ShardByNamespace &&
-		conf.Options.ShardKey != oplog.ShardByID &&
-		conf.Options.ShardKey != oplog.ShardAutomatic {
-		return errors.New("shard key type is unknown")
-	}
-	if conf.Options.SyncerReaderBufferTime == 0 {
-		conf.Options.SyncerReaderBufferTime = 1
-	}
-	if conf.Options.WorkerNum <= 0 || conf.Options.WorkerNum > 256 {
-		return errors.New("worker numeric is not valid")
-	}
-	if conf.Options.WorkerBatchQueueSize <= 0 {
-		return errors.New("worker queue numeric is negative")
-	}
-	if conf.Options.ContextStorage == "" || conf.Options.ContextAddress == "" ||
-		(conf.Options.ContextStorage != ckpt.StorageTypeAPI &&
-			conf.Options.ContextStorage != ckpt.StorageTypeDB) {
-		return errors.New("context storage type or address is invalid")
-	}
-	if conf.Options.WorkerOplogCompressor != module.CompressionNone &&
-		conf.Options.WorkerOplogCompressor != module.CompressionGzip &&
-		conf.Options.WorkerOplogCompressor != module.CompressionZlib &&
-		conf.Options.WorkerOplogCompressor != module.CompressionDeflate {
-		return errors.New("compressor is not supported")
-	}
-	if conf.Options.MasterQuorum && conf.Options.ContextStorage != ckpt.StorageTypeDB {
-		return errors.New("context storage should set to 'database' while master election enabled")
-	}
-	if len(conf.Options.FilterNamespaceBlack) != 0 &&
-		len(conf.Options.FilterNamespaceWhite) != 0 {
-		return errors.New("at most one of black lists and white lists option can be given")
-	}
-	if len(conf.Options.FilterPassSpecialDb) != 0 {
-		// init ns
-		filter.InitNs(conf.Options.FilterPassSpecialDb)
-	}
-
-	conf.Options.HTTPListenPort = utils.MayBeRandom(conf.Options.HTTPListenPort)
-	conf.Options.SystemProfile = utils.MayBeRandom(conf.Options.SystemProfile)
-
-	if conf.Options.Tunnel == "" {
-		return errors.New("tunnel is empty")
-	}
-	if len(conf.Options.TunnelAddress) == 0 && conf.Options.Tunnel != "mock" {
-		return errors.New("tunnel address is illegal")
-	}
-	if conf.Options.SyncMode == "" {
-		conf.Options.SyncMode = "oplog" // default
-	}
-
-	// judge the replayer configuration when tunnel type is "direct"
-	if conf.Options.Tunnel == "direct" {
-		if len(conf.Options.TunnelAddress) > conf.Options.WorkerNum {
-			return errors.New("then length of tunnel_address with type 'direct' shouldn't bigger than worker number")
-		}
-		if conf.Options.ReplayerExecutor <= 0 {
-			conf.Options.ReplayerExecutor = 1
-			// return errors.New("executor number should be large than 1")
-		}
-		if conf.Options.ReplayerConflictWriteTo != executor.DumpConflictToDB &&
-			conf.Options.ReplayerConflictWriteTo != executor.DumpConflictToSDK &&
-			conf.Options.ReplayerConflictWriteTo != executor.NoDumpConflict {
-			return errors.New("collision write strategy is neither db nor sdk nor none")
-		}
-		conf.Options.ReplayerCollisionEnable = conf.Options.ReplayerExecutor != 1
-	} else {
-		if conf.Options.SyncMode != "oplog" {
-			return errors.New("document replication only support direct tunnel type")
-		}
-	}
-
-	if (conf.Options.Tunnel != "file" && conf.Options.Tunnel != "kafka") &&
-		conf.Options.TunnelMessage != utils.TunnelMessageRaw {
-		return fmt.Errorf("tunnel.message should be 'raw' if tunnel type is not 'kafka' or 'file'")
-	}
-
-	if conf.Options.SyncMode != "oplog" && conf.Options.SyncMode != "document" && conf.Options.SyncMode != "all" {
-		return fmt.Errorf("unknown sync_mode[%v]", conf.Options.SyncMode)
-	}
-
-	if conf.Options.MongoConnectMode != utils.ConnectModePrimary &&
-		conf.Options.MongoConnectMode != utils.ConnectModeSecondaryPreferred &&
-		conf.Options.MongoConnectMode != utils.ConnectModeStandalone {
-		return fmt.Errorf("unknown mongo_connect_mode[%v]", conf.Options.MongoConnectMode)
-	}
-
-	return nil
 }
 
 func crash(msg string, errCode int) {
