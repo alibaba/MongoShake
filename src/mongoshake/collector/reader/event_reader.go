@@ -77,7 +77,7 @@ func (er *EventReader) get() ([]byte, error) {
 	select {
 	case ret := <-er.eventChan:
 		return ret.log, ret.err
-	case <-time.After(time.Second * time.Duration(conf.Options.SyncerReaderBufferTime)):
+	case <-time.After(time.Second * time.Duration(conf.Options.IncrSyncReaderBufferTime)):
 		return nil, TimeoutError
 	}
 }

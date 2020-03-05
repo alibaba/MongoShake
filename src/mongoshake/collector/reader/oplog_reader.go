@@ -103,7 +103,7 @@ func (or *OplogReader) get() (log []byte, err error) {
 	select {
 	case ret := <-or.oplogChan:
 		return ret.log, ret.err
-	case <-time.After(time.Second * time.Duration(conf.Options.SyncerReaderBufferTime)):
+	case <-time.After(time.Second * time.Duration(conf.Options.IncrSyncReaderBufferTime)):
 		return nil, TimeoutError
 	}
 }

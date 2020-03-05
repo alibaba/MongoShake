@@ -25,9 +25,9 @@ func TestMongoCheckpoint(t *testing.T) {
 		fmt.Printf("TestMongoCheckpoint case %d.\n", nr)
 		nr++
 
-		conf.Options.ContextStorageUrl = testUrl
-		conf.Options.ContextAddress = "ut_ckpt_table"
-		conf.Options.ContextStorage = StorageTypeDB
+		conf.Options.CheckpointStorageUrl = testUrl
+		conf.Options.CheckpointStorageTable = "ut_ckpt_table"
+		conf.Options.CheckpointStorage = StorageTypeDB
 
 		name := "ut_tet"
 		conn, err := utils.NewMongoConn(testUrl, utils.ConnectModePrimary, true)
@@ -49,9 +49,9 @@ func TestMongoCheckpoint(t *testing.T) {
 		fmt.Printf("TestMongoCheckpoint case %d.\n", nr)
 		nr++
 
-		conf.Options.ContextStorageUrl = testUrl
-		conf.Options.ContextAddress = "ut_ckpt_table"
-		conf.Options.ContextStorage = StorageTypeDB
+		conf.Options.CheckpointStorageUrl = testUrl
+		conf.Options.CheckpointStorageTable = "ut_ckpt_table"
+		conf.Options.CheckpointStorage = StorageTypeDB
 
 		name := "ut_tet"
 		conn, err := utils.NewMongoConn(testUrl, utils.ConnectModePrimary, true)
@@ -94,9 +94,9 @@ func TestMongoCheckpoint(t *testing.T) {
 		fmt.Printf("TestMongoCheckpoint case %d.\n", nr)
 		nr++
 
-		conf.Options.ContextStorageUrl = testUrl
-		conf.Options.ContextAddress = "ut_ckpt_table"
-		conf.Options.ContextStorage = StorageTypeDB
+		conf.Options.CheckpointStorageUrl = testUrl
+		conf.Options.CheckpointStorageTable = "ut_ckpt_table"
+		conf.Options.CheckpointStorage = StorageTypeDB
 
 		name := "ut_tet"
 		conn, err := utils.NewMongoConn(testUrl, utils.ConnectModePrimary, true)
@@ -108,7 +108,7 @@ func TestMongoCheckpoint(t *testing.T) {
 
 		// insert remote with startTs == 300
 		remoteTime := bson.MongoTimestamp(int64(300) << 32)
-		conn.Session.DB(CheckpointDefaultDatabase).C(conf.Options.ContextAddress).Insert(bson.M{
+		conn.Session.DB(CheckpointDefaultDatabase).C(conf.Options.CheckpointStorageTable).Insert(bson.M{
 			"name":                             name,
 			"ckpt":                             remoteTime,
 			"oplog_disk_queue":                 "",
@@ -130,9 +130,9 @@ func TestMongoCheckpoint(t *testing.T) {
 		fmt.Printf("TestMongoCheckpoint case %d.\n", nr)
 		nr++
 
-		conf.Options.ContextStorageUrl = testUrl
-		conf.Options.ContextAddress = "ut_ckpt_table"
-		conf.Options.ContextStorage = StorageTypeDB
+		conf.Options.CheckpointStorageUrl = testUrl
+		conf.Options.CheckpointStorageTable = "ut_ckpt_table"
+		conf.Options.CheckpointStorage = StorageTypeDB
 
 		name := "ut_tet"
 		conn, err := utils.NewMongoConn(testUrl, utils.ConnectModePrimary, true)
@@ -144,7 +144,7 @@ func TestMongoCheckpoint(t *testing.T) {
 
 		// insert remote with startTs == 300
 		remoteTime := bson.MongoTimestamp(int64(300) << 32)
-		conn.Session.DB(CheckpointDefaultDatabase).C(conf.Options.ContextAddress).Insert(bson.M{
+		conn.Session.DB(CheckpointDefaultDatabase).C(conf.Options.CheckpointStorageTable).Insert(bson.M{
 			"name":                             name,
 			"ckpt":                             remoteTime,
 			"oplog_disk_queue":                 "",
@@ -185,9 +185,9 @@ func TestMongoCheckpoint(t *testing.T) {
 		fmt.Printf("TestMongoCheckpoint case %d.\n", nr)
 		nr++
 
-		conf.Options.ContextStorageUrl = testUrl
-		conf.Options.ContextAddress = "ut_ckpt_table"
-		conf.Options.ContextStorage = StorageTypeDB
+		conf.Options.CheckpointStorageUrl = testUrl
+		conf.Options.CheckpointStorageTable = "ut_ckpt_table"
+		conf.Options.CheckpointStorage = StorageTypeDB
 
 		name := "ut_tet"
 		conn, err := utils.NewMongoConn(testUrl, utils.ConnectModePrimary, true)

@@ -174,7 +174,7 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 	var wg sync.WaitGroup
 	wg.Add(len(indexMap))
 
-	collExecutorParallel := conf.Options.FullSyncCollectionParallel
+	collExecutorParallel := conf.Options.FullSyncReaderCollectionParallel
 	namespaces := make(chan *IndexNS, collExecutorParallel)
 	nimo.GoRoutine(func() {
 		for ns, indexList := range indexMap {
@@ -285,7 +285,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 		LOG.Info("document syncer-%d finish, but no data", syncer.id)
 	}
 
-	collExecutorParallel := conf.Options.FullSyncCollectionParallel
+	collExecutorParallel := conf.Options.FullSyncReaderCollectionParallel
 	namespaces := make(chan utils.NS, collExecutorParallel)
 
 	wg.Add(len(nsList))
@@ -343,7 +343,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
 		return err
 	}
 
-	bufferSize := conf.Options.FullSyncDocumentBatchSize
+	bufferSize := conf.Options.FullSyncReaderDocumentBatchSize
 	buffer := make([]*bson.Raw, 0, bufferSize)
 	bufferByteSize := 0
 
@@ -366,7 +366,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
 			bufferByteSize = 0
 		}
 		// transform dbref for document
-		if len(conf.Options.TransformNamespace) > 0 && conf.Options.DBRef {
+		if len(conf.Options.TransformNamespace) > 0 && conf.Options.IncrSyncDBRef {
 			var docData bson.D
 			if err := bson.Unmarshal(doc.Data, docData); err != nil {
 				LOG.Warn("collectionSync do bson unmarshal %v failed. %v", doc.Data, err)

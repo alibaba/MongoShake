@@ -29,7 +29,7 @@ func (exec *Executor) ensureConnection() bool {
 			if exec.bulkInsert, err = utils.GetAndCompareVersion(exec.session, ThresholdVersion); err != nil {
 				LOG.Info("compare version with return[%v], bulkInsert disable", err)
 			}
-			if conf.Options.MajorityWriteIncr {
+			if conf.Options.IncrSyncExecutorMajorityEnable {
 				exec.session.EnsureSafe(&mgo.Safe{WMode: utils.MajorityWriteConcern})
 			}
 		}
@@ -52,7 +52,7 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 
 	lastOne := group.oplogRecords[count-1]
 
-	if conf.Options.ReplayerDurable {
+	if !conf.Options.IncrSyncExecutorDebug {
 		if !exec.ensureConnection() {
 			return errors.New("network connection lost . we would retry for next connecting")
 		}
@@ -75,10 +75,10 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 		switch group.op {
 		case "i":
 			err = dbWriter.doInsert(dc[0], dc[1], metadata, group.oplogRecords,
-				conf.Options.ReplayerExecutorInsertOnDupUpdate)
+				conf.Options.IncrSyncExecutorInsertOnDupUpdate)
 		case "u":
 			err = dbWriter.doUpdate(dc[0], dc[1], metadata, group.oplogRecords,
-				conf.Options.ReplayerExecutorUpsert)
+				conf.Options.IncrSyncExecutorUpsert)
 		case "d":
 			err = dbWriter.doDelete(dc[0], dc[1], metadata, group.oplogRecords)
 		case "c":

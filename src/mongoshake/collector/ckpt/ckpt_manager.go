@@ -31,7 +31,7 @@ type CheckpointManager struct {
 func NewCheckpointManager(name string, startPosition int32) *CheckpointManager {
 	newManager := &CheckpointManager{}
 
-	switch conf.Options.ContextStorage {
+	switch conf.Options.CheckpointStorageUrl {
 	case StorageTypeAPI:
 		newManager.delegate = &HttpApiCheckpoint{
 			CheckpointContext: CheckpointContext{
@@ -41,7 +41,7 @@ func NewCheckpointManager(name string, startPosition int32) *CheckpointManager {
 				OplogDiskQueue:         "",
 				OplogDiskQueueFinishTs: InitCheckpoint,
 			},
-			URL: conf.Options.ContextAddress,
+			URL: conf.Options.CheckpointStorageTable,
 		}
 	case StorageTypeDB:
 		db := CheckpointDefaultDatabase
@@ -57,8 +57,8 @@ func NewCheckpointManager(name string, startPosition int32) *CheckpointManager {
 				OplogDiskQueueFinishTs: InitCheckpoint,
 			},
 			DB:    db,
-			URL:   conf.Options.ContextStorageUrl,
-			Table: conf.Options.ContextAddress,
+			URL:   conf.Options.CheckpointStorage,
+			Table: conf.Options.CheckpointStorageTable,
 		}
 	}
 	return newManager

@@ -91,7 +91,7 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.M, 
 		// update on duplicated key occur
 		if dupUpdate {
 			LOG.Info("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
-			return cw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.ReplayerExecutorUpsert)
+			return cw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.IncrSyncExecutorUpsert)
 		}
 		return nil
 	}
@@ -203,11 +203,11 @@ func (cw *CommandWriter) doCommand(database string, metadata bson.M, oplogs []*O
 	for _, log := range oplogs {
 		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
 		operation, found := oplog.ExtraCommandName(log.original.partialLog.Object)
-		if !conf.Options.ReplayerDMLOnly || (found && oplog.IsSyncDataCommand(operation)) {
+		if conf.Options.FilterDDLEnable || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
 			if err = cw.applyOps(database, metadata, []*oplog.PartialLog{log.original.
 				partialLog}); err == nil {
-				LOG.Info("Execute command (op==c) oplog dml_only mode [%t], operation [%s]", conf.Options.ReplayerDMLOnly, operation)
+				LOG.Info("Execute command (op==c) oplog ddl_enable mode [%t], operation [%s]", conf.Options.FilterDDLEnable, operation)
 			} else {
 				return err
 			}
@@ -278,7 +278,7 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, opl
 			// update on duplicated key occur
 			if dupUpdate {
 				LOG.Info("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
-				return bw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.ReplayerExecutorUpsert)
+				return bw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.IncrSyncExecutorUpsert)
 			}
 			return nil
 		}
@@ -377,11 +377,11 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*Oplo
 		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
 		newObject := log.original.partialLog.Object
 		operation, found := oplog.ExtraCommandName(newObject)
-		if !conf.Options.ReplayerDMLOnly || (found && oplog.IsSyncDataCommand(operation)) {
+		if conf.Options.FilterDDLEnable || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
 			if err = runCommand(database, operation, log.original.partialLog, bw.session); err == nil {
-				LOG.Info("Execute command (op==c) oplog dml_only mode [%t], operation [%s]",
-					conf.Options.ReplayerDMLOnly, operation)
+				LOG.Info("Execute command (op==c) oplog ddl_enable mode [%t], operation [%s]",
+					conf.Options.FilterDDLEnable, operation)
 			} else {
 				return err
 			}
@@ -429,7 +429,7 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.M, o
 		// update on duplicated key occur
 		if dupUpdate {
 			LOG.Info("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
-			return sw.doUpdateOnInsert(database, collection, metadata, upserts, conf.Options.ReplayerExecutorUpsert)
+			return sw.doUpdateOnInsert(database, collection, metadata, upserts, conf.Options.IncrSyncExecutorUpsert)
 		}
 		return nil
 	}
@@ -572,11 +572,11 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*Op
 		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
 		newObject := log.original.partialLog.Object
 		operation, found := oplog.ExtraCommandName(newObject)
-		if !conf.Options.ReplayerDMLOnly || (found && oplog.IsSyncDataCommand(operation)) {
+		if conf.Options.FilterDDLEnable || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
 			if err = runCommand(database, operation, log.original.partialLog, sw.session); err == nil {
-				LOG.Info("Execute command (op==c) oplog dml_only mode [%t], operation [%s]",
-					conf.Options.ReplayerDMLOnly, operation)
+				LOG.Info("Execute command (op==c) oplog ddl_enable mode [%t], operation [%s]",
+					conf.Options.FilterDDLEnable, operation)
 			} else {
 				return err
 			}

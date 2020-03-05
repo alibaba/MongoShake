@@ -54,7 +54,7 @@ func main() {
 		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
 	}
 
-	if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogBuffer, *verbose); err != nil {
+	if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogFlush, *verbose); err != nil {
 		crash(fmt.Sprintf("initial log.dir[%v] log.name[%v] failed[%v].", conf.Options.LogDirectory,
 			conf.Options.LogFileName, err), -2)
 	}
@@ -74,7 +74,7 @@ func main() {
 	utils.Welcome()
 
 	// get exclusive process lock and write pid
-	if utils.WritePidById(conf.Options.LogDirectory, conf.Options.CollectorId) {
+	if utils.WritePidById(conf.Options.LogDirectory, conf.Options.Id) {
 		startup()
 	}
 }
@@ -96,8 +96,8 @@ func startup() {
 	for i, src := range conf.Options.MongoUrls {
 		coordinator.Sources[i] = new(utils.MongoSource)
 		coordinator.Sources[i].URL = src
-		if len(conf.Options.OplogGIDS) != 0 {
-			coordinator.Sources[i].Gids = conf.Options.OplogGIDS
+		if len(conf.Options.IncrSyncOplogGIDS) != 0 {
+			coordinator.Sources[i].Gids = conf.Options.IncrSyncOplogGIDS
 		}
 	}
 
@@ -117,10 +117,10 @@ func startup() {
 
 func selectLeader() {
 	// first of all. ensure we are the Master
-	if conf.Options.MasterQuorum && conf.Options.ContextStorage == ckpt.StorageTypeDB {
+	if conf.Options.MasterQuorum && conf.Options.CheckpointStorage == ckpt.StorageTypeDB {
 		// election become to Master. keep waiting if we are the candidate. election id is must fixed
 		quorum.UseElectionObjectId(bson.ObjectIdHex("5204af979955496907000001"))
-		go quorum.BecomeMaster(conf.Options.ContextStorageUrl, utils.AppDatabase)
+		go quorum.BecomeMaster(conf.Options.CheckpointStorageUrl, utils.AppDatabase)
 
 		// wait until become to a real master
 		<-quorum.MasterPromotionNotifier

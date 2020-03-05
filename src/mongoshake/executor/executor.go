@@ -58,7 +58,7 @@ func (batchExecutor *BatchGroupExecutor) Start() {
 	// conns = number of executor * number of batchExecutor. Normally max
 	// is 64. if collector hashed oplogRecords by _id and the number of collector
 	// is bigger we will use single executer in respective batchExecutor
-	parallel := conf.Options.ReplayerExecutor
+	parallel := conf.Options.IncrSyncExecutor
 	if len(conf.Options.TransformNamespace) > 0 {
 		batchExecutor.NsTrans = transform.NewNamespaceTransform(conf.Options.TransformNamespace)
 	}
@@ -104,7 +104,7 @@ func (batchExecutor *BatchGroupExecutor) replay(logs []*PartialLogWithCallbak) {
 	// In mongo shard cluster. our request goes into mongos. it's safe for
 	// unique index without collision detection
 	var matrix CollisionMatrix = &NoopMatrix{}
-	if conf.Options.ReplayerCollisionEnable {
+	if conf.Options.IncrSyncCollisionEnable {
 		matrix = NewBarrierMatrix()
 	}
 
@@ -215,7 +215,7 @@ func (exec *Executor) start() {
 func (exec *Executor) doSync(logs []*OplogRecord) error {
 	count := len(logs)
 
-	transLogs := transformLogs(logs, exec.batchExecutor.NsTrans, conf.Options.DBRef)
+	transLogs := transformLogs(logs, exec.batchExecutor.NsTrans, conf.Options.IncrSyncDBRef)
 
 	// split batched oplogRecords into (ns, op) groups. individual group
 	// can be accomplished in single MongoDB request. groups

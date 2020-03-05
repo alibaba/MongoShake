@@ -38,13 +38,13 @@ func (tunnel *KafkaWriter) Send(message *WMessage) int64 {
 
 	message.Tag |= MsgPersistent
 
-	switch conf.Options.TunnelMessage {
+	switch conf.Options.IncrSyncTunnelMessage {
 	case utils.TunnelMessageBson:
 		// write the raw oplog directly
 		for _, log := range message.RawLogs {
 			if err := tunnel.writer.SimpleWrite(log); err != nil {
 				LOG.Error("KafkaWriter send [%v] with type[%v] error[%v]", tunnel.RemoteAddr,
-					conf.Options.TunnelMessage, err)
+					conf.Options.IncrSyncTunnelMessage, err)
 				return ReplyError
 			}
 		}
@@ -57,7 +57,7 @@ func (tunnel *KafkaWriter) Send(message *WMessage) int64 {
 			} else {
 				if err := tunnel.writer.SimpleWrite(encode); err != nil {
 					LOG.Error("KafkaWriter send [%v] with type[%v] error[%v]", tunnel.RemoteAddr,
-						conf.Options.TunnelMessage, err)
+						conf.Options.IncrSyncTunnelMessage, err)
 					return ReplyError
 				}
 			}
@@ -83,12 +83,12 @@ func (tunnel *KafkaWriter) Send(message *WMessage) int64 {
 
 		if err := tunnel.writer.SimpleWrite(byteBuffer.Bytes()); err != nil {
 			LOG.Error("KafkaWriter send [%v] with type[%v] error[%v]", tunnel.RemoteAddr,
-				conf.Options.TunnelMessage, err)
+				conf.Options.IncrSyncTunnelMessage, err)
 			return ReplyError
 		}
 
 	default:
-		LOG.Crash("unknown tunnel.message type: ", conf.Options.TunnelMessage)
+		LOG.Crash("unknown tunnel.message type: ", conf.Options.IncrSyncTunnelMessage)
 	}
 
 	// KafkaWriter.AckRequired() is always false, return 0 directly

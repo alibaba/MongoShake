@@ -64,7 +64,7 @@ func RunStatusMessage(status uint64) string {
 	}
 }
 
-func InitialLogger(logDir, logFile, level string, logBuffer bool, verbose bool) error {
+func InitialLogger(logDir, logFile, level string, logFlush bool, verbose bool) error {
 	logLevel := parseLogLevel(level)
 	if verbose {
 		LOG.AddFilter("console", logLevel, LOG.NewConsoleLogWriter())
@@ -81,7 +81,7 @@ func InitialLogger(logDir, logFile, level string, logBuffer bool, verbose bool) 
 	}
 
 	if len(logFile) != 0 {
-		if logBuffer {
+		if !logFlush {
 			LOG.LogBufferLength = 32
 		} else {
 			LOG.LogBufferLength = 0

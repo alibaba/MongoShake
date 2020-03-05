@@ -55,7 +55,7 @@ func NewWorker(coordinator *ReplicationCoordinator, syncer *OplogSyncer, id uint
 		coordinator: coordinator,
 		syncer:      syncer,
 		id:          id,
-		queue:       make(chan []*oplog.GenericOplog, conf.Options.WorkerBatchQueueSize),
+		queue:       make(chan []*oplog.GenericOplog, conf.Options.IncrSyncWorkerBatchQueueSize),
 	}
 }
 

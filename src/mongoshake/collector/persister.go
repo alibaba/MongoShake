@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	ReplayerOplogStoreDiskReadBatch = 10000
+	FullSyncReaderOplogStoreDiskReadBatch = 10000
 )
 
 type Persister struct {
@@ -42,9 +42,9 @@ func NewPersister(replset string, sync *OplogSyncer) *Persister {
 	p := &Persister{
 		replset:           replset,
 		sync:              sync,
-		buffer:            make([][]byte, 0, conf.Options.FetcherBufferCapacity),
+		buffer:            make([][]byte, 0, conf.Options.IncrSyncFetcherBufferCapacity),
 		nextQueuePosition: 0,
-		enableDiskPersist: conf.Options.FullSyncOplogStoreDisk,
+		enableDiskPersist: conf.Options.FullSyncReaderOplogStoreDisk,
 		fetchStage:        utils.FetchStageStoreUnknown,
 		diskQueueLastTs:   -1, // initial set 1
 	}
@@ -76,7 +76,7 @@ func (p *Persister) InitDiskQueue(dqName string) {
 	}
 
 	p.DiskQueue = diskQueue.NewDiskQueue(dqName, conf.Options.LogDirectory,
-		conf.Options.FullSyncOplogStoreDiskMaxSize, ReplayerOplogStoreDiskReadBatch,
+		conf.Options.FullSyncReaderOplogStoreDiskMaxSize, FullSyncReaderOplogStoreDiskReadBatch,
 		1<<30, 0, 1<<26,
 		1000, 2*time.Second)
 }
@@ -91,7 +91,7 @@ func (p *Persister) GetQueryTsFromDiskQueue() bson.MongoTimestamp {
 		return 0
 	}
 
-	if conf.Options.MongoFetchMethod == "oplog" {
+	if conf.Options.IncrSyncMongoFetchMethod == "oplog" {
 		log := new(oplog.PartialLog)
 		if err := bson.Unmarshal(logData, log); err != nil {
 			LOG.Crashf("unmarshal oplog[%v] failed[%v]", logData, err)
@@ -159,7 +159,7 @@ func (p *Persister) PushToPendingQueue(input []byte) {
 		flush = true
 	}
 
-	if len(p.buffer) >= conf.Options.FetcherBufferCapacity || (flush && len(p.buffer) != 0) {
+	if len(p.buffer) >= conf.Options.IncrSyncFetcherBufferCapacity || (flush && len(p.buffer) != 0) {
 		// we could simply ++syncer.resolverIndex. The max uint64 is 9223372036854774807
 		// and discard the skip situation. we assume nextQueueCursor couldn't be overflow
 		selected := int(p.nextQueuePosition % uint64(len(p.sync.PendingQueue)))

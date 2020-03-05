@@ -22,9 +22,9 @@ type Configuration struct {
 	FilterNamespaceBlack    []string `config:"filter.namespace.black"`
 	FilterNamespaceWhite    []string `config:"filter.namespace.white"`
 	FilterPassSpecialDb     []string `config:"filter.pass.special.db"`
-	FilterDDLEnable           bool     `config:"filter.ddl_enable"`
+	FilterDDLEnable         bool     `config:"filter.ddl_enable"`
 	CheckpointStorageUrl    string   `config:"checkpoint.storage.url"`
-	CheckpointAddress       string   `config:"checkpoint.address"`
+	CheckpointStorageTable  string   `config:"checkpoint.storage.table"`
 	CheckpointStartPosition int64    `config:"checkpoint.start_position" type:"date"`
 	TransformNamespace      []string `config:"transform.namespace"`
 

@@ -125,7 +125,7 @@ func (batcher *Batcher) getBatch() []*oplog.GenericOplog {
 		mergeBatch = <-syncer.logsQueue[batcher.currentQueue()]
 		// move to next available logs queue
 		batcher.moveToNextQueue()
-		for len(mergeBatch) < conf.Options.AdaptiveBatchingMaxSize &&
+		for len(mergeBatch) < conf.Options.IncrSyncAdaptiveBatchingMaxSize &&
 			len(syncer.logsQueue[batcher.currentQueue()]) > 0 {
 			// there has more pushed oplogs in next logs queue (read can't to be block)
 			// Hence, we fetch them by the way. and merge together
@@ -178,7 +178,7 @@ Outer:
 			// current is ddl
 			if ddlFilter.Filter(genericLog.Parsed) {
 				// enable ddl?
-				if !conf.Options.ReplayerDMLOnly {
+				if conf.Options.FilterDDLEnable {
 					batcher.addIntoBatchGroup(&batchGroup, batcher.previousOplog)
 					// store and handle in the next call
 					if i == 0 {

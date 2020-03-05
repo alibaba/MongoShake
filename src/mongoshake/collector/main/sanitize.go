@@ -79,8 +79,8 @@ func checkDefaultValue() error {
 	if conf.Options.CheckpointStorageUrl == "" {
 		// do nothing here
 	}
-	if conf.Options.CheckpointAddress == "" {
-		conf.Options.CheckpointAddress = "ckpt_default"
+	if conf.Options.CheckpointStorageTable == "" {
+		conf.Options.CheckpointStorageTable = "ckpt_default"
 	}
 	if conf.Options.CheckpointStartPosition <= 0 {
 		conf.Options.CheckpointStartPosition = 1
@@ -176,16 +176,25 @@ func checkConnection() error {
 		}
 	}
 
-	// TODO
 	// check mongo_cs_url
-	if len(conf.Options.MongoCsUrl) > 0 {
-		for _, mongo := range conf.Options.MongoCsUrl {
+	if conf.Options.MongoCsUrl != "" {
+		_, err := utils.NewMongoConn(conf.Options.MongoCsUrl, utils.ConnectModeSecondaryPreferred, true)
+		if err != nil {
+			return fmt.Errorf("connect config-server[%v] failed[%v]", conf.Options.MongoCsUrl, err)
+		}
+	}
+
+	// check tunnel address
+	if conf.Options.IncrSyncTunnel == "direct" {
+		for _, mongo := range conf.Options.IncrSyncTunnelAddress {
 			_, err := utils.NewMongoConn(mongo, conf.Options.MongoConnectMode, true)
 			if err != nil {
-				return fmt.Errorf("connect source mongodb[%v] failed[%v]", mongo, err)
+				return fmt.Errorf("connect target tunnel mongodb[%v] failed[%v]", mongo, err)
 			}
 		}
 	}
+
+	return nil
 }
 
 func checkConflict() error {
@@ -247,9 +256,15 @@ func checkConflict() error {
 	}
 	// check source mongodb version >= 4.0 when change stream enable
 	if conf.Options.IncrSyncMongoFetchMethod == "change_stream" {
-		conn, err := utils.NewMongoConn(conf.Options.MongoUrls, utils.ConnectModeSecondaryPreferred, true)
+		conn, err := utils.NewMongoConn(conf.Options.MongoUrls[0], utils.ConnectModeSecondaryPreferred, true)
 		if err != nil {
-
+			return fmt.Errorf("connect source mongodb[%v] failed[%v]", conf.Options.MongoUrls[0], err)
+		}
+		if isOk, err := utils.GetAndCompareVersion(conn.Session, "4.0.0"); err != nil {
+			return fmt.Errorf("compare source mongodb[%v] to v4.0.0 failed[%v]", conf.Options.MongoUrls[0], err)
+		} else if !isOk {
+			return fmt.Errorf("source mongodb[%v] should >= 4.0.0 when incr_sync.mongo_fetch_method == %v",
+				conf.Options.MongoUrls[0], "change_stream")
 		}
 	}
 

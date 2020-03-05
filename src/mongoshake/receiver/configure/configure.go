@@ -7,7 +7,7 @@ type Configuration struct {
 	LogDirectory  string `config:"log.dir"`
 	LogLevel      string `config:"log.level"`
 	LogFileName   string `config:"log.file"`
-	LogBuffer     bool   `config:"log.buffer"`
+	LogFlush      bool   `config:"log.flush"`
 	ReplayerNum   int    `config:"replayer"`
 }
 

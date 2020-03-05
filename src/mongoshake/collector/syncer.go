@@ -94,7 +94,7 @@ func NewOplogSyncer(
 	mongoUrl string,
 	gids []string) *OplogSyncer {
 
-	reader, err := sourceReader.CreateReader(conf.Options.MongoFetchMethod, mongoUrl, replset)
+	reader, err := sourceReader.CreateReader(conf.Options.IncrSyncMongoFetchMethod, mongoUrl, replset)
 	if err != nil {
 		LOG.Critical("create reader with url[%v] replset[%v] failed[%v]", mongoUrl, replset, err)
 		return nil
@@ -106,12 +106,12 @@ func NewOplogSyncer(
 		startPosition:          startPosition,
 		fullSyncFinishPosition: fullSyncFinishPosition,
 		journal:                utils.NewJournal(utils.JournalFileName(
-			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
+			fmt.Sprintf("%s.%s", conf.Options.Id, replset))),
 		reader:                 reader,
 	}
 
 	// concurrent level hasher
-	switch conf.Options.ShardKey {
+	switch conf.Options.IncrSyncShardKey {
 	case oplog.ShardByNamespace:
 		syncer.hasher = &oplog.TableHasher{}
 	case oplog.ShardByID:
@@ -121,7 +121,7 @@ func NewOplogSyncer(
 	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter), filter.NewGidFilter(gids)}
 
 	// DDL filter
-	if conf.Options.ReplayerDMLOnly {
+	if !conf.Options.FilterDDLEnable {
 		filterList = append(filterList, new(filter.DDLFilter))
 	}
 	// namespace filter, heavy operation
@@ -159,7 +159,7 @@ func (sync *OplogSyncer) startDiskApply() {
 // start to polling oplog
 func (sync *OplogSyncer) start() {
 	LOG.Info("Poll oplog syncer start. ckpt_interval[%dms], gid[%s], shard_key[%s]",
-		conf.Options.CheckpointInterval, conf.Options.OplogGIDS, conf.Options.ShardKey)
+		conf.Options.CheckpointInterval, conf.Options.IncrSyncOplogGIDS, conf.Options.IncrSyncShardKey)
 
 	sync.startTime = time.Now()
 
@@ -283,7 +283,7 @@ func (sync *OplogSyncer) startBatcher() {
 
 func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.MongoTimestamp) {
 	// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
-	if barrier && newestTs > 0 && conf.Options.WorkerNum > 1 {
+	if barrier && newestTs > 0 && conf.Options.IncrSyncWorker > 1 {
 		LOG.Info("find barrier")
 		for {
 			checkpointTs := sync.ckptManager.GetInMemory().Timestamp
@@ -327,7 +327,7 @@ func (sync *OplogSyncer) startDeserializer() {
 
 func (sync *OplogSyncer) deserializer(index int) {
 	var parser func(input []byte) (*oplog.PartialLog, error)
-	if conf.Options.MongoFetchMethod == "change_stream" {
+	if conf.Options.IncrSyncMongoFetchMethod == "change_stream" {
 		// parse []byte (change stream event format) -> oplog
 		parser = func(input []byte) (*oplog.PartialLog, error) {
 			return oplog.ConvertEvent2Oplog(input)
@@ -370,7 +370,8 @@ func (sync *OplogSyncer) poll() {
 	if err != nil {
 		// we doesn't continue working on ckpt fetched failed. because we should
 		// confirm the exist checkpoint value or exactly knows that it doesn't exist
-		LOG.Critical("Acquire the existing checkpoint from remote[%s] failed !", conf.Options.ContextAddress)
+		LOG.Critical("Acquire the existing checkpoint from remote[%s %s] failed !",
+			conf.Options.CheckpointStorage, conf.Options.CheckpointStorageTable)
 		return
 	}
 	sync.reader.SetQueryTimestampOnEmpty(checkpoint.Timestamp)
@@ -467,7 +468,7 @@ func (sync *OplogSyncer) RestAPI() {
 
 	utils.HttpApi.RegisterAPI("/repl", nimo.HttpGet, func([]byte) interface{} {
 		return &Info{
-			Who:         conf.Options.CollectorId,
+			Who:         conf.Options.Id,
 			Tag:         utils.BRANCH,
 			ReplicaSet:  sync.replset,
 			Logs:        sync.replMetric.Get(),

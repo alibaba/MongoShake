@@ -58,11 +58,11 @@ func (colExecutor *CollectionExecutor) Start() error {
 	if colExecutor.conn, err = utils.NewMongoConn(colExecutor.mongoUrl, utils.ConnectModePrimary, true); err != nil {
 		return err
 	}
-	if conf.Options.MajorityWriteFull {
+	if conf.Options.FullSyncExecutorMajorityEnable {
 		colExecutor.conn.Session.EnsureSafe(&mgo.Safe{WMode: utils.MajorityWriteConcern})
 	}
 
-	parallel := conf.Options.FullSyncDocumentParallel
+	parallel := conf.Options.FullSyncReaderDocumentParallel
 	colExecutor.docBatch = make(chan []*bson.Raw, parallel)
 
 	executors := make([]*DocExecutor, parallel)

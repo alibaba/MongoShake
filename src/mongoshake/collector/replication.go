@@ -45,7 +45,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	if err := coordinator.sanitizeMongoDB(); err != nil {
 		return err
 	}
-	LOG.Info("Collector startup. shard_by[%s] gids[%s]", conf.Options.ShardKey, conf.Options.OplogGIDS)
+	LOG.Info("Collector startup. shard_by[%s] gids[%s]", conf.Options.IncrSyncShardKey, conf.Options.IncrSyncOplogGIDS)
 
 	// all configurations has changed to immutable
 	// opts, _ := json.Marshal(conf.Options)
@@ -70,7 +70,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 
 	switch syncMode {
 	case SYNCMODE_ALL:
-		if conf.Options.FullSyncOplogStoreDisk {
+		if conf.Options.FullSyncReaderOplogStoreDisk {
 			LOG.Info("run parallel document oplog")
 			if err := coordinator.parallelDocumentOplog(fullBeginTs32); err != nil {
 				return err
@@ -86,8 +86,8 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			return err
 		}
 	case SYNCMODE_OPLOG:
-		if err := coordinator.startOplogReplication(conf.Options.ContextStartPosition,
-			conf.Options.ContextStartPosition); err != nil {
+		if err := coordinator.startOplogReplication(conf.Options.CheckpointStartPosition,
+			conf.Options.CheckpointStartPosition); err != nil {
 			return err
 		}
 	default:
@@ -104,8 +104,8 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	var hasUniqIndex = false
 	rs := map[string]int{}
 
-	// try to connect ContextStorageUrl
-	storageUrl := conf.Options.ContextStorageUrl
+	// try to connect CheckpointStorage
+	storageUrl := conf.Options.CheckpointStorage
 	if conn, err = utils.NewMongoConn(storageUrl, utils.ConnectModePrimary, true); conn == nil || !conn.IsGood() || err != nil {
 		LOG.Critical("Connect storageUrl[%v] error[%v]. Please add primary node into 'mongo_urls' " +
 			"if 'context.storage.url' is empty", storageUrl, err)
@@ -152,11 +152,11 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 
 	// we choose sharding by collection if there are unique index
 	// existing in collections
-	if conf.Options.ShardKey == oplog.ShardAutomatic {
+	if conf.Options.IncrSyncShardKey == oplog.ShardAutomatic {
 		if hasUniqIndex {
-			conf.Options.ShardKey = oplog.ShardByNamespace
+			conf.Options.IncrSyncShardKey = oplog.ShardByNamespace
 		} else {
-			conf.Options.ShardKey = oplog.ShardByID
+			conf.Options.IncrSyncShardKey = oplog.ShardByID
 		}
 	}
 
@@ -313,7 +313,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 
 	fromIsSharding := len(coordinator.Sources) > 1
-	toUrl := conf.Options.TunnelAddress[0]
+	toUrl := conf.Options.IncrSyncTunnelAddress[0]
 	var toConn *utils.MongoConn
 	if toConn, err = utils.NewMongoConn(toUrl, utils.ConnectModePrimary, true); err != nil {
 		return err
@@ -327,7 +327,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		return err
 	}
 	if shardingSync {
-		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.ContextStorageUrl, toConn, trans); err != nil {
+		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.CheckpointStorage, toConn, trans); err != nil {
 			return err
 		}
 	}
@@ -370,7 +370,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		return replError
 	}
 
-	if conf.Options.FullSyncCreateIndex {
+	if conf.Options.FullSyncCreateIndex == "foreground" {
 		if err := docsyncer.StartIndexSync(indexMap, toUrl, trans); err != nil {
 			return fmt.Errorf("create index failed[%v]", err)
 		}
@@ -402,7 +402,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	}
 
 	// prepare worker routine and bind it to syncer
-	for i := 0; i != conf.Options.WorkerNum; i++ {
+	for i := 0; i < conf.Options.IncrSyncWorker; i++ {
 		syncer := coordinator.syncerGroup[i%len(coordinator.syncerGroup)]
 		w := NewWorker(coordinator, syncer, uint32(i))
 		if !w.init() {

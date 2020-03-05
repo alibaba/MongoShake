@@ -78,8 +78,8 @@ func TestBatchMore(t *testing.T) {
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
-		conf.Options.AdaptiveBatchingMaxSize = 100
-		conf.Options.ReplayerDMLOnly = true
+		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
+		conf.Options.FilterDDLEnable = false
 
 		syncer.logsQueue[0] <- mockOplogs(5, nil, nil,nil, 0)
 		syncer.logsQueue[1] <- mockOplogs(6, nil, nil,nil, 100)
@@ -103,7 +103,7 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, int64(206), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
 	}
 
-	// split by `conf.Options.AdaptiveBatchingMaxSize`
+	// split by `conf.Options.IncrSyncAdaptiveBatchingMaxSize`
 	{
 		fmt.Printf("TestBatchMore case %d.\n", nr)
 		nr++
@@ -112,8 +112,8 @@ func TestBatchMore(t *testing.T) {
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
-		conf.Options.AdaptiveBatchingMaxSize = 10
-		conf.Options.ReplayerDMLOnly = true
+		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 10
+		conf.Options.FilterDDLEnable = false
 
 		syncer.logsQueue[0] <- mockOplogs(5, nil, nil,nil, 0)
 		syncer.logsQueue[1] <- mockOplogs(6, nil, nil,nil, 100)
@@ -144,8 +144,8 @@ func TestBatchMore(t *testing.T) {
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
-		conf.Options.AdaptiveBatchingMaxSize = 10
-		conf.Options.ReplayerDMLOnly = true
+		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 10
+		conf.Options.FilterDDLEnable = false
 
 		syncer.logsQueue[0] <- mockOplogs(5, []int{0, 1, 2, 3, 4}, nil,nil, 0)
 		syncer.logsQueue[1] <- mockOplogs(6, []int{0, 1, 2, 3, 4, 5}, nil,nil, 100)
@@ -168,8 +168,8 @@ func TestBatchMore(t *testing.T) {
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
-		conf.Options.AdaptiveBatchingMaxSize = 100
-		conf.Options.ReplayerDMLOnly = false
+		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
+		conf.Options.FilterDDLEnable = true
 
 		syncer.logsQueue[0] <- mockOplogs(5, nil, nil,nil, 0)
 		syncer.logsQueue[1] <- mockOplogs(6, []int{2}, nil,nil, 100)
@@ -209,8 +209,8 @@ func TestBatchMore(t *testing.T) {
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
-		conf.Options.AdaptiveBatchingMaxSize = 100
-		conf.Options.ReplayerDMLOnly = false
+		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
+		conf.Options.FilterDDLEnable = true
 
 		syncer.logsQueue[0] <- mockOplogs(5, []int{3}, nil,nil, 0)
 		syncer.logsQueue[1] <- mockOplogs(6, []int{2}, nil,nil, 100)
@@ -294,8 +294,8 @@ func TestBatchMore(t *testing.T) {
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
-		conf.Options.AdaptiveBatchingMaxSize = 100
-		conf.Options.ReplayerDMLOnly = false
+		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
+		conf.Options.FilterDDLEnable = true
 
 		syncer.logsQueue[0] <- mockOplogs(5, []int{0}, nil,nil, 0)
 		syncer.logsQueue[1] <- mockOplogs(6, nil, nil,nil, 100)
@@ -347,8 +347,8 @@ func TestBatchMore(t *testing.T) {
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
-		conf.Options.AdaptiveBatchingMaxSize = 100
-		conf.Options.ReplayerDMLOnly = false
+		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
+		conf.Options.FilterDDLEnable = true
 
 		syncer.logsQueue[0] <- mockOplogs(3, []int{0, 1, 2}, nil,nil, 0)
 		syncer.logsQueue[1] <- mockOplogs(1, []int{0}, nil,nil, 100)
@@ -407,7 +407,7 @@ func TestBatchMore(t *testing.T) {
 
 	}
 
-	// the edge of `AdaptiveBatchingMaxSize` is ddl
+	// the edge of `IncrSyncAdaptiveBatchingMaxSize` is ddl
 	{
 		fmt.Printf("TestBatchMore case %d.\n", nr)
 		nr++
@@ -416,8 +416,8 @@ func TestBatchMore(t *testing.T) {
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
-		conf.Options.AdaptiveBatchingMaxSize = 8
-		conf.Options.ReplayerDMLOnly = false
+		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 8
+		conf.Options.FilterDDLEnable = true
 
 		syncer.logsQueue[0] <- mockOplogs(5, nil, nil,nil, 0)
 		syncer.logsQueue[1] <- mockOplogs(6, []int{5}, nil,nil, 100) // last is ddl
@@ -473,8 +473,8 @@ func TestBatchMore(t *testing.T) {
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
-		conf.Options.AdaptiveBatchingMaxSize = 100
-		conf.Options.ReplayerDMLOnly = false
+		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
+		conf.Options.FilterDDLEnable = true
 
 		// sameTs 3 == 4
 		syncer.logsQueue[0] <- mockOplogs(5, nil, nil,[]int{4}, 0)
@@ -526,8 +526,8 @@ func TestBatchMore(t *testing.T) {
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
-		conf.Options.AdaptiveBatchingMaxSize = 100
-		conf.Options.ReplayerDMLOnly = false
+		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
+		conf.Options.FilterDDLEnable = true
 
 		// sameTs 1 == 2, 5 == 6
 		syncer.logsQueue[0] <- mockOplogs(9, nil, []int{3, 4, 7, 8}, []int{2, 6}, 0)
@@ -566,8 +566,8 @@ func TestBatchMore(t *testing.T) {
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
-		conf.Options.AdaptiveBatchingMaxSize = 100
-		conf.Options.ReplayerDMLOnly = false
+		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
+		conf.Options.FilterDDLEnable = true
 
 		syncer.logsQueue[0] <- mockOplogs(9, []int{0, 7}, []int{3, 4}, []int{2, 6}, 0)
 
@@ -614,8 +614,8 @@ func TestBatchMore(t *testing.T) {
 		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
 		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
 
-		conf.Options.AdaptiveBatchingMaxSize = 10
-		conf.Options.ReplayerDMLOnly = false
+		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 10
+		conf.Options.FilterDDLEnable = true
 
 		syncer.logsQueue[0] <- mockOplogs(6, []int{5}, []int{0, 1, 2}, []int{4}, 0)
 		syncer.logsQueue[1] <- mockOplogs(7, []int{0, 1}, []int{2, 3, 4, 5, 6}, nil, 100)

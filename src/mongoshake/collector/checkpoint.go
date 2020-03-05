@@ -16,8 +16,8 @@ import (
 )
 
 func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int32) {
-	LOG.Info("Oplog sync[%v] create checkpoint manager with storage[%s] address[%s] start-position[%v]",
-		name, conf.Options.ContextStorage, conf.Options.ContextAddress, startPosition)
+	LOG.Info("Oplog sync[%v] create checkpoint manager with storage[%s] table[%s] start-position[%v]",
+		name, conf.Options.CheckpointStorage, conf.Options.CheckpointStorageTable, startPosition)
 	sync.ckptManager = ckpt.NewCheckpointManager(name, startPosition)
 }
 
@@ -32,7 +32,7 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 	LOG.Info("load checkpoint value: %v", checkpoint)
 
 	// not enable oplog persist?
-	if !conf.Options.FullSyncOplogStoreDisk {
+	if !conf.Options.FullSyncReaderOplogStoreDisk {
 		sync.persister.SetFetchStage(utils.FetchStageStoreMemoryApply)
 		return nil
 	}
@@ -82,7 +82,7 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 	// in AckRequired() tunnel. such as "rpc". While collector is restarted,
 	// we can't get the correct worker ack offset since collector have lost
 	// the unack offset...
-	if !flush && conf.Options.Tunnel != "direct" && now.Before(sync.startTime.Add(3*time.Minute)) {
+	if !flush && conf.Options.IncrSyncTunnel != "direct" && now.Before(sync.startTime.Add(3*time.Minute)) {
 		// LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
 		return
 	}
@@ -100,7 +100,7 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 
 	lowestInt64 := bson.MongoTimestamp(lowest)
 	// if all oplogs from disk has been replayed successfully, store the newest oplog timestamp
-	if conf.Options.FullSyncOplogStoreDisk && sync.persister.diskQueueLastTs > 0 {
+	if conf.Options.FullSyncReaderOplogStoreDisk && sync.persister.diskQueueLastTs > 0 {
 		if lowestInt64 >= sync.persister.diskQueueLastTs {
 			sync.ckptManager.SetOplogDiskFinishTs(sync.persister.diskQueueLastTs)
 			sync.persister.diskQueueLastTs = -2 // mark -1 so next time won't call

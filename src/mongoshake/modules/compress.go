@@ -89,13 +89,13 @@ type Compressor struct {
 }
 
 func (compressor *Compressor) IsRegistered() bool {
-	return conf.Options.WorkerOplogCompressor != CompressionNone
+	return conf.Options.IncrSyncWorkerOplogCompressor != CompressionNone
 }
 
 func (compressor *Compressor) Install() bool {
 	var err error
-	if compressor.zipper, err = GetCompressorByName(conf.Options.WorkerOplogCompressor); err != nil {
-		LOG.Critical("Worker create compressor %s failed", conf.Options.WorkerOplogCompressor)
+	if compressor.zipper, err = GetCompressorByName(conf.Options.IncrSyncWorkerOplogCompressor); err != nil {
+		LOG.Critical("Worker create compressor %s failed", conf.Options.IncrSyncWorkerOplogCompressor)
 		return false
 	}
 
