@@ -32,7 +32,7 @@ type MongoConn struct {
 }
 
 func NewMongoConn(url string, connectMode string, timeout bool) (*MongoConn, error) {
-	if connectMode == ConnectModeStandalone {
+	if connectMode == VarMongoConnectModeStandalone {
 		url += "?connect=direct"
 	}
 
@@ -59,11 +59,11 @@ func NewMongoConn(url string, connectMode string, timeout bool) (*MongoConn, err
 	// Switch the session to a eventually behavior. In that case session
 	// may read for any secondary node. default mode is mgo.Strong
 	switch connectMode {
-	case ConnectModePrimary:
+	case VarMongoConnectModePrimary:
 		session.SetMode(mgo.Primary, true)
-	case ConnectModeSecondaryPreferred:
+	case VarMongoConnectModeSecondaryPreferred:
 		session.SetMode(mgo.SecondaryPreferred, true)
-	case ConnectModeStandalone:
+	case VarMongoConnectModeStandalone:
 		session.SetMode(mgo.Monotonic, true)
 	default:
 		err = fmt.Errorf("unknown connect mode[%v]", connectMode)

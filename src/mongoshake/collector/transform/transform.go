@@ -70,6 +70,10 @@ func NewDBTransform(transRule []string) *DBTransform {
 }
 
 func TransformDBRef(logObject bson.D, db string, nsTrans *NamespaceTransform) bson.D {
+	if len(logObject) == 0 {
+		return logObject
+	}
+
 	if logObject[0].Name == "$ref" {
 		// if has DBRef, [0] must be "$ref"
 		collection := logObject[0].Value.(string)

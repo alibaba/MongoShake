@@ -39,7 +39,7 @@ func (tunnel *KafkaWriter) Send(message *WMessage) int64 {
 	message.Tag |= MsgPersistent
 
 	switch conf.Options.IncrSyncTunnelMessage {
-	case utils.TunnelMessageBson:
+	case utils.VarIncrSyncTunnelMessageBson:
 		// write the raw oplog directly
 		for _, log := range message.RawLogs {
 			if err := tunnel.writer.SimpleWrite(log); err != nil {
@@ -48,7 +48,7 @@ func (tunnel *KafkaWriter) Send(message *WMessage) int64 {
 				return ReplyError
 			}
 		}
-	case utils.TunnelMessageJson:
+	case utils.VarIncrSyncTunnelMessageJson:
 		for _, log := range message.ParsedLogs {
 			// json marshal
 			if encode, err := json.Marshal(log); err != nil {
@@ -62,7 +62,7 @@ func (tunnel *KafkaWriter) Send(message *WMessage) int64 {
 				}
 			}
 		}
-	case utils.TunnelMessageRaw:
+	case utils.VarIncrSyncTunnelMessageRaw:
 		byteBuffer := bytes.NewBuffer([]byte{})
 		// checksum
 		binary.Write(byteBuffer, binary.BigEndian, uint32(message.Checksum))

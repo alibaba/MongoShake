@@ -12,10 +12,6 @@ import (
 )
 
 const (
-	StorageTypeAPI            = "api"
-	StorageTypeDB             = "database"
-	CheckpointDefaultDatabase = utils.AppDatabase
-	CheckpointAdminDatabase   = "admin"
 	CheckpointName            = "name"
 )
 
@@ -31,8 +27,8 @@ type CheckpointManager struct {
 func NewCheckpointManager(name string, startPosition int32) *CheckpointManager {
 	newManager := &CheckpointManager{}
 
-	switch conf.Options.CheckpointStorageUrl {
-	case StorageTypeAPI:
+	switch conf.Options.CheckpointStorage {
+	case utils.VarCheckpointStorageApi:
 		newManager.delegate = &HttpApiCheckpoint{
 			CheckpointContext: CheckpointContext{
 				Name:                   name,
@@ -41,12 +37,12 @@ func NewCheckpointManager(name string, startPosition int32) *CheckpointManager {
 				OplogDiskQueue:         "",
 				OplogDiskQueueFinishTs: InitCheckpoint,
 			},
-			URL: conf.Options.CheckpointStorageTable,
+			URL: conf.Options.CheckpointStorageCollection,
 		}
-	case StorageTypeDB:
-		db := CheckpointDefaultDatabase
+	case utils.VarCheckpointStorageDatabase:
+		db := utils.AppDatabase
 		if conf.Options.IsShardCluster() {
-			db = CheckpointAdminDatabase
+			db = utils.VarCheckpointStorageDbShardingDefault
 		}
 		newManager.delegate = &MongoCheckpoint{
 			CheckpointContext: CheckpointContext{
@@ -57,9 +53,11 @@ func NewCheckpointManager(name string, startPosition int32) *CheckpointManager {
 				OplogDiskQueueFinishTs: InitCheckpoint,
 			},
 			DB:    db,
-			URL:   conf.Options.CheckpointStorage,
-			Table: conf.Options.CheckpointStorageTable,
+			URL:   conf.Options.CheckpointStorageUrl,
+			Table: conf.Options.CheckpointStorageCollection,
 		}
+	default:
+		return nil
 	}
 	return newManager
 }

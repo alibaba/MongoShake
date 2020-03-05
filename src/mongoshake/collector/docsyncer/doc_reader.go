@@ -29,7 +29,7 @@ func GetAllNamespace(sources []*utils.MongoSource) (map[utils.NS]bool, error) {
 
 func getDbNamespace(url string) (nsList []utils.NS, err error) {
 	var conn *utils.MongoConn
-	if conn, err = utils.NewMongoConn(url, utils.ConnectModeSecondaryPreferred, true); conn == nil || err != nil {
+	if conn, err = utils.NewMongoConn(url, utils.VarMongoConnectModeSecondaryPreferred, true); conn == nil || err != nil {
 		return nil, err
 	}
 	defer conn.Close()

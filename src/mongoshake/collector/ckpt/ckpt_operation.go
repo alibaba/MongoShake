@@ -55,7 +55,7 @@ type MongoCheckpoint struct {
 func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 	// make connection if we haven't already established one
 	if ckpt.Conn == nil {
-		if conn, err := utils.NewMongoConn(ckpt.URL, utils.ConnectModePrimary, true); err == nil {
+		if conn, err := utils.NewMongoConn(ckpt.URL, utils.VarMongoConnectModePrimary, true); err == nil {
 			ckpt.Conn = conn
 			ckpt.QueryHandle = conn.Session.DB(ckpt.DB).C(ckpt.Table)
 		} else {

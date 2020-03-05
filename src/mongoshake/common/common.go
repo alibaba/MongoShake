@@ -15,10 +15,10 @@ var SIGNALPROFILE = "$"
 var SIGNALSTACK = "$"
 
 const (
-	APPNAME = "mongoshake"
+	// APPNAME = "mongoshake"
+	// AppDatabase          = APPNAME
+	// APPConflictDatabase  = APPNAME + "_conflict"
 
-	AppDatabase          = APPNAME
-	APPConflictDatabase  = APPNAME + "_conflict"
 	GlobalDiagnosticPath = "diagnostic"
 	// This is the time of golang was born to the world
 	GolangSecurityTime = "2006-01-02T15:04:05Z"
@@ -30,14 +30,12 @@ const (
 	TunnelSyncBad  uint64 = 8
 	ReplicaExecBad uint64 = 16
 
-	ConnectModePrimary            = "primary"
-	ConnectModeSecondaryPreferred = "secondaryPreferred"
-	ConnectModeStandalone         = "standalone"
-	MajorityWriteConcern          = "majority"
+	MajorityWriteConcern = "majority"
+)
 
-	TunnelMessageRaw  = "raw"
-	TunnelMessageJson = "json"
-	TunnelMessageBson = "bson"
+var (
+	AppDatabase         = VarCheckpointStorageDbReplicaDefault
+	APPConflictDatabase = VarCheckpointStorageDbReplicaDefault + "_conflict"
 )
 
 func init() {
@@ -138,9 +136,9 @@ func DelayFor(ms int64) {
  */
 func BlockMongoUrlPassword(url, replace string) string {
 	colon := strings.Index(url, ":")
-	if colon == -1 || colon == len(url) - 1 {
+	if colon == -1 || colon == len(url)-1 {
 		return url
-	} else if url[colon + 1] == '/' {
+	} else if url[colon+1] == '/' {
 		// find the second '/'
 		for colon++; colon < len(url); colon++ {
 			if url[colon] == ':' {
@@ -154,7 +152,7 @@ func BlockMongoUrlPassword(url, replace string) string {
 	}
 
 	at := strings.Index(url, "@")
-	if at == -1 || at == len(url) - 1 || at <= colon {
+	if at == -1 || at == len(url)-1 || at <= colon {
 		return url
 	}
 

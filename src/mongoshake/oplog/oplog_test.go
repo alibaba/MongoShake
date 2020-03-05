@@ -317,3 +317,109 @@ func TestGatherApplyOps(t *testing.T) {
 		fmt.Println(gather.Parsed.Object[0])
 	}
 }
+
+func TestPartialLog(t *testing.T) {
+	nr := 0
+
+	{
+		fmt.Printf("TestPartialLog case %d.\n", nr)
+		nr++
+
+		input := bson.M{
+			"ts": bson.MongoTimestamp(1),
+			"ns": "a.b",
+			"o": bson.D{
+				bson.DocElem{
+					Name: "key1",
+					Value: "value1",
+				},
+				bson.DocElem{
+					Name: "key2",
+					Value: "value2",
+				},
+			},
+			"o2": bson.M{
+				"_id": "123",
+			},
+			"useless": "can't see me",
+		}
+
+		output := NewPartialLog(input)
+		assert.Equal(t, &PartialLog{
+			ParsedLog: ParsedLog{
+				Timestamp: bson.MongoTimestamp(1),
+				Namespace: "a.b",
+				Object: bson.D{
+					bson.DocElem{
+						Name: "key1",
+						Value: "value1",
+					},
+					bson.DocElem{
+						Name: "key2",
+						Value: "value2",
+					},
+				},
+				Query: bson.M{
+					"_id": "123",
+				},
+			},
+		}, output, "should be equal")
+
+		output.RawSize = 1 // shouldn't appear
+
+		// test dump
+		bsonDOutput := output.Dump(map[string]struct{}{
+			"ts": {},
+			"o": {},
+			"o2": {},
+		}, false)
+		assert.Equal(t, bson.D{
+			bson.DocElem{
+				Name: "ts",
+				Value: bson.MongoTimestamp(1),
+			},
+			bson.DocElem{
+				Name: "o",
+				Value: bson.D{
+					bson.DocElem{
+						Name: "key1",
+						Value: "value1",
+					},
+					bson.DocElem{
+						Name: "key2",
+						Value: "value2",
+					},
+				},
+			},
+			bson.DocElem{
+				Name: "o2",
+				Value: bson.M{
+					"_id": "123",
+				},
+			},
+		}, bsonDOutput, "should be equal")
+	}
+}
+
+func TestGetKey(t *testing.T) {
+	nr := 0
+
+	{
+		fmt.Printf("TestGetKey case %d.\n", nr)
+		nr++
+
+		input := bson.D{
+			bson.DocElem{
+				Name: "_id",
+				Value: "value1",
+			},
+			bson.DocElem{
+				Name: "key2",
+				Value: "value2",
+			},
+		}
+		assert.Equal(t, "value1", GetKey(input, ""), "should be equal")
+		assert.Equal(t, "value2", GetKey(input, "key2"), "should be equal")
+		assert.Equal(t, nil, GetKey(input, "unknown"), "should be equal")
+	}
+}

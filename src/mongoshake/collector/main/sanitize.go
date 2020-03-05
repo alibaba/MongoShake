@@ -45,9 +45,9 @@ func checkDefaultValue() error {
 	}
 
 	if conf.Options.LogLevel == "" {
-		conf.Options.LogLevel = "info"
-	} else if conf.Options.LogLevel != "debug" && conf.Options.LogLevel != "info" &&
-		conf.Options.LogLevel != "warning" && conf.Options.LogLevel != "error" {
+		conf.Options.LogLevel = utils.VarLogLevelInfo
+	} else if conf.Options.LogLevel != utils.VarLogLevelDebug && conf.Options.LogLevel != utils.VarLogLevelInfo &&
+		conf.Options.LogLevel != utils.VarLogLevelWarning && conf.Options.LogLevel != utils.VarLogLevelError {
 		return fmt.Errorf("log.level should in {debug, info, warning, error}")
 	}
 	if conf.Options.LogFileName == "" {
@@ -55,32 +55,38 @@ func checkDefaultValue() error {
 	}
 
 	if conf.Options.SyncMode == "" {
-		conf.Options.SyncMode = "oplog"
-	} else if conf.Options.SyncMode != "all" && conf.Options.SyncMode != "document" && conf.Options.SyncMode != "oplog" {
+		conf.Options.SyncMode = utils.VarSyncModeOplog
+	} else if conf.Options.SyncMode != utils.VarSyncModeAll && conf.Options.SyncMode != utils.VarSyncModeDocument &&
+		conf.Options.SyncMode != utils.VarSyncModeOplog {
 		return fmt.Errorf("sync_mode should in {all, document, oplog}")
 	}
 	if len(conf.Options.MongoUrls) == 0 {
 		return fmt.Errorf("mongo_urls shouldn't be empty")
 	}
 	if conf.Options.MongoConnectMode == "" {
-		conf.Options.MongoConnectMode = "secondaryPreferred"
+		conf.Options.MongoConnectMode = utils.VarMongoConnectModeSecondaryPreferred
 	} else {
-		if conf.Options.MongoConnectMode != "primary" && conf.Options.MongoConnectMode != "secondaryPreferred" &&
-			conf.Options.MongoConnectMode != "standalone" {
+		if conf.Options.MongoConnectMode != utils.VarMongoConnectModePrimary &&
+			conf.Options.MongoConnectMode != utils.VarMongoConnectModeSecondaryPreferred &&
+			conf.Options.MongoConnectMode != utils.VarMongoConnectModeStandalone {
 			return fmt.Errorf("mongo_connect_mode should in {primary, secondaryPreferred, standalone}")
 		}
 	}
 
 	if conf.Options.CheckpointStorage == "" {
-		conf.Options.CheckpointStorage = "database"
-	} else if conf.Options.CheckpointStorage != "database" && conf.Options.CheckpointStorage != "api" {
+		conf.Options.CheckpointStorage = utils.VarCheckpointStorageDatabase
+	} else if conf.Options.CheckpointStorage != utils.VarCheckpointStorageDatabase &&
+		conf.Options.CheckpointStorage != utils.VarCheckpointStorageApi {
 		return fmt.Errorf("checkpoint.storage should in {database, api}")
 	}
 	if conf.Options.CheckpointStorageUrl == "" {
 		// do nothing here
 	}
-	if conf.Options.CheckpointStorageTable == "" {
-		conf.Options.CheckpointStorageTable = "ckpt_default"
+	if conf.Options.CheckpointStorageDb == "" {
+		conf.Options.CheckpointStorageDb = utils.VarCheckpointStorageDbReplicaDefault
+	}
+	if conf.Options.CheckpointStorageCollection == "" {
+		conf.Options.CheckpointStorageCollection = utils.VarCheckpointStorageCollectionDefault
 	}
 	if conf.Options.CheckpointStartPosition <= 0 {
 		conf.Options.CheckpointStartPosition = 1
@@ -98,10 +104,14 @@ func checkDefaultValue() error {
 	}
 	if conf.Options.FullSyncReaderDocumentBatchSize <= 0 {
 		conf.Options.FullSyncReaderDocumentBatchSize = 128
+	} else if conf.Options.FullSyncReaderDocumentBatchSize > 1000 {
+		// mgo driver restriction: batch size <= 1000
+		conf.Options.FullSyncReaderDocumentBatchSize = 1000
 	}
 	if conf.Options.FullSyncCreateIndex == "" {
-		conf.Options.FullSyncCreateIndex = "foreground"
-	} else if conf.Options.FullSyncCreateIndex != "none" && conf.Options.FullSyncCreateIndex != "foreground" {
+		conf.Options.FullSyncCreateIndex = utils.VarFullSyncCreateIndexForeground
+	} else if conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexNone &&
+		conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexForeground {
 		return fmt.Errorf("full_sync.create_index should in {none, foreground}")
 	}
 	if conf.Options.FullSyncReaderOplogStoreDiskMaxSize <= 0 {
@@ -110,24 +120,29 @@ func checkDefaultValue() error {
 
 	// 3. incr sync
 	if conf.Options.IncrSyncMongoFetchMethod == "" {
-		conf.Options.IncrSyncMongoFetchMethod = "oplog"
-	} else if conf.Options.IncrSyncMongoFetchMethod != "oplog" && conf.Options.IncrSyncMongoFetchMethod != "change_stream" {
+		conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodOplog
+	} else if conf.Options.IncrSyncMongoFetchMethod != utils.VarIncrSyncMongoFetchMethodOplog &&
+		conf.Options.IncrSyncMongoFetchMethod != utils.VarIncrSyncMongoFetchMethodChangeStream {
 		return fmt.Errorf("incr_sync.mongo_fetch_method should in {oplog, change_stream}")
 	}
 	if conf.Options.IncrSyncShardKey == "" {
-		conf.Options.IncrSyncShardKey = "collection"
-	} else if conf.Options.IncrSyncShardKey != "auto" && conf.Options.IncrSyncShardKey != "id" &&
-		conf.Options.IncrSyncShardKey != "collection" {
+		conf.Options.IncrSyncShardKey = utils.VarIncrSyncShardKeyCollection
+	} else if conf.Options.IncrSyncShardKey != utils.VarIncrSyncShardKeyAuto &&
+		conf.Options.IncrSyncShardKey != utils.VarIncrSyncShardKeyId &&
+		conf.Options.IncrSyncShardKey != utils.VarIncrSyncShardKeyCollection {
 		return fmt.Errorf("incr_sync.shard_key should in {auto, id, collection}")
 	}
 	if conf.Options.IncrSyncWorker <= 0 || conf.Options.IncrSyncWorker > 256 {
 		return fmt.Errorf("incr_sync.worker should in range [1, 256]")
 	}
 	if conf.Options.IncrSyncWorkerOplogCompressor == "" {
-		conf.Options.IncrSyncWorkerOplogCompressor = "none"
-	} else if conf.Options.IncrSyncWorkerOplogCompressor != "none" && conf.Options.IncrSyncWorkerOplogCompressor != "gzip" &&
-		conf.Options.IncrSyncWorkerOplogCompressor != "zlib" && conf.Options.IncrSyncWorkerOplogCompressor != "deflate" {
-		return fmt.Errorf("incr_sync.worker.oplog_compressor in {none, gzip, zlib, deflate}")
+		conf.Options.IncrSyncWorkerOplogCompressor = utils.VarIncrSyncWorkerOplogCompressorNone
+	} else if conf.Options.IncrSyncWorkerOplogCompressor != utils.VarIncrSyncWorkerOplogCompressorNone &&
+		conf.Options.IncrSyncWorkerOplogCompressor != utils.VarIncrSyncWorkerOplogCompressorGzip &&
+		conf.Options.IncrSyncWorkerOplogCompressor != utils.VarIncrSyncWorkerOplogCompressorZlib &&
+		conf.Options.IncrSyncWorkerOplogCompressor != utils.VarIncrSyncWorkerOplogCompressorDeflate &&
+		conf.Options.IncrSyncWorkerOplogCompressor != utils.VarIncrSyncWorkerOplogCompressorSnappy {
+		return fmt.Errorf("incr_sync.worker.oplog_compressor in {none, gzip, zlib, deflate, snappy}")
 	}
 	if conf.Options.IncrSyncWorkerBatchQueueSize <= 0 {
 		conf.Options.IncrSyncWorkerBatchQueueSize = 64
@@ -139,25 +154,30 @@ func checkDefaultValue() error {
 		conf.Options.IncrSyncFetcherBufferCapacity = 256
 	}
 	if conf.Options.IncrSyncTunnel == "" {
-		conf.Options.IncrSyncTunnel = "direct"
-	} else if conf.Options.IncrSyncTunnel != "direct" && conf.Options.IncrSyncTunnel != "rpc" &&
-		conf.Options.IncrSyncTunnel != "file" && conf.Options.IncrSyncTunnel != "kafka" &&
-		conf.Options.IncrSyncTunnel != "mock" {
-		return fmt.Errorf("incr_sync.tunnel in {direct, rpc, file, kafka, mock}")
+		conf.Options.IncrSyncTunnel = utils.VarIncrSyncTunnelDirect
+	} else if conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelDirect &&
+		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelRpc &&
+		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelTcp &&
+		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelFile &&
+		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelKafka &&
+		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelMock {
+		return fmt.Errorf("incr_sync.tunnel in {direct, rpc, tcp, file, kafka, mock}")
 	}
 	if conf.Options.IncrSyncTunnelMessage == "" {
-		conf.Options.IncrSyncTunnelMessage = "raw"
-	} else if conf.Options.IncrSyncTunnelMessage != "raw" && conf.Options.IncrSyncTunnelMessage != "bson" &&
-		conf.Options.IncrSyncTunnelMessage != "json" {
+		conf.Options.IncrSyncTunnelMessage = utils.VarIncrSyncTunnelMessageRaw
+	} else if conf.Options.IncrSyncTunnelMessage != utils.VarIncrSyncTunnelMessageRaw &&
+		conf.Options.IncrSyncTunnelMessage != utils.VarIncrSyncTunnelMessageBson &&
+		conf.Options.IncrSyncTunnelMessage != utils.VarIncrSyncTunnelMessageJson {
 		return fmt.Errorf("incr_sync.tunnel.message in {raw, bson, json}")
 	}
 	if conf.Options.IncrSyncExecutor <= 0 {
 		conf.Options.IncrSyncExecutor = 1
 	}
 	if conf.Options.IncrSyncConflictWriteTo == "" {
-		conf.Options.IncrSyncConflictWriteTo = "none"
-	} else if conf.Options.IncrSyncConflictWriteTo != "none" && conf.Options.IncrSyncConflictWriteTo != "db" &&
-		conf.Options.IncrSyncConflictWriteTo != "sdk" {
+		conf.Options.IncrSyncConflictWriteTo = utils.VarIncrSyncConflictWriteToNone
+	} else if conf.Options.IncrSyncConflictWriteTo != utils.VarIncrSyncConflictWriteToNone &&
+		conf.Options.IncrSyncConflictWriteTo != utils.VarIncrSyncConflictWriteToDb &&
+		conf.Options.IncrSyncConflictWriteTo != utils.VarIncrSyncConflictWriteToSdk {
 		return fmt.Errorf("incr_sync.conflict_write_to in {none, db, sdk}")
 	}
 	if conf.Options.IncrSyncReaderBufferTime <= 0 {
@@ -178,14 +198,14 @@ func checkConnection() error {
 
 	// check mongo_cs_url
 	if conf.Options.MongoCsUrl != "" {
-		_, err := utils.NewMongoConn(conf.Options.MongoCsUrl, utils.ConnectModeSecondaryPreferred, true)
+		_, err := utils.NewMongoConn(conf.Options.MongoCsUrl, utils.VarMongoConnectModeSecondaryPreferred, true)
 		if err != nil {
 			return fmt.Errorf("connect config-server[%v] failed[%v]", conf.Options.MongoCsUrl, err)
 		}
 	}
 
 	// check tunnel address
-	if conf.Options.IncrSyncTunnel == "direct" {
+	if conf.Options.IncrSyncTunnel == utils.VarIncrSyncTunnelDirect {
 		for _, mongo := range conf.Options.IncrSyncTunnelAddress {
 			_, err := utils.NewMongoConn(mongo, conf.Options.MongoConnectMode, true)
 			if err != nil {
@@ -208,9 +228,11 @@ func checkConflict() error {
 	}
 	// set checkpoint.storage.url if empty
 	if conf.Options.CheckpointStorageUrl == "" {
-		if len(conf.Options.MongoUrls) == 0 {
+		if len(conf.Options.MongoUrls) == 1 {
+			// replica-set
 			conf.Options.CheckpointStorageUrl = conf.Options.MongoUrls[0]
 		} else {
+			// sharding
 			conf.Options.CheckpointStorageUrl = conf.Options.MongoCsUrl
 		}
 	}
@@ -219,7 +241,7 @@ func checkConflict() error {
 		return fmt.Errorf("mongo urls were duplicated")
 	}
 	// quorm
-	if conf.Options.MasterQuorum && conf.Options.CheckpointStorage != "database" {
+	if conf.Options.MasterQuorum && conf.Options.CheckpointStorage != utils.VarCheckpointStorageDatabase {
 		return fmt.Errorf("context storage should set to 'database' while master election enabled")
 	}
 	// filter
@@ -240,23 +262,27 @@ func checkConflict() error {
 		if conf.Options.IncrSyncWorker != len(conf.Options.MongoUrls) {
 			conf.Options.IncrSyncWorker = len(conf.Options.MongoUrls)
 		}
-		if conf.Options.FilterDDLEnable == true && conf.Options.IncrSyncMongoFetchMethod == "oplog" {
+		if conf.Options.FilterDDLEnable == true &&
+			conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
 			return fmt.Errorf("DDL is not support for sharding when incr_sync.mongo_fetch_method == 'oplog'")
 		}
 	}
-	if conf.Options.IncrSyncTunnel == "direct" && conf.Options.IncrSyncWorkerOplogCompressor != "none" {
-		conf.Options.IncrSyncWorkerOplogCompressor = "none"
+	if conf.Options.IncrSyncTunnel == utils.VarIncrSyncTunnelDirect &&
+		conf.Options.IncrSyncWorkerOplogCompressor != utils.VarIncrSyncWorkerOplogCompressorNone {
+		conf.Options.IncrSyncWorkerOplogCompressor = utils.VarIncrSyncWorkerOplogCompressorNone
 	}
-	if len(conf.Options.IncrSyncTunnelAddress) == 0 && conf.Options.IncrSyncTunnel != "mock" {
+	if len(conf.Options.IncrSyncTunnelAddress) == 0 &&
+		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelMock {
 		return fmt.Errorf("incr_sync.tunnel.address shouldn't be empty when incr_sync.tunnel != 'mock'")
 	}
 	conf.Options.IncrSyncCollisionEnable = conf.Options.IncrSyncExecutor != 1
-	if conf.Options.IncrSyncTunnel != "direct" && conf.Options.SyncMode != "oplog" {
+	if conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelDirect &&
+		conf.Options.SyncMode != utils.VarSyncModeOplog {
 		return fmt.Errorf("full sync only support when tunnel type == direct")
 	}
 	// check source mongodb version >= 4.0 when change stream enable
-	if conf.Options.IncrSyncMongoFetchMethod == "change_stream" {
-		conn, err := utils.NewMongoConn(conf.Options.MongoUrls[0], utils.ConnectModeSecondaryPreferred, true)
+	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
+		conn, err := utils.NewMongoConn(conf.Options.MongoUrls[0], utils.VarMongoConnectModeSecondaryPreferred, true)
 		if err != nil {
 			return fmt.Errorf("connect source mongodb[%v] failed[%v]", conf.Options.MongoUrls[0], err)
 		}
@@ -264,7 +290,13 @@ func checkConflict() error {
 			return fmt.Errorf("compare source mongodb[%v] to v4.0.0 failed[%v]", conf.Options.MongoUrls[0], err)
 		} else if !isOk {
 			return fmt.Errorf("source mongodb[%v] should >= 4.0.0 when incr_sync.mongo_fetch_method == %v",
-				conf.Options.MongoUrls[0], "change_stream")
+				conf.Options.MongoUrls[0], utils.VarIncrSyncMongoFetchMethodChangeStream)
+		}
+	}
+	// set compressor to none when tunnel message is not 'raw'
+	if conf.Options.IncrSyncTunnelMessage != utils.VarIncrSyncTunnelMessageRaw {
+		if conf.Options.IncrSyncWorkerOplogCompressor != utils.VarIncrSyncWorkerOplogCompressorNone {
+			conf.Options.IncrSyncWorkerOplogCompressor = utils.VarIncrSyncWorkerOplogCompressorNone
 		}
 	}
 

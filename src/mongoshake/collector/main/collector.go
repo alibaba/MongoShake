@@ -10,7 +10,6 @@ import (
 	"strconv"
 
 	"mongoshake/collector"
-	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
 	"mongoshake/common"
 	"mongoshake/quorum"
@@ -117,10 +116,10 @@ func startup() {
 
 func selectLeader() {
 	// first of all. ensure we are the Master
-	if conf.Options.MasterQuorum && conf.Options.CheckpointStorage == ckpt.StorageTypeDB {
+	if conf.Options.MasterQuorum && conf.Options.CheckpointStorage == utils.VarCheckpointStorageDatabase {
 		// election become to Master. keep waiting if we are the candidate. election id is must fixed
 		quorum.UseElectionObjectId(bson.ObjectIdHex("5204af979955496907000001"))
-		go quorum.BecomeMaster(conf.Options.CheckpointStorageUrl, utils.AppDatabase)
+		go quorum.BecomeMaster(conf.Options.CheckpointStorageUrl, utils.VarCheckpointStorageDbDefault)
 
 		// wait until become to a real master
 		<-quorum.MasterPromotionNotifier

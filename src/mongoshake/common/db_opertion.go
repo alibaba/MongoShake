@@ -117,7 +117,7 @@ func GetOldestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, err
 func GetNewestTimestampByUrl(url string) (bson.MongoTimestamp, error) {
 	var conn *MongoConn
 	var err error
-	if conn, err = NewMongoConn(url, ConnectModeSecondaryPreferred, true); conn == nil || err != nil {
+	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()
@@ -128,7 +128,7 @@ func GetNewestTimestampByUrl(url string) (bson.MongoTimestamp, error) {
 func GetOldestTimestampByUrl(url string) (bson.MongoTimestamp, error) {
 	var conn *MongoConn
 	var err error
-	if conn, err = NewMongoConn(url, ConnectModeSecondaryPreferred, true); conn == nil || err != nil {
+	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()

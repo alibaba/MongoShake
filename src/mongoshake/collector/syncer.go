@@ -327,7 +327,7 @@ func (sync *OplogSyncer) startDeserializer() {
 
 func (sync *OplogSyncer) deserializer(index int) {
 	var parser func(input []byte) (*oplog.PartialLog, error)
-	if conf.Options.IncrSyncMongoFetchMethod == "change_stream" {
+	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
 		// parse []byte (change stream event format) -> oplog
 		parser = func(input []byte) (*oplog.PartialLog, error) {
 			return oplog.ConvertEvent2Oplog(input)
@@ -370,8 +370,9 @@ func (sync *OplogSyncer) poll() {
 	if err != nil {
 		// we doesn't continue working on ckpt fetched failed. because we should
 		// confirm the exist checkpoint value or exactly knows that it doesn't exist
-		LOG.Critical("Acquire the existing checkpoint from remote[%s %s] failed !",
-			conf.Options.CheckpointStorage, conf.Options.CheckpointStorageTable)
+		LOG.Critical("Acquire the existing checkpoint from remote[%s %s.%s] failed !",
+			conf.Options.CheckpointStorage, conf.Options.CheckpointStorageDb,
+			conf.Options.CheckpointStorageCollection)
 		return
 	}
 	sync.reader.SetQueryTimestampOnEmpty(checkpoint.Timestamp)

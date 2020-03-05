@@ -5,6 +5,8 @@ package sourceReader
 import (
 	"fmt"
 
+	"mongoshake/common"
+
 	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
 )
@@ -25,9 +27,9 @@ type retOplog struct {
 
 func CreateReader(fetchMethod string, src string, replset string) (Reader, error) {
 	switch fetchMethod {
-	case "oplog":
+	case utils.VarIncrSyncMongoFetchMethodOplog:
 		return NewOplogReader(src, replset), nil
-	case "change_stream":
+	case utils.VarIncrSyncMongoFetchMethodChangeStream:
 		return NewEventReader(src, replset), nil
 	default:
 		return nil, fmt.Errorf("unknown reader type[%v]", fetchMethod)

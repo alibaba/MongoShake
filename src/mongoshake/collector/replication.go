@@ -105,10 +105,10 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	rs := map[string]int{}
 
 	// try to connect CheckpointStorage
-	storageUrl := conf.Options.CheckpointStorage
-	if conn, err = utils.NewMongoConn(storageUrl, utils.ConnectModePrimary, true); conn == nil || !conn.IsGood() || err != nil {
-		LOG.Critical("Connect storageUrl[%v] error[%v]. Please add primary node into 'mongo_urls' " +
-			"if 'context.storage.url' is empty", storageUrl, err)
+	checkpointStorageUrl := conf.Options.CheckpointStorageUrl
+	if conn, err = utils.NewMongoConn(checkpointStorageUrl, utils.VarMongoConnectModePrimary, true); conn == nil || !conn.IsGood() || err != nil {
+		LOG.Critical("Connect checkpointStorageUrl[%v] error[%v]. Please add primary node into 'mongo_urls' " +
+			"if 'context.storage.url' is empty", checkpointStorageUrl, err)
 		return err
 	}
 	conn.Close()
@@ -315,7 +315,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	fromIsSharding := len(coordinator.Sources) > 1
 	toUrl := conf.Options.IncrSyncTunnelAddress[0]
 	var toConn *utils.MongoConn
-	if toConn, err = utils.NewMongoConn(toUrl, utils.ConnectModePrimary, true); err != nil {
+	if toConn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, true); err != nil {
 		return err
 	}
 	defer toConn.Close()
@@ -327,7 +327,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		return err
 	}
 	if shardingSync {
-		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.CheckpointStorage, toConn, trans); err != nil {
+		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.MongoCsUrl, toConn, trans); err != nil {
 			return err
 		}
 	}

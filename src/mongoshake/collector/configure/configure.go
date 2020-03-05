@@ -24,7 +24,8 @@ type Configuration struct {
 	FilterPassSpecialDb     []string `config:"filter.pass.special.db"`
 	FilterDDLEnable         bool     `config:"filter.ddl_enable"`
 	CheckpointStorageUrl    string   `config:"checkpoint.storage.url"`
-	CheckpointStorageTable  string   `config:"checkpoint.storage.table"`
+	CheckpointStorageDb  string   `config:"checkpoint.storage.db"`
+	CheckpointStorageCollection  string   `config:"checkpoint.storage.collection"`
 	CheckpointStartPosition int64    `config:"checkpoint.start_position" type:"date"`
 	TransformNamespace      []string `config:"transform.namespace"`
 

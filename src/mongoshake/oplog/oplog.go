@@ -60,25 +60,28 @@ func LogParsed(logs []*GenericOplog) []*PartialLog {
 }
 
 func NewPartialLog(data bson.M) *PartialLog {
-	partialLog := new(PartialLog)
-	logType := reflect.TypeOf(*partialLog)
+	// partialLog := new(PartialLog)
+	parsedLog := new(ParsedLog)
+	logType := reflect.TypeOf(*parsedLog)
 	for i := 0; i < logType.NumField(); i++ {
 		tagName := logType.Field(i).Tag.Get("bson")
 		if v, ok := data[tagName]; ok {
-			reflect.ValueOf(partialLog).Elem().Field(i).Set(reflect.ValueOf(v))
+			reflect.ValueOf(parsedLog).Elem().Field(i).Set(reflect.ValueOf(v))
 		}
 	}
-	return partialLog
+	return &PartialLog{
+		ParsedLog: *parsedLog,
+	}
 }
 
 // dump according to the given keys, "all" == true means ignore keys
 func (partialLog *PartialLog) Dump(keys map[string]struct{}, all bool) bson.D {
 	var out bson.D
-	logType := reflect.TypeOf(*partialLog)
+	logType := reflect.TypeOf(partialLog.ParsedLog)
 	for i := 0; i < logType.NumField(); i++ {
 		if tagName, ok := logType.Field(i).Tag.Lookup("bson"); ok {
 			// out[tagName] = reflect.ValueOf(partialLog).Elem().Field(i).Interface()
-			value := reflect.ValueOf(partialLog).Elem().Field(i).Interface()
+			value := reflect.ValueOf(partialLog.ParsedLog).Field(i).Interface()
 			if !all {
 				if _, ok := keys[tagName]; !ok {
 					continue

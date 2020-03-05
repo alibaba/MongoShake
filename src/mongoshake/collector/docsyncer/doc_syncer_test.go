@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	testMongoAddress = "mongodb://127.0.0.1:40441,127.0.0.1:40442,127.0.0.1:40443"
+	testMongoAddress = "mongodb://100.81.164.177:40441,100.81.164.177:40442,100.81.164.177:40443"
 	testDb           = "a"
 	testCollection   = "b"
 )
@@ -27,7 +27,7 @@ var (
 func TestDbSync(t *testing.T) {
 	// test doSync
 
-	conn, err := utils.NewMongoConn(testMongoAddress, utils.ConnectModePrimary, false)
+	conn, err := utils.NewMongoConn(testMongoAddress, utils.VarMongoConnectModePrimary, false)
 	assert.Equal(t, nil, err, "should be equal")
 
 	// init DocExecutor, ignore DBSyncer here

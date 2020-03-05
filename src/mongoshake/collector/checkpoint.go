@@ -16,8 +16,9 @@ import (
 )
 
 func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int32) {
-	LOG.Info("Oplog sync[%v] create checkpoint manager with storage[%s] table[%s] start-position[%v]",
-		name, conf.Options.CheckpointStorage, conf.Options.CheckpointStorageTable, startPosition)
+	LOG.Info("Oplog sync[%v] create checkpoint manager with url[%s] table[%s.%s] start-position[%v]",
+		name, conf.Options.CheckpointStorageUrl, conf.Options.CheckpointStorageDb,
+		conf.Options.CheckpointStorageCollection, startPosition)
 	sync.ckptManager = ckpt.NewCheckpointManager(name, startPosition)
 }
 
@@ -82,7 +83,7 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 	// in AckRequired() tunnel. such as "rpc". While collector is restarted,
 	// we can't get the correct worker ack offset since collector have lost
 	// the unack offset...
-	if !flush && conf.Options.IncrSyncTunnel != "direct" && now.Before(sync.startTime.Add(3*time.Minute)) {
+	if !flush && conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelDirect && now.Before(sync.startTime.Add(3*time.Minute)) {
 		// LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
 		return
 	}
