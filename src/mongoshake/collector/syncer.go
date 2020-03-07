@@ -46,9 +46,9 @@ type OplogSyncer struct {
 	// source mongodb replica set name
 	replset string
 	// oplog start position of source mongodb
-	startPosition int32
+	startPosition int64
 	// full sync finish position, used to check DDL between full sync and incr sync
-	fullSyncFinishPosition int64
+	fullSyncFinishPosition bson.MongoTimestamp
 
 	ckptManager *ckpt.CheckpointManager
 
@@ -59,8 +59,8 @@ type OplogSyncer struct {
 	// target raw oplogs in buffer and push them to pending queue
 	// when buffer is filled in. and transfer to log queue
 	// buffer            []*bson.Raw // move to persister
-	PendingQueue      []chan [][]byte
-	logsQueue         []chan []*oplog.GenericOplog
+	PendingQueue []chan [][]byte
+	logsQueue    []chan []*oplog.GenericOplog
 	// nextQueuePosition uint64 // move to persister
 
 	// source mongo oplog/event reader
@@ -83,13 +83,13 @@ type OplogSyncer struct {
  * Syncer is used to fetch oplog from source MongoDB and then send to different workers which can be seen as
  * a network sender. There are several syncer coexist to improve the fetching performance.
  * The data flow in syncer is:
- * source mongodb --> reader --> pending queue(raw data) --> logs queue(parsed data) --> worker
+ * source mongodb --> reader --> persister --> pending queue(raw data) --> logs queue(parsed data) --> worker
  * The reason we split pending queue and logs queue is to improve the performance.
  */
 func NewOplogSyncer(
 	coordinator *ReplicationCoordinator,
 	replset string,
-	startPosition int32,
+	startPosition int64,
 	fullSyncFinishPosition int64,
 	mongoUrl string,
 	gids []string) *OplogSyncer {
@@ -104,10 +104,10 @@ func NewOplogSyncer(
 		coordinator:            coordinator,
 		replset:                replset,
 		startPosition:          startPosition,
-		fullSyncFinishPosition: fullSyncFinishPosition,
-		journal:                utils.NewJournal(utils.JournalFileName(
+		fullSyncFinishPosition: bson.MongoTimestamp(fullSyncFinishPosition),
+		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.Id, replset))),
-		reader:                 reader,
+		reader: reader,
 	}
 
 	// concurrent level hasher
@@ -135,6 +135,10 @@ func NewOplogSyncer(
 	// list returns true. The order of all filters is not significant.
 	// workerGroup is assigned later by syncer.bind()
 	syncer.batcher = NewBatcher(syncer, filterList, syncer, []*Worker{})
+
+	// init persist
+	syncer.persister = NewPersister(replset, syncer)
+
 	return syncer
 }
 
@@ -145,6 +149,7 @@ func (sync *OplogSyncer) init() {
 	sync.replMetric.ReplStatus.Update(utils.WorkGood)
 
 	sync.RestAPI()
+	sync.persister.RestAPI()
 }
 
 // bind different worker
@@ -164,7 +169,7 @@ func (sync *OplogSyncer) start() {
 	sync.startTime = time.Now()
 
 	// start persister
-	sync.persister = NewPersister(sync.replset, sync)
+	sync.persister.Start()
 
 	// process about the checkpoint :
 	//
@@ -335,9 +340,11 @@ func (sync *OplogSyncer) deserializer(index int) {
 	} else {
 		// parse []byte (oplog format) -> oplog
 		parser = func(input []byte) (*oplog.PartialLog, error) {
-			log := new(oplog.PartialLog)
-			err := bson.Unmarshal(input, log)
-			return log, err
+			log := oplog.ParsedLog{}
+			err := bson.Unmarshal(input, &log)
+			return &oplog.PartialLog{
+				ParsedLog: log,
+			}, err
 		}
 	}
 
@@ -359,7 +366,6 @@ func (sync *OplogSyncer) deserializer(index int) {
 }
 
 /********************************deserializer end**********************************/
-
 
 // only master(maybe several mongo-shake start) can poll oplog.
 func (sync *OplogSyncer) poll() {
@@ -467,6 +473,7 @@ func (sync *OplogSyncer) RestAPI() {
 		Now         *Time      `json:"now"`
 	}
 
+	// total replication info
 	utils.HttpApi.RegisterAPI("/repl", nimo.HttpGet, func([]byte) interface{} {
 		return &Info{
 			Who:         conf.Options.Id,
@@ -486,6 +493,34 @@ func (sync *OplogSyncer) RestAPI() {
 				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSNAck),
 					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSNAck))}},
 			Now: &Time{TimestampUnix: time.Now().Unix(), TimestampTime: utils.TimestampToString(time.Now().Unix())},
+		}
+	})
+
+	// queue size info
+	type InnerQueue struct {
+		Id           uint   `json:"queue_id"`
+		PendingQueue uint64 `json:"pending_queue_size"`
+		LogsQueue    uint64 `json:"logs_queue_size"`
+	}
+	type Queue struct {
+		SyncerId            string       `json:"syncer_replica_set_name"`
+		InnerQueue          []InnerQueue `json:"syncer_inner_queue"`
+		PersisterBufferUsed int          `json:"persister_buffer_used"`
+	}
+
+	utils.HttpApi.RegisterAPI("/queue", nimo.HttpGet, func([]byte) interface{} {
+		queue := make([]InnerQueue, calculatePendingQueueConcurrency())
+		for i := 0; i < len(queue); i++ {
+			queue[i] = InnerQueue{
+				Id:           uint(i),
+				PendingQueue: uint64(len(sync.PendingQueue[i])),
+				LogsQueue:    uint64(len(sync.logsQueue[i])),
+			}
+		}
+		return &Queue{
+			SyncerId:            sync.replset,
+			InnerQueue:          queue,
+			PersisterBufferUsed: len(sync.persister.Buffer),
 		}
 	})
 }

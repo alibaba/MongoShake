@@ -3,16 +3,17 @@ package collector
 // persist oplog on disk
 
 import (
-	"mongoshake/oplog"
-	"mongoshake/collector/configure"
-	"sync"
-	"mongoshake/common"
-	"sync/atomic"
-	"time"
+"mongoshake/oplog"
+"mongoshake/collector/configure"
+"sync"
+"mongoshake/common"
+"sync/atomic"
+"time"
 
-	"github.com/vinllen/mgo/bson"
-	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/go-diskqueue"
+"github.com/vinllen/mgo/bson"
+LOG "github.com/vinllen/log4go"
+"github.com/vinllen/go-diskqueue"
+"github.com/gugemichael/nimo4go"
 )
 
 const (
@@ -24,7 +25,7 @@ type Persister struct {
 	sync    *OplogSyncer // not owned, inner call
 
 	// batch data([]byte) together and send to downstream
-	buffer            [][]byte
+	Buffer            [][]byte
 	nextQueuePosition uint64
 
 	// enable disk persist
@@ -36,23 +37,31 @@ type Persister struct {
 	DiskQueue       *diskQueue.DiskQueue
 	diskQueueMutex  sync.Mutex          // disk queue mutex
 	diskQueueLastTs bson.MongoTimestamp // the last oplog timestamp in disk queue
+
+	// metric info, used in print
+	diskWriteCount uint64
+	diskReadCount  uint64
 }
 
 func NewPersister(replset string, sync *OplogSyncer) *Persister {
 	p := &Persister{
 		replset:           replset,
 		sync:              sync,
-		buffer:            make([][]byte, 0, conf.Options.IncrSyncFetcherBufferCapacity),
+		Buffer:            make([][]byte, 0, conf.Options.IncrSyncFetcherBufferCapacity),
 		nextQueuePosition: 0,
-		enableDiskPersist: conf.Options.FullSyncReaderOplogStoreDisk,
-		fetchStage:        utils.FetchStageStoreUnknown,
-		diskQueueLastTs:   -1, // initial set 1
+		enableDiskPersist: conf.Options.SyncMode == utils.VarSyncModeFull &&
+			conf.Options.FullSyncReaderOplogStoreDisk,
+		fetchStage:      utils.FetchStageStoreUnknown,
+		diskQueueLastTs: -1, // initial set 1
 	}
 
+	return p
+}
+
+func (p *Persister) Start() {
 	if p.enableDiskPersist {
 		go p.retrieve()
 	}
-	return p
 }
 
 func (p *Persister) SetFetchStage(fetchStage int32) {
@@ -134,6 +143,7 @@ func (p *Persister) Inject(input []byte) {
 			p.diskQueueMutex.Lock()
 			if p.DiskQueue != nil { // double check
 				// should send to disQueue
+				atomic.AddUint64(&p.diskWriteCount, 1)
 				if err := p.DiskQueue.Put(input); err != nil {
 					LOG.Crashf("persister inject replset[%v] put oplog to disk queue failed[%v]",
 						p.replset, err)
@@ -154,19 +164,19 @@ func (p *Persister) Inject(input []byte) {
 func (p *Persister) PushToPendingQueue(input []byte) {
 	flush := false
 	if input != nil {
-		p.buffer = append(p.buffer, input)
+		p.Buffer = append(p.Buffer, input)
 	} else {
 		flush = true
 	}
 
-	if len(p.buffer) >= conf.Options.IncrSyncFetcherBufferCapacity || (flush && len(p.buffer) != 0) {
+	if len(p.Buffer) >= conf.Options.IncrSyncFetcherBufferCapacity || (flush && len(p.Buffer) != 0) {
 		// we could simply ++syncer.resolverIndex. The max uint64 is 9223372036854774807
 		// and discard the skip situation. we assume nextQueueCursor couldn't be overflow
 		selected := int(p.nextQueuePosition % uint64(len(p.sync.PendingQueue)))
-		p.sync.PendingQueue[selected] <- p.buffer
+		p.sync.PendingQueue[selected] <- p.Buffer
 
-		// clear old buffer
-		p.buffer = p.buffer[:0]
+		// clear old Buffer
+		p.Buffer = p.Buffer[:0]
 
 		// queue position = (queue position + 1) % n
 		p.nextQueuePosition++
@@ -200,6 +210,7 @@ Loop:
 				continue
 			}
 
+			atomic.AddUint64(&p.diskReadCount, uint64(len(readData)))
 			for _, data := range readData {
 				p.PushToPendingQueue(data)
 			}
@@ -224,6 +235,7 @@ Loop:
 	defer p.diskQueueMutex.Unlock() // lock till the end
 	readData := p.DiskQueue.ReadAll()
 	if len(readData) > 0 {
+		atomic.AddUint64(&p.diskReadCount, uint64(len(readData)))
 		for _, data := range readData {
 			// or.oplogChan <- &retOplog{&bson.Raw{Kind: 3, Data: data}, nil}
 			p.PushToPendingQueue(data)
@@ -246,4 +258,26 @@ Loop:
 		LOG.Critical("persister retrieve for replset[%v] close disk queue error. %v", p.replset, err)
 	}
 	LOG.Info("persister retriever for replset[%v] exits", p.replset)
+}
+
+func (p *Persister) RestAPI() {
+	type PersistNode struct {
+		BufferUsed        int    `json:"buffer_used"`
+		BufferSize        int    `json:"buffer_size"`
+		EnableDiskPersist bool   `json:"enable_disk_persist"`
+		FetchStage        string `json:"fetch_stage"`
+		DiskWriteCount    uint64 `json:"disk_write_count"`
+		DiskReadCount     uint64 `json:"disk_read_count"`
+	}
+
+	utils.HttpApi.RegisterAPI("/persist", nimo.HttpGet, func([]byte) interface{} {
+		return &PersistNode{
+			BufferSize:        conf.Options.IncrSyncFetcherBufferCapacity,
+			BufferUsed:        len(p.Buffer),
+			EnableDiskPersist: p.enableDiskPersist,
+			FetchStage:        utils.LogFetchStage(p.GetFetchStage()),
+			DiskWriteCount:    atomic.LoadUint64(&p.diskWriteCount),
+			DiskReadCount:     atomic.LoadUint64(&p.diskReadCount),
+		}
+	})
 }

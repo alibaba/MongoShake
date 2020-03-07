@@ -20,12 +20,6 @@ import (
 	"mongoshake/collector/filter"
 )
 
-const (
-	SYNCMODE_ALL      = "all"
-	SYNCMODE_DOCUMENT = "document"
-	SYNCMODE_OPLOG    = "oplog"
-)
-
 // ReplicationCoordinator global coordinator instance. consist of
 // one syncerGroup and a number of workers
 type ReplicationCoordinator struct {
@@ -59,35 +53,54 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	if err != nil {
 		return err
 	}
-	fullBeginTs32 := utils.ExtractMongoTimestamp(fullBeginTs)
 
 	/*
 	 * Generally speaking, it's better to use several bridge timestamp so that
 	 * each shard match one in sharding mode.
 	 * TODO
 	 */
-	LOG.Info("start running with mode[%v], fullBeginTs[%v]", syncMode, fullBeginTs32)
+	LOG.Info("start running with mode[%v], fullBeginTs[%v]", syncMode, utils.ExtractTimestampForLog(fullBeginTs))
 
 	switch syncMode {
-	case SYNCMODE_ALL:
+	case utils.VarSyncModeAll:
 		if conf.Options.FullSyncReaderOplogStoreDisk {
 			LOG.Info("run parallel document oplog")
-			if err := coordinator.parallelDocumentOplog(fullBeginTs32); err != nil {
+			if err := coordinator.parallelDocumentOplog(fullBeginTs); err != nil {
 				return err
 			}
 		} else {
 			LOG.Info("run serialize document oplog")
-			if err := coordinator.serializeDocumentOplog(fullBeginTs32); err != nil {
+			if err := coordinator.serializeDocumentOplog(fullBeginTs); err != nil {
 				return err
 			}
 		}
-	case SYNCMODE_DOCUMENT:
+	case utils.VarSyncModeFull:
 		if err := coordinator.startDocumentReplication(); err != nil {
 			return err
 		}
-	case SYNCMODE_OPLOG:
-		if err := coordinator.startOplogReplication(conf.Options.CheckpointStartPosition,
-			conf.Options.CheckpointStartPosition); err != nil {
+	case utils.VarSyncModeIncr:
+		// check given oplog exists
+		beginTs64 := conf.Options.CheckpointStartPosition
+		if beginTs64 > 1 {
+			LOG.Info("begin timestamp[%v] > 1, need to check oplog exists",
+				utils.ExtractTimestampForLog(beginTs64))
+
+			// get current oldest timestamp
+			_, _, _, bigOldTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
+			if err != nil {
+				return LOG.Critical("get oldest timestamp failed[%v]", err)
+			}
+			// the oldest oplog is lost
+			if utils.ExtractMongoTimestamp(bigOldTs) >= beginTs64 {
+				return LOG.Critical("incr sync beginTs[%v] is less than current the biggest old timestamp[%v], " +
+					"this error usually means illegal start timestamp or capped collection error happen",
+					utils.ExtractMongoTimestamp(beginTs64), utils.ExtractMongoTimestamp(bigOldTs))
+			}
+		} else {
+			// we can't insert Timestamp(0, 0) that will be treat as Now(), so we use Timestamp(1, 0)
+			beginTs64 = 1
+		}
+		if err := coordinator.startOplogReplication(beginTs64, beginTs64); err != nil {
 			return err
 		}
 	default:
@@ -120,7 +133,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		}
 
 		// a conventional ReplicaSet should have local.oplog.rs collection
-		if conf.Options.SyncMode != SYNCMODE_DOCUMENT && !conn.HasOplogNs() {
+		if conf.Options.SyncMode != utils.VarSyncModeFull && !conn.HasOplogNs() {
 			LOG.Critical("There has no oplog collection in mongo db server")
 			conn.Close()
 			return errors.New("no oplog ns in mongo. See https://github.com/alibaba/MongoShake/wiki/FAQ#q-how-to-solve-the-oplog-tailer-initialize-failed-no-oplog-ns-in-mongo-error")
@@ -166,7 +179,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 // TODO, add UT
 // if the oplog of checkpoint timestamp exist in all source db, then only do oplog replication instead of document replication
 func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, int64, error) {
-	if syncMode != SYNCMODE_ALL {
+	if syncMode != utils.VarSyncModeAll {
 		return syncMode, 0, nil
 	}
 
@@ -194,15 +207,15 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	}
 
 	if needFull {
-		return SYNCMODE_ALL, utils.TimestampToInt64(oldestTs), nil
+		return utils.VarSyncModeAll, utils.TimestampToInt64(oldestTs), nil
 	} else {
 		LOG.Info("sync mode change from 'all' to 'oplog'")
-		return SYNCMODE_OPLOG, 0, nil
+		return utils.VarSyncModeIncr, 0, nil
 	}
 }
 
 // run incr-sync after full-sync
-func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs32 int64) error {
+func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs int64) error {
 	if err := coordinator.startDocumentReplication(); err != nil {
 		return fmt.Errorf("start document replication failed: %v", err)
 	}
@@ -212,26 +225,28 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs32 
 	if err != nil {
 		return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
 	}
+
 	LOG.Info("------------------------full sync done!------------------------")
-	oldestTs32 := utils.ExtractMongoTimestamp(oldestTs)
-	LOG.Info("oldestTs[%v] fullBeginTs[%v] fullFinishTs[%v]", oldestTs32, fullBeginTs32,
-		utils.ExtractMongoTimestamp(fullFinishTs))
+	LOG.Info("oldestTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractTimestampForLog(oldestTs),
+		utils.ExtractTimestampForLog(fullBeginTs), utils.ExtractTimestampForLog(fullFinishTs))
+
 	// the oldest oplog is lost
-	if oldestTs32 >= fullBeginTs32 {
+	if utils.TimestampToInt64(oldestTs) >= fullBeginTs {
 		err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's " +
-			"oplog collection size is too small or full sync continues too long", fullBeginTs32, oldestTs32)
+			"oplog collection size is too small or full sync continues too long",
+			utils.ExtractTimestampForLog(fullBeginTs), utils.ExtractTimestampForLog(oldestTs))
 		LOG.Error(err)
 		return err
 	}
 
 	LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
-		fullBeginTs32, utils.ExtractMongoTimestamp(fullFinishTs))
+		utils.ExtractTimestampForLog(fullBeginTs), utils.ExtractTimestampForLog(fullFinishTs))
 
-	return coordinator.startOplogReplication(fullBeginTs32, utils.TimestampToInt64(fullFinishTs))
+	return coordinator.startOplogReplication(fullBeginTs, utils.TimestampToInt64(fullFinishTs))
 }
 
 // run full-sync and incr-sync in parallel
-func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs32 int64) error {
+func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs int64) error {
 	var docError error
 	var docWg sync.WaitGroup
 	docWg.Add(1)
@@ -260,7 +275,7 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs32 i
 	})
 	// during document replication, oplog syncer fetch oplog and store on disk, in order to avoid oplog roll up
 	// fullSyncFinishPosition means no need to check the end time to disable DDL
-	if err := coordinator.startOplogReplication(fullBeginTs32, 0); err != nil {
+	if err := coordinator.startOplogReplication(fullBeginTs, 0); err != nil {
 		return LOG.Critical("start oplog replication failed: %v", err)
 	}
 	// wait for document replication to finish, set docEndTs to oplog syncer, start oplog replication
@@ -305,7 +320,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 
 	var ckptMap map[string]utils.TimestampNode
 	// get all newest timestamp for each mongodb if sync mode isn't "document"
-	if conf.Options.SyncMode != SYNCMODE_DOCUMENT {
+	if conf.Options.SyncMode != utils.VarSyncModeFull {
 		ckptMap, _, _, _, _, err = utils.GetAllTimestamp(coordinator.Sources)
 		if err != nil {
 			return err
@@ -376,7 +391,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		}
 	}
 
-	if conf.Options.SyncMode != SYNCMODE_DOCUMENT {
+	if conf.Options.SyncMode != utils.VarSyncModeFull {
 		LOG.Info("try to set checkpoint with map[%v]", ckptMap)
 		if err := docsyncer.Checkpoint(ckptMap); err != nil {
 			return err
@@ -393,8 +408,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
 	for _, src := range coordinator.Sources {
-		// oplogStartPosition is 32 bits
-		syncer := NewOplogSyncer(coordinator, src.ReplicaName, int32(oplogStartPosition), fullSyncFinishPosition, src.URL,
+		syncer := NewOplogSyncer(coordinator, src.ReplicaName, oplogStartPosition, fullSyncFinishPosition, src.URL,
 			src.Gids)
 		// syncerGroup http api registry
 		syncer.init()

@@ -15,10 +15,10 @@ import (
 	"github.com/vinllen/mgo/bson"
 )
 
-func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int32) {
+func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int64) {
 	LOG.Info("Oplog sync[%v] create checkpoint manager with url[%s] table[%s.%s] start-position[%v]",
 		name, conf.Options.CheckpointStorageUrl, conf.Options.CheckpointStorageDb,
-		conf.Options.CheckpointStorageCollection, startPosition)
+		conf.Options.CheckpointStorageCollection, utils.ExtractTimestampForLog(startPosition))
 	sync.ckptManager = ckpt.NewCheckpointManager(name, startPosition)
 }
 
@@ -30,7 +30,7 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 	if err != nil {
 		return fmt.Errorf("load checkpoint[%v] failed[%v]", sync.replset, err)
 	}
-	LOG.Info("load checkpoint value: %v", checkpoint)
+	LOG.Info("load checkpoint value: %s", checkpoint)
 
 	// not enable oplog persist?
 	if !conf.Options.FullSyncReaderOplogStoreDisk {

@@ -30,6 +30,14 @@ type CheckpointContext struct {
 	OplogDiskQueueFinishTs bson.MongoTimestamp `bson:"oplog_disk_queue_apply_finish_ts" json:"oplog_disk_queue_apply_finish_ts"`
 }
 
+func (cc *CheckpointContext) String() string {
+	if ret, err := json.Marshal(cc); err != nil {
+		return err.Error()
+	} else {
+		return string(ret)
+	}
+}
+
 type CheckpointOperation interface {
 	// read checkpoint from remote storage. and encapsulation
 	// with CheckpointContext struct
@@ -96,7 +104,7 @@ func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 		value.Version = ckpt.Version
 		value.OplogDiskQueue = ckpt.OplogDiskQueue
 		value.OplogDiskQueueFinishTs = ckpt.OplogDiskQueueFinishTs
-		LOG.Info("Regenerate checkpoint but won't persist. content %v", value)
+		LOG.Info("Regenerate checkpoint but won't persist. content: %s", value)
 		// insert current ckpt snapshot in memory
 		// ckpt.QueryHandle.Insert(value)
 		return value, false

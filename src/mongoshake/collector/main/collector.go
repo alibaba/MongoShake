@@ -107,7 +107,7 @@ func startup() {
 	}
 
 	// if the sync mode is "document", mongoshake should exit here.
-	if conf.Options.SyncMode != collector.SYNCMODE_DOCUMENT {
+	if conf.Options.SyncMode != utils.VarSyncModeFull {
 		if err := utils.HttpApi.Listen(); err != nil {
 			LOG.Critical("Coordinator http api listen failed. %v", err)
 		}
@@ -119,7 +119,7 @@ func selectLeader() {
 	if conf.Options.MasterQuorum && conf.Options.CheckpointStorage == utils.VarCheckpointStorageDatabase {
 		// election become to Master. keep waiting if we are the candidate. election id is must fixed
 		quorum.UseElectionObjectId(bson.ObjectIdHex("5204af979955496907000001"))
-		go quorum.BecomeMaster(conf.Options.CheckpointStorageUrl, utils.VarCheckpointStorageDbDefault)
+		go quorum.BecomeMaster(conf.Options.CheckpointStorageUrl, utils.VarCheckpointStorageDbReplicaDefault)
 
 		// wait until become to a real master
 		<-quorum.MasterPromotionNotifier

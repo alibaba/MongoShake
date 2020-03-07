@@ -7,7 +7,7 @@ var (
 	}
 	FcvConfiguration = Configuration{
 		CurrentVersion:           1,
-		FeatureCompatibleVersion: 0,
+		FeatureCompatibleVersion: 1,
 	}
 )
 

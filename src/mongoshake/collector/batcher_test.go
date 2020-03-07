@@ -7,6 +7,7 @@ import (
 	"mongoshake/collector/configure"
 	"mongoshake/collector/filter"
 	"mongoshake/oplog"
+	"mongoshake/common"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
@@ -18,6 +19,7 @@ func mockSyncer() *OplogSyncer {
 		logsQueue:              make([]chan []*oplog.GenericOplog, length),
 		hasher:                 &oplog.PrimaryKeyHasher{},
 		fullSyncFinishPosition: -3, // disable in current test
+		replMetric:             utils.NewMetric("test", 0),
 	}
 	for i := 0; i < length; i++ {
 		syncer.logsQueue[i] = make(chan []*oplog.GenericOplog, 100)

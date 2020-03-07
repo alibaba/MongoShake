@@ -24,7 +24,7 @@ type CheckpointManager struct {
 	delegate   CheckpointOperation
 }
 
-func NewCheckpointManager(name string, startPosition int32) *CheckpointManager {
+func NewCheckpointManager(name string, startPosition int64) *CheckpointManager {
 	newManager := &CheckpointManager{}
 
 	switch conf.Options.CheckpointStorage {
@@ -32,7 +32,7 @@ func NewCheckpointManager(name string, startPosition int32) *CheckpointManager {
 		newManager.delegate = &HttpApiCheckpoint{
 			CheckpointContext: CheckpointContext{
 				Name:                   name,
-				Timestamp:              bson.MongoTimestamp(int64(startPosition) << 32),
+				Timestamp:              bson.MongoTimestamp(startPosition),
 				Version:                utils.FcvCheckpoint.CurrentVersion,
 				OplogDiskQueue:         "",
 				OplogDiskQueueFinishTs: InitCheckpoint,
@@ -47,7 +47,7 @@ func NewCheckpointManager(name string, startPosition int32) *CheckpointManager {
 		newManager.delegate = &MongoCheckpoint{
 			CheckpointContext: CheckpointContext{
 				Name:                   name,
-				Timestamp:              bson.MongoTimestamp(int64(startPosition) << 32),
+				Timestamp:              bson.MongoTimestamp(startPosition),
 				Version:                utils.FcvCheckpoint.CurrentVersion,
 				OplogDiskQueue:         "",
 				OplogDiskQueueFinishTs: InitCheckpoint,

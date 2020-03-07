@@ -55,10 +55,11 @@ func checkDefaultValue() error {
 	}
 
 	if conf.Options.SyncMode == "" {
-		conf.Options.SyncMode = utils.VarSyncModeOplog
-	} else if conf.Options.SyncMode != utils.VarSyncModeAll && conf.Options.SyncMode != utils.VarSyncModeDocument &&
-		conf.Options.SyncMode != utils.VarSyncModeOplog {
-		return fmt.Errorf("sync_mode should in {all, document, oplog}")
+		conf.Options.SyncMode = utils.VarSyncModeIncr
+	} else if conf.Options.SyncMode != utils.VarSyncModeAll &&
+		conf.Options.SyncMode != utils.VarSyncModeFull &&
+		conf.Options.SyncMode != utils.VarSyncModeIncr {
+		return fmt.Errorf("sync_mode should in {all, full, incr}")
 	}
 	if len(conf.Options.MongoUrls) == 0 {
 		return fmt.Errorf("mongo_urls shouldn't be empty")
@@ -277,7 +278,7 @@ func checkConflict() error {
 	}
 	conf.Options.IncrSyncCollisionEnable = conf.Options.IncrSyncExecutor != 1
 	if conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelDirect &&
-		conf.Options.SyncMode != utils.VarSyncModeOplog {
+		conf.Options.SyncMode != utils.VarSyncModeIncr {
 		return fmt.Errorf("full sync only support when tunnel type == direct")
 	}
 	// check source mongodb version >= 4.0 when change stream enable
@@ -297,6 +298,12 @@ func checkConflict() error {
 	if conf.Options.IncrSyncTunnelMessage != utils.VarIncrSyncTunnelMessageRaw {
 		if conf.Options.IncrSyncWorkerOplogCompressor != utils.VarIncrSyncWorkerOplogCompressorNone {
 			conf.Options.IncrSyncWorkerOplogCompressor = utils.VarIncrSyncWorkerOplogCompressorNone
+		}
+	}
+	// disable oplog disk persist when sync mode isn't 'full'
+	if conf.Options.FullSyncReaderOplogStoreDisk {
+		if conf.Options.SyncMode != utils.VarSyncModeFull {
+			conf.Options.FullSyncReaderOplogStoreDisk = false
 		}
 	}
 

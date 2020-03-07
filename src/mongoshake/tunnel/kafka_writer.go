@@ -51,7 +51,7 @@ func (tunnel *KafkaWriter) Send(message *WMessage) int64 {
 	case utils.VarIncrSyncTunnelMessageJson:
 		for _, log := range message.ParsedLogs {
 			// json marshal
-			if encode, err := json.Marshal(log); err != nil {
+			if encode, err := json.Marshal(log.ParsedLog); err != nil {
 				LOG.Error("KafkaWriter json marshal data[%v] error[%v]", log, err)
 				return ReplyError
 			} else {

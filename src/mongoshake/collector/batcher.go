@@ -2,13 +2,13 @@ package collector
 
 import (
 	"mongoshake/collector/filter"
-	"mongoshake/common"
 	"mongoshake/oplog"
 	"mongoshake/collector/configure"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
 	"github.com/vinllen/mgo/bson"
+	"mongoshake/common"
 )
 
 var (
@@ -82,9 +82,7 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 	// filter oplog such like Noop or Gid-filtered
 	if batcher.filterList.IterateFilter(log) {
 		LOG.Debug("Oplog is filtered. %v", log)
-		if batcher.syncer.replMetric != nil {
-			batcher.syncer.replMetric.AddFilter(1)
-		}
+		batcher.syncer.replMetric.AddFilter(1)
 		return true
 	}
 
@@ -94,9 +92,10 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 	}
 
 	// DDL is disable when timestamp <= fullSyncFinishPosition
-	if ddlFilter.Filter(log) && utils.TimestampToInt64(log.Timestamp) <= batcher.syncer.fullSyncFinishPosition {
+	if ddlFilter.Filter(log) && log.Timestamp <= batcher.syncer.fullSyncFinishPosition {
 		LOG.Crashf("ddl oplog found[%v] when oplog timestamp[%v] less than fullSyncFinishPosition[%v]",
-			log, log.Timestamp, batcher.syncer.fullSyncFinishPosition)
+			log, utils.ExtractTimestampForLog(log.Timestamp),
+			utils.ExtractTimestampForLog(batcher.syncer.fullSyncFinishPosition))
 		return false
 	}
 	return false
@@ -196,6 +195,7 @@ Outer:
 					break Outer
 				} else {
 					// filter
+					batcher.syncer.replMetric.AddFilter(1)
 					// doesn't push to worker, set lastFilterOplog
 					batcher.lastFilterOplog = genericLog.Parsed
 					if batcher.flushBufferOplogs(&batchGroup, &transactionOplogs) {

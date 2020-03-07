@@ -70,12 +70,12 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, false, exist, "should be equal")
 		assert.Equal(t, name, ctx.Name, "should be equal")
 		assert.Equal(t, utils.FcvCheckpoint.CurrentVersion, ctx.Version, "should be equal")
-		assert.Equal(t, bson.MongoTimestamp(int64(100)<<32), ctx.Timestamp, "should be equal")
+		assert.Equal(t, bson.MongoTimestamp(100), ctx.Timestamp, "should be equal")
 		assert.Equal(t, "", ctx.OplogDiskQueue, "should be equal")
 		assert.Equal(t, InitCheckpoint, ctx.OplogDiskQueueFinishTs, "should be equal")
 
 		// update
-		newTime := bson.MongoTimestamp(int64(200) << 32)
+		newTime := bson.MongoTimestamp(200)
 		err = ckptManager.Update(newTime)
 
 		// get again
@@ -107,7 +107,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		// insert remote with startTs == 300
-		remoteTime := bson.MongoTimestamp(int64(300) << 32)
+		remoteTime := bson.MongoTimestamp(300)
 		conn.Session.DB(utils.VarCheckpointStorageDbReplicaDefault).C(conf.Options.CheckpointStorageCollection).Insert(bson.M{
 			"name":                             name,
 			"ckpt":                             remoteTime,
@@ -143,7 +143,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		// insert remote with startTs == 300
-		remoteTime := bson.MongoTimestamp(int64(300) << 32)
+		remoteTime := bson.MongoTimestamp(300)
 		conn.Session.DB(utils.VarCheckpointStorageDbReplicaDefault).C(conf.Options.CheckpointStorageCollection).Insert(bson.M{
 			"name":                             name,
 			"ckpt":                             remoteTime,
@@ -166,7 +166,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		// assert.Equal(t, InitCheckpoint, ctx.OplogDiskQueueFinishTs, "should be equal")
 
 		// update with 400
-		updateTime := bson.MongoTimestamp(int64(400) << 32)
+		updateTime := bson.MongoTimestamp(400)
 		err = ckptManager.Update(updateTime)
 
 		// get again
@@ -200,7 +200,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		ckptManager := NewCheckpointManager(name, 100)
 		assert.NotEqual(t, nil, ckptManager, "should be equal")
 
-		startTime := bson.MongoTimestamp(int64(100) << 32)
+		startTime := bson.MongoTimestamp(100)
 
 		// get remote
 		ctx, exist, err := ckptManager.Get()
@@ -229,7 +229,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, "", ctx.OplogDiskQueue, "should be equal")
 
 		// update
-		updateTime := bson.MongoTimestamp(int64(200) << 32)
+		updateTime := bson.MongoTimestamp(200)
 		ckptManager.Update(updateTime)
 
 		// get again
@@ -245,7 +245,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		ckptManager.SetOplogDiskQueueName("ut_test_disk_queue_name_2")
 
 		// update again
-		updateTime = bson.MongoTimestamp(int64(300) << 32)
+		updateTime = bson.MongoTimestamp(300)
 		ckptManager.Update(updateTime)
 
 		// get again
@@ -258,7 +258,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, "ut_test_disk_queue_name_2", ctx.OplogDiskQueue, "should be equal")
 
 		// update again, test ctx.OplogDiskQueue is not clear
-		updateTime = bson.MongoTimestamp(int64(400) << 32)
+		updateTime = bson.MongoTimestamp(400)
 		ckptManager.Update(updateTime)
 
 		// get again
@@ -271,11 +271,11 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, "ut_test_disk_queue_name_2", ctx.OplogDiskQueue, "should be equal")
 
 		// call SetOplogDiskFinishTs
-		diskFinishTs := bson.MongoTimestamp(int64(450) << 32)
+		diskFinishTs := bson.MongoTimestamp(450)
 		ckptManager.SetOplogDiskFinishTs(diskFinishTs)
 
 		// update again
-		updateTime = bson.MongoTimestamp(int64(500) << 32)
+		updateTime = bson.MongoTimestamp(500)
 		ckptManager.Update(updateTime)
 
 		// get again
