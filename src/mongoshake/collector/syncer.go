@@ -291,11 +291,20 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.Mongo
 	if barrier && newestTs > 0 && conf.Options.IncrSyncWorker > 1 {
 		LOG.Info("find barrier")
 		for {
-			checkpointTs := sync.ckptManager.GetInMemory().Timestamp
-			LOG.Info("compare remote checkpoint[%v] to local newestTs[%v(%v)]",
+			// checkpointTs := sync.ckptManager.GetInMemory().Timestamp
+			checkpoint, _, err := sync.ckptManager.Get()
+			if err != nil {
+				LOG.Error("get remote checkpoint failed: %v", err)
+				utils.YieldInMs(DDLCheckpointInterval * 3)
+				continue
+			}
+
+			checkpointTs := checkpoint.Timestamp
+
+			LOG.Info("compare remote checkpoint[%v] to local newestTs[%v]",
 				utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
 			if checkpointTs >= newestTs {
-				LOG.Info("barrier checkpoint updated")
+				LOG.Info("barrier checkpoint updated to newest[%v]", utils.ExtractTimestampForLog(newestTs))
 				break
 			}
 			utils.YieldInMs(DDLCheckpointInterval)
@@ -499,11 +508,13 @@ func (sync *OplogSyncer) RestAPI() {
 	// queue size info
 	type InnerQueue struct {
 		Id           uint   `json:"queue_id"`
-		PendingQueue uint64 `json:"pending_queue_size"`
-		LogsQueue    uint64 `json:"logs_queue_size"`
+		PendingQueue uint64 `json:"pending_queue_used"`
+		LogsQueue    uint64 `json:"logs_queue_used"`
 	}
 	type Queue struct {
 		SyncerId            string       `json:"syncer_replica_set_name"`
+		LogsQueuePerSize    int          `json:"logs_queue_size"`
+		PendingQueuePerSize int          `json:"pending_queue_size"`
 		InnerQueue          []InnerQueue `json:"syncer_inner_queue"`
 		PersisterBufferUsed int          `json:"persister_buffer_used"`
 	}
@@ -519,6 +530,8 @@ func (sync *OplogSyncer) RestAPI() {
 		}
 		return &Queue{
 			SyncerId:            sync.replset,
+			LogsQueuePerSize:    cap(sync.logsQueue[0]),
+			PendingQueuePerSize: cap(sync.PendingQueue[0]),
 			InnerQueue:          queue,
 			PersisterBufferUsed: len(sync.persister.Buffer),
 		}

@@ -119,7 +119,7 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 				return
 			}
 		case lowestInt64 < inMemoryTs:
-			LOG.Info("CheckpointOperation calculated is smaller than value in memory. lowest %v current %v",
+			LOG.Info("CheckpointOperation calculated[%v] is smaller than value in memory[%v]",
 				utils.ExtractTimestampForLog(lowest), utils.ExtractTimestampForLog(inMemoryTs))
 			return
 		case lowestInt64 == inMemoryTs:

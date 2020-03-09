@@ -161,7 +161,7 @@ Outer:
 		mergeBatch := batcher.getBatch()
 		for i, genericLog := range mergeBatch {
 			// filter oplog such like Noop or Gid-filtered
-			// PAY ATTENTION: we can't handle the oplog in transaction has been filtered
+			// PAY ATTENTION: we can't handle the oplog in transaction that has been filtered
 			if batcher.filter(genericLog.Parsed) {
 				// doesn't push to worker, set lastFilterOplog
 				batcher.lastFilterOplog = genericLog.Parsed
@@ -185,7 +185,8 @@ Outer:
 						batcher.addIntoBatchGroup(&batchGroup, genericLog)
 						batcher.remainLogs = mergeBatch[i + 1:]
 					} else {
-						// add barrier before, current oplog should handled on the next iteration
+						// add barrier before, current oplog should be handled on the
+						// next iteration
 						batcher.remainLogs = mergeBatch[i:]
 					}
 

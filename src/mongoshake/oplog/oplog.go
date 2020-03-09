@@ -6,6 +6,7 @@ import (
 	"github.com/gugemichael/nimo4go"
 	"github.com/vinllen/mgo/bson"
 	"fmt"
+	"encoding/json"
 )
 
 const (
@@ -71,6 +72,14 @@ func NewPartialLog(data bson.M) *PartialLog {
 	}
 	return &PartialLog{
 		ParsedLog: *parsedLog,
+	}
+}
+
+func (partialLog *PartialLog) String() string {
+	if ret, err := json.Marshal(partialLog.ParsedLog); err != nil {
+		return err.Error()
+	} else {
+		return string(ret)
 	}
 }
 

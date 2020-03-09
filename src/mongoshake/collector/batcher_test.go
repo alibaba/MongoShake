@@ -16,6 +16,7 @@ import (
 func mockSyncer() *OplogSyncer {
 	length := 3
 	syncer := &OplogSyncer{
+		PendingQueue:           make([]chan [][]byte, 4),
 		logsQueue:              make([]chan []*oplog.GenericOplog, length),
 		hasher:                 &oplog.PrimaryKeyHasher{},
 		fullSyncFinishPosition: -3, // disable in current test
@@ -57,7 +58,7 @@ func mockOplogs(length int, ddlGiven []int, noopGiven []int, sameTsGiven []int, 
 			},
 		}
 		if sameTsIndex < len(sameTsGiven) && i > 0 && sameTsGiven[sameTsIndex] == i {
-			output[i].Parsed.Timestamp = output[i - 1].Parsed.Timestamp
+			output[i].Parsed.Timestamp = output[i-1].Parsed.Timestamp
 			sameTsIndex++
 		}
 
@@ -83,9 +84,9 @@ func TestBatchMore(t *testing.T) {
 		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
 		conf.Options.FilterDDLEnable = false
 
-		syncer.logsQueue[0] <- mockOplogs(5, nil, nil,nil, 0)
-		syncer.logsQueue[1] <- mockOplogs(6, nil, nil,nil, 100)
-		syncer.logsQueue[2] <- mockOplogs(7, nil, nil,nil, 200)
+		syncer.logsQueue[0] <- mockOplogs(5, nil, nil, nil, 0)
+		syncer.logsQueue[1] <- mockOplogs(6, nil, nil, nil, 100)
+		syncer.logsQueue[2] <- mockOplogs(7, nil, nil, nil, 200)
 
 		batchedOplog, barrier, allEmpty := batcher.batchMore()
 		assert.Equal(t, false, barrier, "should be equal")
@@ -95,7 +96,7 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, int64(206), int64(batcher.previousOplog.Parsed.Timestamp), "should be equal")
 		assert.Equal(t, int64(205), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
 
-		syncer.logsQueue[0] <- mockOplogs(1, nil, nil,nil, 300)
+		syncer.logsQueue[0] <- mockOplogs(1, nil, nil, nil, 300)
 		batchedOplog, barrier, allEmpty = batcher.batchMore()
 		assert.Equal(t, false, barrier, "should be equal")
 		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
@@ -117,9 +118,9 @@ func TestBatchMore(t *testing.T) {
 		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 10
 		conf.Options.FilterDDLEnable = false
 
-		syncer.logsQueue[0] <- mockOplogs(5, nil, nil,nil, 0)
-		syncer.logsQueue[1] <- mockOplogs(6, nil, nil,nil, 100)
-		syncer.logsQueue[2] <- mockOplogs(7, nil, nil,nil, 200)
+		syncer.logsQueue[0] <- mockOplogs(5, nil, nil, nil, 0)
+		syncer.logsQueue[1] <- mockOplogs(6, nil, nil, nil, 100)
+		syncer.logsQueue[2] <- mockOplogs(7, nil, nil, nil, 200)
 
 		batchedOplog, barrier, allEmpty := batcher.batchMore()
 		assert.Equal(t, false, barrier, "should be equal")
@@ -149,8 +150,8 @@ func TestBatchMore(t *testing.T) {
 		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 10
 		conf.Options.FilterDDLEnable = false
 
-		syncer.logsQueue[0] <- mockOplogs(5, []int{0, 1, 2, 3, 4}, nil,nil, 0)
-		syncer.logsQueue[1] <- mockOplogs(6, []int{0, 1, 2, 3, 4, 5}, nil,nil, 100)
+		syncer.logsQueue[0] <- mockOplogs(5, []int{0, 1, 2, 3, 4}, nil, nil, 0)
+		syncer.logsQueue[1] <- mockOplogs(6, []int{0, 1, 2, 3, 4, 5}, nil, nil, 100)
 
 		batchedOplog, barrier, allEmpty := batcher.batchMore()
 		assert.Equal(t, false, barrier, "should be equal")
@@ -173,9 +174,9 @@ func TestBatchMore(t *testing.T) {
 		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
 		conf.Options.FilterDDLEnable = true
 
-		syncer.logsQueue[0] <- mockOplogs(5, nil, nil,nil, 0)
-		syncer.logsQueue[1] <- mockOplogs(6, []int{2}, nil,nil, 100)
-		syncer.logsQueue[2] <- mockOplogs(7, nil, nil,nil, 200)
+		syncer.logsQueue[0] <- mockOplogs(5, nil, nil, nil, 0)
+		syncer.logsQueue[1] <- mockOplogs(6, []int{2}, nil, nil, 100)
+		syncer.logsQueue[2] <- mockOplogs(7, nil, nil, nil, 200)
 
 		batchedOplog, barrier, allEmpty := batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
@@ -214,9 +215,9 @@ func TestBatchMore(t *testing.T) {
 		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
 		conf.Options.FilterDDLEnable = true
 
-		syncer.logsQueue[0] <- mockOplogs(5, []int{3}, nil,nil, 0)
-		syncer.logsQueue[1] <- mockOplogs(6, []int{2}, nil,nil, 100)
-		syncer.logsQueue[2] <- mockOplogs(7, []int{4, 5}, nil,nil, 200)
+		syncer.logsQueue[0] <- mockOplogs(5, []int{3}, nil, nil, 0)
+		syncer.logsQueue[1] <- mockOplogs(6, []int{2}, nil, nil, 100)
+		syncer.logsQueue[2] <- mockOplogs(7, []int{4, 5}, nil, nil, 200)
 
 		batchedOplog, barrier, allEmpty := batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
@@ -299,9 +300,9 @@ func TestBatchMore(t *testing.T) {
 		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
 		conf.Options.FilterDDLEnable = true
 
-		syncer.logsQueue[0] <- mockOplogs(5, []int{0}, nil,nil, 0)
-		syncer.logsQueue[1] <- mockOplogs(6, nil, nil,nil, 100)
-		syncer.logsQueue[2] <- mockOplogs(7, []int{6}, nil,nil, 200)
+		syncer.logsQueue[0] <- mockOplogs(5, []int{0}, nil, nil, 0)
+		syncer.logsQueue[1] <- mockOplogs(6, nil, nil, nil, 100)
+		syncer.logsQueue[2] <- mockOplogs(7, []int{6}, nil, nil, 200)
 
 		batchedOplog, barrier, allEmpty := batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
@@ -329,7 +330,7 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
 
 		// push again
-		syncer.logsQueue[0] <- mockOplogs(80, nil, nil,nil, 300)
+		syncer.logsQueue[0] <- mockOplogs(80, nil, nil, nil, 300)
 
 		batchedOplog, barrier, allEmpty = batcher.batchMore()
 		assert.Equal(t, false, barrier, "should be equal")
@@ -352,9 +353,9 @@ func TestBatchMore(t *testing.T) {
 		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
 		conf.Options.FilterDDLEnable = true
 
-		syncer.logsQueue[0] <- mockOplogs(3, []int{0, 1, 2}, nil,nil, 0)
-		syncer.logsQueue[1] <- mockOplogs(1, []int{0}, nil,nil, 100)
-		syncer.logsQueue[2] <- mockOplogs(1, []int{0}, nil,nil, 200)
+		syncer.logsQueue[0] <- mockOplogs(3, []int{0, 1, 2}, nil, nil, 0)
+		syncer.logsQueue[1] <- mockOplogs(1, []int{0}, nil, nil, 100)
+		syncer.logsQueue[2] <- mockOplogs(1, []int{0}, nil, nil, 200)
 
 		batchedOplog, barrier, allEmpty := batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
@@ -397,7 +398,7 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
 
 		// push again
-		syncer.logsQueue[0] <- mockOplogs(80, nil, nil,nil, 300)
+		syncer.logsQueue[0] <- mockOplogs(80, nil, nil, nil, 300)
 
 		batchedOplog, barrier, allEmpty = batcher.batchMore()
 		assert.Equal(t, false, barrier, "should be equal")
@@ -421,9 +422,9 @@ func TestBatchMore(t *testing.T) {
 		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 8
 		conf.Options.FilterDDLEnable = true
 
-		syncer.logsQueue[0] <- mockOplogs(5, nil, nil,nil, 0)
-		syncer.logsQueue[1] <- mockOplogs(6, []int{5}, nil,nil, 100) // last is ddl
-		syncer.logsQueue[2] <- mockOplogs(7, []int{3}, nil,nil, 200)
+		syncer.logsQueue[0] <- mockOplogs(5, nil, nil, nil, 0)
+		syncer.logsQueue[1] <- mockOplogs(6, []int{5}, nil, nil, 100) // last is ddl
+		syncer.logsQueue[2] <- mockOplogs(7, []int{3}, nil, nil, 200)
 
 		batchedOplog, barrier, allEmpty := batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
@@ -479,10 +480,10 @@ func TestBatchMore(t *testing.T) {
 		conf.Options.FilterDDLEnable = true
 
 		// sameTs 3 == 4
-		syncer.logsQueue[0] <- mockOplogs(5, nil, nil,[]int{4}, 0)
-		syncer.logsQueue[1] <- mockOplogs(6, nil, nil,nil, 100)
+		syncer.logsQueue[0] <- mockOplogs(5, nil, nil, []int{4}, 0)
+		syncer.logsQueue[1] <- mockOplogs(6, nil, nil, nil, 100)
 		// at the end of queue
-		syncer.logsQueue[2] <- mockOplogs(7, nil, nil,[]int{5, 6}, 200)
+		syncer.logsQueue[2] <- mockOplogs(7, nil, nil, []int{5, 6}, 200)
 
 		batchedOplog, barrier, allEmpty := batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
@@ -493,7 +494,7 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
 
 		// inject more
-		syncer.logsQueue[0] <- mockOplogs(5, nil, nil,[]int{1}, 300)
+		syncer.logsQueue[0] <- mockOplogs(5, nil, nil, []int{1}, 300)
 		batchedOplog, barrier, allEmpty = batcher.batchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 11, len(batchedOplog[0]), "should be equal")
@@ -685,6 +686,37 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, int64(203), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
+		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
+	}
+
+	// test simple case which run failed in sync test
+	{
+		fmt.Printf("TestBatchMore case %d.\n", nr)
+		nr++
+
+		syncer := mockSyncer()
+		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
+
+		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 10
+		conf.Options.FilterDDLEnable = true
+
+		syncer.logsQueue[0] <- mockOplogs(4, []int{2}, []int{0, 1}, nil, 0)
+
+		batchedOplog, barrier, allEmpty := batcher.batchMore()
+		assert.Equal(t, true, barrier, "should be equal")
+		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
+		assert.Equal(t, 2, len(batcher.remainLogs), "should be equal")
+		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, fakeOplog, batcher.lastOplog, "should be equal")
+		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
+
+		batchedOplog, barrier, allEmpty = batcher.batchMore()
+		assert.Equal(t, true, barrier, "should be equal")
+		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
+		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
+		assert.Equal(t, 2, int(batcher.lastOplog.Parsed.Timestamp), "should be equal")
 		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
 	}
 }

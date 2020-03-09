@@ -141,21 +141,21 @@ func (worker *Worker) startWorker() {
 }
 
 /*
-*
-*  [ Before transfer ]
-*
-*	batch 			|9,10,11|
-*	listSent			|1,2,3,4,5,6,7,8|
-*
-*  [ After transfer ]
-*
-*	batch			| (empty) |
-*	listSent			|1,2,3,4,5,6,7,8,9,10,11|
-*
-*  [ Purge listWaitACK (ack == 7) ]
-*
-*	listUnACK		|8,9,10,11|
-*
+ *
+ *  [ Before transfer ]
+ *
+ *	batch 			|9,10,11|
+ *	listSent			|1,2,3,4,5,6,7,8|
+ *
+ *  [ After transfer ]
+ *
+ *	batch			| (empty) |
+ *	listSent			|1,2,3,4,5,6,7,8,9,10,11|
+ *
+ *  [ Purge listWaitACK (ack == 7) ]
+ *
+ *	listUnACK		|8,9,10,11|
+ *
  */
 func (worker *Worker) transfer(batch []*oplog.GenericOplog) {
 	nimo.AssertTrue(batch != nil, "batch oplogs should not empty")

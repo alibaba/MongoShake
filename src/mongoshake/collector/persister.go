@@ -3,17 +3,17 @@ package collector
 // persist oplog on disk
 
 import (
-"mongoshake/oplog"
-"mongoshake/collector/configure"
-"sync"
-"mongoshake/common"
-"sync/atomic"
-"time"
+	"mongoshake/oplog"
+	"mongoshake/collector/configure"
+	"sync"
+	"mongoshake/common"
+	"sync/atomic"
+	"time"
 
-"github.com/vinllen/mgo/bson"
-LOG "github.com/vinllen/log4go"
-"github.com/vinllen/go-diskqueue"
-"github.com/gugemichael/nimo4go"
+	"github.com/vinllen/mgo/bson"
+	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/go-diskqueue"
+	"github.com/gugemichael/nimo4go"
 )
 
 const (
@@ -142,7 +142,7 @@ func (p *Persister) Inject(input []byte) {
 			// store local
 			p.diskQueueMutex.Lock()
 			if p.DiskQueue != nil { // double check
-				// should send to disQueue
+				// should send to diskQueue
 				atomic.AddUint64(&p.diskWriteCount, 1)
 				if err := p.DiskQueue.Put(input); err != nil {
 					LOG.Crashf("persister inject replset[%v] put oplog to disk queue failed[%v]",
@@ -175,8 +175,10 @@ func (p *Persister) PushToPendingQueue(input []byte) {
 		selected := int(p.nextQueuePosition % uint64(len(p.sync.PendingQueue)))
 		p.sync.PendingQueue[selected] <- p.Buffer
 
-		// clear old Buffer
-		p.Buffer = p.Buffer[:0]
+		// clear old Buffer, we shouldn't use "p.Buffer = p.Buffer[:0]" because these addres won't
+		// be changed in the channel.
+		// p.Buffer = p.Buffer[:0]
+		p.Buffer = make([][]byte, 0, conf.Options.IncrSyncFetcherBufferCapacity)
 
 		// queue position = (queue position + 1) % n
 		p.nextQueuePosition++
