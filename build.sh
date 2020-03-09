@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -o errexit
+set -o errexit 
 
 # compile specified module
 modules=(collector receiver)

@@ -12,6 +12,8 @@ import (
 	"github.com/vinllen/mgo/bson"
 	"mongoshake/collector/filter"
 	"mongoshake/sharding"
+	"mongoshake/collector/transform"
+	"sort"
 )
 
 const (
@@ -23,6 +25,36 @@ const (
 var (
 	testNs = strings.Join([]string{testDb, testCollection}, ".")
 )
+
+
+func marshalData(input []bson.D) []*bson.Raw {
+	output := make([]*bson.Raw, 0, len(input))
+	for _, ele := range input {
+		if data, err := bson.Marshal(ele); err != nil {
+			return nil
+		} else {
+			output = append(output, &bson.Raw{
+				Kind: 3,
+				Data: data,
+			})
+		}
+	}
+	return output
+}
+
+func fetchAllDocument(conn *utils.MongoConn) ([]bson.D, error) {
+	it := conn.Session.DB(testDb).C(testCollection).Find(bson.M{}).Iter()
+	doc := new(bson.Raw)
+	result := make([]bson.D, 0)
+	for it.Next(doc) {
+		var docD bson.D
+		if err := bson.Unmarshal(doc.Data, &docD); err != nil {
+			return nil, err
+		}
+		result = append(result, docD)
+	}
+	return result, nil
+}
 
 func TestDbSync(t *testing.T) {
 	// test doSync
@@ -315,31 +347,95 @@ func TestDbSync(t *testing.T) {
 	}
 }
 
-func marshalData(input []bson.D) []*bson.Raw {
-	output := make([]*bson.Raw, 0, len(input))
-	for _, ele := range input {
-		if data, err := bson.Marshal(ele); err != nil {
-			return nil
-		} else {
-			output = append(output, &bson.Raw{
-				Kind: 3,
-				Data: data,
-			})
-		}
-	}
-	return output
-}
+func TestStartDropDestCollection(t *testing.T) {
+	// test StartDropDestCollection
 
-func fetchAllDocument(conn *utils.MongoConn) ([]bson.D, error) {
-	it := conn.Session.DB(testDb).C(testCollection).Find(bson.M{}).Iter()
-	doc := new(bson.Raw)
-	result := make([]bson.D, 0)
-	for it.Next(doc) {
-		var docD bson.D
-		if err := bson.Unmarshal(doc.Data, &docD); err != nil {
-			return nil, err
-		}
-		result = append(result, docD)
+	var nr int
+
+	// test drop
+	{
+		fmt.Printf("TestStartDropDestCollection case %d.\n", nr)
+		nr++
+
+		conn, err := utils.NewMongoConn(testMongoAddress, utils.VarMongoConnectModePrimary, true)
+		assert.Equal(t, nil, err, "should be equal")
+
+		// drop old db
+		err = conn.Session.DB("test").DropDatabase()
+		assert.Equal(t, nil, err, "should be equal")
+
+		// create test.c1
+		err = conn.Session.DB("test").C("c1").Insert(bson.M{"c":1})
+		assert.Equal(t, nil, err, "should be equal")
+
+		// create test.c2
+		err = conn.Session.DB("test").C("c2").Insert(bson.M{"c":1})
+		assert.Equal(t, nil, err, "should be equal")
+
+		// create test2.c3
+		err = conn.Session.DB("test").C("c3").Insert(bson.M{"c":1})
+		assert.Equal(t, nil, err, "should be equal")
+
+		nsSet := map[utils.NS]bool {}
+		nsSet[utils.NS{Database: "test", Collection:"c1"}] = true
+		nsSet[utils.NS{Database: "test", Collection:"c4"}] = true
+		nsSet[utils.NS{Database: "test", Collection:"c5"}] = true
+
+		conf.Options.FullSyncCollectionDrop = true
+		nsTrans := transform.NewNamespaceTransform([]string{"test.c4:test.c3"})
+
+		err = StartDropDestCollection(nsSet, conn, nsTrans)
+		assert.Equal(t, nil, err, "should be equal")
+
+		list, err := conn.Session.DB("test").CollectionNames()
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 1, len(list), "should be equal")
+		assert.Equal(t, "c2", list[0], "should be equal")
+		// sort.Strings(list)
+
 	}
-	return result, nil
+
+	// test no drop
+	{
+		fmt.Printf("TestStartDropDestCollection case %d.\n", nr)
+		nr++
+
+		conn, err := utils.NewMongoConn(testMongoAddress, utils.VarMongoConnectModePrimary, true)
+		assert.Equal(t, nil, err, "should be equal")
+
+		// drop old db
+		err = conn.Session.DB("test").DropDatabase()
+		assert.Equal(t, nil, err, "should be equal")
+
+		// create test.c1
+		err = conn.Session.DB("test").C("c1").Insert(bson.M{"c":1})
+		assert.Equal(t, nil, err, "should be equal")
+
+		// create test.c2
+		err = conn.Session.DB("test").C("c2").Insert(bson.M{"c":1})
+		assert.Equal(t, nil, err, "should be equal")
+
+		// create test2.c3
+		err = conn.Session.DB("test").C("c3").Insert(bson.M{"c":1})
+		assert.Equal(t, nil, err, "should be equal")
+
+		nsSet := map[utils.NS]bool {}
+		nsSet[utils.NS{Database: "test", Collection:"c1"}] = true
+		nsSet[utils.NS{Database: "test", Collection:"c4"}] = true
+		nsSet[utils.NS{Database: "test", Collection:"c5"}] = true
+
+		conf.Options.FullSyncCollectionDrop = false
+		nsTrans := transform.NewNamespaceTransform([]string{"test.c4:test.c3"})
+
+		err = StartDropDestCollection(nsSet, conn, nsTrans)
+		assert.Equal(t, nil, err, "should be equal")
+
+		list, err := conn.Session.DB("test").CollectionNames()
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 3, len(list), "should be equal")
+		sort.Strings(list)
+		assert.Equal(t, "c1", list[0], "should be equal")
+		assert.Equal(t, "c2", list[1], "should be equal")
+		assert.Equal(t, "c3", list[2], "should be equal")
+	}
 }
