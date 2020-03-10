@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	CheckpointName            = "name"
+	CheckpointName = "name"
 )
 
 type CheckpointManager struct {
@@ -100,6 +100,9 @@ func (manager *CheckpointManager) Update(ts bson.MongoTimestamp) error {
 		if manager.ctx.OplogDiskQueue != manager.ctxRec.OplogDiskQueue {
 			manager.ctx.OplogDiskQueue = manager.ctxRec.OplogDiskQueue
 		}
+		if manager.ctx.FetchMethod != manager.ctxRec.FetchMethod {
+			manager.ctx.FetchMethod = manager.ctxRec.FetchMethod
+		}
 	}
 
 	return manager.delegate.Insert(manager.ctx)
@@ -126,4 +129,15 @@ func (manager *CheckpointManager) SetOplogDiskQueueName(name string) {
 		manager.ctxRecLock.Unlock()
 	}
 	manager.ctxRec.OplogDiskQueue = name
+}
+
+func (manager *CheckpointManager) SetFetchMethod(method string) {
+	if manager.ctxRec == nil {
+		manager.ctxRecLock.Lock()
+		if manager.ctxRec == nil { // double check
+			manager.ctxRec = new(CheckpointContext)
+		}
+		manager.ctxRecLock.Unlock()
+	}
+	manager.ctxRec.FetchMethod = method
 }

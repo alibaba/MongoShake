@@ -14,6 +14,10 @@ import (
 	"github.com/vinllen/go-diskqueue"
 )
 
+const (
+	ErrInvalidStartPosition = "resume point may no longer be in the oplog."
+)
+
 type EventReader struct {
 	// source mongo address url
 	src     string
@@ -50,6 +54,10 @@ func NewEventReader(src string, replset string) *EventReader {
 		firstRead:            true,
 		diskQueueLastTs:      -1,
 	}
+}
+
+func (er *EventReader) Name() string {
+	return utils.VarIncrSyncMongoFetchMethodChangeStream
 }
 
 // SetQueryTimestampOnEmpty set internal timestamp if
@@ -106,9 +114,10 @@ func (er *EventReader) fetcher() {
 
 		ok, data := er.client.GetNext()
 		if !ok {
+			err := er.client.CsHandler.Err()
 			// no data
 			er.client.Close()
-			LOG.Error("change stream reader hit the end")
+			LOG.Error("change stream reader hit the end: %v", err)
 			time.Sleep(1 * time.Second)
 		}
 

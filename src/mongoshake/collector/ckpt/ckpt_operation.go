@@ -26,6 +26,7 @@ type CheckpointContext struct {
 	Name                   string              `bson:"name" json:"name"`
 	Timestamp              bson.MongoTimestamp `bson:"ckpt" json:"ckpt"`
 	Version                int                 `bson:"version" json:"version"`
+	FetchMethod            string              `bson:"fetch_method" json:"fetch_method"`
 	OplogDiskQueue         string              `bson:"oplog_disk_queue" json:"oplog_disk_queue"`
 	OplogDiskQueueFinishTs bson.MongoTimestamp `bson:"oplog_disk_queue_apply_finish_ts" json:"oplog_disk_queue_apply_finish_ts"`
 }

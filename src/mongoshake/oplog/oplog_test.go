@@ -13,7 +13,7 @@ func TestRemoveFiled(t *testing.T) {
 
 	var nr int
 	{
-		fmt.Printf("TestMergeToGroups case %d.\n", nr)
+		fmt.Printf("TestRemoveFiled case %d.\n", nr)
 		nr++
 
 		input := bson.D{
@@ -45,7 +45,7 @@ func TestRemoveFiled(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestMergeToGroups case %d.\n", nr)
+		fmt.Printf("TestRemoveFiled case %d.\n", nr)
 		nr++
 
 		input := bson.D{
@@ -77,7 +77,7 @@ func TestRemoveFiled(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestMergeToGroups case %d.\n", nr)
+		fmt.Printf("TestRemoveFiled case %d.\n", nr)
 		nr++
 
 		input := bson.D{
@@ -109,7 +109,7 @@ func TestRemoveFiled(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestMergeToGroups case %d.\n", nr)
+		fmt.Printf("TestRemoveFiled case %d.\n", nr)
 		nr++
 
 		input := bson.D{
@@ -132,7 +132,7 @@ func TestRemoveFiled(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestMergeToGroups case %d.\n", nr)
+		fmt.Printf("TestRemoveFiled case %d.\n", nr)
 		nr++
 
 		input := bson.D{
@@ -196,7 +196,7 @@ func TestRemoveFiled(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestMergeToGroups case %d.\n", nr)
+		fmt.Printf("TestRemoveFiled case %d.\n", nr)
 		nr++
 
 		input := bson.D{
@@ -421,5 +421,28 @@ func TestGetKey(t *testing.T) {
 		assert.Equal(t, "value1", GetKey(input, ""), "should be equal")
 		assert.Equal(t, "value2", GetKey(input, "key2"), "should be equal")
 		assert.Equal(t, nil, GetKey(input, "unknown"), "should be equal")
+	}
+}
+
+func TestConvertBson(t *testing.T) {
+	nr := 0
+
+	{
+		fmt.Printf("TestConvertBson case %d.\n", nr)
+		nr++
+
+		input := bson.M{
+			"k1": "b",
+			"k2": 12,
+			"k3": []string{"1", "2", "3"},
+			"k4": map[string]int{
+				"hello": 1,
+				"world": 2,
+			},
+		}
+
+		m := ConvertBsonM2D(input)
+		output, _ := ConvertBsonD2M(m)
+		assert.Equal(t, input, output, "should be equal")
 	}
 }

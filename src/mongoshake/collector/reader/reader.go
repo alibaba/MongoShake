@@ -12,7 +12,8 @@ import (
 )
 
 type Reader interface {
-	StartFetcher()
+	Name() string                                 // reader name
+	StartFetcher()                                // start fetcher
 	SetQueryTimestampOnEmpty(bson.MongoTimestamp) // set query timestamp when first start
 	UpdateQueryTimestamp(bson.MongoTimestamp)     // update query timestamp
 	Next() ([]byte, error)                        // fetch next oplog/event

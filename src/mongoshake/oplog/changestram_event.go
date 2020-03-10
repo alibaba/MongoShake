@@ -1,8 +1,10 @@
 package oplog
 
 import (
-	"github.com/vinllen/mgo/bson"
 	"fmt"
+	"encoding/json"
+
+	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -48,16 +50,24 @@ const (
 	}
  */
 type Event struct {
-	Id                bson.M              `bson:"_id"`
-	OperationType     string              `bson:"operationType"`
-	FullDocument      bson.D              `bson:"fullDocument"`  // exists on "insert", "replace", "delete", "update"
-	Ns                bson.M              `bson:"ns"`
-	To                bson.M              `bson:"to"`
-	DocumentKey       bson.M              `bson:"documentKey"`  // exists on "insert", "replace", "delete", "update"
-	UpdateDescription bson.M              `bson:"updateDescription"`
-	ClusterTime       bson.MongoTimestamp `bson:"clusterTime"`
-	TxnNumber         uint64              `bson:"txnNumber"`
-	Lsid              bson.M              `bson:"lsid"`
+	Id                bson.M              `bson:"_id" json:"_id"`
+	OperationType     string              `bson:"operationType" json:"operationType"`
+	FullDocument      bson.D              `bson:"fullDocument" json:"fullDocument"`  // exists on "insert", "replace", "delete", "update"
+	Ns                bson.M              `bson:"ns" json:"ns"`
+	To                bson.M              `bson:"to" json:"to"`
+	DocumentKey       bson.M              `bson:"documentKey" json:"documentKey"`  // exists on "insert", "replace", "delete", "update"
+	UpdateDescription bson.M              `bson:"updateDescription" json:"updateDescription"`
+	ClusterTime       bson.MongoTimestamp `bson:"clusterTime" json:"clusterTime"`
+	TxnNumber         uint64              `bson:"txnNumber" json:"txnNumber"`
+	Lsid              bson.M              `bson:"lsid" json:"lsid"`
+}
+
+func (e *Event) String() string {
+	if ret, err := json.Marshal(e); err != nil {
+		return err.Error()
+	} else {
+		return string(ret)
+	}
 }
 
 func ConvertEvent2Oplog(input []byte) (*PartialLog, error) {
@@ -152,7 +162,7 @@ func ConvertEvent2Oplog(input []byte) (*PartialLog, error) {
 		*/
 		oplog.Namespace = fmt.Sprintf("%s.%s", ns["db"], ns["coll"])
 		oplog.Operation = "d"
-		oplog.Object = event.FullDocument
+		oplog.Object = ConvertBsonM2D(event.DocumentKey)
 	case "replace":
 		// db.test.update({"kick":1}, {"kick":10, "ok":true})
 		/* event
@@ -258,22 +268,23 @@ func ConvertEvent2Oplog(input []byte) (*PartialLog, error) {
 		oplog.Operation = "u"
 		oplog.Query = event.DocumentKey
 		oplog.Object = make(bson.D, 0, 2)
-		if updatedFields, ok := event.UpdateDescription["updatedFields"]; ok {
+		if updatedFields, ok := event.UpdateDescription["updatedFields"]; ok && len(updatedFields.(bson.M)) > 0 {
 			oplog.Object = append(oplog.Object, bson.DocElem{
 				Name: "$set",
 				Value: updatedFields,
 			})
 		}
-		if removedFields, ok := event.UpdateDescription["removedFields"]; ok {
+		if removedFields, ok := event.UpdateDescription["removedFields"]; ok && len(removedFields.([]interface{})) > 0 {
 			removedFieldsMap := make(bson.M)
-			for _, ele := range removedFields.([]string) {
-				removedFieldsMap[ele] = 1
+			for _, ele := range removedFields.([]interface{}) {
+				removedFieldsMap[ele.(string)] = 1
 			}
 			oplog.Object = append(oplog.Object, bson.DocElem{
 				Name: "$unset",
 				Value: removedFieldsMap,
 			})
 		}
+
 	case "drop":
 		// mgset-xxx:PRIMARY> db.test.drop()
 		/* event:
@@ -407,7 +418,7 @@ func ConvertEvent2Oplog(input []byte) (*PartialLog, error) {
 		 * this case shouldn't happen because we watch the whole MongoDB, so we need to panic here
 		 * once happen to find the root cause.
 		 */
-		return nil, fmt.Errorf("invalidate event happen, should be handle manually: %s", input)
+		return nil, fmt.Errorf("invalidate event happen, should be handle manually: %s", event)
 	default:
 		return nil, fmt.Errorf("unknown event[%v]", event.OperationType)
 	}

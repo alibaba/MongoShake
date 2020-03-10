@@ -80,8 +80,9 @@ func (coordinator *ReplicationCoordinator) Run() error {
 		}
 	case utils.VarSyncModeIncr:
 		// check given oplog exists
-		beginTs64 := conf.Options.CheckpointStartPosition
-		if beginTs64 > 1 {
+		beginTs32 := conf.Options.CheckpointStartPosition
+		beginTs64 := beginTs32 << 32
+		if beginTs32 > 1 {
 			LOG.Info("begin timestamp[%v] > 1, need to check oplog exists",
 				utils.ExtractTimestampForLog(beginTs64))
 

@@ -2,11 +2,12 @@ package oplog
 
 import (
 	"reflect"
+	"fmt"
+	"encoding/json"
 
 	"github.com/gugemichael/nimo4go"
 	"github.com/vinllen/mgo/bson"
-	"fmt"
-	"encoding/json"
+
 )
 
 const (
@@ -134,6 +135,17 @@ func ConvertBsonD2M(input bson.D) (bson.M, map[string]struct{}) {
 	}
 
 	return m, keys
+}
+
+func ConvertBsonM2D(input bson.M) bson.D {
+	output := make(bson.D, 0, len(input))
+	for key, val := range input {
+		output = append(output, bson.DocElem{
+			Name:  key,
+			Value: val,
+		})
+	}
+	return output
 }
 
 func RemoveFiled(input bson.D, key string) bson.D {

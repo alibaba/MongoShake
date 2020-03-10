@@ -287,10 +287,10 @@ func checkConflict() error {
 		if err != nil {
 			return fmt.Errorf("connect source mongodb[%v] failed[%v]", conf.Options.MongoUrls[0], err)
 		}
-		if isOk, err := utils.GetAndCompareVersion(conn.Session, "4.0.0"); err != nil {
+		if isOk, err := utils.GetAndCompareVersion(conn.Session, "4.0.1"); err != nil {
 			return fmt.Errorf("compare source mongodb[%v] to v4.0.0 failed[%v]", conf.Options.MongoUrls[0], err)
 		} else if !isOk {
-			return fmt.Errorf("source mongodb[%v] should >= 4.0.0 when incr_sync.mongo_fetch_method == %v",
+			return fmt.Errorf("source mongodb[%v] should >= 4.0.1 when incr_sync.mongo_fetch_method == %v",
 				conf.Options.MongoUrls[0], utils.VarIncrSyncMongoFetchMethodChangeStream)
 		}
 	}

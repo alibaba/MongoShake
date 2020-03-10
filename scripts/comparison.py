@@ -61,7 +61,10 @@ def check(src, dst):
     srcDbNames = [db for db in srcDbNames if db not in configure[EXCLUDE_DBS]]
     dstDbNames = [db for db in dstDbNames if db not in configure[EXCLUDE_DBS]]
     if len(srcDbNames) != len(dstDbNames):
-        log_error("DIFF => database count not equals. src[%s], dst[%s]" % (srcDbNames, dstDbNames))
+        log_error("DIFF => database count not equals src[%s] != dst[%s].\nsrc: %s\ndst[%s]" % (len(srcDbNames),
+                                                                                              len(dstDbNames),
+                                                                                              srcDbNames,
+                                                                                              dstDbNames))
         return False
     else:
         log_info("EQUL => database count equals")

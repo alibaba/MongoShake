@@ -1,17 +1,20 @@
 package utils
 
 import (
-	"go.mongodb.org/mongo-driver/mongo"
 	"context"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"time"
 	"fmt"
 
-	mdBson "go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	LOG "github.com/vinllen/log4go"
 )
 
 const (
-	contextTimeout = 60 * time.Second
+	contextTimeout      = 60 * time.Second
+	int32max            = (int64(1) << 33) - 1
+	changeStreamTimeout = 24 // hours
 )
 
 type ChangeStreamConn struct {
@@ -26,7 +29,8 @@ func NewChangeStreamConn(src string, watchStartTime int64) (*ChangeStreamConn, e
 		return nil, fmt.Errorf("create change stream client[%v] failed[%v]", src, err)
 	}
 
-	ctx, _ := context.WithTimeout(context.Background(), contextTimeout)
+	// ctx, _ := context.WithTimeout(context.Background(), contextTimeout)
+	ctx := context.Background()
 
 	if err = client.Connect(ctx); err != nil {
 		return nil, fmt.Errorf("change stream connect src[%v] failed[%v]", src, err)
@@ -37,17 +41,19 @@ func NewChangeStreamConn(src string, watchStartTime int64) (*ChangeStreamConn, e
 		return nil, fmt.Errorf("client[%v] ping failed[%v]", src, err)
 	}
 
-	csHandler, err := client.Watch(ctx, mongo.Pipeline{
-		mdBson.D {
-			{
-				Key:   "startAtOperationTime",
-				Value: watchStartTime,
-			},
+	waitTime := time.Duration(changeStreamTimeout * time.Hour) // hours
+	csHandler, err := client.Watch(ctx, mongo.Pipeline{}, &options.ChangeStreamOptions{
+		StartAtOperationTime: &primitive.Timestamp{
+			T: uint32(watchStartTime >> 32),
+			I: uint32(watchStartTime & int32max),
 		},
+		MaxAwaitTime: &waitTime,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("client[%v] create change stream handler failed[%v]", src, err)
 	}
+
+	LOG.Info("create change stream with timestamp[%v]", ExtractTimestampForLog(watchStartTime))
 
 	return &ChangeStreamConn{
 		Client:    client,

@@ -10,11 +10,12 @@ import (
 	"mongoshake/common"
 	"mongoshake/oplog"
 	"mongoshake/quorum"
+	"mongoshake/collector/reader"
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
-	"mongoshake/collector/reader"
+	"strings"
 )
 
 const (
@@ -340,6 +341,7 @@ func (sync *OplogSyncer) startDeserializer() {
 }
 
 func (sync *OplogSyncer) deserializer(index int) {
+	// parser is used to parse the raw []byte
 	var parser func(input []byte) (*oplog.PartialLog, error)
 	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
 		// parse []byte (change stream event format) -> oplog
@@ -357,6 +359,29 @@ func (sync *OplogSyncer) deserializer(index int) {
 		}
 	}
 
+	// combiner is used to combine data and send to downstream
+	var combiner func(raw []byte, log *oplog.PartialLog) *oplog.GenericOplog
+	// change stream && !direct && !(kafka & json)
+	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream &&
+		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelDirect &&
+		!(conf.Options.IncrSyncTunnel == utils.VarIncrSyncTunnelKafka &&
+			conf.Options.IncrSyncTunnelMessage == utils.VarIncrSyncTunnelMessageJson) {
+		// very time consuming!
+		combiner = func(raw []byte, log *oplog.PartialLog) *oplog.GenericOplog {
+			if out, err := bson.Marshal(log.ParsedLog); err != nil {
+				LOG.Crashf("deserializer marshal[%v] failed: %v", log.ParsedLog, err)
+				return nil
+			} else {
+				return &oplog.GenericOplog{Raw: out, Parsed: log}
+			}
+		}
+	} else {
+		combiner = func(raw []byte, log *oplog.PartialLog) *oplog.GenericOplog {
+			return &oplog.GenericOplog{Raw: raw, Parsed: log}
+		}
+	}
+
+	// run
 	for {
 		batchRawLogs := <-sync.PendingQueue[index]
 		nimo.AssertTrue(len(batchRawLogs) != 0, "pending queue batch logs has zero length")
@@ -365,10 +390,10 @@ func (sync *OplogSyncer) deserializer(index int) {
 		for _, rawLog := range batchRawLogs {
 			log, err := parser(rawLog)
 			if err != nil {
-				LOG.Crashf("deserializer parse data[%v] failed[%v]", rawLog, err)
+				LOG.Crashf("deserializer parse data failed[%v]", err)
 			}
 			log.RawSize = len(rawLog)
-			deserializeLogs = append(deserializeLogs, &oplog.GenericOplog{Raw: rawLog, Parsed: log})
+			deserializeLogs = append(deserializeLogs, combiner(rawLog, log))
 		}
 		sync.logsQueue[index] <- deserializeLogs
 	}
@@ -434,11 +459,16 @@ func (sync *OplogSyncer) next() bool {
 		sync.replMetric.ReplStatus.Clear(utils.FetchBad)
 	} else if err == sourceReader.CollectionCappedError {
 		LOG.Error("oplog collection capped error, users should fix it manually")
+		utils.YieldInMs(DurationTime)
 		return false
 	} else if err != nil && err != sourceReader.TimeoutError {
-		LOG.Error("oplog syncer internal error: %v", err)
+		LOG.Error("syncer[%s] internal error: %v", sync.reader.Name(), err)
 		// error is nil indicate that only timeout incur syncer.next()
 		// return false. so we regardless that
+		if sync.isCrashError(err.Error()) {
+			LOG.Crashf("I can't handle this error, please solve it manually!")
+		}
+
 		sync.replMetric.ReplStatus.Update(utils.FetchBad)
 		utils.YieldInMs(DurationTime)
 
@@ -451,6 +481,14 @@ func (sync *OplogSyncer) next() bool {
 	// inject into persist handler
 	sync.persister.Inject(log)
 	return true
+}
+
+func (sync *OplogSyncer) isCrashError(errMsg string) bool {
+	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream &&
+		strings.Contains(errMsg, sourceReader.ErrInvalidStartPosition) {
+		return true
+	}
+	return false
 }
 
 func (sync *OplogSyncer) Handle(log *oplog.PartialLog) {

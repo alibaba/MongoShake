@@ -64,6 +64,10 @@ func NewOplogReader(src string, replset string) *OplogReader {
 	}
 }
 
+func (or *OplogReader) Name() string {
+	return utils.VarIncrSyncMongoFetchMethodOplog
+}
+
 // SetQueryTimestampOnEmpty set internal timestamp if
 // not exist in this or. initial stage most of the time
 func (or *OplogReader) SetQueryTimestampOnEmpty(ts bson.MongoTimestamp) {

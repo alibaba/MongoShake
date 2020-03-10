@@ -32,6 +32,10 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 	}
 	LOG.Info("load checkpoint value: %s", checkpoint)
 
+	if !exists {
+		sync.ckptManager.SetFetchMethod(conf.Options.IncrSyncMongoFetchMethod)
+	}
+
 	// not enable oplog persist?
 	if !conf.Options.FullSyncReaderOplogStoreDisk {
 		sync.persister.SetFetchStage(utils.FetchStageStoreMemoryApply)
@@ -83,7 +87,8 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 	// in AckRequired() tunnel. such as "rpc". While collector is restarted,
 	// we can't get the correct worker ack offset since collector have lost
 	// the unack offset...
-	if !flush && conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelDirect && now.Before(sync.startTime.Add(3*time.Minute)) {
+	if !flush && conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelDirect &&
+		now.Before(sync.startTime.Add(1 * time.Minute)) {
 		// LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
 		return
 	}
