@@ -263,7 +263,7 @@ func (sync *OplogSyncer) startBatcher() {
 
 			if log != nil {
 				newestTsLog := utils.ExtractTimestampForLog(newestTs)
-				if newestTs <= log.Timestamp {
+				if newestTs < log.Timestamp {
 					LOG.Crashf("filter newestTs[%v] smaller than previous timestamp[%v]",
 						newestTsLog, utils.ExtractTimestampForLog(log.Timestamp))
 				}

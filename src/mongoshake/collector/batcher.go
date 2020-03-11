@@ -12,6 +12,11 @@ import (
 	"time"
 )
 
+
+const (
+	noopInterval = 10 // s
+)
+
 var (
 	moveChunkFilter filter.MigrateFilter
 	ddlFilter       filter.DDLFilter
@@ -61,12 +66,13 @@ type Batcher struct {
 func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
 	handler OplogHandler, workerGroup []*Worker) *Batcher {
 	return &Batcher{
-		syncer:        syncer,
-		filterList:    filterList,
-		handler:       handler,
-		workerGroup:   workerGroup,
-		previousOplog: fakeOplog, // initial fake oplog only used in comparison
-		lastOplog:     fakeOplog,
+		syncer:          syncer,
+		filterList:      filterList,
+		handler:         handler,
+		workerGroup:     workerGroup,
+		previousOplog:   fakeOplog, // initial fake oplog only used in comparison
+		lastOplog:       fakeOplog,
+		lastFilterOplog: fakeOplog.Parsed,
 	}
 }
 
@@ -120,13 +126,32 @@ func (batcher *Batcher) getBatch() []*oplog.GenericOplog {
 	var mergeBatch []*oplog.GenericOplog
 	if len(batcher.remainLogs) == 0 {
 		// remainLogs is empty.
-		// first part of merge batch is from current logs queue.
-		select {
-		case mergeBatch = <-syncer.logsQueue[batcher.currentQueue()]:
-			break
-		case <-time.After(1 * time.Second):
-			// return nil if timeout
-			return nil
+		/*
+		 * first part of merge batch is from current logs queue.
+		 * we have 3 judgements:
+		 * 1. if logs queue isn't empty, we return immediately. if not, goto 2 or 3.
+		 * 2. if the previous log isn't empty which means this log needs to be flushed
+		 * as soon as possible, so we wait at most 1 second.
+		 * 3. if the previous log is empty, we wait 10s same as the noop oplog interval
+		 */
+		if batcher.previousOplog == fakeOplog {
+			// previous oplog is empty. rule 1, 3
+			select {
+			case mergeBatch = <-syncer.logsQueue[batcher.currentQueue()]:
+				break
+			case <-time.After(noopInterval * time.Second):
+				// return nil if timeout
+				return nil
+			}
+		} else {
+			// previous oplog isn't empty. rule 1, 2
+			select {
+			case mergeBatch = <-syncer.logsQueue[batcher.currentQueue()]:
+				break
+			case <-time.After(1 * time.Second):
+				// return nil if timeout
+				return nil
+			}
 		}
 
 		// move to next available logs queue
@@ -166,12 +191,17 @@ Outer:
 	for {
 		// get a batch
 		mergeBatch := batcher.getBatch()
+		// heartbeat
 		if mergeBatch == nil {
 			// we can't fetch any data currently
 			if batcher.previousOplog == fakeOplog {
-				// no cached data, just wait again
-				time.Sleep(1 * time.Second)
-				continue
+				// no cached data, set filterOplog and break.
+				// filterOplog is fake when == lastOplog.
+				// this is for flushing checkpoint only.
+				if batcher.lastOplog.Parsed.Timestamp > batcher.lastFilterOplog.Timestamp {
+					batcher.lastFilterOplog = batcher.lastOplog.Parsed
+				}
+				break
 			}
 
 			LOG.Info("batcher flushes cached oplog")
@@ -186,7 +216,7 @@ Outer:
 			// filter oplog such like Noop or Gid-filtered
 			// PAY ATTENTION: we can't handle the oplog in transaction that has been filtered
 			if batcher.filter(genericLog.Parsed) {
-				// doesn't push to worker, set lastFilterOplog
+				// don't push to worker, set lastFilterOplog
 				batcher.lastFilterOplog = genericLog.Parsed
 				if batcher.flushBufferOplogs(&batchGroup, &transactionOplogs) {
 					barrier = true
