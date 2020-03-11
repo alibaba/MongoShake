@@ -104,6 +104,15 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, int64(300), int64(batcher.previousOplog.Parsed.Timestamp), "should be equal")
 		assert.Equal(t, int64(206), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
+
+		// test the last flush oplog
+		batchedOplog, barrier, allEmpty = batcher.batchMore()
+		assert.Equal(t, false, barrier, "should be equal")
+		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
+		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
+		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
+		assert.Equal(t, int64(300), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
 	}
 
 	// split by `conf.Options.IncrSyncAdaptiveBatchingMaxSize`
@@ -137,6 +146,15 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, int64(205), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
 		assert.Equal(t, int64(206), int64(batcher.previousOplog.Parsed.Timestamp), "should be equal")
+
+		// test the last flush oplog
+		batchedOplog, barrier, allEmpty = batcher.batchMore()
+		assert.Equal(t, false, barrier, "should be equal")
+		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
+		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
+		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
+		assert.Equal(t, int64(206), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
 	}
 
 	{
@@ -201,6 +219,15 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, int64(205), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
 		assert.Equal(t, int64(206), int64(batcher.previousOplog.Parsed.Timestamp), "should be equal")
+
+		// test the last flush oplog
+		batchedOplog, barrier, allEmpty = batcher.batchMore()
+		assert.Equal(t, false, barrier, "should be equal")
+		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
+		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
+		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
+		assert.Equal(t, int64(206), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
 	}
 
 	// has several ddl
@@ -286,6 +313,15 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, int64(206), int64(batcher.previousOplog.Parsed.Timestamp), "should be equal")
 		assert.Equal(t, int64(205), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
+
+		// test the last flush oplog
+		batchedOplog, barrier, allEmpty = batcher.batchMore()
+		assert.Equal(t, false, barrier, "should be equal")
+		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
+		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
+		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
+		assert.Equal(t, int64(206), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
 	}
 
 	// first one and last one are ddl
@@ -339,6 +375,15 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, int64(378), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
 		assert.Equal(t, int64(379), int64(batcher.previousOplog.Parsed.Timestamp), "should be equal")
+
+		// test the last flush oplog
+		batchedOplog, barrier, allEmpty = batcher.batchMore()
+		assert.Equal(t, false, barrier, "should be equal")
+		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
+		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
+		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
+		assert.Equal(t, int64(379), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
 	}
 
 	// all ddl
@@ -408,6 +453,15 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, int64(378), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
 		assert.Equal(t, int64(379), int64(batcher.previousOplog.Parsed.Timestamp), "should be equal")
 
+
+		// test the last flush oplog
+		batchedOplog, barrier, allEmpty = batcher.batchMore()
+		assert.Equal(t, false, barrier, "should be equal")
+		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
+		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
+		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
+		assert.Equal(t, int64(379), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
 	}
 
 	// the edge of `IncrSyncAdaptiveBatchingMaxSize` is ddl
@@ -717,6 +771,58 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 2, int(batcher.lastOplog.Parsed.Timestamp), "should be equal")
+		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
+	}
+
+	// test DDL on the last
+	{
+		fmt.Printf("TestBatchMore case %d.\n", nr)
+		nr++
+
+		syncer := mockSyncer()
+		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
+
+		conf.Options.FilterDDLEnable = true
+
+		syncer.logsQueue[0] <- mockOplogs(6, []int{5}, nil, nil, 0)
+
+		batchedOplog, barrier, allEmpty := batcher.batchMore()
+		assert.Equal(t, true, barrier, "should be equal")
+		assert.Equal(t, 5, len(batchedOplog[0]), "should be equal")
+		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
+		assert.Equal(t, int64(4), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
+		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
+
+		batchedOplog, barrier, allEmpty = batcher.batchMore()
+		assert.Equal(t, true, barrier, "should be equal")
+		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
+		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
+		assert.Equal(t, int64(5), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
+		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
+	}
+
+	// test transaction on the last
+	{
+		fmt.Printf("TestBatchMore case %d.\n", nr)
+		nr++
+
+		syncer := mockSyncer()
+		filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+		batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
+
+		conf.Options.FilterDDLEnable = true
+
+		syncer.logsQueue[0] <- mockOplogs(6, nil, nil, []int{1, 2, 3, 4, 5}, 0)
+
+		batchedOplog, barrier, allEmpty := batcher.batchMore()
+		assert.Equal(t, true, barrier, "should be equal")
+		assert.Equal(t, 1, len(batchedOplog[0]), "should be equal")
+		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
+		assert.Equal(t, int64(0), int64(batcher.lastOplog.Parsed.Timestamp), "should be equal")
 		assert.Equal(t, fakeOplog, batcher.previousOplog, "should be equal")
 	}
 }

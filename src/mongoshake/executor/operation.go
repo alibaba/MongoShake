@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"errors"
 	"reflect"
 	"strings"
 
@@ -12,6 +11,7 @@ import (
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
+	"fmt"
 )
 
 var ErrorsShouldSkip = map[int]string{
@@ -54,7 +54,8 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 
 	if !conf.Options.IncrSyncExecutorDebug {
 		if !exec.ensureConnection() {
-			return errors.New("network connection lost . we would retry for next connecting")
+			return fmt.Errorf("Replay-%d network connection lost . we would retry for next connecting",
+				exec.batchExecutor.ReplayerId)
 		}
 		// just use the first log. they has the same metadata
 		metadata := buildMetadata(group.oplogRecords[0].original.partialLog)
@@ -82,17 +83,19 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 		case "d":
 			err = dbWriter.doDelete(dc[0], dc[1], metadata, group.oplogRecords)
 		case "c":
+			LOG.Info("Replay-%d run DDL with metadata[%v] in db[%v], firstLog: %v", exec.batchExecutor.ReplayerId,
+				dc[0], metadata, group.oplogRecords[0].original.partialLog)
 			err = dbWriter.doCommand(dc[0], metadata, group.oplogRecords)
 		case "n":
 			// exec.batchExecutor.ReplMetric.AddFilter(count)
 		default:
-			LOG.Warn("Unknown type oplogs found. op '%s'", group.op)
+			LOG.Warn("Replay-%d meets unknown type oplogs found. op '%s'", exec.batchExecutor.ReplayerId, group.op)
 		}
 
 		// a few known error we can skip !! such as "ShardKeyNotFound" returned
 		// if mongoshake connected to MongoS
 		if exec.errorIgnore(err) {
-			LOG.Info("Discard known error[%v], It's acceptable", err)
+			LOG.Info("Replay-%d Discard known error[%v], It's acceptable", exec.batchExecutor.ReplayerId, err)
 			err = nil
 		}
 

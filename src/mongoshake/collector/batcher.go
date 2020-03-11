@@ -9,6 +9,7 @@ import (
 	"github.com/gugemichael/nimo4go"
 	"github.com/vinllen/mgo/bson"
 	"mongoshake/common"
+	"time"
 )
 
 var (
@@ -120,8 +121,14 @@ func (batcher *Batcher) getBatch() []*oplog.GenericOplog {
 	if len(batcher.remainLogs) == 0 {
 		// remainLogs is empty.
 		// first part of merge batch is from current logs queue.
-		// It's allowed to be blocked !
-		mergeBatch = <-syncer.logsQueue[batcher.currentQueue()]
+		select {
+		case mergeBatch = <-syncer.logsQueue[batcher.currentQueue()]:
+			break
+		case <-time.After(1 * time.Second):
+			// return nil if timeout
+			return nil
+		}
+
 		// move to next available logs queue
 		batcher.moveToNextQueue()
 		for len(mergeBatch) < conf.Options.IncrSyncAdaptiveBatchingMaxSize &&
@@ -159,6 +166,22 @@ Outer:
 	for {
 		// get a batch
 		mergeBatch := batcher.getBatch()
+		if mergeBatch == nil {
+			// we can't fetch any data currently
+			if batcher.previousOplog == fakeOplog {
+				// no cached data, just wait again
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			LOG.Info("batcher flushes cached oplog")
+			// we have cached previous data that need to flush
+			if batcher.flushBufferOplogs(&batchGroup, &transactionOplogs) {
+				barrier = true
+			}
+			break
+		}
+
 		for i, genericLog := range mergeBatch {
 			// filter oplog such like Noop or Gid-filtered
 			// PAY ATTENTION: we can't handle the oplog in transaction that has been filtered
