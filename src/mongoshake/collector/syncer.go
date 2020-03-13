@@ -208,7 +208,7 @@ func (sync *OplogSyncer) startBatcher() {
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
 		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
-		batchedOplog, barrier, allEmpty := batcher.batchMore()
+		batchedOplog, barrier, allEmpty := batcher.BatchMore()
 
 		var newestTs bson.MongoTimestamp
 		if log, filterLog := batcher.getLastOplog(); log != nil && !allEmpty {
