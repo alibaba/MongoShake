@@ -130,4 +130,92 @@ func TestRemoveFiled(t *testing.T) {
 		ret := RemoveFiled(input, "aff")
 		assert.Equal(t, input, ret, "should be equal")
 	}
+
+	{
+		fmt.Printf("TestMergeToGroups case %d.\n", nr)
+		nr++
+
+		input := bson.D{
+			bson.DocElem{
+				Name:  "$v",
+				Value: 1,
+			},
+			bson.DocElem{
+				Name: "$set",
+				Value: bson.D{
+					bson.DocElem{
+						Name:  "web_list.0.utime",
+						Value: "2019-12-24 17:05:41",
+					},
+				},
+			},
+			bson.DocElem{
+				Name:  "$set",
+				Value: bson.M{
+					"web_list.0.utime": "2019-12-24 17:05:41",
+				},
+			},
+			bson.DocElem{
+				Name: "$set",
+				Value: bson.D{
+					bson.DocElem{
+						Name:  "web_list.0.utime",
+						Value: "2019-12-24 17:05:41",
+					},
+				},
+			},
+		}
+
+		ret := RemoveFiled(input, "$v")
+		assert.Equal(t, ret, bson.D{
+			bson.DocElem{
+				Name: "$set",
+				Value: bson.D{
+					bson.DocElem{
+						Name:  "web_list.0.utime",
+						Value: "2019-12-24 17:05:41",
+					},
+				},
+			},
+			bson.DocElem{
+				Name:  "$set",
+				Value: bson.M{
+					"web_list.0.utime": "2019-12-24 17:05:41",
+				},
+			},
+			bson.DocElem{
+				Name: "$set",
+				Value: bson.D{
+					bson.DocElem{
+						Name:  "web_list.0.utime",
+						Value: "2019-12-24 17:05:41",
+					},
+				},
+			},
+		}, "should be equal")
+	}
+
+	{
+		fmt.Printf("TestMergeToGroups case %d.\n", nr)
+		nr++
+
+		input := bson.D{
+			bson.DocElem{
+				Name:  "$v",
+				Value: 1,
+			},
+			bson.DocElem{
+				Name: "$set",
+				Value: bson.D{
+					bson.DocElem{
+						Name:  "web_list.0.utime",
+						Value: "2019-12-24 17:05:41",
+					},
+				},
+			},
+		}
+
+		ret := RemoveFiled(input, "$v2")
+		assert.Equal(t, ret, input, "should be equal")
+	}
 }
