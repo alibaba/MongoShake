@@ -39,6 +39,12 @@
 			"revisionTime": "2018-02-27T14:14:24Z"
 		},
 		{
+			"checksumSHA1": "z8W4xMqdjgSFaXxFtILDHL+/JqU=",
+			"path": "github.com/getlantern/deepcopy",
+			"revision": "7f45deb8130a0acc553242eb0e009e3f6f3d9ce3",
+			"revisionTime": "2016-03-17T15:43:40Z"
+		},
+		{
 			"checksumSHA1": "H8wo+NR5z+VRl0wqPYpVQfC06ks=",
 			"path": "github.com/go-stack/stack",
 			"revision": "2fee6af1a9795aafbe0253a0cfbdf668e1fb8a9a",

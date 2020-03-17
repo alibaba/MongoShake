@@ -103,7 +103,7 @@ func startup() {
 	// start mongodb replication
 	if err := coordinator.Run(); err != nil {
 		// initial or connection established failed
-		crash(fmt.Sprintf("Oplog Tailer initialize failed: %v", err), -6)
+		crash(fmt.Sprintf("run replication failed: %v", err), -6)
 	}
 
 	// if the sync mode is "document", mongoshake should exit here.

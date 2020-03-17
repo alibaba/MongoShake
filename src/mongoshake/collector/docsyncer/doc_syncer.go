@@ -21,6 +21,7 @@ import (
 
 const (
 	MAX_BUFFER_BYTE_SIZE = 16 * 1024 * 1024
+	SpliterReader        = 4
 )
 
 func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
@@ -274,6 +275,15 @@ func NewDBSyncer(
 	return syncer
 }
 
+func (syncer *DBSyncer) String() string {
+	return fmt.Sprintf("DBSyncer id[%v] source[%v] target[%v] startTime[%v]",
+		syncer.id, syncer.FromMongoUrl, syncer.ToMongoUrl, syncer.startTime)
+}
+
+func (syncer *DBSyncer) GetIndexMap() map[utils.NS][]mgo.Index {
+	return syncer.indexMap
+}
+
 func (syncer *DBSyncer) Start() (syncError error) {
 	syncer.startTime = time.Now()
 	var wg sync.WaitGroup
@@ -284,7 +294,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	}
 
 	if len(nsList) == 0 {
-		LOG.Info("document syncer-%d finish, but no data", syncer.id)
+		LOG.Info("%s finish, but no data", syncer)
 	}
 
 	collExecutorParallel := conf.Options.FullSyncReaderCollectionParallel
@@ -310,24 +320,23 @@ func (syncer *DBSyncer) Start() (syncError error) {
 
 				toNS := utils.NewNS(syncer.nsTrans.Transform(ns.Str()))
 
-				LOG.Info("document syncer-%d collExecutor-%d sync ns %v to %v begin",
-					syncer.id, collExecutorId, ns, toNS)
+				LOG.Info("%s collExecutor-%d sync ns %v to %v begin",
+					syncer, collExecutorId, ns, toNS)
 				err := syncer.collectionSync(collExecutorId, ns, toNS)
 				atomic.AddInt32(&nsDoneCount, 1)
 
 				if err != nil {
-					LOG.Critical("document syncer-%d collExecutor-%d sync ns %v to %v failed. %v",
-						syncer.id, collExecutorId, ns, toNS, err)
-					syncError = errors.New(fmt.Sprintf("document syncer sync ns %v to %v failed. %v",
-						ns, toNS, err))
+					LOG.Critical("%s collExecutor-%d sync ns %v to %v failed. %v",
+						syncer, collExecutorId, ns, toNS, err)
+					syncError = fmt.Errorf("document syncer sync ns %v to %v failed. %v", ns, toNS, err)
 				} else {
 					process := int(atomic.LoadInt32(&nsDoneCount)) * 100 / len(nsList)
-					LOG.Info("document syncer-%d collExecutor-%d sync ns %v to %v successful. db syncer-%d progress %v%%",
-						syncer.id, collExecutorId, ns, toNS, syncer.id, process)
+					LOG.Info("%s collExecutor-%d sync ns %v to %v successful. db syncer-%d progress %v%%",
+						syncer, collExecutorId, ns, toNS, syncer.id, process)
 				}
 				wg.Done()
 			}
-			LOG.Info("document syncer-%d collExecutor-%d finish", syncer.id, collExecutorId)
+			LOG.Info("%s collExecutor-%d finish", syncer, collExecutorId)
 		})
 	}
 
@@ -336,15 +345,58 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	return syncError
 }
 
-func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
-	toNS utils.NS) error {
-	reader := NewDocumentReader(syncer.FromMongoUrl, ns)
-
+func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS utils.NS) error {
+	// writer
 	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS, syncer)
 	if err := colExecutor.Start(); err != nil {
 		return err
 	}
 
+	// reader
+	splitter := NewDocumentSplitter(syncer.FromMongoUrl, ns)
+	if splitter == nil {
+		return fmt.Errorf("create splitter failed")
+	}
+
+	// run in several pieces
+	var wg sync.WaitGroup
+	wg.Add(splitter.pieceNumber)
+	for i := 0; i < SpliterReader; i++ {
+		go func() {
+			for {
+				reader, ok := <-splitter.readerChan
+				if !ok {
+					break
+				}
+
+				if err := syncer.splitSync(reader, colExecutor); err != nil {
+					LOG.Crashf("%v", err)
+				}
+
+				wg.Done()
+			}
+		}()
+	}
+	wg.Wait()
+
+	// close writer
+	if err := colExecutor.Wait(); err != nil {
+		return fmt.Errorf("close writer failed: %v", err)
+	}
+
+	// fetch index
+	if indexes, err := splitter.GetIndexes(); err != nil {
+		return fmt.Errorf("get indexes from ns[%v] of src mongodb failed: %v", ns, err)
+	} else {
+		syncer.mutex.Lock()
+		defer syncer.mutex.Unlock()
+		syncer.indexMap[ns] = indexes
+	}
+
+	return nil
+}
+
+func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *CollectionExecutor) error {
 	bufferSize := conf.Options.FullSyncReaderDocumentBatchSize
 	buffer := make([]*bson.Raw, 0, bufferSize)
 	bufferByteSize := 0
@@ -353,15 +405,12 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
 		var doc *bson.Raw
 		var err error
 		if doc, err = reader.NextDoc(); err != nil {
-			return errors.New(fmt.Sprintf("Get next document from ns %v of src mongodb failed. %v", ns, err))
+			return fmt.Errorf("splitter reader[%v] get next document failed: %v", reader, err)
 		} else if doc == nil {
 			colExecutor.Sync(buffer)
-			if err := colExecutor.Wait(); err != nil {
-				return err
-			}
 			break
 		}
-		
+
 		if bufferByteSize+len(doc.Data) > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
 			colExecutor.Sync(buffer)
 			buffer = make([]*bson.Raw, 0, bufferSize)
@@ -371,11 +420,11 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
 		if len(conf.Options.TransformNamespace) > 0 && conf.Options.IncrSyncDBRef {
 			var docData bson.D
 			if err := bson.Unmarshal(doc.Data, docData); err != nil {
-				LOG.Warn("collectionSync do bson unmarshal %v failed. %v", doc.Data, err)
+				LOG.Error("splitter reader[%v] do bson unmarshal %v failed. %v", reader, doc.Data, err)
 			} else {
-				docData = transform.TransformDBRef(docData, ns.Database, syncer.nsTrans)
+				docData = transform.TransformDBRef(docData, reader.ns.Database, syncer.nsTrans)
 				if v, err := bson.Marshal(docData); err != nil {
-					LOG.Warn("collectionSync do bson marshal %v failed. %v", docData, err)
+					LOG.Warn("splitter reader[%v] do bson marshal %v failed. %v", reader, docData, err)
 				} else {
 					doc.Data = v
 				}
@@ -385,18 +434,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
 		bufferByteSize += len(doc.Data)
 	}
 
-	if indexes, err := reader.GetIndexes(); err != nil {
-		return errors.New(fmt.Sprintf("Get indexes from ns %v of src mongodb failed. %v", ns, err))
-	} else {
-		syncer.mutex.Lock()
-		defer syncer.mutex.Unlock()
-		syncer.indexMap[ns] = indexes
-	}
-
+	LOG.Info("splitter reader[%v] finishes", reader)
 	reader.Close()
 	return nil
-}
-
-func (syncer *DBSyncer) GetIndexMap() map[utils.NS][]mgo.Index {
-	return syncer.indexMap
 }

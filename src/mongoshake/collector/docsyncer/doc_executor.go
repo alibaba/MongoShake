@@ -62,7 +62,7 @@ func (colExecutor *CollectionExecutor) Start() error {
 		colExecutor.conn.Session.EnsureSafe(&mgo.Safe{WMode: utils.MajorityWriteConcern})
 	}
 
-	parallel := conf.Options.FullSyncReaderDocumentParallel
+	parallel := conf.Options.FullSyncReaderWriteDocumentParallel
 	colExecutor.docBatch = make(chan []*bson.Raw, parallel)
 
 	executors := make([]*DocExecutor, parallel)

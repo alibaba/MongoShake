@@ -1,37 +1,42 @@
 package conf
 
-import "mongoshake/common"
+import (
+	"mongoshake/common"
+
+	"github.com/getlantern/deepcopy"
+)
 
 type Configuration struct {
 	// 0. version
 	ConfVersion uint `config:"conf.version"` // TODO
 
 	// 1. global
-	Id                      string   `config:"id"`
-	MasterQuorum            bool     `config:"master_quorum"`
-	HTTPListenPort          int      `config:"http_profile"`
-	SystemProfile           int      `config:"system_profile"`
-	LogLevel                string   `config:"log.level"`
-	LogDirectory            string   `config:"log.dir"`
-	LogFileName             string   `config:"log.file"`
-	LogFlush                bool     `config:"log.flush"`
-	SyncMode                string   `config:"sync_mode"`
-	MongoUrls               []string `config:"mongo_urls"`
-	MongoCsUrl              string   `config:"mongo_cs_url"`
-	MongoConnectMode        string   `config:"mongo_connect_mode"`
-	FilterNamespaceBlack    []string `config:"filter.namespace.black"`
-	FilterNamespaceWhite    []string `config:"filter.namespace.white"`
-	FilterPassSpecialDb     []string `config:"filter.pass.special.db"`
-	FilterDDLEnable         bool     `config:"filter.ddl_enable"`
-	CheckpointStorageUrl    string   `config:"checkpoint.storage.url"`
-	CheckpointStorageDb  string   `config:"checkpoint.storage.db"`
-	CheckpointStorageCollection  string   `config:"checkpoint.storage.collection"`
-	CheckpointStartPosition int64    `config:"checkpoint.start_position" type:"date"`
-	TransformNamespace      []string `config:"transform.namespace"`
+	Id                          string   `config:"id"`
+	MasterQuorum                bool     `config:"master_quorum"`
+	HTTPListenPort              int      `config:"http_profile"`
+	SystemProfile               int      `config:"system_profile"`
+	LogLevel                    string   `config:"log.level"`
+	LogDirectory                string   `config:"log.dir"`
+	LogFileName                 string   `config:"log.file"`
+	LogFlush                    bool     `config:"log.flush"`
+	SyncMode                    string   `config:"sync_mode"`
+	MongoUrls                   []string `config:"mongo_urls"`
+	MongoCsUrl                  string   `config:"mongo_cs_url"`
+	MongoConnectMode            string   `config:"mongo_connect_mode"`
+	FilterNamespaceBlack        []string `config:"filter.namespace.black"`
+	FilterNamespaceWhite        []string `config:"filter.namespace.white"`
+	FilterPassSpecialDb         []string `config:"filter.pass.special.db"`
+	FilterDDLEnable             bool     `config:"filter.ddl_enable"`
+	CheckpointStorageUrl        string   `config:"checkpoint.storage.url"`
+	CheckpointStorageDb         string   `config:"checkpoint.storage.db"`
+	CheckpointStorageCollection string   `config:"checkpoint.storage.collection"`
+	CheckpointStartPosition     int64    `config:"checkpoint.start_position" type:"date"`
+	TransformNamespace          []string `config:"transform.namespace"`
 
 	// 2. full sync
 	FullSyncReaderCollectionParallel     int    `config:"full_sync.reader.collection_parallel"`
-	FullSyncReaderDocumentParallel       int    `config:"full_sync.reader.document_parallel"`
+	FullSyncReaderWriteDocumentParallel  int    `config:"full_sync.reader.write_document_parallel"`
+	FullSyncReaderReadDocumentCount      int    `config:"full_sync.reader.read_document_count"`
 	FullSyncReaderDocumentBatchSize      int    `config:"full_sync.reader.document_batch_size"`
 	FullSyncCollectionDrop               bool   `config:"full_sync.collection_exist_no_drop"`
 	FullSyncCreateIndex                  string `config:"full_sync.create_index"`
@@ -83,18 +88,19 @@ func (configuration *Configuration) IsShardCluster() bool {
 var Options Configuration
 
 func GetSafeOptions() Configuration {
-	polish := Options
+	polish := new(Configuration)
+	deepcopy.Copy(polish, &Options)
 
 	// modify mongo_ulrs
-	for i := range polish.MongoUrls {
-		polish.MongoUrls[i] = utils.BlockMongoUrlPassword(polish.MongoUrls[i], "***")
+	for i := range Options.MongoUrls {
+		polish.MongoUrls[i] = utils.BlockMongoUrlPassword(Options.MongoUrls[i], "***")
 	}
 	// modify tunnel.address
-	for i := range polish.IncrSyncTunnelAddress {
-		polish.IncrSyncTunnelAddress[i] = utils.BlockMongoUrlPassword(polish.IncrSyncTunnelAddress[i], "***")
+	for i := range Options.IncrSyncTunnelAddress {
+		polish.IncrSyncTunnelAddress[i] = utils.BlockMongoUrlPassword(Options.IncrSyncTunnelAddress[i], "***")
 	}
 	// modify storage url
-	polish.CheckpointStorageUrl = utils.BlockMongoUrlPassword(polish.CheckpointStorageUrl, "***")
+	polish.CheckpointStorageUrl = utils.BlockMongoUrlPassword(Options.CheckpointStorageUrl, "***")
 
-	return polish
+	return *polish
 }

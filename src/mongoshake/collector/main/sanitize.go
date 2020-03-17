@@ -100,8 +100,13 @@ func checkDefaultValue() error {
 	if conf.Options.FullSyncReaderCollectionParallel <= 0 {
 		conf.Options.FullSyncReaderCollectionParallel = 6
 	}
-	if conf.Options.FullSyncReaderDocumentParallel <= 0 {
-		conf.Options.FullSyncReaderDocumentParallel = 8
+	if conf.Options.FullSyncReaderWriteDocumentParallel <= 0 {
+		conf.Options.FullSyncReaderWriteDocumentParallel = 8
+	}
+	if conf.Options.FullSyncReaderReadDocumentCount < 0 {
+		conf.Options.FullSyncReaderReadDocumentCount = 0
+	} else if conf.Options.FullSyncReaderReadDocumentCount > 0 && conf.Options.FullSyncReaderReadDocumentCount < 1024 {
+		return fmt.Errorf("full_sync.reader.read_document_count should == 0 or > 1024")
 	}
 	if conf.Options.FullSyncReaderDocumentBatchSize <= 0 {
 		conf.Options.FullSyncReaderDocumentBatchSize = 128
