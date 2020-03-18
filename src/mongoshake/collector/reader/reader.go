@@ -11,6 +11,11 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
+var (
+	BatchSize       = 8192
+	PrefetchPercent = 0.2
+)
+
 type Reader interface {
 	Name() string                                 // reader name
 	StartFetcher()                                // start fetcher

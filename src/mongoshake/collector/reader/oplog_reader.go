@@ -23,7 +23,6 @@ const (
 	QueryOpGTE = "$gte"
 
 	tailTimeout   = 7
-	oplogChanSize = 0
 
 	localDB = "local"
 )
@@ -59,7 +58,8 @@ func NewOplogReader(src string, replset string) *OplogReader {
 		src:             src,
 		replset:         replset,
 		query:           bson.M{},
-		oplogChan:       make(chan *retOplog, oplogChanSize),
+		// the mgo driver already has cache mechanism(prefetch), so there is no need to buffer here again
+		oplogChan:       make(chan *retOplog, 0),
 		firstRead:       true,
 	}
 }
@@ -206,8 +206,8 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 	or.firstRead = false
 
 	// rebuild syncerGroup condition statement with current checkpoint timestamp
-	or.conn.Session.SetBatch(8192) //
-	or.conn.Session.SetPrefetch(0.2)
+	or.conn.Session.SetBatch(BatchSize)
+	or.conn.Session.SetPrefetch(PrefetchPercent)
 	or.oplogsIterator = or.conn.Session.DB(localDB).C(utils.OplogNS).
 		Find(or.query).LogReplay().Tail(time.Second * tailTimeout) // this timeout is useless
 	return

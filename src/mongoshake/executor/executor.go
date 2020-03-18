@@ -65,6 +65,7 @@ func (batchExecutor *BatchGroupExecutor) Start() {
 	executors := make([]*Executor, parallel)
 	for i := 0; i != len(executors); i++ {
 		executors[i] = NewExecutor(GenerateExecutorId(), batchExecutor, batchExecutor.MongoUrl)
+		executors[i].RestAPI()
 		go executors[i].start()
 	}
 	batchExecutor.executors = executors
@@ -180,6 +181,15 @@ type Executor struct {
 
 	// bulk insert or single insert
 	bulkInsert bool
+
+	// metric
+	metricInsert  uint64
+	metricUpdate  uint64
+	metricDelete  uint64
+	metricDDL     uint64
+	metricUnknown uint64
+	metricNoop    uint64
+	metricError   uint64
 }
 
 func GenerateExecutorId() int {
@@ -337,4 +347,29 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		}
 	}
 	return partialLog
+}
+
+func (exec *Executor) RestAPI() {
+	type ExecutorInfo struct {
+		Id      int    `json:"id"`
+		Insert  uint64 `json:"insert"`
+		Update  uint64 `json:"update"`
+		Delete  uint64 `json:"delete"`
+		DDL     uint64 `json:"ddl"`
+		Unknown uint64 `json:"unknown"`
+		Error   uint64 `json:"error"`
+		// Noop uint64 `json:"noop"`
+	}
+
+	utils.HttpApi.RegisterAPI("/executor", nimo.HttpGet, func([]byte) interface{} {
+		return &ExecutorInfo{
+			Id:      exec.id,
+			Insert:  exec.metricInsert,
+			Update:  exec.metricUpdate,
+			Delete:  exec.metricDelete,
+			DDL:     exec.metricDDL,
+			Unknown: exec.metricUnknown,
+			Error:   exec.metricError,
+		}
+	})
 }

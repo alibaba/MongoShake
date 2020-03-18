@@ -46,11 +46,12 @@ type EventReader struct {
 
 // NewEventReader creates reader with mongodb url
 func NewEventReader(src string, replset string) *EventReader {
-	return &EventReader{
+	var channelSize = int(float64(BatchSize) * PrefetchPercent)
+	return &EventReader {
 		src:                  src,
 		replset:              replset,
 		startAtOperationTime: -1, // init value
-		eventChan:            make(chan *retOplog, oplogChanSize),
+		eventChan:            make(chan *retOplog, channelSize),
 		firstRead:            true,
 		diskQueueLastTs:      -1,
 	}
@@ -135,7 +136,7 @@ func (er *EventReader) EnsureNetwork() error {
 	}
 
 	var err error
-	if er.client, err = utils.NewChangeStreamConn(er.src, er.startAtOperationTime); err != nil {
+	if er.client, err = utils.NewChangeStreamConn(er.src, er.startAtOperationTime, int32(BatchSize)); err != nil {
 		return err
 	}
 

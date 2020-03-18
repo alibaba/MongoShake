@@ -49,7 +49,7 @@ func NewPersister(replset string, sync *OplogSyncer) *Persister {
 		sync:              sync,
 		Buffer:            make([][]byte, 0, conf.Options.IncrSyncFetcherBufferCapacity),
 		nextQueuePosition: 0,
-		enableDiskPersist: conf.Options.SyncMode == utils.VarSyncModeFull &&
+		enableDiskPersist: conf.Options.SyncMode == utils.VarSyncModeAll &&
 			conf.Options.FullSyncReaderOplogStoreDisk,
 		fetchStage:      utils.FetchStageStoreUnknown,
 		diskQueueLastTs: -1, // initial set 1
@@ -128,6 +128,11 @@ func (p *Persister) GetQueryTsFromDiskQueue() bson.MongoTimestamp {
 
 // inject data
 func (p *Persister) Inject(input []byte) {
+	// only used to test the reader, discard anything
+	if conf.Options.IncrSyncReaderDebug {
+		return
+	}
+
 	if p.enableDiskPersist {
 		// current fetch stage
 		fetchStage := p.GetFetchStage()
