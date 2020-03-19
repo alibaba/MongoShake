@@ -143,7 +143,7 @@ func (exec *DocExecutor) start() {
 }
 
 func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
-	if len(docs) == 0 {
+	if len(docs) == 0 || conf.Options.FullSyncExecutorDebug {
 		return nil
 	}
 

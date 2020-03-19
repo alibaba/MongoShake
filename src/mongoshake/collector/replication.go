@@ -134,7 +134,9 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		}
 
 		// a conventional ReplicaSet should have local.oplog.rs collection
-		if conf.Options.SyncMode != utils.VarSyncModeFull && !conn.HasOplogNs() {
+		if conf.Options.SyncMode != utils.VarSyncModeFull &&
+			conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog &&
+			!conn.HasOplogNs() {
 			LOG.Critical("There has no oplog collection in mongo db server")
 			conn.Close()
 			return errors.New("no oplog ns in mongo. See https://github.com/alibaba/MongoShake/wiki/FAQ#q-how-to-solve-the-oplog-tailer-initialize-failed-no-oplog-ns-in-mongo-error")

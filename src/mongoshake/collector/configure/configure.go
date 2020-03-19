@@ -67,6 +67,7 @@ type Configuration struct {
 	// inner variables, not open to user
 	CheckpointStorage        string `config:"checkpoint.storage"`
 	CheckpointInterval       int64  `config:"checkpoint.interval"`
+	FullSyncExecutorDebug    bool   `config:"full_sync.executor.debug"`
 	IncrSyncDBRef            bool   `config:"incr_sync.dbref"`
 	IncrSyncExecutor         int    `config:"incr_sync.executor"`
 	IncrSyncExecutorDebug    bool   `config:"incr_sync.executor.debug"` // !ReplayerDurable

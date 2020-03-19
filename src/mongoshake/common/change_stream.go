@@ -9,7 +9,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"mongoshake/collector/configure"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
@@ -25,7 +24,7 @@ type ChangeStreamConn struct {
 	ctx       context.Context
 }
 
-func NewChangeStreamConn(src string, watchStartTime int64, batchSize int32) (*ChangeStreamConn, error) {
+func NewChangeStreamConn(src string, mode string, watchStartTime int64, batchSize int32) (*ChangeStreamConn, error) {
 	// init client ops
 	clientOps := options.Client().ApplyURI(src)
 
@@ -33,7 +32,7 @@ func NewChangeStreamConn(src string, watchStartTime int64, batchSize int32) (*Ch
 
 	// read preference
 	readPreference := readpref.Primary()
-	switch conf.Options.MongoConnectMode {
+	switch mode {
 	case VarMongoConnectModeSecondaryPreferred:
 		readPreference = readpref.SecondaryPreferred()
 	case VarMongoConnectModeStandalone:
