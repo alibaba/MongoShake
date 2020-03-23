@@ -22,6 +22,7 @@ type Configuration struct {
 	SyncMode                    string   `config:"sync_mode"`
 	MongoUrls                   []string `config:"mongo_urls"`
 	MongoCsUrl                  string   `config:"mongo_cs_url"`
+	MongoSUrl                   string   `config:"mongo_s_url"`
 	MongoConnectMode            string   `config:"mongo_connect_mode"`
 	FilterNamespaceBlack        []string `config:"filter.namespace.black"`
 	FilterNamespaceWhite        []string `config:"filter.namespace.white"`
@@ -97,6 +98,10 @@ func GetSafeOptions() Configuration {
 	for i := range Options.MongoUrls {
 		polish.MongoUrls[i] = utils.BlockMongoUrlPassword(Options.MongoUrls[i], "***")
 	}
+	// modify mongo_cs_url
+	polish.MongoCsUrl = utils.BlockMongoUrlPassword(Options.MongoCsUrl, "***")
+	// modify mongo_s_url
+	polish.MongoSUrl = utils.BlockMongoUrlPassword(Options.MongoSUrl, "***")
 	// modify tunnel.address
 	for i := range Options.IncrSyncTunnelAddress {
 		polish.IncrSyncTunnelAddress[i] = utils.BlockMongoUrlPassword(Options.IncrSyncTunnelAddress[i], "***")

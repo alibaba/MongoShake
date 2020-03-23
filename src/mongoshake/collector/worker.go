@@ -17,8 +17,6 @@ import (
 const MaxUnAckListLength = 128 * 256
 
 type Worker struct {
-	// parent transfer
-	coordinator *ReplicationCoordinator
 	// parent syncer
 	syncer *OplogSyncer
 
@@ -50,16 +48,15 @@ type TransferEventListener struct {
 	whenTransferRetry        func(worker *Worker, buffer []*oplog.GenericOplog)
 }
 
-func NewWorker(coordinator *ReplicationCoordinator, syncer *OplogSyncer, id uint32) *Worker {
+func NewWorker(syncer *OplogSyncer, id uint32) *Worker {
 	return &Worker{
-		coordinator: coordinator,
 		syncer:      syncer,
 		id:          id,
 		queue:       make(chan []*oplog.GenericOplog, conf.Options.IncrSyncWorkerBatchQueueSize),
 	}
 }
 
-func (worker *Worker) init() bool {
+func (worker *Worker) Init() bool {
 	worker.RestAPI()
 	worker.writeController = NewWriteController(worker)
 	return worker.writeController != nil
@@ -113,7 +110,7 @@ func (worker *Worker) findFirstAvailableBatch() []*oplog.GenericOplog {
 	}
 }
 
-func (worker *Worker) startWorker() {
+func (worker *Worker) StartWorker() {
 	LOG.Info("Collector-worker-%d start working with jobs batch queue. buffer capacity %d",
 		worker.id, cap(worker.queue))
 

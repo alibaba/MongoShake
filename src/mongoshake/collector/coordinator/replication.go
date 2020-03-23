@@ -1,4 +1,4 @@
-package collector
+package coordinator
 
 import (
 	"encoding/json"
@@ -6,18 +6,13 @@ import (
 	"fmt"
 	"sync"
 
+	"mongoshake/collector"
 	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
-	"mongoshake/collector/docsyncer"
-	"mongoshake/collector/transform"
 	"mongoshake/common"
 	"mongoshake/oplog"
-
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
-	"mongoshake/sharding"
-	"mongoshake/collector/filter"
 )
 
 // ReplicationCoordinator global coordinator instance. consist of
@@ -29,8 +24,9 @@ type ReplicationCoordinator struct {
 
 	// syncerGroup and workerGroup number is 1:N in ReplicaSet.
 	// 1:1 while replicated in shard cluster
-	syncerGroup []*OplogSyncer
+	syncerGroup []*collector.OplogSyncer
 
+	// control the qps, TODO, need modify to bucket
 	rateController *nimo.SimpleRateController
 }
 
@@ -87,15 +83,21 @@ func (coordinator *ReplicationCoordinator) Run() error {
 				utils.ExtractTimestampForLog(beginTs64))
 
 			// get current oldest timestamp
-			_, _, _, bigOldTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
+			_, _, _, bigOldTs, _, fromMongos, err := utils.GetAllTimestamp(coordinator.Sources)
 			if err != nil {
-				return LOG.Critical("get oldest timestamp failed[%v]", err)
+				return fmt.Errorf("get oldest timestamp failed[%v]", err)
 			}
-			// the oldest oplog is lost
-			if utils.ExtractMongoTimestamp(bigOldTs) >= beginTs64 {
-				return LOG.Critical("incr sync beginTs[%v] is less than current the biggest old timestamp[%v], " +
-					"this error usually means illegal start timestamp or capped collection error happen",
-					utils.ExtractMongoTimestamp(beginTs64), utils.ExtractMongoTimestamp(bigOldTs))
+
+			if fromMongos {
+				// currently, we can't check whether the oplog is lost from mongos
+				LOG.Info("ignore check oldest timestamp exist when source is mongos")
+			} else {
+				// the oldest oplog is lost
+				if utils.ExtractMongoTimestamp(bigOldTs) >= beginTs64 {
+					return fmt.Errorf("incr sync beginTs[%v] is less than current the biggest old timestamp[%v], " +
+						"this error usually means illegal start timestamp or capped collection error happen",
+						utils.ExtractMongoTimestamp(beginTs64), utils.ExtractMongoTimestamp(bigOldTs))
+				}
 			}
 		} else {
 			// we can't insert Timestamp(0, 0) that will be treat as Now(), so we use Timestamp(1, 0)
@@ -135,7 +137,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 
 		// a conventional ReplicaSet should have local.oplog.rs collection
 		if conf.Options.SyncMode != utils.VarSyncModeFull &&
-			conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog &&
+			// conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog &&
 			!conn.HasOplogNs() {
 			LOG.Critical("There has no oplog collection in mongo db server")
 			conn.Close()
@@ -186,10 +188,14 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 		return syncMode, 0, nil
 	}
 
-	// oldestTs is the smallest of the all newest timestamp
-	tsMap, _, oldestTs, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
+	// smallestNew is the smallest of the all newest timestamp
+	tsMap, _, smallestNew, _, _, fromMongoS, err := utils.GetAllTimestamp(coordinator.Sources)
 	if err != nil {
-		return syncMode, 0, nil
+		return syncMode, 0, err
+	}
+
+	if fromMongoS {
+		return syncMode, utils.TimestampToInt64(smallestNew), nil
 	}
 
 	needFull := false
@@ -210,7 +216,7 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	}
 
 	if needFull {
-		return utils.VarSyncModeAll, utils.TimestampToInt64(oldestTs), nil
+		return utils.VarSyncModeAll, utils.TimestampToInt64(smallestNew), nil
 	} else {
 		LOG.Info("sync mode change from 'all' to 'oplog'")
 		return utils.VarSyncModeIncr, 0, nil
@@ -224,7 +230,7 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 	}
 
 	// get current newest timestamp
-	_, fullFinishTs, _, oldestTs, _, err := utils.GetAllTimestamp(coordinator.Sources)
+	_, fullFinishTs, _, oldestTs, _, fromMongoS, err := utils.GetAllTimestamp(coordinator.Sources)
 	if err != nil {
 		return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
 	}
@@ -233,13 +239,18 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 	LOG.Info("oldestTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractTimestampForLog(oldestTs),
 		utils.ExtractTimestampForLog(fullBeginTs), utils.ExtractTimestampForLog(fullFinishTs))
 
-	// the oldest oplog is lost
-	if utils.TimestampToInt64(oldestTs) >= fullBeginTs {
-		err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's " +
-			"oplog collection size is too small or full sync continues too long",
-			utils.ExtractTimestampForLog(fullBeginTs), utils.ExtractTimestampForLog(oldestTs))
-		LOG.Error(err)
-		return err
+	if fromMongoS {
+		// currently, we can't check whether the oplog is lost from mongos
+		LOG.Info("ignore check oldest timestamp exist when source is mongos")
+	} else {
+		// the oldest oplog is lost
+		if utils.TimestampToInt64(oldestTs) >= fullBeginTs {
+			err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's " +
+				"oplog collection size is too small or full sync continues too long",
+				utils.ExtractTimestampForLog(fullBeginTs), utils.ExtractTimestampForLog(oldestTs))
+			LOG.Error(err)
+			return err
+		}
 	}
 
 	LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
@@ -259,7 +270,7 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs int
 			docError = LOG.Critical("document Replication error. %v", err)
 			return
 		}
-		LOG.Info("------------------------document replication done!------------------------")
+		LOG.Info("------------------------full sync done!------------------------")
 
 		/*
 		// get current newest timestamp
@@ -288,154 +299,8 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs int
 	}
 	LOG.Info("finish document replication, change oplog replication to %v", utils.FetchStageStoreDiskApply)
 	for _, syncer := range coordinator.syncerGroup {
-		syncer.startDiskApply()
+		syncer.StartDiskApply()
 	}
 
-	return nil
-}
-
-func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
-	// init orphan sharding chunk map if source is sharding
-	shardingChunkMap := make(sharding.ShardingChunkMap)
-	if len(coordinator.Sources) > 1 {
-		ok, err := sharding.GetBalancerStatusByUrl(conf.Options.MongoCsUrl)
-		if ok {
-			if err != nil {
-				return LOG.Critical("obtain balance status from mongo_cs_url=%s error. %v",
-					conf.Options.MongoCsUrl, err)
-			}
-			return LOG.Critical("source mongodb sharding need to stop balancer when document replication occur.")
-		}
-
-		if conf.Options.FullSyncExecutorFilterOrphanDocument {
-			LOG.Info("begin to get chunk map from config.chunks of source mongodb sharding")
-			if shardingChunkMap, err = sharding.GetChunkMapByUrl(conf.Options.MongoCsUrl); err != nil {
-				return err
-			}
-		}
-	}
-
-	// get all namespace need to sync
-	nsSet, err := docsyncer.GetAllNamespace(coordinator.Sources)
-	if err != nil {
-		return err
-	}
-
-	var ckptMap map[string]utils.TimestampNode
-	// get all newest timestamp for each mongodb if sync mode isn't "document"
-	if conf.Options.SyncMode != utils.VarSyncModeFull {
-		ckptMap, _, _, _, _, err = utils.GetAllTimestamp(coordinator.Sources)
-		if err != nil {
-			return err
-		}
-	}
-
-	fromIsSharding := len(coordinator.Sources) > 1
-	toUrl := conf.Options.IncrSyncTunnelAddress[0]
-	var toConn *utils.MongoConn
-	if toConn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, true); err != nil {
-		return err
-	}
-	defer toConn.Close()
-
-	trans := transform.NewNamespaceTransform(conf.Options.TransformNamespace)
-
-	shardingSync := docsyncer.IsShardingToSharding(fromIsSharding, toConn)
-	if err := docsyncer.StartDropDestCollection(nsSet, toConn, trans); err != nil {
-		return err
-	}
-	if shardingSync {
-		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.MongoCsUrl, toConn, trans); err != nil {
-			return err
-		}
-	}
-
-	var wg sync.WaitGroup
-	var replError error
-	var mutex sync.Mutex
-	indexMap := make(map[utils.NS][]mgo.Index)
-
-	for i, src := range coordinator.Sources {
-		var orphanFilter *filter.OrphanFilter
-		if conf.Options.FullSyncExecutorFilterOrphanDocument {
-			dbChunkMap := make(sharding.DBChunkMap)
-			if chunkMap, ok := shardingChunkMap[src.ReplicaName]; ok {
-				dbChunkMap = chunkMap
-			} else {
-				LOG.Warn("document syncer %v has no chunk map", src.ReplicaName)
-			}
-			orphanFilter = filter.NewOrphanFilter(src.ReplicaName, dbChunkMap)
-		}
-
-		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl, trans, orphanFilter)
-		LOG.Info("document syncer-%d do replication for url=%v", i, src.URL)
-		wg.Add(1)
-		nimo.GoRoutine(func() {
-			defer wg.Done()
-			if err := dbSyncer.Start(); err != nil {
-				LOG.Critical("document replication for url=%v failed. %v", src.URL, err)
-				replError = err
-			}
-			mutex.Lock()
-			defer mutex.Unlock()
-			for ns, indexList := range dbSyncer.GetIndexMap() {
-				indexMap[ns] = indexList
-			}
-		})
-	}
-	wg.Wait()
-	if replError != nil {
-		return replError
-	}
-
-	if conf.Options.FullSyncCreateIndex == "foreground" {
-		if err := docsyncer.StartIndexSync(indexMap, toUrl, trans); err != nil {
-			return fmt.Errorf("create index failed[%v]", err)
-		}
-	}
-
-	if conf.Options.SyncMode != utils.VarSyncModeFull {
-		LOG.Info("try to set checkpoint with map[%v]", ckptMap)
-		if err := docsyncer.Checkpoint(ckptMap); err != nil {
-			return err
-		}
-	}
-	LOG.Info("document syncer sync end")
-	return nil
-}
-
-func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition, fullSyncFinishPosition int64) error {
-	// replicate speed limit on all syncer
-	coordinator.rateController = nimo.NewSimpleRateController()
-
-	// prepare all syncer. only one syncer while source is ReplicaSet
-	// otherwise one syncer connects to one shard
-	for _, src := range coordinator.Sources {
-		syncer := NewOplogSyncer(coordinator, src.ReplicaName, oplogStartPosition, fullSyncFinishPosition, src.URL,
-			src.Gids)
-		// syncerGroup http api registry
-		syncer.init()
-		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)
-	}
-
-	// prepare worker routine and bind it to syncer
-	for i := 0; i < conf.Options.IncrSyncWorker; i++ {
-		syncer := coordinator.syncerGroup[i%len(coordinator.syncerGroup)]
-		w := NewWorker(coordinator, syncer, uint32(i))
-		if !w.init() {
-			return errors.New("worker initialize error")
-		}
-
-		// syncer and worker are independent. the relationship between
-		// them needs binding here. one worker definitely belongs to a specific
-		// syncer. However individual syncer could bind multi workers (if source
-		// of overall replication is single mongodb replica)
-		syncer.bind(w)
-		go w.startWorker()
-	}
-
-	for _, syncer := range coordinator.syncerGroup {
-		go syncer.start()
-	}
 	return nil
 }

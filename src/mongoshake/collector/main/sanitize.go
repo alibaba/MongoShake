@@ -74,6 +74,13 @@ func checkDefaultValue() error {
 		}
 	}
 
+	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
+		if len(conf.Options.MongoSUrl) == 0 {
+			return fmt.Errorf("mongo_s_url should only be given if incr_sync.mongo_fetch_method == %s",
+				utils.VarIncrSyncMongoFetchMethodChangeStream)
+		}
+	}
+
 	if conf.Options.CheckpointStorage == "" {
 		conf.Options.CheckpointStorage = utils.VarCheckpointStorageDatabase
 	} else if conf.Options.CheckpointStorage != utils.VarCheckpointStorageDatabase &&

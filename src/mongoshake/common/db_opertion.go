@@ -114,7 +114,7 @@ func GetOldestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, err
 	return retMap[QueryTs].(bson.MongoTimestamp), nil
 }
 
-func GetNewestTimestampByUrl(url string) (bson.MongoTimestamp, error) {
+func GetNewestTimestampByUrl(url string, fromMongoS bool) (bson.MongoTimestamp, error) {
 	var conn *MongoConn
 	var err error
 	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true); conn == nil || err != nil {
@@ -122,10 +122,19 @@ func GetNewestTimestampByUrl(url string) (bson.MongoTimestamp, error) {
 	}
 	defer conn.Close()
 
+	if fromMongoS {
+		date := conn.CurrentDate()
+		return date, nil
+	}
+
 	return GetNewestTimestampBySession(conn.Session)
 }
 
-func GetOldestTimestampByUrl(url string) (bson.MongoTimestamp, error) {
+func GetOldestTimestampByUrl(url string, fromMongoS bool) (bson.MongoTimestamp, error) {
+	if fromMongoS {
+		return 0, nil
+	}
+
 	var conn *MongoConn
 	var err error
 	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true); conn == nil || err != nil {
@@ -136,6 +145,16 @@ func GetOldestTimestampByUrl(url string) (bson.MongoTimestamp, error) {
 	return GetOldestTimestampBySession(conn.Session)
 }
 
+func IsFromMongos(url string) (bool, error) {
+	var conn *MongoConn
+	var err error
+	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true); conn == nil || err != nil {
+		return false, err
+	}
+	return conn.IsMongos(), nil
+}
+
+// record the oldest and newest timestamp of each mongod
 type TimestampNode struct {
 	Oldest bson.MongoTimestamp
 	Newest bson.MongoTimestamp
@@ -150,21 +169,34 @@ type TimestampNode struct {
  *     error: error
  */
 func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.MongoTimestamp,
-	bson.MongoTimestamp, bson.MongoTimestamp, bson.MongoTimestamp, error) {
+		bson.MongoTimestamp, bson.MongoTimestamp, bson.MongoTimestamp, bool, error) {
+	// check from mongos
+	fromMongoS := false
+	/*var err error
+	if len(sources) == 1 {
+		fromMongoS, err = IsFromMongos(sources[0].URL)
+		if err != nil {
+			return nil, 0, 0, 0, 0, false, err
+		}
+	}*/
+
 	smallestNew := bson.MongoTimestamp(math.MaxInt64)
 	biggestNew := bson.MongoTimestamp(0)
 	smallestOld := bson.MongoTimestamp(math.MaxInt64)
 	biggestOld := bson.MongoTimestamp(0)
 	tsMap := make(map[string]TimestampNode)
+
 	for _, src := range sources {
-		newest, err := GetNewestTimestampByUrl(src.URL)
+		newest, err := GetNewestTimestampByUrl(src.URL, fromMongoS)
 		if err != nil {
-			return nil, 0, 0, 0, 0, err
+			return nil, 0, 0, 0, 0, fromMongoS, err
+		} else if newest == 0 {
+			return nil, 0, 0, 0, 0, fromMongoS, fmt.Errorf("illegal newest timestamp == 0")
 		}
 
-		oldest, err := GetOldestTimestampByUrl(src.URL)
+		oldest, err := GetOldestTimestampByUrl(src.URL, fromMongoS)
 		if err != nil {
-			return nil, 0, 0, 0, 0, err
+			return nil, 0, 0, 0, 0, fromMongoS, err
 		}
 		tsMap[src.ReplicaName] = TimestampNode{
 			Oldest: oldest,
@@ -184,7 +216,7 @@ func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.Mon
 			smallestOld = oldest
 		}
 	}
-	return tsMap, biggestNew, smallestNew, biggestOld, smallestOld, nil
+	return tsMap, biggestNew, smallestNew, biggestOld, smallestOld, fromMongoS, nil
 }
 
 func IsCollectionCappedError(err error) bool {

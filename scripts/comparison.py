@@ -61,7 +61,7 @@ def check(src, dst):
     srcDbNames = [db for db in srcDbNames if db not in configure[EXCLUDE_DBS]]
     dstDbNames = [db for db in dstDbNames if db not in configure[EXCLUDE_DBS]]
     if len(srcDbNames) != len(dstDbNames):
-        log_error("DIFF => database count not equals src[%s] != dst[%s].\nsrc: %s\ndst[%s]" % (len(srcDbNames),
+        log_error("DIFF => database count not equals src[%s] != dst[%s].\nsrc: %s\ndst: %s" % (len(srcDbNames),
                                                                                               len(dstDbNames),
                                                                                               srcDbNames,
                                                                                               dstDbNames))
@@ -82,17 +82,17 @@ def check(src, dst):
         # db.stats() comparison
         srcDb = src.conn[db] 
         dstDb = dst.conn[db] 
-        srcStats = srcDb.command("dbstats") 
-        dstStats = dstDb.command("dbstats")
-
-        srcStats = filter_check(srcStats)
-        dstStats = filter_check(dstStats)
-
-        if srcStats != dstStats:
-            log_error("DIFF => database [%s] stats not equals src[%s], dst[%s]" % (db, srcStats, dstStats))
-            return False
-        else:
-            log_info("EQUL => database [%s] stats equals" % db)
+        # srcStats = srcDb.command("dbstats")
+        # dstStats = dstDb.command("dbstats")
+        #
+        # srcStats = filter_check(srcStats)
+        # dstStats = filter_check(dstStats)
+        #
+        # if srcStats != dstStats:
+        #     log_error("DIFF => database [%s] stats not equals src[%s], dst[%s]" % (db, srcStats, dstStats))
+        #     return False
+        # else:
+        #     log_info("EQUL => database [%s] stats equals" % db)
 
         # for collections in db
         srcColls = srcDb.collection_names()

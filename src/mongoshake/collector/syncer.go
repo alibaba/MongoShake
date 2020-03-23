@@ -42,14 +42,14 @@ type OplogHandler interface {
 type OplogSyncer struct {
 	OplogHandler
 
-	// global replicate coordinator
-	coordinator *ReplicationCoordinator
 	// source mongodb replica set name
 	replset string
 	// oplog start position of source mongodb
 	startPosition int64
 	// full sync finish position, used to check DDL between full sync and incr sync
 	fullSyncFinishPosition bson.MongoTimestamp
+	// pass from coordinator
+	rateController *nimo.SimpleRateController
 
 	ckptManager *ckpt.CheckpointManager
 
@@ -88,12 +88,12 @@ type OplogSyncer struct {
  * The reason we split pending queue and logs queue is to improve the performance.
  */
 func NewOplogSyncer(
-	coordinator *ReplicationCoordinator,
 	replset string,
 	startPosition int64,
 	fullSyncFinishPosition int64,
 	mongoUrl string,
-	gids []string) *OplogSyncer {
+	gids []string,
+	rateController *nimo.SimpleRateController) *OplogSyncer {
 
 	reader, err := sourceReader.CreateReader(conf.Options.IncrSyncMongoFetchMethod, mongoUrl, replset)
 	if err != nil {
@@ -102,10 +102,10 @@ func NewOplogSyncer(
 	}
 
 	syncer := &OplogSyncer{
-		coordinator:            coordinator,
 		replset:                replset,
 		startPosition:          startPosition,
 		fullSyncFinishPosition: bson.MongoTimestamp(fullSyncFinishPosition),
+		rateController:         rateController,
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.Id, replset))),
 		reader: reader,
@@ -143,7 +143,7 @@ func NewOplogSyncer(
 	return syncer
 }
 
-func (sync *OplogSyncer) init() {
+func (sync *OplogSyncer) Init() {
 	sync.replMetric = utils.NewMetric(sync.replset, utils.METRIC_CKPT_TIMES|
 		utils.METRIC_TUNNEL_TRAFFIC| utils.METRIC_LSN_CKPT| utils.METRIC_SUCCESS|
 		utils.METRIC_TPS| utils.METRIC_RETRANSIMISSION)
@@ -154,16 +154,16 @@ func (sync *OplogSyncer) init() {
 }
 
 // bind different worker
-func (sync *OplogSyncer) bind(w *Worker) {
+func (sync *OplogSyncer) Bind(w *Worker) {
 	sync.batcher.workerGroup = append(sync.batcher.workerGroup, w)
 }
 
-func (sync *OplogSyncer) startDiskApply() {
+func (sync *OplogSyncer) StartDiskApply() {
 	sync.persister.SetFetchStage(utils.FetchStageStoreDiskApply)
 }
 
 // start to polling oplog
-func (sync *OplogSyncer) start() {
+func (sync *OplogSyncer) Start() {
 	LOG.Info("Poll oplog syncer start. ckpt_interval[%dms], gid[%s], shard_key[%s]",
 		conf.Options.CheckpointInterval, conf.Options.IncrSyncOplogGIDS, conf.Options.IncrSyncShardKey)
 
@@ -419,7 +419,7 @@ func (sync *OplogSyncer) poll() {
 	sync.reader.StartFetcher() // start reader fetcher if not exist
 
 	// every syncer should under the control of global rate limiter
-	rc := sync.coordinator.rateController
+	rc := sync.rateController
 
 	for quorum.IsMaster() {
 		// SimpleRateController is too simple. the TPS flow may represent

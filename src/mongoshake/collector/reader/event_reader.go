@@ -65,6 +65,7 @@ func (er *EventReader) Name() string {
 // not exist in this or. initial stage most of the time
 func (er *EventReader) SetQueryTimestampOnEmpty(ts bson.MongoTimestamp) {
 	if er.startAtOperationTime == -1 {
+		LOG.Info("set query timestamp: %v", utils.ExtractTimestampForLog(ts))
 		er.startAtOperationTime = utils.TimestampToInt64(ts)
 	}
 }
@@ -107,6 +108,9 @@ func (er *EventReader) StartFetcher() {
 
 // fetch change stream event tp store disk queue or memory
 func (er *EventReader) fetcher() {
+	LOG.Info("start fetcher with src[%v] replica-name[%v] query-ts[%v]", er.src, er.replset,
+		utils.ExtractTimestampForLog(er.startAtOperationTime))
+
 	for {
 		if err := er.EnsureNetwork(); err != nil {
 			er.eventChan <- &retOplog{nil, err}

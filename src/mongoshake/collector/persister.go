@@ -100,7 +100,7 @@ func (p *Persister) GetQueryTsFromDiskQueue() bson.MongoTimestamp {
 		return 0
 	}
 
-	if conf.Options.IncrSyncMongoFetchMethod == "oplog" {
+	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
 		log := new(oplog.PartialLog)
 		if err := bson.Unmarshal(logData, log); err != nil {
 			LOG.Crashf("unmarshal oplog[%v] failed[%v]", logData, err)

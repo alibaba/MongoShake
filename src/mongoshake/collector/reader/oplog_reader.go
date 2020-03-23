@@ -72,6 +72,7 @@ func (or *OplogReader) Name() string {
 // not exist in this or. initial stage most of the time
 func (or *OplogReader) SetQueryTimestampOnEmpty(ts bson.MongoTimestamp) {
 	if _, exist := or.query[QueryTs]; !exist {
+		LOG.Info("set query timestamp: %v", utils.ExtractTimestampForLog(ts))
 		or.UpdateQueryTimestamp(ts)
 	}
 }
@@ -128,6 +129,8 @@ func (or *OplogReader) StartFetcher() {
 
 // fetch oplog tp store disk queue or memory
 func (or *OplogReader) fetcher() {
+	LOG.Info("start fetcher with src[%v] replica-name[%v] query-ts[%v]", or.src, or.replset,
+		utils.ExtractTimestampForLog(or.query[QueryTs].(bson.M)[QueryOpGT].(bson.MongoTimestamp)))
 	var log *bson.Raw
 	for {
 		if err := or.EnsureNetwork(); err != nil {

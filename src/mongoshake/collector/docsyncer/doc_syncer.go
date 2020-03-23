@@ -25,28 +25,26 @@ const (
 )
 
 func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
-	var toIsSharding bool
+	var source, target string
+	if fromIsSharding {
+		source = "sharding"
+	} else {
+		source = "replica"
+	}
+
 	var result interface{}
 	err := toConn.Session.DB("config").C("version").Find(bson.M{}).One(&result)
 	if err != nil {
-		toIsSharding = false
+		target = "replica"
 	} else {
-		toIsSharding = true
+		target = "sharding"
 	}
 
-	if fromIsSharding && toIsSharding {
-		LOG.Info("replication from sharding to sharding")
+	LOG.Info("replication from [%s] to [%s]", source, target)
+	if source == "sharding" && target == "sharding" {
 		return true
-	} else if fromIsSharding && !toIsSharding {
-		LOG.Info("replication from sharding to replica")
-		return false
-	} else if !fromIsSharding && toIsSharding {
-		LOG.Info("replication from replica to sharding")
-		return false
-	} else {
-		LOG.Info("replication from replica to replica")
-		return false
 	}
+	return false
 }
 
 func StartDropDestCollection(nsSet map[utils.NS]bool, toConn *utils.MongoConn,

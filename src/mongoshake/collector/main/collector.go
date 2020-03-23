@@ -9,10 +9,11 @@ import (
 	"syscall"
 	"strconv"
 
-	"mongoshake/collector"
 	"mongoshake/collector/configure"
 	"mongoshake/common"
 	"mongoshake/quorum"
+	"mongoshake/collector/coordinator"
+
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
@@ -84,7 +85,7 @@ func startup() {
 
 	// initialize http api
 	utils.InitHttpApi(conf.Options.HTTPListenPort)
-	coordinator := &collector.ReplicationCoordinator{
+	coordinator := &coordinator.ReplicationCoordinator{
 		Sources: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
 	}
 
