@@ -31,6 +31,8 @@ const (
 	ReplicaExecBad uint64 = 16
 
 	MajorityWriteConcern = "majority"
+
+	Int32max = (int64(1) << 33) - 1
 )
 
 var (

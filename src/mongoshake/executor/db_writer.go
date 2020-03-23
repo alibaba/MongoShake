@@ -272,6 +272,7 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, opl
 	}
 	// collectionHandle := bw.session.DB(database).C(collection)
 	bulk := bw.session.DB(database).C(collection).Bulk()
+	bulk.Unordered()
 	bulk.Insert(inserts...)
 
 	if _, err := bulk.Run(); err != nil {
@@ -312,9 +313,15 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 	} else {
 		bulk.Update(update...)
 	}
+
 	if _, err := bulk.Run(); err != nil {
+		// parse error
+		index, errMsg, dup := utils.FindFirstErrorIndexAndMessage(err.Error())
+		LOG.Error("detail error info with index[%v] msg[%v] dup[%v]", index, errMsg, dup)
 		if mgo.IsDup(err) {
-			return nil
+			// create single writer to write one by one
+			sw := NewDbWriter(bw.session, bson.M{}, false)
+			return sw.doUpdateOnInsert(database, collection, metadata, oplogs[index:], upsert)
 		}
 		return fmt.Errorf("doUpdateOnInsert run upsert/update[%v] failed[%v]", upsert, err)
 	}
@@ -344,9 +351,14 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 	}
 
 	if _, err := bulk.Run(); err != nil {
+		// parse error
+		index, errMsg, dup := utils.FindFirstErrorIndexAndMessage(err.Error())
+		LOG.Error("detail error info with index[%v] msg[%v] dup[%v]", index, errMsg, dup)
 		if mgo.IsDup(err) {
 			HandleDuplicated(bw.session.DB(database).C(collection), oplogs, OpUpdate)
-			return nil
+			// create single writer to write one by one
+			sw := NewDbWriter(bw.session, bson.M{}, false)
+			return sw.doUpdate(database, collection, metadata, oplogs[index:], upsert)
 		}
 		return fmt.Errorf("doUpdate run upsert/update[%v] failed[%v]", upsert, err)
 	}
@@ -363,6 +375,7 @@ func (bw *BulkWriter) doDelete(database, collection string, metadata bson.M,
 	}
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
+	bulk.Unordered()
 	bulk.Remove(delete...)
 	if _, err := bulk.Run(); err != nil {
 		return fmt.Errorf("doDelete run delete[%v] failed[%v]", delete, err)

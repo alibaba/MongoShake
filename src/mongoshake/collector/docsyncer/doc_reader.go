@@ -118,7 +118,7 @@ func NewDocumentSplitter(src string, ns utils.NS) *DocumentSplitter {
 
 func (ds *DocumentSplitter) String() string {
 	return fmt.Sprintf("DocumentSplitter src[%s] ns[%s] count[%v] pieceSize[%v] pieceNumber[%v]",
-		ds.src, ds.ns, ds.count, ds.pieceSize, ds.pieceNumber)
+		utils.BlockMongoUrlPassword(ds.src, "***"), ds.ns, ds.count, ds.pieceSize, ds.pieceNumber)
 }
 
 // TODO, need add retry
@@ -216,7 +216,8 @@ func NewDocumentReader(src string, ns utils.NS, start, end interface{}) *Documen
 }
 
 func (reader *DocumentReader) String() string {
-	return fmt.Sprintf("DocumentReader src[%v] ns[%s] query[%v]", reader.src, reader.ns, reader.query)
+	return fmt.Sprintf("DocumentReader src[%v] ns[%s] query[%v]",
+		utils.BlockMongoUrlPassword(reader.src, "***"), reader.ns, reader.query)
 }
 
 // NextDoc returns an document by raw bytes which is []byte

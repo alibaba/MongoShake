@@ -14,7 +14,6 @@ import (
 
 const (
 	contextTimeout      = 60 * time.Second
-	int32max            = (int64(1) << 33) - 1
 	changeStreamTimeout = 24 // hours
 )
 
@@ -65,7 +64,7 @@ func NewChangeStreamConn(src string, mode string, watchStartTime int64, batchSiz
 	ops := &options.ChangeStreamOptions{
 		StartAtOperationTime: &primitive.Timestamp{
 			T: uint32(watchStartTime >> 32),
-			I: uint32(watchStartTime & int32max),
+			I: uint32(watchStartTime & Int32max),
 		},
 		MaxAwaitTime: &waitTime,
 		BatchSize:    &batchSize,

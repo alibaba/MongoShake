@@ -83,8 +83,19 @@ func ExtractMongoTimestamp(ts interface{}) int64 {
 	return 0
 }
 
+func ExtractMongoTimestampCounter(ts interface{}) int64 {
+	switch src := ts.(type) {
+	case bson.MongoTimestamp:
+		return int64(src) & Int32max
+	case int64:
+		return src & Int32max
+	}
+
+	return 0
+}
+
 func ExtractTimestampForLog(ts interface{}) string {
-	return fmt.Sprintf("%v(%v)", ts, ExtractMongoTimestamp(ts))
+	return fmt.Sprintf("%v[%v, %v]", ts, ExtractMongoTimestamp(ts), ExtractMongoTimestampCounter(ts))
 }
 
 func Int64ToString(v int64) string {
