@@ -3,6 +3,7 @@ package coordinator
 import (
 	"fmt"
 	"sync"
+	"math"
 
 	"mongoshake/common"
 	"mongoshake/collector/configure"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/gugemichael/nimo4go"
 	"github.com/vinllen/mgo"
+	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
 )
 
@@ -49,23 +51,26 @@ func getTimestampMap(sources []*utils.MongoSource) (map[string]utils.TimestampNo
 	var ckptMap map[string]utils.TimestampNode
 	var err error
 
-	ckptMap, _, _, _, _, _, err = utils.GetAllTimestamp(sources)
+	ckptMap, _, _, _, _, err = utils.GetAllTimestamp(sources)
 	if err != nil {
 		return nil, fmt.Errorf("fetch source all timestamp failed: %v", err)
 	}
+
 	return ckptMap, nil
 }
 
 func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// for change stream, we need to fetch current timestamp
-	fromConn0, err := utils.NewMongoConn(coordinator.Sources[0].URL, utils.VarMongoConnectModePrimary, true)
+	/*fromConn0, err := utils.NewMongoConn(coordinator.Sources[0].URL, utils.VarMongoConnectModePrimary, true)
 	if err != nil {
 		return fmt.Errorf("connect soruce[%v] failed[%v]", coordinator.Sources[0].URL, err)
 	}
-	defer fromConn0.Close()
+	defer fromConn0.Close()*/
 
 	// the source is sharding or replica-set
-	fromIsSharding := len(coordinator.Sources) > 1 || fromConn0.IsMongos()
+	// fromIsSharding := len(coordinator.Sources) > 1 || fromConn0.IsMongos()
+
+	fromIsSharding := coordinator.MongoS != nil
 
 	// init orphan sharding chunk map if source is sharding
 	shardingChunkMap, err := fetchChunkMap(fromIsSharding)
@@ -75,13 +80,13 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 
 	// get all namespace need to sync
-	nsSet, err := docsyncer.GetAllNamespace(coordinator.Sources)
+	nsSet, err := docsyncer.GetAllNamespace(coordinator.RealSource)
 	if err != nil {
 		return err
 	}
 
 	// get current newest timestamp
-	ckptMap, err := getTimestampMap(coordinator.Sources)
+	ckptMap, err := getTimestampMap(coordinator.MongoD)
 	if err != nil {
 		return err
 	}
@@ -114,7 +119,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	var replError error
 	var mutex sync.Mutex
 	indexMap := make(map[utils.NS][]mgo.Index)
-	for i, src := range coordinator.Sources {
+	for i, src := range coordinator.RealSource {
 		var orphanFilter *filter.OrphanFilter
 		if conf.Options.FullSyncExecutorFilterOrphanDocument {
 			dbChunkMap := make(sharding.DBChunkMap)
@@ -156,6 +161,21 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 
 	// update checkpoint after full sync
 	if conf.Options.SyncMode != utils.VarSyncModeFull {
+		// need merge to one when from mongos
+		if coordinator.MongoS != nil {
+			var smallestNew bson.MongoTimestamp = math.MaxInt64
+			for _, val := range ckptMap {
+				if smallestNew > val.Newest {
+					smallestNew = val.Newest
+				}
+			}
+			ckptMap = map[string]utils.TimestampNode {
+				coordinator.MongoS.ReplicaName: {
+					Newest: smallestNew,
+				},
+			}
+		}
+
 		LOG.Info("try to set checkpoint with map[%v]", ckptMap)
 		if err := docsyncer.Checkpoint(ckptMap); err != nil {
 			return err

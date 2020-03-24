@@ -129,7 +129,8 @@ func (or *OplogReader) StartFetcher() {
 
 // fetch oplog tp store disk queue or memory
 func (or *OplogReader) fetcher() {
-	LOG.Info("start fetcher with src[%v] replica-name[%v] query-ts[%v]", or.src, or.replset,
+	LOG.Info("start fetcher with src[%v] replica-name[%v] query-ts[%v]",
+		utils.BlockMongoUrlPassword(or.src, "***"), or.replset,
 		utils.ExtractTimestampForLog(or.query[QueryTs].(bson.M)[QueryOpGT].(bson.MongoTimestamp)))
 	var log *bson.Raw
 	for {

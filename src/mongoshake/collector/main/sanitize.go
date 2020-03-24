@@ -295,16 +295,30 @@ func checkConflict() error {
 	}
 	// check source mongodb version >= 4.0 when change stream enable
 	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
-		conn, err := utils.NewMongoConn(conf.Options.MongoUrls[0], utils.VarMongoConnectModeSecondaryPreferred, true)
+		if conf.Options.MongoSUrl == "" && len(conf.Options.MongoUrls) > 1 {
+			return fmt.Errorf("mongo_s_url should be given when source is sharding and fetch method is change stream")
+		}
+
+		var source string
+		if len(conf.Options.MongoUrls) > 1 {
+			source = conf.Options.MongoSUrl
+		} else {
+			source = conf.Options.MongoUrls[0]
+		}
+
+		conn, err := utils.NewMongoConn(source, utils.VarMongoConnectModeSecondaryPreferred, true)
 		if err != nil {
-			return fmt.Errorf("connect source mongodb[%v] failed[%v]", conf.Options.MongoUrls[0], err)
+			return fmt.Errorf("connect source[%v] failed[%v]", source, err)
 		}
 		if isOk, err := utils.GetAndCompareVersion(conn.Session, "4.0.1"); err != nil {
-			return fmt.Errorf("compare source mongodb[%v] to v4.0.0 failed[%v]", conf.Options.MongoUrls[0], err)
+			return fmt.Errorf("compare source[%v] to v4.0.0 failed[%v]", source, err)
 		} else if !isOk {
-			return fmt.Errorf("source mongodb[%v] should >= 4.0.1 when incr_sync.mongo_fetch_method == %v",
+			return fmt.Errorf("source[%v] version should >= 4.0.1 when incr_sync.mongo_fetch_method == %v",
 				conf.Options.MongoUrls[0], utils.VarIncrSyncMongoFetchMethodChangeStream)
 		}
+	} else {
+		// disable mongos if fetch method != 'change_stream'
+		conf.Options.MongoSUrl = ""
 	}
 	// set compressor to none when tunnel message is not 'raw'
 	if conf.Options.IncrSyncTunnelMessage != utils.VarIncrSyncTunnelMessageRaw {
@@ -314,7 +328,7 @@ func checkConflict() error {
 	}
 	// disable oplog disk persist when sync mode isn't 'full'
 	if conf.Options.FullSyncReaderOplogStoreDisk {
-		if conf.Options.SyncMode != utils.VarSyncModeFull {
+		if conf.Options.SyncMode != utils.VarSyncModeAll {
 			conf.Options.FullSyncReaderOplogStoreDisk = false
 		}
 	}

@@ -169,17 +169,7 @@ type TimestampNode struct {
  *     error: error
  */
 func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.MongoTimestamp,
-		bson.MongoTimestamp, bson.MongoTimestamp, bson.MongoTimestamp, bool, error) {
-	// check from mongos
-	fromMongoS := false
-	/*var err error
-	if len(sources) == 1 {
-		fromMongoS, err = IsFromMongos(sources[0].URL)
-		if err != nil {
-			return nil, 0, 0, 0, 0, false, err
-		}
-	}*/
-
+		bson.MongoTimestamp, bson.MongoTimestamp, bson.MongoTimestamp, error) {
 	smallestNew := bson.MongoTimestamp(math.MaxInt64)
 	biggestNew := bson.MongoTimestamp(0)
 	smallestOld := bson.MongoTimestamp(math.MaxInt64)
@@ -187,16 +177,16 @@ func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.Mon
 	tsMap := make(map[string]TimestampNode)
 
 	for _, src := range sources {
-		newest, err := GetNewestTimestampByUrl(src.URL, fromMongoS)
+		newest, err := GetNewestTimestampByUrl(src.URL, false)
 		if err != nil {
-			return nil, 0, 0, 0, 0, fromMongoS, err
+			return nil, 0, 0, 0, 0, err
 		} else if newest == 0 {
-			return nil, 0, 0, 0, 0, fromMongoS, fmt.Errorf("illegal newest timestamp == 0")
+			return nil, 0, 0, 0, 0, fmt.Errorf("illegal newest timestamp == 0")
 		}
 
-		oldest, err := GetOldestTimestampByUrl(src.URL, fromMongoS)
+		oldest, err := GetOldestTimestampByUrl(src.URL, false)
 		if err != nil {
-			return nil, 0, 0, 0, 0, fromMongoS, err
+			return nil, 0, 0, 0, 0, err
 		}
 		tsMap[src.ReplicaName] = TimestampNode{
 			Oldest: oldest,
@@ -216,7 +206,7 @@ func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.Mon
 			smallestOld = oldest
 		}
 	}
-	return tsMap, biggestNew, smallestNew, biggestOld, smallestOld, fromMongoS, nil
+	return tsMap, biggestNew, smallestNew, biggestOld, smallestOld, nil
 }
 
 func IsCollectionCappedError(err error) bool {

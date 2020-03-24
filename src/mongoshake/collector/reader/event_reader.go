@@ -108,7 +108,8 @@ func (er *EventReader) StartFetcher() {
 
 // fetch change stream event tp store disk queue or memory
 func (er *EventReader) fetcher() {
-	LOG.Info("start fetcher with src[%v] replica-name[%v] query-ts[%v]", er.src, er.replset,
+	LOG.Info("start fetcher with src[%v] replica-name[%v] query-ts[%v]",
+		utils.BlockMongoUrlPassword(er.src, "***"), er.replset,
 		utils.ExtractTimestampForLog(er.startAtOperationTime))
 
 	for {

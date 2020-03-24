@@ -191,7 +191,7 @@ func (p *Persister) PushToPendingQueue(input []byte) {
 }
 
 func (p *Persister) retrieve() {
-	for {
+	for range time.NewTicker(3 * time.Second).C {
 		stage := atomic.LoadInt32(&p.fetchStage)
 		switch stage {
 		case utils.FetchStageStoreDiskApply:
@@ -203,7 +203,6 @@ func (p *Persister) retrieve() {
 		default:
 			LOG.Crashf("invalid fetch stage[%v]", utils.LogFetchStage(stage))
 		}
-		time.Sleep(3 * time.Second)
 	}
 
 	LOG.Info("persister retrieve for replset[%v] begin to read from disk queue with depth[%v]",

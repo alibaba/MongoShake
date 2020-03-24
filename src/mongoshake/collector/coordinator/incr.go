@@ -15,7 +15,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
-	for _, src := range coordinator.Sources {
+	for _, src := range coordinator.RealSource {
 		syncer := collector.NewOplogSyncer(src.ReplicaName, oplogStartPosition, fullSyncFinishPosition, src.URL,
 			src.Gids, coordinator.rateController)
 		// syncerGroup http api registry

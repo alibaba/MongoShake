@@ -11,6 +11,7 @@ import (
 	"mongoshake/collector/configure"
 	"mongoshake/common"
 	"mongoshake/oplog"
+
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 )
@@ -18,7 +19,11 @@ import (
 // ReplicationCoordinator global coordinator instance. consist of
 // one syncerGroup and a number of workers
 type ReplicationCoordinator struct {
-	Sources []*utils.MongoSource
+	MongoD     []*utils.MongoSource // the source mongod
+	MongoS     *utils.MongoSource   // the source mongos
+	MongoCS    *utils.MongoSource   // the source mongos
+	RealSource []*utils.MongoSource // point to MongoD if source is mongod, otherwise MongoS
+
 	// Sentinel listener
 	sentinel *utils.Sentinel
 
@@ -83,12 +88,13 @@ func (coordinator *ReplicationCoordinator) Run() error {
 				utils.ExtractTimestampForLog(beginTs64))
 
 			// get current oldest timestamp
-			_, _, _, bigOldTs, _, fromMongos, err := utils.GetAllTimestamp(coordinator.Sources)
+			_, _, _, bigOldTs, _, err := utils.GetAllTimestamp(coordinator.MongoD)
 			if err != nil {
 				return fmt.Errorf("get oldest timestamp failed[%v]", err)
 			}
 
-			if fromMongos {
+			// if fromMongos {
+			if false {
 				// currently, we can't check whether the oplog is lost from mongos
 				LOG.Info("ignore check oldest timestamp exist when source is mongos")
 			} else {
@@ -129,7 +135,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	}
 	conn.Close()
 
-	for i, src := range coordinator.Sources {
+	for i, src := range coordinator.MongoD {
 		if conn, err = utils.NewMongoConn(src.URL, conf.Options.MongoConnectMode, true); conn == nil || !conn.IsGood() || err != nil {
 			LOG.Critical("Connect mongo server error. %v, url : %s. See https://github.com/alibaba/MongoShake/wiki/FAQ#q-how-to-solve-the-oplog-tailer-initialize-failed-no-reachable-servers-error", err, src.URL)
 			return err
@@ -189,26 +195,39 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	}
 
 	// smallestNew is the smallest of the all newest timestamp
-	tsMap, _, smallestNew, _, _, fromMongoS, err := utils.GetAllTimestamp(coordinator.Sources)
+	tsMap, _, smallestNew, _, _, err := utils.GetAllTimestamp(coordinator.MongoD)
 	if err != nil {
 		return syncMode, 0, err
 	}
 
-	if fromMongoS {
-		return syncMode, utils.TimestampToInt64(smallestNew), nil
-	}
-
-	needFull := false
-	for replName, ts := range tsMap {
-		ckptManager := ckpt.NewCheckpointManager(replName, 0)
+	// fetch mongos checkpoint
+	var mongosCkpt *ckpt.CheckpointContext
+	if coordinator.MongoS != nil {
+		ckptManager := ckpt.NewCheckpointManager(coordinator.MongoS.ReplicaName, 0)
 		ckpt, _, err := ckptManager.Get()
 		if err != nil {
 			return "", 0, err
 		}
+		mongosCkpt = ckpt
+	}
+
+	needFull := false
+	for replName, ts := range tsMap {
+		var ckptRemote *ckpt.CheckpointContext
+		if mongosCkpt == nil {
+			ckptManager := ckpt.NewCheckpointManager(replName, 0)
+			ckpt, _, err := ckptManager.Get()
+			if err != nil {
+				return "", 0, err
+			}
+			ckptRemote = ckpt
+		} else {
+			ckptRemote = mongosCkpt
+		}
 
 		// checkpoint less than the oldest timestamp, ckpt.OplogDiskQueue == "" means not enable
 		// disk persist
-		if ts.Oldest >= ckpt.Timestamp && ckpt.OplogDiskQueue == "" {
+		if ts.Oldest >= ckptRemote.Timestamp && ckptRemote.OplogDiskQueue == "" {
 			// check if disk queue enable
 			needFull = true
 			break
@@ -230,7 +249,7 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 	}
 
 	// get current newest timestamp
-	_, fullFinishTs, _, oldestTs, _, fromMongoS, err := utils.GetAllTimestamp(coordinator.Sources)
+	_, fullFinishTs, _, oldestTs, _, err := utils.GetAllTimestamp(coordinator.MongoD)
 	if err != nil {
 		return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
 	}
@@ -239,7 +258,8 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 	LOG.Info("oldestTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractTimestampForLog(oldestTs),
 		utils.ExtractTimestampForLog(fullBeginTs), utils.ExtractTimestampForLog(fullFinishTs))
 
-	if fromMongoS {
+	// if fromMongoS {
+	if false {
 		// currently, we can't check whether the oplog is lost from mongos
 		LOG.Info("ignore check oldest timestamp exist when source is mongos")
 	} else {

@@ -86,18 +86,34 @@ func startup() {
 	// initialize http api
 	utils.InitHttpApi(conf.Options.HTTPListenPort)
 	coordinator := &coordinator.ReplicationCoordinator{
-		Sources: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
+		MongoD: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
 	}
 
 	utils.HttpApi.RegisterAPI("/conf", nimo.HttpGet, func([]byte) interface{} {
 		return conf.GetSafeOptions()
 	})
 
+	// init
 	for i, src := range conf.Options.MongoUrls {
-		coordinator.Sources[i] = new(utils.MongoSource)
-		coordinator.Sources[i].URL = src
+		coordinator.MongoD[i] = new(utils.MongoSource)
+		coordinator.MongoD[i].URL = src
 		if len(conf.Options.IncrSyncOplogGIDS) != 0 {
-			coordinator.Sources[i].Gids = conf.Options.IncrSyncOplogGIDS
+			coordinator.MongoD[i].Gids = conf.Options.IncrSyncOplogGIDS
+		}
+	}
+	if conf.Options.MongoSUrl != "" {
+		coordinator.MongoS = &utils.MongoSource{
+			URL:         conf.Options.MongoSUrl,
+			ReplicaName: "mongos",
+		}
+		coordinator.RealSource = []*utils.MongoSource{coordinator.MongoS}
+	} else {
+		coordinator.RealSource = coordinator.MongoD
+	}
+
+	if conf.Options.MongoCsUrl != "" {
+		coordinator.MongoCS = &utils.MongoSource {
+			URL: conf.Options.MongoCsUrl,
 		}
 	}
 
