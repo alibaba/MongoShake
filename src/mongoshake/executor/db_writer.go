@@ -463,7 +463,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 			newObject := log.original.partialLog.Object
 			updates = append(updates, &pair{id: id, data: newObject})
 		} else {
-			LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
+			return fmt.Errorf("insert on duplicated update _id look up failed. %v", log.original.partialLog)
 		}
 
 		LOG.Debug("writer: updateOnInsert %v", log.original.partialLog)
@@ -531,7 +531,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 			err := collectionHandle.Update(log.original.partialLog.Query, newObject)
 			if err != nil {
 				if utils.IsNotFound(err) {
-					LOG.Warn("doUpdate[update] data[%v] not found", log.original.partialLog.Query)
+					return fmt.Errorf("doUpdate[update] data[%v] not found", log.original.partialLog.Query)
 				} else if mgo.IsDup(err) {
 					HandleDuplicated(collectionHandle, oplogs, OpUpdate)
 				} else {
@@ -561,7 +561,7 @@ func (sw *SingleWriter) doDelete(database, collection string, metadata bson.M,
 		id := oplog.GetKey(log.original.partialLog.Object, "")
 		if err := collectionHandle.RemoveId(id); err != nil {
 			if utils.IsNotFound(err) {
-				LOG.Warn("doDelete data[%v] not found", log.original.partialLog.Query)
+				return fmt.Errorf("doDelete data[%v] not found", log.original.partialLog.Query)
 			} else {
 				errMsg := fmt.Sprintf("delete data[%v] failed[%v]", log.original.partialLog.Query,
 					err)

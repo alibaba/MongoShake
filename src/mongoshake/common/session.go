@@ -38,7 +38,7 @@ func NewMongoConn(url string, connectMode string, timeout bool) (*MongoConn, err
 
 	session, err := mgo.Dial(url)
 	if err != nil {
-		LOG.Critical("Connect to %s failed. %v", url, err)
+		LOG.Critical("Connect to %s failed. %v", BlockMongoUrlPassword(url, "***"), err)
 		return nil, err
 	}
 	// maximum pooled connections. the overall established sockets

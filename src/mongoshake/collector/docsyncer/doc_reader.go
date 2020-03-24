@@ -116,6 +116,10 @@ func NewDocumentSplitter(src string, ns utils.NS) *DocumentSplitter {
 	return ds
 }
 
+func (ds *DocumentSplitter) Close() {
+	ds.conn.Close()
+}
+
 func (ds *DocumentSplitter) String() string {
 	return fmt.Sprintf("DocumentSplitter src[%s] ns[%s] count[%v] pieceSize[%v] pieceNumber[%v]",
 		utils.BlockMongoUrlPassword(ds.src, "***"), ds.ns, ds.count, ds.pieceSize, ds.pieceNumber)

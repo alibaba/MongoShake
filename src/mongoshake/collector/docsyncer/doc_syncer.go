@@ -275,7 +275,8 @@ func NewDBSyncer(
 
 func (syncer *DBSyncer) String() string {
 	return fmt.Sprintf("DBSyncer id[%v] source[%v] target[%v] startTime[%v]",
-		syncer.id, syncer.FromMongoUrl, syncer.ToMongoUrl, syncer.startTime)
+		syncer.id, utils.BlockMongoUrlPassword(syncer.FromMongoUrl, "***"), syncer.ToMongoUrl,
+		syncer.startTime)
 }
 
 func (syncer *DBSyncer) GetIndexMap() map[utils.NS][]mgo.Index {
@@ -350,11 +351,12 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 		return err
 	}
 
-	// reader
+	// splitter reader
 	splitter := NewDocumentSplitter(syncer.FromMongoUrl, ns)
 	if splitter == nil {
 		return fmt.Errorf("create splitter failed")
 	}
+	defer splitter.Close()
 
 	// run in several pieces
 	var wg sync.WaitGroup
