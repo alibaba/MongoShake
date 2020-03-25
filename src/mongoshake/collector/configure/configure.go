@@ -8,7 +8,7 @@ import (
 
 type Configuration struct {
 	// 0. version
-	ConfVersion uint `config:"conf.version"` // TODO
+	ConfVersion uint `config:"conf.version"` // do not modify the tag name
 
 	// 1. global
 	Id                          string   `config:"id"`
