@@ -72,7 +72,7 @@ type Configuration struct {
 	IncrSyncDBRef            bool   `config:"incr_sync.dbref"`
 	IncrSyncExecutor         int    `config:"incr_sync.executor"`
 	IncrSyncExecutorDebug    bool   `config:"incr_sync.executor.debug"` // !ReplayerDurable
-	IncrSyncReaderDebug      bool   `config:"incr_sync.reader.debug"`
+	IncrSyncReaderDebug      string `config:"incr_sync.reader.debug"`
 	IncrSyncCollisionEnable  bool   `config:"incr_sync.collision_detection"`
 	IncrSyncReaderBufferTime uint   `config:"incr_sycn.reader.buffer_time"`
 

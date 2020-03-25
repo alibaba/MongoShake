@@ -333,5 +333,12 @@ func checkConflict() error {
 		}
 	}
 
+	/*****************************4. inner variables******************************/
+	if conf.Options.IncrSyncReaderDebug != utils.VarIncrSyncReaderDebugNone &&
+		conf.Options.IncrSyncReaderDebug != utils.VarIncrSyncReaderDebugDiscard &&
+		conf.Options.IncrSyncReaderDebug != utils.VarIncrSyncReaderDebugPrint {
+		return fmt.Errorf("incr_sync.reader.debug[%v] invalid", conf.Options.IncrSyncReaderDebug)
+	}
+
 	return nil
 }

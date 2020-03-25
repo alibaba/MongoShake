@@ -32,7 +32,8 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 	}
 	LOG.Info("load checkpoint value: %s", checkpoint)
 
-	if !exists {
+	// set fetch method if not exists or empty
+	if !exists || checkpoint.FetchMethod == "" {
 		sync.ckptManager.SetFetchMethod(conf.Options.IncrSyncMongoFetchMethod)
 	}
 

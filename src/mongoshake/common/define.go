@@ -63,4 +63,9 @@ const (
 	// inner variable: checkpoint.storage
 	VarCheckpointStorageApi      = "api"
 	VarCheckpointStorageDatabase = "database"
+
+	// innder variable: incr_sync.reader_debug
+	VarIncrSyncReaderDebugNone    = ""
+	VarIncrSyncReaderDebugDiscard = "discard" // throw all
+	VarIncrSyncReaderDebugPrint   = "print"   // print
 )

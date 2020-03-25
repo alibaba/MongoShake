@@ -9,6 +9,15 @@ var (
 		CurrentVersion:           1,
 		FeatureCompatibleVersion: 1,
 	}
+
+	LowestCheckpointVersion = map[int]string {
+		0: "1.0.0",
+		1: "2.4.0",
+	}
+	LowestConfigurationVersion = map[int]string {
+		0: "1.0.0",
+		1: "2.4.0",
+	}
 )
 
 type Fcv interface {

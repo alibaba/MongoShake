@@ -72,8 +72,9 @@ func (manager *CheckpointManager) Get() (*CheckpointContext, bool, error) {
 
 	// check fcv
 	if exist && utils.FcvCheckpoint.IsCompatible(manager.ctx.Version) == false {
-		return nil, exist, fmt.Errorf("current checkpoint version is %v, input[%v] isn't compatible",
-			utils.FcvCheckpoint.CurrentVersion, manager.ctx.Version)
+		return nil, exist, fmt.Errorf("current required checkpoint version[%v] > input[%v], please upgrade MongoShake to version >= %v",
+			utils.FcvCheckpoint.CurrentVersion, manager.ctx.Version,
+			utils.LowestCheckpointVersion[utils.FcvCheckpoint.CurrentVersion])
 	}
 
 	return manager.ctx, exist, nil

@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"fmt"
 	"os"
+	"mongoshake/common"
 )
 
 // read the given file and parse the fcv do comparison
@@ -33,8 +34,8 @@ func CheckFcv(file string, fcv int) (int, error) {
 	}
 
 	if version < fcv {
-		return version, fmt.Errorf("current version[%v] less than fcv[%v], need upgrade to new conf file",
-			version, fcv)
+		return version, fmt.Errorf("current required configuration version[%v] > input[%v], please upgrade MongoShake to version >= %v",
+			fcv, version, utils.LowestConfigurationVersion[fcv])
 	}
 	return version, nil
 }

@@ -126,7 +126,8 @@ func startup() {
 	// start mongodb replication
 	if err := coordinator.Run(); err != nil {
 		// initial or connection established failed
-		crash(fmt.Sprintf("run replication failed: %v", err), -6)
+		LOG.Critical(fmt.Sprintf("run replication failed: %v", err))
+		crash(err.Error(), -6)
 	}
 
 	// if the sync mode is "document", mongoshake should exit here.

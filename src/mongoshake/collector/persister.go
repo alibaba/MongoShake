@@ -129,8 +129,17 @@ func (p *Persister) GetQueryTsFromDiskQueue() bson.MongoTimestamp {
 // inject data
 func (p *Persister) Inject(input []byte) {
 	// only used to test the reader, discard anything
-	if conf.Options.IncrSyncReaderDebug {
+	switch conf.Options.IncrSyncReaderDebug {
+	case utils.VarIncrSyncReaderDebugNone:
+		break
+	case utils.VarIncrSyncReaderDebugDiscard:
 		return
+	case utils.VarIncrSyncReaderDebugPrint:
+		var test interface{}
+		bson.Unmarshal(input, &test)
+		LOG.Info("print debug: %v", test)
+	default:
+		break
 	}
 
 	if p.enableDiskPersist {

@@ -52,7 +52,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 
 	syncMode, fullBeginTs, err := coordinator.selectSyncMode(conf.Options.SyncMode)
 	if err != nil {
-		return err
+		return fmt.Errorf("select sync mode failed: %v", err)
 	}
 
 	/*
@@ -317,7 +317,8 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs int
 	if docError != nil {
 		return docError
 	}
-	LOG.Info("finish document replication, change oplog replication to %v", utils.FetchStageStoreDiskApply)
+	LOG.Info("finish document replication, change oplog replication to %v",
+		utils.LogFetchStage(utils.FetchStageStoreDiskApply))
 	for _, syncer := range coordinator.syncerGroup {
 		syncer.StartDiskApply()
 	}

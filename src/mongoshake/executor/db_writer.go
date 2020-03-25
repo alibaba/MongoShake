@@ -210,7 +210,8 @@ func (cw *CommandWriter) doCommand(database string, metadata bson.M, oplogs []*O
 			// execute one by one with sequence order
 			if err = cw.applyOps(database, metadata, []*oplog.PartialLog{log.original.
 				partialLog}); err == nil {
-				LOG.Info("Execute command (op==c) oplog ddl_enable mode [%t], operation [%s]", conf.Options.FilterDDLEnable, operation)
+				LOG.Info("Execute command (op==c) oplog , operation [%s]", conf.Options.FilterDDLEnable,
+					operation)
 			} else {
 				return err
 			}
@@ -392,8 +393,9 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*Oplo
 		if conf.Options.FilterDDLEnable || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
 			if err = RunCommand(database, operation, log.original.partialLog, bw.session); err == nil {
-				LOG.Info("Execute command (op==c) oplog ddl_enable mode [%t], operation [%s]",
-					conf.Options.FilterDDLEnable, operation)
+				LOG.Info("Execute command (op==c) oplog, operation [%s]", operation)
+			} else if err.Error() == "ns not found" {
+				LOG.Info("Execute command (op==c) oplog, operation [%s], ignore error[ns not found]", operation)
 			} else {
 				return err
 			}
@@ -587,8 +589,9 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*Op
 		if conf.Options.FilterDDLEnable || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
 			if err = RunCommand(database, operation, log.original.partialLog, sw.session); err == nil {
-				LOG.Info("Execute command (op==c) oplog ddl_enable mode [%t], operation [%s]",
-					conf.Options.FilterDDLEnable, operation)
+				LOG.Info("Execute command (op==c) oplog, operation [%s]", operation)
+			} else if err.Error() == "ns not found" {
+				LOG.Info("Execute command (op==c) oplog, operation [%s], ignore error[ns not found]", operation)
 			} else {
 				return err
 			}
