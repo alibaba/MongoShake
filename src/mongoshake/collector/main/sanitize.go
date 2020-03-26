@@ -75,8 +75,8 @@ func checkDefaultValue() error {
 	}
 
 	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
-		if len(conf.Options.MongoSUrl) == 0 {
-			return fmt.Errorf("mongo_s_url should only be given if incr_sync.mongo_fetch_method == %s",
+		if len(conf.Options.MongoSUrl) == 0 && len(conf.Options.MongoUrls) > 1 {
+			return fmt.Errorf("mongo_s_url should be given if source is sharding and incr_sync.mongo_fetch_method == %s",
 				utils.VarIncrSyncMongoFetchMethodChangeStream)
 		}
 	}
