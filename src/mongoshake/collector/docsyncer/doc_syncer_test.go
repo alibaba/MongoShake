@@ -4,20 +4,21 @@ import (
 	"fmt"
 	"testing"
 	"strings"
+	"sort"
 
 	"mongoshake/common"
 	"mongoshake/collector/configure"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/vinllen/mgo/bson"
 	"mongoshake/collector/filter"
 	"mongoshake/sharding"
 	"mongoshake/collector/transform"
-	"sort"
+	"mongoshake/unit_test_common"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/vinllen/mgo/bson"
 )
 
 const (
-	testMongoAddress = "mongodb://100.81.164.177:40441,100.81.164.177:40442,100.81.164.177:40443"
+	testMongoAddress = unit_test_common.TestUrl
 	testDb           = "a"
 	testCollection   = "b"
 )

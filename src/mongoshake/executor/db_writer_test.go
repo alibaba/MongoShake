@@ -5,15 +5,16 @@ import (
 	"fmt"
 
 	"mongoshake/common"
+	"mongoshake/oplog"
+	"mongoshake/unit_test_common"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
 	"github.com/vinllen/mgo"
-	"mongoshake/oplog"
 )
 
 const (
-	testMongoAddress = "mongodb://100.81.164.177:40441,100.81.164.177:40442,100.81.164.177:40443"
+	testMongoAddress = unit_test_common.TestUrl
 	testDb           = "writer_test"
 	testCollection   = "a"
 )

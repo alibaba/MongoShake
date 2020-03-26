@@ -6,10 +6,10 @@ import (
 
 	"mongoshake/oplog"
 	"mongoshake/collector/configure"
+	"mongoshake/common"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
-	"mongoshake/common"
 )
 
 // mock oplog with different namespace

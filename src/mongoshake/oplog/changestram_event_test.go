@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"mongoshake/unit_test_common"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
 	"github.com/vinllen/mgo"
@@ -12,7 +14,7 @@ import (
 )
 
 const (
-	testUrl = "mongodb://100.81.164.177:40441,100.81.164.177:40442,100.81.164.177:40443"
+	testUrl = unit_test_common.TestUrl
 )
 
 var (

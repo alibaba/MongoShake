@@ -201,7 +201,6 @@ func (exec *DocExecutor) tryOneByOne(input []interface{}, index int, collectionH
 			// judge whether is orphan document, pass if so
 			if exec.syncer.orphanFilter.Filter(docD, collectionHandler.FullName) {
 				LOG.Info("orphan document with _id[%v] filter", id)
-				fmt.Printf("orphan document with _id[%v] filter\n", id)
 				continue
 			}
 		}
