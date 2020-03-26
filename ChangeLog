@@ -3,6 +3,11 @@
 	* IMPROVE: support change stream to solve move chunk problem.
 	* IMRPOVE: add feature compatiable version(fcv) for configuration and
 	checkpoint.
+	* IMPROVE: optimize orphan document filter.
+	* IMPROVE: block password in conf and log.
+	* IMPROVE: retry to insert document when duplicate error happen in full
+	sync stage.
+	* IMRPOVE: add 'full_sync.create_index' in configuration.
 	* DISABLE: temporarily disable oplog stored to disk during document
 	replication released on v2.2.1.
 
