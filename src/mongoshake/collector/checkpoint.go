@@ -186,7 +186,7 @@ func (sync *OplogSyncer) calculateWorkerLowestCheckpoint() (v int64, err error) 
 	if candidates[0] == 0 {
 		return 0, errors.New("smallest candidates is zero")
 	}
-	LOG.Info("worker offset %v use lowest %d", candidates, candidates[0])
+	LOG.Info("worker offset %v use lowest %d", candidates, utils.ExtractTimestampForLog(candidates[0]))
 	return candidates[0], nil
 }
 

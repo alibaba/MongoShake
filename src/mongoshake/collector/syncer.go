@@ -252,8 +252,9 @@ func (sync *OplogSyncer) startBatcher() {
 					// if checkpoint has not been update for {FilterCheckpointGap} seconds, update
 					// checkpoint mandatory.
 					newestTs = filterLog.Timestamp
-					LOG.Info("try to update checkpoint mandatory from %v(%v) to %v(%v)",
-						sync.ckptManager.GetInMemory().Timestamp, checkpointTs, filterLog.Timestamp, filterNewestTs)
+					LOG.Info("try to update checkpoint mandatory from %v to %v",
+						utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp),
+						utils.ExtractTimestampForLog(filterLog.Timestamp))
 				} else {
 					return
 				}
