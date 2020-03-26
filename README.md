@@ -5,6 +5,7 @@ This is a brief introduction of Mongo-Shake, please visit [english wiki](https:/
 *  [第一次使用，如何配置](https://github.com/alibaba/MongoShake/wiki/%E7%AC%AC%E4%B8%80%E6%AC%A1%E4%BD%BF%E7%94%A8%EF%BC%8C%E5%A6%82%E4%BD%95%E8%BF%9B%E8%A1%8C%E9%85%8D%E7%BD%AE%EF%BC%9F)
 *  [Tutorial](https://github.com/alibaba/MongoShake/wiki/tutorial-about-how-to-set-up)
 *  [FAQ document](https://github.com/aliyun/mongo-shake/wiki/FAQ)
+*  [MongoShake最佳实践](https://yq.aliyun.com/articles/719704)
 *  [Performance test document](https://github.com/aliyun/mongo-shake/wiki/MongoShake-Performance-Document)
 *  [WeChat discuss group](https://github.com/aliyun/mongo-shake#shake-series-tool)
 
@@ -83,9 +84,9 @@ Run `./bin/collector.darwin64` or `collector.linux64` which is built in OSX and 
 Or you can build mongo-shake yourself according to the following steps:
 *  git clone https://github.com/alibaba/MongoShake.git
 *  cd MongoShake
-*  export GOPATH=\`pwd\`/../..
+*  export GOPATH=\`pwd\`
 *  cd src/vendor
-*  govendor sync    #please note: must install govendor first and then pull all dependencies: `go get -u github.com/kardianos/govendor`
+*  govendor sync    #please note: must install govendor first and then pull all dependencies: `go get -u github.com/kardianos/govendor`. Or, users can use govendor located in `tools` directory: `../../tools/govendor sync`
 *  cd ../../ && ./build.sh
 *  ./bin/collector -conf=conf/collector.conf #please note: user must modify collector.conf first to match needs. You can also use \"start.sh\" script which supports hypervisor mechanism in Linux OS only.
 
@@ -113,3 +114,4 @@ Plus, we have a DingDing(钉钉) group so that users can join and discuss, pleas
 | lixj1103 | 244769542@qq.com |
 | xzshinan | shinan@gongchang.com |
 | tzjavadmg | codyzeng@163.com |
+| monkeyWie |  |

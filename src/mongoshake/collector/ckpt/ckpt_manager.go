@@ -1,83 +1,86 @@
 package ckpt
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
-	"io/ioutil"
-	"math"
-	"net/http"
+	"fmt"
 
 	"mongoshake/collector/configure"
 	"mongoshake/common"
 
-	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
+	"sync"
 )
 
 const (
-	StorageTypeAPI            = "api"
-	StorageTypeDB             = "database"
-	CheckpointDefaultDatabase = utils.AppDatabase
-	CheckpointAdminDatabase   = "admin"
-	CheckpointName            = "name"
-
-	MajorityWriteConcern = "majority"
+	CheckpointName = "name"
 )
-
-type CheckpointContext struct {
-	Name      string              `bson:"name" json:"name"`
-	Timestamp bson.MongoTimestamp `bson:"ckpt" json:"ckpt"`
-}
-
-type Checkpoint struct {
-	Name          string
-	StartPosition int64
-}
 
 type CheckpointManager struct {
 	Type string
 
-	ctx      *CheckpointContext
-	delegate CheckpointOperation
+	ctx        *CheckpointContext
+	ctxRecLock sync.Mutex
+	ctxRec     *CheckpointContext // only used to store temporary value that will be lazy load
+	delegate   CheckpointOperation
 }
 
 func NewCheckpointManager(name string, startPosition int64) *CheckpointManager {
 	newManager := &CheckpointManager{}
 
-	switch conf.Options.ContextStorage {
-	case StorageTypeAPI:
+	switch conf.Options.CheckpointStorage {
+	case utils.VarCheckpointStorageApi:
 		newManager.delegate = &HttpApiCheckpoint{
-			Checkpoint: Checkpoint{
-				Name:          name,
-				StartPosition: startPosition,
+			CheckpointContext: CheckpointContext{
+				Name:                   name,
+				Timestamp:              bson.MongoTimestamp(startPosition),
+				Version:                utils.FcvCheckpoint.CurrentVersion,
+				OplogDiskQueue:         "",
+				OplogDiskQueueFinishTs: InitCheckpoint,
 			},
-			URL: conf.Options.ContextAddress,
+			URL: conf.Options.CheckpointStorageCollection,
 		}
-	case StorageTypeDB:
-		db := CheckpointDefaultDatabase
+	case utils.VarCheckpointStorageDatabase:
+		db := utils.AppDatabase
 		if conf.Options.IsShardCluster() {
-			db = CheckpointAdminDatabase
+			db = utils.VarCheckpointStorageDbShardingDefault
 		}
 		newManager.delegate = &MongoCheckpoint{
-			Checkpoint: Checkpoint{
-				Name:          name,
-				StartPosition: startPosition,
+			CheckpointContext: CheckpointContext{
+				Name:                   name,
+				Timestamp:              bson.MongoTimestamp(startPosition),
+				Version:                utils.FcvCheckpoint.CurrentVersion,
+				OplogDiskQueue:         "",
+				OplogDiskQueueFinishTs: InitCheckpoint,
 			},
 			DB:    db,
-			URL:   conf.Options.ContextStorageUrl,
-			Table: conf.Options.ContextAddress,
+			URL:   conf.Options.CheckpointStorageUrl,
+			Table: conf.Options.CheckpointStorageCollection,
 		}
+	default:
+		return nil
 	}
 	return newManager
 }
 
-func (manager *CheckpointManager) Get() *CheckpointContext {
-	manager.ctx = manager.delegate.Get()
-	return manager.ctx
+// get persist checkpoint
+func (manager *CheckpointManager) Get() (*CheckpointContext, bool, error) {
+	var exist bool
+	manager.ctx, exist = manager.delegate.Get()
+	if manager.ctx == nil {
+		return nil, exist, fmt.Errorf("get by checkpoint manager[%v] failed", manager.Type)
+	}
+
+	// check fcv
+	if exist && utils.FcvCheckpoint.IsCompatible(manager.ctx.Version) == false {
+		return nil, exist, fmt.Errorf("current required checkpoint version[%v] > input[%v], please upgrade MongoShake to version >= %v",
+			utils.FcvCheckpoint.CurrentVersion, manager.ctx.Version,
+			utils.LowestCheckpointVersion[utils.FcvCheckpoint.CurrentVersion])
+	}
+
+	return manager.ctx, exist, nil
 }
 
+// get in memory checkpoint
 func (manager *CheckpointManager) GetInMemory() *CheckpointContext {
 	return manager.ctx
 }
@@ -88,137 +91,54 @@ func (manager *CheckpointManager) Update(ts bson.MongoTimestamp) error {
 	}
 
 	manager.ctx.Timestamp = ts
-	return manager.delegate.Insert(manager.ctx)
-}
+	manager.ctx.Version = utils.FcvCheckpoint.CurrentVersion
 
-type CheckpointOperation interface {
-	// read checkpoint from remote storage. and encapsulation
-	// with CheckpointContext struct
-	Get() *CheckpointContext
-
-	// save checkpoint
-	Insert(ckpt *CheckpointContext) error
-}
-
-type MongoCheckpoint struct {
-	Checkpoint
-
-	Conn        *utils.MongoConn
-	QueryHandle *mgo.Collection
-
-	// connection info
-	URL       string
-	DB, Table string
-}
-
-func (ckpt *MongoCheckpoint) ensureNetwork() bool {
-	// make connection if we don't already established
-	if ckpt.Conn == nil {
-		if conn, err := utils.NewMongoConn(ckpt.URL, utils.ConnectModePrimary, true); err == nil {
-			ckpt.Conn = conn
-			ckpt.QueryHandle = conn.Session.DB(ckpt.DB).C(ckpt.Table)
-		} else {
-			LOG.Warn("CheckpointOperation manager connect mongo cluster failed. %v", err)
-			return false
+	// update OplogDiskQueueFinishTs if set
+	if manager.ctxRec != nil {
+		if manager.ctx.OplogDiskQueueFinishTs != manager.ctxRec.OplogDiskQueueFinishTs {
+			manager.ctx.OplogDiskQueueFinishTs = manager.ctxRec.OplogDiskQueueFinishTs
+		}
+		if manager.ctx.OplogDiskQueue != manager.ctxRec.OplogDiskQueue {
+			manager.ctx.OplogDiskQueue = manager.ctxRec.OplogDiskQueue
+		}
+		if manager.ctx.FetchMethod != manager.ctxRec.FetchMethod {
+			manager.ctx.FetchMethod = manager.ctxRec.FetchMethod
 		}
 	}
 
-	// set WriteMajority while checkpoint is writing to ConfigServer
-	if conf.Options.IsShardCluster() {
-		ckpt.Conn.Session.EnsureSafe(&mgo.Safe{WMode: MajorityWriteConcern})
-	}
-	return true
+	return manager.delegate.Insert(manager.ctx)
 }
 
-func (ckpt *MongoCheckpoint) close() {
-	ckpt.Conn.Close()
-	ckpt.Conn = nil
+// OplogDiskQueueFinishTs and OplogDiskQueue won't immediate effect, will be inserted in the next Update call.
+func (manager *CheckpointManager) SetOplogDiskFinishTs(ts bson.MongoTimestamp) {
+	if manager.ctxRec == nil {
+		manager.ctxRecLock.Lock()
+		if manager.ctxRec == nil { // double check
+			manager.ctxRec = new(CheckpointContext)
+		}
+		manager.ctxRecLock.Unlock()
+	}
+	manager.ctxRec.OplogDiskQueueFinishTs = ts
 }
 
-func (ckpt *MongoCheckpoint) Get() *CheckpointContext {
-	if !ckpt.ensureNetwork() {
-		LOG.Warn("Reload ckpt ensure network failed. %v", ckpt.Conn)
-		return nil
+func (manager *CheckpointManager) SetOplogDiskQueueName(name string) {
+	if manager.ctxRec == nil {
+		manager.ctxRecLock.Lock()
+		if manager.ctxRec == nil { // double check
+			manager.ctxRec = new(CheckpointContext)
+		}
+		manager.ctxRecLock.Unlock()
 	}
-
-	var err error
-	value := new(CheckpointContext)
-	if err = ckpt.QueryHandle.Find(bson.M{CheckpointName: ckpt.Name}).One(value); err == nil {
-		LOG.Info("Load exist checkpoint. content %v", value)
-		return value
-	} else if err == mgo.ErrNotFound {
-		// we can't insert Timestamp(0, 0) that will be treat as Now() inserted
-		// into mongo. so we use Timestamp(0, 1)
-		ckpt.StartPosition = int64(math.Max(float64(ckpt.StartPosition), 1))
-		value.Name = ckpt.Name
-		value.Timestamp = bson.MongoTimestamp(ckpt.StartPosition << 32)
-		LOG.Info("Regenerate checkpoint but won't insert. content %v", value)
-		// insert current ckpt snapshot in memory
-		// ckpt.QueryHandle.Insert(value)
-		return value
-	}
-
-	ckpt.close()
-	LOG.Warn("Reload ckpt find context fail. %v", err)
-	return nil
+	manager.ctxRec.OplogDiskQueue = name
 }
 
-func (ckpt *MongoCheckpoint) Insert(updates *CheckpointContext) error {
-	if !ckpt.ensureNetwork() {
-		LOG.Warn("Record ckpt ensure network failed. %v", ckpt.Conn)
-		return errors.New("record ckpt network failed")
+func (manager *CheckpointManager) SetFetchMethod(method string) {
+	if manager.ctxRec == nil {
+		manager.ctxRecLock.Lock()
+		if manager.ctxRec == nil { // double check
+			manager.ctxRec = new(CheckpointContext)
+		}
+		manager.ctxRecLock.Unlock()
 	}
-
-	if _, err := ckpt.QueryHandle.Upsert(bson.M{CheckpointName: ckpt.Name}, updates); err != nil {
-		LOG.Warn("Record checkpoint %v upsert error %v", updates, err)
-		ckpt.close()
-		return err
-	}
-
-	LOG.Info("Record new checkpoint success [%d]", int64(utils.ExtractMongoTimestamp(updates.Timestamp)))
-	return nil
-}
-
-type HttpApiCheckpoint struct {
-	Checkpoint
-
-	URL string
-}
-
-func (ckpt *HttpApiCheckpoint) Get() *CheckpointContext {
-	var err error
-	var resp *http.Response
-	var stream []byte
-	value := new(CheckpointContext)
-	if resp, err = http.Get(ckpt.URL); err != nil {
-		LOG.Warn("Http api ckpt request failed, %v", err)
-		return nil
-	}
-
-	if stream, err = ioutil.ReadAll(resp.Body); err != nil {
-		return nil
-	}
-	if err = json.Unmarshal(stream, value); err != nil {
-		return nil
-	}
-	if value.Timestamp == 0 {
-		// use default start position
-		value.Timestamp = bson.MongoTimestamp(ckpt.StartPosition)
-	}
-	if len(value.Name) == 0 {
-		// default name
-		value.Name = ckpt.Name
-	}
-	return value
-}
-
-func (ckpt *HttpApiCheckpoint) Insert(insert *CheckpointContext) error {
-	body, _ := json.Marshal(insert)
-	if resp, err := http.Post(ckpt.URL, "application/json", bytes.NewReader(body)); err != nil || resp.StatusCode != http.StatusOK {
-		LOG.Warn("Context api manager write request failed, %v", err)
-		return err
-	}
-
-	LOG.Info("Record new checkpoint success [%d]", int64(utils.ExtractMongoTimestamp(insert.Timestamp)))
-	return nil
+	manager.ctxRec.FetchMethod = method
 }

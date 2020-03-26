@@ -13,7 +13,7 @@ import (
 func HandleDuplicated(collection *mgo.Collection, records []*OplogRecord, op int8) {
 	for _, record := range records {
 		log := record.original.partialLog
-		switch conf.Options.ReplayerConflictWriteTo {
+		switch conf.Options.IncrSyncConflictWriteTo {
 		case DumpConflictToDB:
 			// general process : write record to specific database
 			session := collection.Database.Session

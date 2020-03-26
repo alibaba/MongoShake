@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -o errexit
+set -o errexit 
 
 # compile specified module
 modules=(collector receiver)
@@ -72,10 +72,19 @@ for g in "${goos[@]}"; do
 
     for i in "${modules[@]}" ; do
         echo "Build ""$i"
+        
+        # fetch all files in the main directory
+        build_dir="src/mongoshake/$i/main"
+        all_files=""
+        for j in $(ls $build_dir); do
+            all_files="$all_files $build_dir/$j "
+        done
+
+        # build
         if [ $DEBUG -eq 1 ]; then
-            $run_builder ${compile_line} -ldflags "-X $build_info" -gcflags='-N -l' -o "bin/$i.$g" -tags "debug" "src/mongoshake//$i/main/$i.go"
+            $run_builder ${compile_line} -ldflags "-X $build_info" -gcflags='-N -l' -o "bin/$i.$g" -tags "debug" $all_files
         else
-            $run_builder ${compile_line} -ldflags "-X $build_info" -o "bin/$i.$g" "src/mongoshake//$i/main/$i.go"
+            $run_builder ${compile_line} -ldflags "-X $build_info" -o "bin/$i.$g" $all_files
         fi
 
         # execute and show compile messages

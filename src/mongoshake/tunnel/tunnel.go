@@ -10,6 +10,7 @@ import (
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
+	"mongoshake/common"
 )
 
 const InitialStageChecking = false
@@ -151,17 +152,17 @@ type WriterFactory struct {
 // or usefully meta
 func (factory *WriterFactory) Create(address []string, workerId uint32) Writer {
 	switch factory.Name {
-	case "kafka":
+	case utils.VarIncrSyncTunnelKafka:
 		return &KafkaWriter{RemoteAddr: address[0]}
-	case "tcp":
+	case utils.VarIncrSyncTunnelTcp:
 		return &TCPWriter{RemoteAddr: address[0]}
-	case "rpc":
+	case utils.VarIncrSyncTunnelRpc:
 		return &RPCWriter{RemoteAddr: address[0]}
-	case "mock":
+	case utils.VarIncrSyncTunnelMock:
 		return &MockWriter{}
-	case "file":
+	case utils.VarIncrSyncTunnelFile:
 		return &FileWriter{Local: address[0]}
-	case "direct":
+	case utils.VarIncrSyncTunnelDirect:
 		return &DirectWriter{RemoteAddrs: address, ReplayerId: workerId}
 	default:
 		LOG.Critical("Specific tunnel not found [%s]", factory.Name)
@@ -173,16 +174,19 @@ func (factory *WriterFactory) Create(address []string, workerId uint32) Writer {
 // or usefully meta
 func (factory *ReaderFactory) Create(address string) Reader {
 	switch factory.Name {
-	case "kafka":
+	case utils.VarIncrSyncTunnelKafka:
 		return &KafkaReader{address: address}
-	case "tcp":
+	case utils.VarIncrSyncTunnelTcp:
 		return &TCPReader{listenAddress: address}
-	case "rpc":
+	case utils.VarIncrSyncTunnelRpc:
 		return &RPCReader{address: address}
-	case "mock":
+	case utils.VarIncrSyncTunnelMock:
 		return &MockReader{}
-	case "file":
+	case utils.VarIncrSyncTunnelFile:
 		return &FileReader{File: address}
+	case utils.VarIncrSyncTunnelDirect:
+		LOG.Critical("direct mode not supported in reader")
+		return nil
 	default:
 		LOG.Critical("Specific tunnel not found [%s]", factory.Name)
 		return nil

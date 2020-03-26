@@ -16,9 +16,58 @@ import (
 )
 
 func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int64) {
-	LOG.Info("Oplog sync create checkpoint manager with [%s] [%s]",
-		conf.Options.ContextStorage, conf.Options.ContextAddress)
+	LOG.Info("Oplog sync[%v] create checkpoint manager with url[%s] table[%s.%s] start-position[%v]",
+		name, conf.Options.CheckpointStorageUrl, conf.Options.CheckpointStorageDb,
+		conf.Options.CheckpointStorageCollection, utils.ExtractTimestampForLog(startPosition))
 	sync.ckptManager = ckpt.NewCheckpointManager(name, startPosition)
+}
+
+/*
+ * load checkpoint and do some checks
+ */
+func (sync *OplogSyncer) loadCheckpoint() error {
+	checkpoint, exists, err := sync.ckptManager.Get()
+	if err != nil {
+		return fmt.Errorf("load checkpoint[%v] failed[%v]", sync.replset, err)
+	}
+	LOG.Info("load checkpoint value: %s", checkpoint)
+
+	// set fetch method if not exists or empty
+	if !exists || checkpoint.FetchMethod == "" {
+		sync.ckptManager.SetFetchMethod(conf.Options.IncrSyncMongoFetchMethod)
+	}
+
+	// not enable oplog persist?
+	if !conf.Options.FullSyncReaderOplogStoreDisk {
+		sync.persister.SetFetchStage(utils.FetchStageStoreMemoryApply)
+		return nil
+	}
+
+	ts := time.Now()
+
+	// if no checkpoint exists
+	if !exists {
+		sync.persister.SetFetchStage(utils.FetchStageStoreDiskNoApply)
+		dqName := fmt.Sprintf("diskqueue-%v-%v", sync.replset, ts.Format("20060102-150405"))
+		sync.persister.InitDiskQueue(dqName)
+		sync.ckptManager.SetOplogDiskQueueName(dqName)
+		sync.ckptManager.SetOplogDiskFinishTs(ckpt.InitCheckpoint) // set as init
+		return nil
+	}
+
+	// check if checkpoint real ts >= checkpoint disk last ts
+	if checkpoint.OplogDiskQueueFinishTs > 0 && checkpoint.Timestamp >= checkpoint.OplogDiskQueueFinishTs {
+		// no need to init disk queue again
+		sync.persister.SetFetchStage(utils.FetchStageStoreMemoryApply)
+		return nil
+	}
+
+	// TODO, there is a bug if MongoShake restarts
+
+	// need to init
+	sync.persister.SetFetchStage(utils.FetchStageStoreDiskNoApply)
+	sync.persister.InitDiskQueue(checkpoint.OplogDiskQueue)
+	return nil
 }
 
 /*
@@ -39,7 +88,8 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 	// in AckRequired() tunnel. such as "rpc". While collector is restarted,
 	// we can't get the correct worker ack offset since collector have lost
 	// the unack offset...
-	if !flush && conf.Options.Tunnel != "direct" && now.Before(sync.startTime.Add(3*time.Minute)) {
+	if !flush && conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelDirect &&
+		now.Before(sync.startTime.Add(1 * time.Minute)) {
 		// LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
 		return
 	}
@@ -55,21 +105,30 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 		lowest, err = sync.calculateWorkerLowestCheckpoint()
 	}
 
+	lowestInt64 := bson.MongoTimestamp(lowest)
+	// if all oplogs from disk has been replayed successfully, store the newest oplog timestamp
+	if conf.Options.FullSyncReaderOplogStoreDisk && sync.persister.diskQueueLastTs > 0 {
+		if lowestInt64 >= sync.persister.diskQueueLastTs {
+			sync.ckptManager.SetOplogDiskFinishTs(sync.persister.diskQueueLastTs)
+			sync.persister.diskQueueLastTs = -2 // mark -1 so next time won't call
+		}
+	}
+
 	if lowest > 0 && err == nil {
 		switch {
-		case bson.MongoTimestamp(lowest) > inMemoryTs:
-			if err = sync.ckptManager.Update(bson.MongoTimestamp(lowest)); err == nil {
+		case lowestInt64 > inMemoryTs:
+			if err = sync.ckptManager.Update(lowestInt64); err == nil {
 				LOG.Info("CheckpointOperation write success. updated from %v to %v",
 					utils.ExtractTimestampForLog(inMemoryTs), utils.ExtractTimestampForLog(lowest))
 				sync.replMetric.AddCheckpoint(1)
 				sync.replMetric.SetLSNCheckpoint(lowest)
 				return
 			}
-		case bson.MongoTimestamp(lowest) < inMemoryTs:
-			LOG.Info("CheckpointOperation calculated is smaller than value in memory. lowest %v current %v",
+		case lowestInt64 < inMemoryTs:
+			LOG.Info("CheckpointOperation calculated[%v] is smaller than value in memory[%v]",
 				utils.ExtractTimestampForLog(lowest), utils.ExtractTimestampForLog(inMemoryTs))
 			return
-		case bson.MongoTimestamp(lowest) == inMemoryTs:
+		case lowestInt64 == inMemoryTs:
 			return
 		}
 	}
@@ -127,6 +186,7 @@ func (sync *OplogSyncer) calculateWorkerLowestCheckpoint() (v int64, err error) 
 	if candidates[0] == 0 {
 		return 0, errors.New("smallest candidates is zero")
 	}
-	LOG.Info("worker offset %v use lowest %d", candidates, candidates[0])
+	LOG.Info("worker offset %v use lowest %d", candidates, utils.ExtractTimestampForLog(candidates[0]))
 	return candidates[0], nil
 }
+

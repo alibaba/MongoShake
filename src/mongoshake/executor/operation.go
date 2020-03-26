@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"errors"
 	"reflect"
 	"strings"
 
@@ -12,6 +11,8 @@ import (
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
+	"fmt"
+	"sync/atomic"
 )
 
 var ErrorsShouldSkip = map[int]string{
@@ -21,13 +22,16 @@ var ErrorsShouldSkip = map[int]string{
 func (exec *Executor) ensureConnection() bool {
 	// reconnect if necessary
 	if exec.session == nil {
-		if conn, err := utils.NewMongoConn(exec.MongoUrl, utils.ConnectModePrimary, true); err != nil {
+		if conn, err := utils.NewMongoConn(exec.MongoUrl, utils.VarMongoConnectModePrimary, true); err != nil {
 			LOG.Critical("Connect to mongo cluster failed. %v", err)
 			return false
 		} else {
 			exec.session = conn.Session
 			if exec.bulkInsert, err = utils.GetAndCompareVersion(exec.session, ThresholdVersion); err != nil {
 				LOG.Info("compare version with return[%v], bulkInsert disable", err)
+			}
+			if conf.Options.IncrSyncExecutorMajorityEnable {
+				exec.session.EnsureSafe(&mgo.Safe{WMode: utils.MajorityWriteConcern})
 			}
 		}
 	}
@@ -49,9 +53,10 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 
 	lastOne := group.oplogRecords[count-1]
 
-	if conf.Options.ReplayerDurable {
+	if !conf.Options.IncrSyncExecutorDebug {
 		if !exec.ensureConnection() {
-			return errors.New("network connection lost . we would retry for next connecting")
+			return fmt.Errorf("Replay-%d network connection lost . we would retry for next connecting",
+				exec.batchExecutor.ReplayerId)
 		}
 		// just use the first log. they has the same metadata
 		metadata := buildMetadata(group.oplogRecords[0].original.partialLog)
@@ -72,33 +77,42 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 		switch group.op {
 		case "i":
 			err = dbWriter.doInsert(dc[0], dc[1], metadata, group.oplogRecords,
-				conf.Options.ReplayerExecutorInsertOnDupUpdate)
+				conf.Options.IncrSyncExecutorInsertOnDupUpdate)
+			atomic.AddUint64(&exec.metricInsert, uint64(len(group.oplogRecords)))
 		case "u":
 			err = dbWriter.doUpdate(dc[0], dc[1], metadata, group.oplogRecords,
-				conf.Options.ReplayerExecutorUpsert)
+				conf.Options.IncrSyncExecutorUpsert)
+			atomic.AddUint64(&exec.metricUpdate, uint64(len(group.oplogRecords)))
 		case "d":
 			err = dbWriter.doDelete(dc[0], dc[1], metadata, group.oplogRecords)
+			atomic.AddUint64(&exec.metricDelete, uint64(len(group.oplogRecords)))
 		case "c":
+			LOG.Info("Replay-%d run DDL with metadata[%v] in db[%v], firstLog: %v", exec.batchExecutor.ReplayerId,
+				dc[0], metadata, group.oplogRecords[0].original.partialLog)
 			err = dbWriter.doCommand(dc[0], metadata, group.oplogRecords)
+			atomic.AddUint64(&exec.metricDDL, uint64(len(group.oplogRecords)))
 		case "n":
 			// exec.batchExecutor.ReplMetric.AddFilter(count)
+			atomic.AddUint64(&exec.metricNoop, uint64(len(group.oplogRecords)))
 		default:
-			LOG.Warn("Unknown type oplogs found. op '%s'", group.op)
+			atomic.AddUint64(&exec.metricUnknown, uint64(len(group.oplogRecords)))
+			LOG.Warn("Replay-%d meets unknown type oplogs found. op '%s'", exec.batchExecutor.ReplayerId, group.op)
 		}
 
 		// a few known error we can skip !! such as "ShardKeyNotFound" returned
 		// if mongoshake connected to MongoS
 		if exec.errorIgnore(err) {
-			LOG.Info("Discard known error[%v], It's acceptable", err)
+			LOG.Info("Replay-%d Discard known error[%v], It's acceptable", exec.batchExecutor.ReplayerId, err)
 			err = nil
 		}
 
 		if err != nil {
 			LOG.Critical("Replayer-%d, executor-%d, oplog for namespace[%s] op[%s] failed. error type[%v]"+
-				" error[%v], logs number[%d], firstLog: %v",
+				" error[%v], logs number[%d], firstLog: %s",
 				exec.batchExecutor.ReplayerId, exec.id, group.ns, group.op, reflect.TypeOf(err), err.Error(), count,
-				group.oplogRecords[0].original.partialLog.Dump(nil, true))
+				group.oplogRecords[0].original.partialLog)
 			exec.dropConnection()
+			atomic.AddUint64(&exec.metricError, uint64(len(group.oplogRecords)))
 
 			return err
 		}

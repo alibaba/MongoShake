@@ -35,6 +35,11 @@ func (collectionHasher *TableHasher) DistributeOplogByMod(log *PartialLog, mod i
 		return DefaultHashValue
 	}
 
+	// when oplog is DDL, go into worker 0.
+	if log.Operation == "c" {
+		return 0
+	}
+
 	return stringHashValue(log.Namespace) % uint32(mod)
 }
 

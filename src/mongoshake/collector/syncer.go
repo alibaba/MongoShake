@@ -10,10 +10,12 @@ import (
 	"mongoshake/common"
 	"mongoshake/oplog"
 	"mongoshake/quorum"
+	"mongoshake/collector/reader"
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
+	"strings"
 )
 
 const (
@@ -40,34 +42,36 @@ type OplogHandler interface {
 type OplogSyncer struct {
 	OplogHandler
 
-	// global replicate coordinator
-	coordinator *ReplicationCoordinator
 	// source mongodb replica set name
 	replset string
 	// oplog start position of source mongodb
 	startPosition int64
 	// full sync finish position, used to check DDL between full sync and incr sync
-	fullSyncFinishPosition int64
+	fullSyncFinishPosition bson.MongoTimestamp
+	// pass from coordinator
+	rateController *nimo.SimpleRateController
 
 	ckptManager *ckpt.CheckpointManager
 
 	// oplog hash strategy
 	hasher oplog.Hasher
 
-	// pending queue. used by rawlog parsing. we buffered the
+	// pending queue. used by raw log parsing. we buffered the
 	// target raw oplogs in buffer and push them to pending queue
 	// when buffer is filled in. and transfer to log queue
-	buffer            []*bson.Raw
-	pendingQueue      []chan []*bson.Raw
-	logsQueue         []chan []*oplog.GenericOplog
-	nextQueuePosition uint64
+	// buffer            []*bson.Raw // move to persister
+	PendingQueue []chan [][]byte
+	logsQueue    []chan []*oplog.GenericOplog
+	// nextQueuePosition uint64 // move to persister
 
-	// source mongo oplog reader
-	reader *OplogReader
+	// source mongo oplog/event reader
+	reader sourceReader.Reader
 	// journal log that records all oplogs
 	journal *utils.Journal
 	// oplogs dispatcher
 	batcher *Batcher
+	// data persist handler
+	persister *Persister
 
 	// timers for inner event
 	startTime time.Time
@@ -80,28 +84,35 @@ type OplogSyncer struct {
  * Syncer is used to fetch oplog from source MongoDB and then send to different workers which can be seen as
  * a network sender. There are several syncer coexist to improve the fetching performance.
  * The data flow in syncer is:
- * source mongodb --> reader --> pending queue(raw data) --> logs queue(parsed data) --> worker
+ * source mongodb --> reader --> persister --> pending queue(raw data) --> logs queue(parsed data) --> worker
  * The reason we split pending queue and logs queue is to improve the performance.
  */
 func NewOplogSyncer(
-	coordinator *ReplicationCoordinator,
 	replset string,
 	startPosition int64,
 	fullSyncFinishPosition int64,
 	mongoUrl string,
-	gids []string) *OplogSyncer {
+	gids []string,
+	rateController *nimo.SimpleRateController) *OplogSyncer {
+
+	reader, err := sourceReader.CreateReader(conf.Options.IncrSyncMongoFetchMethod, mongoUrl, replset)
+	if err != nil {
+		LOG.Critical("create reader with url[%v] replset[%v] failed[%v]", mongoUrl, replset, err)
+		return nil
+	}
+
 	syncer := &OplogSyncer{
-		coordinator:            coordinator,
 		replset:                replset,
 		startPosition:          startPosition,
-		fullSyncFinishPosition: fullSyncFinishPosition,
+		fullSyncFinishPosition: bson.MongoTimestamp(fullSyncFinishPosition),
+		rateController:         rateController,
 		journal: utils.NewJournal(utils.JournalFileName(
-			fmt.Sprintf("%s.%s", conf.Options.CollectorId, replset))),
-		reader: NewOplogReader(mongoUrl),
+			fmt.Sprintf("%s.%s", conf.Options.Id, replset))),
+		reader: reader,
 	}
 
 	// concurrent level hasher
-	switch conf.Options.ShardKey {
+	switch conf.Options.IncrSyncShardKey {
 	case oplog.ShardByNamespace:
 		syncer.hasher = &oplog.TableHasher{}
 	case oplog.ShardByID:
@@ -111,7 +122,7 @@ func NewOplogSyncer(
 	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter), filter.NewGidFilter(gids)}
 
 	// DDL filter
-	if conf.Options.ReplayerDMLOnly {
+	if !conf.Options.FilterDDLEnable {
 		filterList = append(filterList, new(filter.DDLFilter))
 	}
 	// namespace filter, heavy operation
@@ -125,29 +136,41 @@ func NewOplogSyncer(
 	// list returns true. The order of all filters is not significant.
 	// workerGroup is assigned later by syncer.bind()
 	syncer.batcher = NewBatcher(syncer, filterList, syncer, []*Worker{})
+
+	// init persist
+	syncer.persister = NewPersister(replset, syncer)
+
 	return syncer
 }
 
-func (sync *OplogSyncer) init() {
+func (sync *OplogSyncer) Init() {
 	sync.replMetric = utils.NewMetric(sync.replset, utils.METRIC_CKPT_TIMES|
 		utils.METRIC_TUNNEL_TRAFFIC| utils.METRIC_LSN_CKPT| utils.METRIC_SUCCESS|
 		utils.METRIC_TPS| utils.METRIC_RETRANSIMISSION)
 	sync.replMetric.ReplStatus.Update(utils.WorkGood)
 
 	sync.RestAPI()
+	sync.persister.RestAPI()
 }
 
 // bind different worker
-func (sync *OplogSyncer) bind(w *Worker) {
+func (sync *OplogSyncer) Bind(w *Worker) {
 	sync.batcher.workerGroup = append(sync.batcher.workerGroup, w)
 }
 
+func (sync *OplogSyncer) StartDiskApply() {
+	sync.persister.SetFetchStage(utils.FetchStageStoreDiskApply)
+}
+
 // start to polling oplog
-func (sync *OplogSyncer) start() {
+func (sync *OplogSyncer) Start() {
 	LOG.Info("Poll oplog syncer start. ckpt_interval[%dms], gid[%s], shard_key[%s]",
-		conf.Options.CheckpointInterval, conf.Options.OplogGIDS, conf.Options.ShardKey)
+		conf.Options.CheckpointInterval, conf.Options.IncrSyncOplogGIDS, conf.Options.IncrSyncShardKey)
 
 	sync.startTime = time.Now()
+
+	// start persister
+	sync.persister.Start()
 
 	// process about the checkpoint :
 	//
@@ -155,6 +178,10 @@ func (sync *OplogSyncer) start() {
 	// 2. load existing ckpt from remote storage
 	// 3. start checkpoint persist routine
 	sync.newCheckpointManager(sync.replset, sync.startPosition)
+	// load checkpoint and set stage
+	if err := sync.loadCheckpoint(); err != nil {
+		LOG.Crash(err)
+	}
 
 	// start deserializer: parse data from pending queue, and then push into logs queue.
 	sync.startDeserializer()
@@ -181,10 +208,11 @@ func (sync *OplogSyncer) startBatcher() {
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
 		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
-		batchedOplog, barrier, allEmpty := batcher.batchMore()
+		batchedOplog, barrier, allEmpty := batcher.BatchMore()
 
 		var newestTs bson.MongoTimestamp
 		if log, filterLog := batcher.getLastOplog(); log != nil && !allEmpty {
+			// if all filtered, still update checkpoint
 			newestTs = log.Timestamp
 
 			// push to worker
@@ -218,14 +246,15 @@ func (sync *OplogSyncer) startBatcher() {
 					return
 				}
 
-				checkpointTs := utils.ExtractMongoTimestamp(sync.ckptManager.Get().Timestamp)
+				checkpointTs := utils.ExtractMongoTimestamp(sync.ckptManager.GetInMemory().Timestamp)
 				filterNewestTs := utils.ExtractMongoTimestamp(filterLog.Timestamp)
 				if filterNewestTs-FilterCheckpointGap > checkpointTs {
 					// if checkpoint has not been update for {FilterCheckpointGap} seconds, update
 					// checkpoint mandatory.
 					newestTs = filterLog.Timestamp
-					LOG.Info("try to update checkpoint mandatory from %v(%v) to %v(%v)", sync.ckptManager.Get().Timestamp,
-						checkpointTs, filterLog.Timestamp, filterNewestTs)
+					LOG.Info("try to update checkpoint mandatory from %v to %v",
+						utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp),
+						utils.ExtractTimestampForLog(filterLog.Timestamp))
 				} else {
 					return
 				}
@@ -235,7 +264,7 @@ func (sync *OplogSyncer) startBatcher() {
 
 			if log != nil {
 				newestTsLog := utils.ExtractTimestampForLog(newestTs)
-				if newestTs <= log.Timestamp {
+				if newestTs < log.Timestamp {
 					LOG.Crashf("filter newestTs[%v] smaller than previous timestamp[%v]",
 						newestTsLog, utils.ExtractTimestampForLog(log.Timestamp))
 				}
@@ -261,14 +290,23 @@ func (sync *OplogSyncer) startBatcher() {
 
 func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.MongoTimestamp) {
 	// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
-	if barrier && newestTs > 0 && conf.Options.WorkerNum > 1 {
+	if barrier && newestTs > 0 && conf.Options.IncrSyncWorker > 1 {
 		LOG.Info("find barrier")
 		for {
-			checkpointTs := sync.ckptManager.Get().Timestamp
-			LOG.Info("compare remote checkpoint[%v(%v)] to local newestTs[%v(%v)]",
-				checkpointTs, utils.ExtractMongoTimestamp(checkpointTs), newestTs, utils.ExtractMongoTimestamp(newestTs))
+			// checkpointTs := sync.ckptManager.GetInMemory().Timestamp
+			checkpoint, _, err := sync.ckptManager.Get()
+			if err != nil {
+				LOG.Error("get remote checkpoint failed: %v", err)
+				utils.YieldInMs(DDLCheckpointInterval * 3)
+				continue
+			}
+
+			checkpointTs := checkpoint.Timestamp
+
+			LOG.Info("compare remote checkpoint[%v] to local newestTs[%v]",
+				utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
 			if checkpointTs >= newestTs {
-				LOG.Info("barrier checkpoint updated")
+				LOG.Info("barrier checkpoint updated to newest[%v]", utils.ExtractTimestampForLog(newestTs))
 				break
 			}
 			utils.YieldInMs(DDLCheckpointInterval)
@@ -278,6 +316,9 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.Mongo
 		}
 	}
 }
+
+/********************************deserializer begin**********************************/
+// deserializer: pending_queue -> logs_queue
 
 // how many pending queue we create
 func calculatePendingQueueConcurrency() int {
@@ -291,48 +332,95 @@ func calculatePendingQueueConcurrency() int {
 // deserializer: fetch oplog from pending queue, parsed and then add into logs queue.
 func (sync *OplogSyncer) startDeserializer() {
 	parallel := calculatePendingQueueConcurrency()
-	sync.pendingQueue = make([]chan []*bson.Raw, parallel, parallel)
+	sync.PendingQueue = make([]chan [][]byte, parallel, parallel)
 	sync.logsQueue = make([]chan []*oplog.GenericOplog, parallel, parallel)
-	for index := 0; index != len(sync.pendingQueue); index++ {
-		sync.pendingQueue[index] = make(chan []*bson.Raw, PipelineQueueLen)
+	for index := 0; index != len(sync.PendingQueue); index++ {
+		sync.PendingQueue[index] = make(chan [][]byte, PipelineQueueLen)
 		sync.logsQueue[index] = make(chan []*oplog.GenericOplog, PipelineQueueLen)
 		go sync.deserializer(index)
 	}
 }
 
 func (sync *OplogSyncer) deserializer(index int) {
+	// parser is used to parse the raw []byte
+	var parser func(input []byte) (*oplog.PartialLog, error)
+	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
+		// parse []byte (change stream event format) -> oplog
+		parser = func(input []byte) (*oplog.PartialLog, error) {
+			return oplog.ConvertEvent2Oplog(input)
+		}
+	} else {
+		// parse []byte (oplog format) -> oplog
+		parser = func(input []byte) (*oplog.PartialLog, error) {
+			log := oplog.ParsedLog{}
+			err := bson.Unmarshal(input, &log)
+			return &oplog.PartialLog{
+				ParsedLog: log,
+			}, err
+		}
+	}
+
+	// combiner is used to combine data and send to downstream
+	var combiner func(raw []byte, log *oplog.PartialLog) *oplog.GenericOplog
+	// change stream && !direct && !(kafka & json)
+	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream &&
+		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelDirect &&
+		!(conf.Options.IncrSyncTunnel == utils.VarIncrSyncTunnelKafka &&
+			conf.Options.IncrSyncTunnelMessage == utils.VarIncrSyncTunnelMessageJson) {
+		// very time consuming!
+		combiner = func(raw []byte, log *oplog.PartialLog) *oplog.GenericOplog {
+			if out, err := bson.Marshal(log.ParsedLog); err != nil {
+				LOG.Crashf("deserializer marshal[%v] failed: %v", log.ParsedLog, err)
+				return nil
+			} else {
+				return &oplog.GenericOplog{Raw: out, Parsed: log}
+			}
+		}
+	} else {
+		combiner = func(raw []byte, log *oplog.PartialLog) *oplog.GenericOplog {
+			return &oplog.GenericOplog{Raw: raw, Parsed: log}
+		}
+	}
+
+	// run
 	for {
-		batchRawLogs := <-sync.pendingQueue[index]
+		batchRawLogs := <-sync.PendingQueue[index]
 		nimo.AssertTrue(len(batchRawLogs) != 0, "pending queue batch logs has zero length")
 		var deserializeLogs = make([]*oplog.GenericOplog, 0, len(batchRawLogs))
 
 		for _, rawLog := range batchRawLogs {
-			log := new(oplog.PartialLog)
-			bson.Unmarshal(rawLog.Data, log)
-			log.RawSize = len(rawLog.Data)
-			deserializeLogs = append(deserializeLogs, &oplog.GenericOplog{Raw: rawLog.Data, Parsed: log})
+			log, err := parser(rawLog)
+			if err != nil {
+				LOG.Crashf("deserializer parse data failed[%v]", err)
+			}
+			log.RawSize = len(rawLog)
+			deserializeLogs = append(deserializeLogs, combiner(rawLog, log))
 		}
 		sync.logsQueue[index] <- deserializeLogs
 	}
 }
 
-// only master(maybe several mongo-shake starts) can poll oplog.
+/********************************deserializer end**********************************/
+
+// only master(maybe several mongo-shake start) can poll oplog.
 func (sync *OplogSyncer) poll() {
 	// we should reload checkpoint. in case of other collector
 	// has fetched oplogs when master quorum leader election
 	// happens frequently. so we simply reload.
-	checkpoint := sync.ckptManager.Get()
-	if checkpoint == nil {
+	checkpoint, _, err := sync.ckptManager.Get()
+	if err != nil {
 		// we doesn't continue working on ckpt fetched failed. because we should
 		// confirm the exist checkpoint value or exactly knows that it doesn't exist
-		LOG.Critical("Acquire the existing checkpoint from remote[%s] failed !", conf.Options.ContextAddress)
+		LOG.Critical("Acquire the existing checkpoint from remote[%s %s.%s] failed !",
+			conf.Options.CheckpointStorage, conf.Options.CheckpointStorageDb,
+			conf.Options.CheckpointStorageCollection)
 		return
 	}
 	sync.reader.SetQueryTimestampOnEmpty(checkpoint.Timestamp)
 	sync.reader.StartFetcher() // start reader fetcher if not exist
 
 	// every syncer should under the control of global rate limiter
-	rc := sync.coordinator.rateController
+	rc := sync.rateController
 
 	for quorum.IsMaster() {
 		// SimpleRateController is too simple. the TPS flow may represent
@@ -362,21 +450,26 @@ func (sync *OplogSyncer) poll() {
 
 // fetch oplog from reader.
 func (sync *OplogSyncer) next() bool {
-	var log *bson.Raw
+	var log []byte
 	var err error
 	if log, err = sync.reader.Next(); log != nil {
-		payload := int64(len(log.Data))
+		payload := int64(len(log))
 		sync.replMetric.AddGet(1)
 		sync.replMetric.SetOplogMax(payload)
 		sync.replMetric.SetOplogAvg(payload)
 		sync.replMetric.ReplStatus.Clear(utils.FetchBad)
-	} else if err == CollectionCappedError {
+	} else if err == sourceReader.CollectionCappedError {
 		LOG.Error("oplog collection capped error, users should fix it manually")
+		utils.YieldInMs(DurationTime)
 		return false
-	} else if err != nil && err != TimeoutError {
-		LOG.Error("oplog syncer internal error: %v", err)
+	} else if err != nil && err != sourceReader.TimeoutError {
+		LOG.Error("syncer[%s] internal error: %v", sync.reader.Name(), err)
 		// error is nil indicate that only timeout incur syncer.next()
 		// return false. so we regardless that
+		if sync.isCrashError(err.Error()) {
+			LOG.Crashf("I can't handle this error, please solve it manually!")
+		}
+
 		sync.replMetric.ReplStatus.Update(utils.FetchBad)
 		utils.YieldInMs(DurationTime)
 
@@ -385,25 +478,15 @@ func (sync *OplogSyncer) next() bool {
 
 	// buffered oplog or trigger to flush. log is nil
 	// means that we need to flush buffer right now
-	return sync.transfer(log)
+
+	// inject into persist handler
+	sync.persister.Inject(log)
+	return true
 }
 
-func (sync *OplogSyncer) transfer(log *bson.Raw) bool {
-	flush := false
-	if log != nil {
-		sync.buffer = append(sync.buffer, log)
-	} else {
-		flush = true
-	}
-
-	if len(sync.buffer) >= conf.Options.FetcherBufferCapacity || (flush && len(sync.buffer) != 0) {
-		// we could simply ++syncer.resolverIndex. The max uint64 is 9223372036854774807
-		// and discard the skip situation. we assume nextQueueCursor couldn't be overflow
-		selected := int(sync.nextQueuePosition % uint64(len(sync.pendingQueue)))
-		sync.pendingQueue[selected] <- sync.buffer
-		sync.buffer = make([]*bson.Raw, 0, conf.Options.FetcherBufferCapacity)
-
-		sync.nextQueuePosition++
+func (sync *OplogSyncer) isCrashError(errMsg string) bool {
+	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream &&
+		strings.Contains(errMsg, sourceReader.ErrInvalidStartPosition) {
 		return true
 	}
 	return false
@@ -438,9 +521,10 @@ func (sync *OplogSyncer) RestAPI() {
 		Now         *Time      `json:"now"`
 	}
 
+	// total replication info
 	utils.HttpApi.RegisterAPI("/repl", nimo.HttpGet, func([]byte) interface{} {
 		return &Info{
-			Who:         conf.Options.CollectorId,
+			Who:         conf.Options.Id,
 			Tag:         utils.BRANCH,
 			ReplicaSet:  sync.replset,
 			Logs:        sync.replMetric.Get(),
@@ -457,6 +541,38 @@ func (sync *OplogSyncer) RestAPI() {
 				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSNAck),
 					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSNAck))}},
 			Now: &Time{TimestampUnix: time.Now().Unix(), TimestampTime: utils.TimestampToString(time.Now().Unix())},
+		}
+	})
+
+	// queue size info
+	type InnerQueue struct {
+		Id           uint   `json:"queue_id"`
+		PendingQueue uint64 `json:"pending_queue_used"`
+		LogsQueue    uint64 `json:"logs_queue_used"`
+	}
+	type Queue struct {
+		SyncerId            string       `json:"syncer_replica_set_name"`
+		LogsQueuePerSize    int          `json:"logs_queue_size"`
+		PendingQueuePerSize int          `json:"pending_queue_size"`
+		InnerQueue          []InnerQueue `json:"syncer_inner_queue"`
+		PersisterBufferUsed int          `json:"persister_buffer_used"`
+	}
+
+	utils.HttpApi.RegisterAPI("/queue", nimo.HttpGet, func([]byte) interface{} {
+		queue := make([]InnerQueue, calculatePendingQueueConcurrency())
+		for i := 0; i < len(queue); i++ {
+			queue[i] = InnerQueue{
+				Id:           uint(i),
+				PendingQueue: uint64(len(sync.PendingQueue[i])),
+				LogsQueue:    uint64(len(sync.logsQueue[i])),
+			}
+		}
+		return &Queue{
+			SyncerId:            sync.replset,
+			LogsQueuePerSize:    cap(sync.logsQueue[0]),
+			PendingQueuePerSize: cap(sync.PendingQueue[0]),
+			InnerQueue:          queue,
+			PersisterBufferUsed: len(sync.persister.Buffer),
 		}
 	})
 }

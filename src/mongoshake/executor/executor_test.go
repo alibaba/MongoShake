@@ -20,8 +20,10 @@ func mockLogs(op, ns string, size int, cb bool) *OplogRecord {
 	return &OplogRecord{
 		original: &PartialLogWithCallbak{
 			partialLog: &oplog.PartialLog{
-				Namespace: ns,
-				Operation: op,
+				ParsedLog: oplog.ParsedLog{
+					Namespace: ns,
+					Operation: op,
+				},
 				RawSize:   size,
 			},
 			callback: nil,
@@ -198,10 +200,12 @@ func mockTransLogs(op, ns string, logObject bson.D) *OplogRecord {
 	return &OplogRecord{
 		original: &PartialLogWithCallbak{
 			partialLog: &oplog.PartialLog{
-				Namespace: ns,
-				Operation: op,
+				ParsedLog: oplog.ParsedLog{
+					Namespace: ns,
+					Operation: op,
+					Object:    logObject,
+				},
 				RawSize:   1,
-				Object:    logObject,
 			},
 			callback: nil,
 		},
@@ -395,7 +399,9 @@ func TestTransformLog(t *testing.T) {
 			}),
 		}
 
+		// fmt.Println(logs[0].original.partialLog)
 		logs = transformLogs(logs, nsTrans, true)
+		// fmt.Println(logs[0].original.partialLog)
 		assert.Equal(t, mockTransLogs("c", "admin.$cmd", bson.D{
 			bson.DocElem{
 				Name: "applyOps",

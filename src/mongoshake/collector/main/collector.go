@@ -3,22 +3,16 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"syscall"
 	"strconv"
 
-	"mongoshake/collector"
-	"mongoshake/collector/ckpt"
 	"mongoshake/collector/configure"
 	"mongoshake/common"
-	"mongoshake/executor"
-	"mongoshake/modules"
-	"mongoshake/oplog"
 	"mongoshake/quorum"
-	"mongoshake/collector/filter"
+	"mongoshake/collector/coordinator"
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
@@ -48,6 +42,12 @@ func main() {
 	if file, err = os.Open(*configuration); err != nil {
 		crash(fmt.Sprintf("Configure file open failed. %v", err), -1)
 	}
+	defer file.Close()
+
+	// read fcv and do comparison
+	if _, err := conf.CheckFcv(*configuration, utils.FcvConfiguration.FeatureCompatibleVersion); err != nil {
+		crash(err.Error(), -5)
+	}
 
 	configure := nimo.NewConfigLoader(file)
 	configure.SetDateFormat(utils.GolangSecurityTime)
@@ -56,11 +56,11 @@ func main() {
 	}
 
 	// verify collector options and revise
-	if err = sanitizeOptions(); err != nil {
+	if err = SanitizeOptions(); err != nil {
 		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
 	}
 
-	if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogBuffer, *verbose); err != nil {
+	if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogFlush, *verbose); err != nil {
 		crash(fmt.Sprintf("initial log.dir[%v] log.name[%v] failed[%v].", conf.Options.LogDirectory,
 			conf.Options.LogFileName, err), -2)
 	}
@@ -80,7 +80,7 @@ func main() {
 	utils.Welcome()
 
 	// get exclusive process lock and write pid
-	if utils.WritePidById(conf.Options.LogDirectory, conf.Options.CollectorId) {
+	if utils.WritePidById(conf.Options.LogDirectory, conf.Options.Id) {
 		startup()
 	}
 }
@@ -91,30 +91,47 @@ func startup() {
 
 	// initialize http api
 	utils.InitHttpApi(conf.Options.HTTPListenPort)
-	coordinator := &collector.ReplicationCoordinator{
-		Sources: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
+	coordinator := &coordinator.ReplicationCoordinator{
+		MongoD: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
 	}
 
 	utils.HttpApi.RegisterAPI("/conf", nimo.HttpGet, func([]byte) interface{} {
-		return &conf.Options
+		return conf.GetSafeOptions()
 	})
 
+	// init
 	for i, src := range conf.Options.MongoUrls {
-		coordinator.Sources[i] = new(utils.MongoSource)
-		coordinator.Sources[i].URL = src
-		if len(conf.Options.OplogGIDS) != 0 {
-			coordinator.Sources[i].Gids = conf.Options.OplogGIDS
+		coordinator.MongoD[i] = new(utils.MongoSource)
+		coordinator.MongoD[i].URL = src
+		if len(conf.Options.IncrSyncOplogGIDS) != 0 {
+			coordinator.MongoD[i].Gids = conf.Options.IncrSyncOplogGIDS
+		}
+	}
+	if conf.Options.MongoSUrl != "" {
+		coordinator.MongoS = &utils.MongoSource{
+			URL:         conf.Options.MongoSUrl,
+			ReplicaName: "mongos",
+		}
+		coordinator.RealSource = []*utils.MongoSource{coordinator.MongoS}
+	} else {
+		coordinator.RealSource = coordinator.MongoD
+	}
+
+	if conf.Options.MongoCsUrl != "" {
+		coordinator.MongoCS = &utils.MongoSource {
+			URL: conf.Options.MongoCsUrl,
 		}
 	}
 
 	// start mongodb replication
 	if err := coordinator.Run(); err != nil {
 		// initial or connection established failed
-		crash(fmt.Sprintf("Oplog Tailer initialize failed: %v", err), -6)
+		LOG.Critical(fmt.Sprintf("run replication failed: %v", err))
+		crash(err.Error(), -6)
 	}
 
 	// if the sync mode is "document", mongoshake should exit here.
-	if conf.Options.SyncMode != collector.SYNCMODE_DOCUMENT {
+	if conf.Options.SyncMode != utils.VarSyncModeFull {
 		if err := utils.HttpApi.Listen(); err != nil {
 			LOG.Critical("Coordinator http api listen failed. %v", err)
 		}
@@ -123,150 +140,16 @@ func startup() {
 
 func selectLeader() {
 	// first of all. ensure we are the Master
-	if conf.Options.MasterQuorum && conf.Options.ContextStorage == ckpt.StorageTypeDB {
+	if conf.Options.MasterQuorum && conf.Options.CheckpointStorage == utils.VarCheckpointStorageDatabase {
 		// election become to Master. keep waiting if we are the candidate. election id is must fixed
 		quorum.UseElectionObjectId(bson.ObjectIdHex("5204af979955496907000001"))
-		go quorum.BecomeMaster(conf.Options.ContextStorageUrl, utils.AppDatabase)
+		go quorum.BecomeMaster(conf.Options.CheckpointStorageUrl, utils.VarCheckpointStorageDbReplicaDefault)
 
 		// wait until become to a real master
 		<-quorum.MasterPromotionNotifier
 	} else {
 		quorum.AlwaysMaster()
 	}
-}
-
-func sanitizeOptions() error {
-	// compatible with old version
-	if len(conf.Options.LogFileNameOld) != 0 {
-		conf.Options.LogFileName = conf.Options.LogFileNameOld
-	}
-	if len(conf.Options.LogLevelOld) != 0 {
-		conf.Options.LogLevel = conf.Options.LogLevelOld
-	}
-	if conf.Options.LogBufferOld == true {
-		conf.Options.LogBuffer = conf.Options.LogBufferOld
-	}
-	if len(conf.Options.LogFileName) == 0 {
-		return fmt.Errorf("log.name[%v] shouldn't be empty", conf.Options.LogFileName)
-	}
-
-	if len(conf.Options.MongoUrls) == 0 {
-		return errors.New("mongo_urls were empty")
-	}
-	if conf.Options.ContextStorageUrl == "" {
-		if len(conf.Options.MongoUrls) == 1 {
-			conf.Options.ContextStorageUrl = conf.Options.MongoUrls[0]
-		} else if len(conf.Options.MongoUrls) > 1 {
-			return errors.New("storage server should be configured while using mongo shard servers")
-		}
-	}
-	if len(conf.Options.MongoUrls) > 1 {
-		if conf.Options.WorkerNum != len(conf.Options.MongoUrls) {
-			//LOG.Warn("replication worker should be equal to count of mongo_urls while multi sources (shard), set worker = %v",
-			//	len(conf.Options.MongoUrls))
-			conf.Options.WorkerNum = len(conf.Options.MongoUrls)
-		}
-		if conf.Options.ReplayerDMLOnly == false {
-			return errors.New("DDL is not support for sharding, pleasing waiting")
-		}
-	}
-	// avoid the typo of mongo urls
-	if utils.HasDuplicated(conf.Options.MongoUrls) {
-		return errors.New("mongo urls were duplicated")
-	}
-	if conf.Options.CollectorId == "" {
-		return errors.New("collector id should not be empty")
-	}
-	if conf.Options.HTTPListenPort <= 1024 && conf.Options.HTTPListenPort > 0 {
-		return errors.New("http listen port too low numeric")
-	}
-	if conf.Options.CheckpointInterval < 0 {
-		return errors.New("checkpoint batch size is negative")
-	} else if conf.Options.CheckpointInterval  == 0 {
-		conf.Options.CheckpointInterval = 5000 // set default to 5 seconds
-	}
-	if conf.Options.ShardKey != oplog.ShardByNamespace &&
-		conf.Options.ShardKey != oplog.ShardByID &&
-		conf.Options.ShardKey != oplog.ShardAutomatic {
-		return errors.New("shard key type is unknown")
-	}
-	if conf.Options.SyncerReaderBufferTime == 0 {
-		conf.Options.SyncerReaderBufferTime = 1
-	}
-	if conf.Options.WorkerNum <= 0 || conf.Options.WorkerNum > 256 {
-		return errors.New("worker numeric is not valid")
-	}
-	if conf.Options.WorkerBatchQueueSize <= 0 {
-		return errors.New("worker queue numeric is negative")
-	}
-	if conf.Options.ContextStorage == "" || conf.Options.ContextAddress == "" ||
-		(conf.Options.ContextStorage != ckpt.StorageTypeAPI &&
-			conf.Options.ContextStorage != ckpt.StorageTypeDB) {
-		return errors.New("context storage type or address is invalid")
-	}
-	if conf.Options.WorkerOplogCompressor != module.CompressionNone &&
-		conf.Options.WorkerOplogCompressor != module.CompressionGzip &&
-		conf.Options.WorkerOplogCompressor != module.CompressionZlib &&
-		conf.Options.WorkerOplogCompressor != module.CompressionDeflate {
-		return errors.New("compressor is not supported")
-	}
-	if conf.Options.MasterQuorum && conf.Options.ContextStorage != ckpt.StorageTypeDB {
-		return errors.New("context storage should set to 'database' while master election enabled")
-	}
-	if len(conf.Options.FilterNamespaceBlack) != 0 &&
-		len(conf.Options.FilterNamespaceWhite) != 0 {
-		return errors.New("at most one of black lists and white lists option can be given")
-	}
-	if len(conf.Options.FilterPassSpecialDb) != 0 {
-		// init ns
-		filter.InitNs(conf.Options.FilterPassSpecialDb)
-	}
-
-	conf.Options.HTTPListenPort = utils.MayBeRandom(conf.Options.HTTPListenPort)
-	conf.Options.SystemProfile = utils.MayBeRandom(conf.Options.SystemProfile)
-
-	if conf.Options.Tunnel == "" {
-		return errors.New("tunnel is empty")
-	}
-	if len(conf.Options.TunnelAddress) == 0 && conf.Options.Tunnel != "mock" {
-		return errors.New("tunnel address is illegal")
-	}
-	if conf.Options.SyncMode == "" {
-		conf.Options.SyncMode = "oplog" // default
-	}
-
-	// judge the replayer configuration when tunnel type is "direct"
-	if conf.Options.Tunnel == "direct" {
-		if len(conf.Options.TunnelAddress) > conf.Options.WorkerNum {
-			return errors.New("then length of tunnel_address with type 'direct' shouldn't bigger than worker number")
-		}
-		if conf.Options.ReplayerExecutor <= 0 {
-			conf.Options.ReplayerExecutor = 1
-			// return errors.New("executor number should be large than 1")
-		}
-		if conf.Options.ReplayerConflictWriteTo != executor.DumpConflictToDB &&
-			conf.Options.ReplayerConflictWriteTo != executor.DumpConflictToSDK &&
-			conf.Options.ReplayerConflictWriteTo != executor.NoDumpConflict {
-			return errors.New("collision write strategy is neither db nor sdk nor none")
-		}
-		conf.Options.ReplayerCollisionEnable = conf.Options.ReplayerExecutor != 1
-	} else {
-		if conf.Options.SyncMode != "oplog" {
-			return errors.New("document replication only support direct tunnel type")
-		}
-	}
-
-	if conf.Options.SyncMode != "oplog" && conf.Options.SyncMode != "document" && conf.Options.SyncMode != "all" {
-		return fmt.Errorf("unknown sync_mode[%v]", conf.Options.SyncMode)
-	}
-
-	if conf.Options.MongoConnectMode != utils.ConnectModePrimary &&
-		conf.Options.MongoConnectMode != utils.ConnectModeSecondaryPreferred &&
-		conf.Options.MongoConnectMode != utils.ConnectModeStandalone {
-		return fmt.Errorf("unknown mongo_connect_mode[%v]", conf.Options.MongoConnectMode)
-	}
-
-	return nil
 }
 
 func crash(msg string, errCode int) {

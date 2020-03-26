@@ -21,54 +21,56 @@ import (
 
 const (
 	MAX_BUFFER_BYTE_SIZE = 16 * 1024 * 1024
+	SpliterReader        = 4
 )
 
 func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
-	var toIsSharding bool
+	var source, target string
+	if fromIsSharding {
+		source = "sharding"
+	} else {
+		source = "replica"
+	}
+
 	var result interface{}
 	err := toConn.Session.DB("config").C("version").Find(bson.M{}).One(&result)
 	if err != nil {
-		toIsSharding = false
+		target = "replica"
 	} else {
-		toIsSharding = true
+		target = "sharding"
 	}
 
-	if fromIsSharding && toIsSharding {
-		LOG.Info("replication from sharding to sharding")
+	LOG.Info("replication from [%s] to [%s]", source, target)
+	if source == "sharding" && target == "sharding" {
 		return true
-	} else if fromIsSharding && !toIsSharding {
-		LOG.Info("replication from sharding to replica")
-		return false
-	} else if !fromIsSharding && toIsSharding {
-		LOG.Info("replication from replica to sharding")
-		return false
-	} else {
-		LOG.Info("replication from replica to replica")
-		return false
 	}
+	return false
 }
 
 func StartDropDestCollection(nsSet map[utils.NS]bool, toConn *utils.MongoConn,
 	nsTrans *transform.NamespaceTransform) error {
 	for ns := range nsSet {
 		toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
-		if !conf.Options.ReplayerCollectionDrop {
+		if !conf.Options.FullSyncCollectionDrop {
 			colNames, err := toConn.Session.DB(toNS.Database).CollectionNames()
 			if err != nil {
 				LOG.Critical("Get collection names of db %v of dest mongodb failed. %v", toNS.Database, err)
 				return err
 			}
+
+			// judge whether toNs exists
 			for _, colName := range colNames {
-				if colName == ns.Collection {
-					LOG.Critical("ns %v to be synced already exists in dest mongodb", toNS)
-					return errors.New(fmt.Sprintf("ns %v to be synced already exists in dest mongodb", toNS))
+				if colName == toNS.Collection {
+					LOG.Warn("ns %v to be synced already exists in dest mongodb", toNS)
+					break
 				}
 			}
-		}
-		err := toConn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
-		if err != nil && err.Error() != "ns not found" {
-			LOG.Critical("Drop collection ns %v of dest mongodb failed. %v", toNS, err)
-			return errors.New(fmt.Sprintf("Drop collection ns %v of dest mongodb failed. %v", toNS, err))
+		} else {
+			err := toConn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
+			if err != nil && err.Error() != "ns not found" {
+				LOG.Critical("Drop collection ns %v of dest mongodb failed. %v", toNS, err)
+				return errors.New(fmt.Sprintf("Drop collection ns %v of dest mongodb failed. %v", toNS, err))
+			}
 		}
 	}
 	return nil
@@ -80,7 +82,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 
 	var fromConn *utils.MongoConn
 	var err error
-	if fromConn, err = utils.NewMongoConn(csUrl, utils.ConnectModePrimary, true); err != nil {
+	if fromConn, err = utils.NewMongoConn(csUrl, utils.VarMongoConnectModePrimary, true); err != nil {
 		return err
 	}
 	defer fromConn.Close()
@@ -173,7 +175,7 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 	var wg sync.WaitGroup
 	wg.Add(len(indexMap))
 
-	collExecutorParallel := conf.Options.ReplayerCollectionParallel
+	collExecutorParallel := conf.Options.FullSyncReaderCollectionParallel
 	namespaces := make(chan *IndexNS, collExecutorParallel)
 	nimo.GoRoutine(func() {
 		for ns, indexList := range indexMap {
@@ -183,7 +185,7 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 
 	var conn *utils.MongoConn
 	var err error
-	if conn, err = utils.NewMongoConn(toUrl, utils.ConnectModePrimary, false); err != nil {
+	if conn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, false); err != nil {
 		return err
 	}
 	defer conn.Close()
@@ -223,7 +225,7 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 func Checkpoint(ckptMap map[string]utils.TimestampNode) error {
 	for name, ts := range ckptMap {
 		ckptManager := ckpt.NewCheckpointManager(name, 0)
-		ckptManager.Get()
+		ckptManager.Get() // load checkpoint in ckptManager
 		if err := ckptManager.Update(ts.Newest); err != nil {
 			return err
 		}
@@ -244,6 +246,8 @@ type DBSyncer struct {
 	startTime time.Time
 
 	nsTrans *transform.NamespaceTransform
+	// filter orphan duplicate record
+	orphanFilter *filter.OrphanFilter
 
 	mutex sync.Mutex
 
@@ -254,7 +258,8 @@ func NewDBSyncer(
 	id int,
 	fromMongoUrl string,
 	toMongoUrl string,
-	nsTrans *transform.NamespaceTransform) *DBSyncer {
+	nsTrans *transform.NamespaceTransform,
+	orphanFilter *filter.OrphanFilter) *DBSyncer {
 
 	syncer := &DBSyncer{
 		id:           id,
@@ -262,9 +267,20 @@ func NewDBSyncer(
 		ToMongoUrl:   toMongoUrl,
 		indexMap:     make(map[utils.NS][]mgo.Index),
 		nsTrans:      nsTrans,
+		orphanFilter: orphanFilter,
 	}
 
 	return syncer
+}
+
+func (syncer *DBSyncer) String() string {
+	return fmt.Sprintf("DBSyncer id[%v] source[%v] target[%v] startTime[%v]",
+		syncer.id, utils.BlockMongoUrlPassword(syncer.FromMongoUrl, "***"), syncer.ToMongoUrl,
+		syncer.startTime)
+}
+
+func (syncer *DBSyncer) GetIndexMap() map[utils.NS][]mgo.Index {
+	return syncer.indexMap
 }
 
 func (syncer *DBSyncer) Start() (syncError error) {
@@ -277,10 +293,10 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	}
 
 	if len(nsList) == 0 {
-		LOG.Info("document syncer-%d finish, but no data", syncer.id)
+		LOG.Info("%s finish, but no data", syncer)
 	}
 
-	collExecutorParallel := conf.Options.ReplayerCollectionParallel
+	collExecutorParallel := conf.Options.FullSyncReaderCollectionParallel
 	namespaces := make(chan utils.NS, collExecutorParallel)
 
 	wg.Add(len(nsList))
@@ -303,24 +319,23 @@ func (syncer *DBSyncer) Start() (syncError error) {
 
 				toNS := utils.NewNS(syncer.nsTrans.Transform(ns.Str()))
 
-				LOG.Info("document syncer-%d collExecutor-%d sync ns %v to %v begin",
-					syncer.id, collExecutorId, ns, toNS)
+				LOG.Info("%s collExecutor-%d sync ns %v to %v begin",
+					syncer, collExecutorId, ns, toNS)
 				err := syncer.collectionSync(collExecutorId, ns, toNS)
 				atomic.AddInt32(&nsDoneCount, 1)
 
 				if err != nil {
-					LOG.Critical("document syncer-%d collExecutor-%d sync ns %v to %v failed. %v",
-						syncer.id, collExecutorId, ns, toNS, err)
-					syncError = errors.New(fmt.Sprintf("document syncer sync ns %v to %v failed. %v",
-						ns, toNS, err))
+					LOG.Critical("%s collExecutor-%d sync ns %v to %v failed. %v",
+						syncer, collExecutorId, ns, toNS, err)
+					syncError = fmt.Errorf("document syncer sync ns %v to %v failed. %v", ns, toNS, err)
 				} else {
 					process := int(atomic.LoadInt32(&nsDoneCount)) * 100 / len(nsList)
-					LOG.Info("document syncer-%d collExecutor-%d sync ns %v to %v successful. db syncer-%d progress %v%%",
-						syncer.id, collExecutorId, ns, toNS, syncer.id, process)
+					LOG.Info("%s collExecutor-%d sync ns %v to %v successful. db syncer-%d progress %v%%",
+						syncer, collExecutorId, ns, toNS, syncer.id, process)
 				}
 				wg.Done()
 			}
-			LOG.Info("document syncer-%d collExecutor-%d finish", syncer.id, collExecutorId)
+			LOG.Info("%s collExecutor-%d finish", syncer, collExecutorId)
 		})
 	}
 
@@ -329,16 +344,60 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	return syncError
 }
 
-func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
-	toNS utils.NS) error {
-	reader := NewDocumentReader(syncer.FromMongoUrl, ns)
-
-	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS)
+func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS utils.NS) error {
+	// writer
+	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS, syncer)
 	if err := colExecutor.Start(); err != nil {
 		return err
 	}
 
-	bufferSize := conf.Options.ReplayerDocumentBatchSize
+	// splitter reader
+	splitter := NewDocumentSplitter(syncer.FromMongoUrl, ns)
+	if splitter == nil {
+		return fmt.Errorf("create splitter failed")
+	}
+	defer splitter.Close()
+
+	// run in several pieces
+	var wg sync.WaitGroup
+	wg.Add(splitter.pieceNumber)
+	for i := 0; i < SpliterReader; i++ {
+		go func() {
+			for {
+				reader, ok := <-splitter.readerChan
+				if !ok {
+					break
+				}
+
+				if err := syncer.splitSync(reader, colExecutor); err != nil {
+					LOG.Crashf("%v", err)
+				}
+
+				wg.Done()
+			}
+		}()
+	}
+	wg.Wait()
+
+	// close writer
+	if err := colExecutor.Wait(); err != nil {
+		return fmt.Errorf("close writer failed: %v", err)
+	}
+
+	// fetch index
+	if indexes, err := splitter.GetIndexes(); err != nil {
+		return fmt.Errorf("get indexes from ns[%v] of src mongodb failed: %v", ns, err)
+	} else {
+		syncer.mutex.Lock()
+		defer syncer.mutex.Unlock()
+		syncer.indexMap[ns] = indexes
+	}
+
+	return nil
+}
+
+func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *CollectionExecutor) error {
+	bufferSize := conf.Options.FullSyncReaderDocumentBatchSize
 	buffer := make([]*bson.Raw, 0, bufferSize)
 	bufferByteSize := 0
 
@@ -346,28 +405,26 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
 		var doc *bson.Raw
 		var err error
 		if doc, err = reader.NextDoc(); err != nil {
-			return errors.New(fmt.Sprintf("Get next document from ns %v of src mongodb failed. %v", ns, err))
+			return fmt.Errorf("splitter reader[%v] get next document failed: %v", reader, err)
 		} else if doc == nil {
 			colExecutor.Sync(buffer)
-			if err := colExecutor.Wait(); err != nil {
-				return err
-			}
 			break
 		}
+
 		if bufferByteSize+len(doc.Data) > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
 			colExecutor.Sync(buffer)
 			buffer = make([]*bson.Raw, 0, bufferSize)
 			bufferByteSize = 0
 		}
 		// transform dbref for document
-		if len(conf.Options.TransformNamespace) > 0 && conf.Options.DBRef {
+		if len(conf.Options.TransformNamespace) > 0 && conf.Options.IncrSyncDBRef {
 			var docData bson.D
 			if err := bson.Unmarshal(doc.Data, docData); err != nil {
-				LOG.Warn("collectionSync do bson unmarshal %v failed. %v", doc.Data, err)
+				LOG.Error("splitter reader[%v] do bson unmarshal %v failed. %v", reader, doc.Data, err)
 			} else {
-				docData = transform.TransformDBRef(docData, ns.Database, syncer.nsTrans)
+				docData = transform.TransformDBRef(docData, reader.ns.Database, syncer.nsTrans)
 				if v, err := bson.Marshal(docData); err != nil {
-					LOG.Warn("collectionSync do bson marshal %v failed. %v", docData, err)
+					LOG.Warn("splitter reader[%v] do bson marshal %v failed. %v", reader, docData, err)
 				} else {
 					doc.Data = v
 				}
@@ -377,18 +434,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS,
 		bufferByteSize += len(doc.Data)
 	}
 
-	if indexes, err := reader.GetIndexes(); err != nil {
-		return errors.New(fmt.Sprintf("Get indexes from ns %v of src mongodb failed. %v", ns, err))
-	} else {
-		syncer.mutex.Lock()
-		defer syncer.mutex.Unlock()
-		syncer.indexMap[ns] = indexes
-	}
-
+	LOG.Info("splitter reader[%v] finishes", reader)
 	reader.Close()
 	return nil
-}
-
-func (syncer *DBSyncer) GetIndexMap() map[utils.NS][]mgo.Index {
-	return syncer.indexMap
 }

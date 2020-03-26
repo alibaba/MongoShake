@@ -1,3 +1,30 @@
+2020-03-25 Alibaba Cloud.
+	* version: 2.4.0
+	* IMPROVE: support change stream to solve move chunk problem.
+	* IMRPOVE: add feature compatiable version(fcv) for configuration and
+	checkpoint.
+	* IMPROVE: optimize orphan document filter.
+	* IMPROVE: block password in conf and log.
+	* IMPROVE: retry to insert document when duplicate error happen in full
+	sync stage.
+	* IMRPOVE: add 'full_sync.create_index' in configuration.
+	* DISABLE: temporarily disable oplog stored to disk during document
+	replication released on v2.2.1.
+
+2020-01-22 Alibaba Cloud.
+	* version: 2.2.1
+	* IMPROVE: support oplog stored to disk during document replication.
+	* IMPROVE: support reading from kafka in by different tunnel message type.
+
+2019-11-20 Alibaba Cloud.
+	* version: 2.2.0
+	* this is a experimental version for sharding replication
+	* IMRPOVE: support filter orphan document in full synchronization for mongodb sharding
+	* IMPROVE: support move chunk in incremental synchronization for mongodb sharding
+	* IMPROVE: support ddl in incremental synchronization for mongodb sharding
+	* IMPROVE: support different sharding key or index at destination mongodb
+	* IMPROVE: support global consistence checkpoint
+
 2019-09-30 Alibaba Cloud.
 	* version: 2.0.8
 	* BUGFIX: fetch data from kafka failed. update "sarama" driver, see #212.

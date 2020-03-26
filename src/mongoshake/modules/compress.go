@@ -12,14 +12,7 @@ import (
 	"mongoshake/tunnel"
 
 	LOG "github.com/vinllen/log4go"
-)
-
-const (
-	CompressionNone    = "none"
-	CompressionGzip    = "gzip"
-	CompressionZlib    = "zlib"
-	CompressionDeflate = "deflate"
-	CompressionSnappy  = "snappy"
+	"mongoshake/common"
 )
 
 const (
@@ -47,15 +40,15 @@ type Compress interface {
 
 func GetCompressorByName(name string) (Compress, error) {
 	switch name {
-	case CompressionGzip:
+	case utils.VarIncrSyncWorkerOplogCompressorGzip:
 		return compressorGzip, nil
-	case CompressionSnappy:
+	case utils.VarIncrSyncWorkerOplogCompressorSnappy:
 		return compressorSnappy, nil
-	case CompressionZlib:
+	case utils.VarIncrSyncWorkerOplogCompressorZlib:
 		return compressorZlib, nil
-	case CompressionDeflate:
+	case utils.VarIncrSyncWorkerOplogCompressorDeflate:
 		return compressorDeflate, nil
-	case CompressionNone:
+	case utils.VarIncrSyncWorkerOplogCompressorNone:
 		fallthrough
 	default:
 		return nil, errors.New("invalid compressor name")
@@ -89,13 +82,13 @@ type Compressor struct {
 }
 
 func (compressor *Compressor) IsRegistered() bool {
-	return conf.Options.WorkerOplogCompressor != CompressionNone
+	return conf.Options.IncrSyncWorkerOplogCompressor != utils.VarIncrSyncWorkerOplogCompressorNone
 }
 
 func (compressor *Compressor) Install() bool {
 	var err error
-	if compressor.zipper, err = GetCompressorByName(conf.Options.WorkerOplogCompressor); err != nil {
-		LOG.Critical("Worker create compressor %s failed", conf.Options.WorkerOplogCompressor)
+	if compressor.zipper, err = GetCompressorByName(conf.Options.IncrSyncWorkerOplogCompressor); err != nil {
+		LOG.Critical("Worker create compressor %s failed", conf.Options.IncrSyncWorkerOplogCompressor)
 		return false
 	}
 
@@ -150,7 +143,7 @@ func NewGZipCompressor() *GZip {
 }
 
 func (Gzip *GZip) Name() string {
-	return CompressionGzip
+	return utils.VarIncrSyncWorkerOplogCompressorGzip
 }
 
 func (Gzip *GZip) Id() uint32 {
@@ -187,7 +180,7 @@ func NewSnappyCompressor() *Snappy {
 }
 
 func (snappy *Snappy) Name() string {
-	return CompressionSnappy
+	return utils.VarIncrSyncWorkerOplogCompressorSnappy
 }
 
 func (snappy *Snappy) Id() uint32 {
@@ -212,7 +205,7 @@ func NewZlibCompressor() *Zlib {
 }
 
 func (zlib *Zlib) Name() string {
-	return CompressionZlib
+	return utils.VarIncrSyncWorkerOplogCompressorZlib
 }
 
 func (zlib *Zlib) Id() uint32 {
@@ -250,7 +243,7 @@ func NewDeflateCompressor() *Deflate {
 }
 
 func (deflate *Deflate) Name() string {
-	return CompressionDeflate
+	return utils.VarIncrSyncWorkerOplogCompressorDeflate
 }
 
 func (deflate *Deflate) Id() uint32 {

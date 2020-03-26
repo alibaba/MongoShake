@@ -2,9 +2,12 @@ package oplog
 
 import (
 	"reflect"
+	"fmt"
+	"encoding/json"
 
 	"github.com/gugemichael/nimo4go"
 	"github.com/vinllen/mgo/bson"
+
 )
 
 const (
@@ -16,16 +19,20 @@ type GenericOplog struct {
 	Parsed *PartialLog
 }
 
+type ParsedLog struct {
+	Timestamp     bson.MongoTimestamp `bson:"ts" json:"ts"`
+	Operation     string              `bson:"op" json:"op"`
+	Gid           string              `bson:"g" json:"g"`
+	Namespace     string              `bson:"ns" json:"ns"`
+	Object        bson.D              `bson:"o" json:"o"`
+	Query         bson.M              `bson:"o2" json:"o2"`
+	UniqueIndexes bson.M              `bson:"uk" json:"uk"`
+	Lsid          interface{}         `bson:"lsid" json:"lsid"`               // mark the session id, used in transaction
+	FromMigrate   bool                `bson:"fromMigrate" json:"fromMigrate"` // move chunk
+}
+
 type PartialLog struct {
-	Timestamp     bson.MongoTimestamp `bson:"ts"`
-	Operation     string              `bson:"op"`
-	Gid           string              `bson:"g"`
-	Namespace     string              `bson:"ns"`
-	Object        bson.D              `bson:"o"`
-	Query         bson.M              `bson:"o2"`
-	UniqueIndexes bson.M              `bson:"uk"`
-	Lsid          interface{}         `bson:"lsid"`        // mark the session id, used in transaction
-	FromMigrate   bool                `bson:"fromMigrate"` // move chunk
+	ParsedLog
 
 	/*
 	 * Every field subsequent declared is NEVER persistent or
@@ -55,25 +62,36 @@ func LogParsed(logs []*GenericOplog) []*PartialLog {
 }
 
 func NewPartialLog(data bson.M) *PartialLog {
-	partialLog := new(PartialLog)
-	logType := reflect.TypeOf(*partialLog)
+	// partialLog := new(PartialLog)
+	parsedLog := new(ParsedLog)
+	logType := reflect.TypeOf(*parsedLog)
 	for i := 0; i < logType.NumField(); i++ {
 		tagName := logType.Field(i).Tag.Get("bson")
 		if v, ok := data[tagName]; ok {
-			reflect.ValueOf(partialLog).Elem().Field(i).Set(reflect.ValueOf(v))
+			reflect.ValueOf(parsedLog).Elem().Field(i).Set(reflect.ValueOf(v))
 		}
 	}
-	return partialLog
+	return &PartialLog{
+		ParsedLog: *parsedLog,
+	}
+}
+
+func (partialLog *PartialLog) String() string {
+	if ret, err := json.Marshal(partialLog.ParsedLog); err != nil {
+		return err.Error()
+	} else {
+		return string(ret)
+	}
 }
 
 // dump according to the given keys, "all" == true means ignore keys
 func (partialLog *PartialLog) Dump(keys map[string]struct{}, all bool) bson.D {
 	var out bson.D
-	logType := reflect.TypeOf(*partialLog)
+	logType := reflect.TypeOf(partialLog.ParsedLog)
 	for i := 0; i < logType.NumField(); i++ {
 		if tagName, ok := logType.Field(i).Tag.Lookup("bson"); ok {
 			// out[tagName] = reflect.ValueOf(partialLog).Elem().Field(i).Interface()
-			value := reflect.ValueOf(partialLog).Elem().Field(i).Interface()
+			value := reflect.ValueOf(partialLog.ParsedLog).Field(i).Interface()
 			if !all {
 				if _, ok := keys[tagName]; !ok {
 					continue
@@ -119,6 +137,17 @@ func ConvertBsonD2M(input bson.D) (bson.M, map[string]struct{}) {
 	return m, keys
 }
 
+func ConvertBsonM2D(input bson.M) bson.D {
+	output := make(bson.D, 0, len(input))
+	for key, val := range input {
+		output = append(output, bson.DocElem{
+			Name:  key,
+			Value: val,
+		})
+	}
+	return output
+}
+
 func RemoveFiled(input bson.D, key string) bson.D {
 	flag := -1
 	for id := range input {
@@ -139,5 +168,56 @@ func SetFiled(input bson.D, key string, value interface{}) {
 		if ele.Name == key {
 			input[i].Value = value
 		}
+	}
+}
+
+func ParseTimestampFromBson(intput []byte) bson.MongoTimestamp {
+	log := new(PartialLog)
+	if err := bson.Unmarshal(intput, log); err != nil {
+		return -1
+	}
+	return log.Timestamp
+}
+
+func GatherApplyOps(input []*PartialLog) (*GenericOplog, error) {
+	if len(input) == 0 {
+		return nil, fmt.Errorf("input list is empty")
+	}
+
+	newOplog := &PartialLog{
+		ParsedLog: ParsedLog{
+			Timestamp:     input[0].Timestamp,
+			Operation:     "c",
+			Gid:           input[0].Gid,
+			Namespace:     "admin.$cmd",
+			UniqueIndexes: input[0].UniqueIndexes,
+			Lsid:          input[0].Lsid,
+			FromMigrate:   input[0].FromMigrate,
+		},
+	}
+
+	applyOpsList := make([]bson.M, 0, len(input))
+	for _, ele := range input {
+		applyOpsList = append(applyOpsList, bson.M{
+			"op": ele.Operation,
+			"ns": ele.Namespace,
+			"o":  ele.Object,
+			"o2": ele.Query,
+		})
+	}
+	newOplog.Object = bson.D{
+		bson.DocElem{
+			Name:  "applyOps",
+			Value: applyOpsList,
+		},
+	}
+
+	if out, err := bson.Marshal(newOplog); err != nil {
+		return nil, fmt.Errorf("marshal new oplog[%v] failed[%v]", newOplog, err)
+	} else {
+		return &GenericOplog{
+			Raw:    out,
+			Parsed: newOplog,
+		}, nil
 	}
 }

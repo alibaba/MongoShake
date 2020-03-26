@@ -9,7 +9,20 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
+// Build info
+var BRANCH = "$"
+var SIGNALPROFILE = "$"
+var SIGNALSTACK = "$"
+
 const (
+	// APPNAME = "mongoshake"
+	// AppDatabase          = APPNAME
+	// APPConflictDatabase  = APPNAME + "_conflict"
+
+	GlobalDiagnosticPath = "diagnostic"
+	// This is the time of golang was born to the world
+	GolangSecurityTime = "2006-01-02T15:04:05Z"
+
 	WorkGood       uint64 = 0
 	GetReady       uint64 = 1
 	FetchBad       uint64 = 2
@@ -17,25 +30,14 @@ const (
 	TunnelSyncBad  uint64 = 8
 	ReplicaExecBad uint64 = 16
 
-	ConnectModePrimary            = "primary"
-	ConnectModeSecondaryPreferred = "secondaryPreferred"
-	ConnectModeStandalone         = "standalone"
+	MajorityWriteConcern = "majority"
+
+	Int32max = (int64(1) << 33) - 1
 )
 
-// Build info
-var BRANCH = "$"
-var SIGNALPROFILE = "$"
-var SIGNALSTACK = "$"
-
-const (
-	APPNAME = "mongoshake"
-
-	AppDatabase          = APPNAME
-	APPConflictDatabase  = APPNAME + "_conflict"
-	GlobalDiagnosticPath = "diagnostic"
-
-	// This is the time of golang was born to the world
-	GolangSecurityTime = "2006-01-02T15:04:05Z"
+var (
+	AppDatabase         = VarCheckpointStorageDbReplicaDefault
+	APPConflictDatabase = VarCheckpointStorageDbReplicaDefault + "_conflict"
 )
 
 func init() {
@@ -62,7 +64,7 @@ func RunStatusMessage(status uint64) string {
 	}
 }
 
-func InitialLogger(logDir, logFile, level string, logBuffer bool, verbose bool) error {
+func InitialLogger(logDir, logFile, level string, logFlush bool, verbose bool) error {
 	logLevel := parseLogLevel(level)
 	if verbose {
 		LOG.AddFilter("console", logLevel, LOG.NewConsoleLogWriter())
@@ -79,7 +81,7 @@ func InitialLogger(logDir, logFile, level string, logBuffer bool, verbose bool) 
 	}
 
 	if len(logFile) != 0 {
-		if logBuffer {
+		if !logFlush {
 			LOG.LogBufferLength = 32
 		} else {
 			LOG.LogBufferLength = 0
@@ -126,4 +128,44 @@ func WritePid(id string) (err error) {
 
 func DelayFor(ms int64) {
 	YieldInMs(ms)
+}
+
+/**
+ * block password in mongo_urls:
+ * two kind mongo_urls:
+ * 1. mongodb://username:password@address
+ * 2. username:password@address
+ */
+func BlockMongoUrlPassword(url, replace string) string {
+	colon := strings.Index(url, ":")
+	if colon == -1 || colon == len(url)-1 {
+		return url
+	} else if url[colon+1] == '/' {
+		// find the second '/'
+		for colon++; colon < len(url); colon++ {
+			if url[colon] == ':' {
+				break
+			}
+		}
+
+		if colon == len(url) {
+			return url
+		}
+	}
+
+	at := strings.Index(url, "@")
+	if at == -1 || at == len(url)-1 || at <= colon {
+		return url
+	}
+
+	newUrl := make([]byte, 0, len(url))
+	for i := 0; i < len(url); i++ {
+		if i <= colon || i > at {
+			newUrl = append(newUrl, byte(url[i]))
+		} else if i == at {
+			newUrl = append(newUrl, []byte(replace)...)
+			newUrl = append(newUrl, byte(url[i]))
+		}
+	}
+	return string(newUrl)
 }

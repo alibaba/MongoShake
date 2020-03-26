@@ -32,13 +32,13 @@ type MongoConn struct {
 }
 
 func NewMongoConn(url string, connectMode string, timeout bool) (*MongoConn, error) {
-	if connectMode == ConnectModeStandalone {
+	if connectMode == VarMongoConnectModeStandalone {
 		url += "?connect=direct"
 	}
 
 	session, err := mgo.Dial(url)
 	if err != nil {
-		LOG.Critical("Connect to %s failed. %v", url, err)
+		LOG.Critical("Connect to %s failed. %v", BlockMongoUrlPassword(url, "***"), err)
 		return nil, err
 	}
 	// maximum pooled connections. the overall established sockets
@@ -59,23 +59,23 @@ func NewMongoConn(url string, connectMode string, timeout bool) (*MongoConn, err
 	// Switch the session to a eventually behavior. In that case session
 	// may read for any secondary node. default mode is mgo.Strong
 	switch connectMode {
-	case ConnectModePrimary:
+	case VarMongoConnectModePrimary:
 		session.SetMode(mgo.Primary, true)
-	case ConnectModeSecondaryPreferred:
+	case VarMongoConnectModeSecondaryPreferred:
 		session.SetMode(mgo.SecondaryPreferred, true)
-	case ConnectModeStandalone:
+	case VarMongoConnectModeStandalone:
 		session.SetMode(mgo.Monotonic, true)
 	default:
 		err = fmt.Errorf("unknown connect mode[%v]", connectMode)
 		return nil, err
 	}
 
-	LOG.Info("New session to %s successfully", url)
+	LOG.Info("New session to %s successfully", BlockMongoUrlPassword(url, "***"))
 	return &MongoConn{Session: session, URL: url}, nil
 }
 
 func (conn *MongoConn) Close() {
-	LOG.Info("Close session with %s", conn.URL)
+	LOG.Info("Close session with %s", BlockMongoUrlPassword(conn.URL, "***"))
 	conn.Session.Close()
 }
 
@@ -87,14 +87,29 @@ func (conn *MongoConn) IsGood() bool {
 	return true
 }
 
+func (conn *MongoConn) IsMongos() bool {
+	setName := conn.AcquireReplicaSetName()
+	return setName == ""
+}
+
 func (conn *MongoConn) AcquireReplicaSetName() string {
 	var replicaset struct {
 		Id string `bson:"set"`
 	}
 	if err := conn.Session.DB("admin").Run(bson.M{"replSetGetStatus": 1}, &replicaset); err != nil {
-		LOG.Warn("Replica set name not found in system.replset, %v", err)
+		LOG.Warn("Replica set name not found in system.replset: %v", err)
 	}
 	return replicaset.Id
+}
+
+func (conn *MongoConn) CurrentDate() bson.MongoTimestamp {
+	var replicaset struct {
+		OperationTime bson.MongoTimestamp `bson:"operationTime"`
+	}
+	if err := conn.Session.DB("admin").Run(bson.M{"replSetGetStatus": 1}, &replicaset); err != nil {
+		LOG.Warn("OperationTime not found in system.replset, but it's ok if server is mongos: %v", err)
+	}
+	return replicaset.OperationTime
 }
 
 func (conn *MongoConn) HasOplogNs() bool {
