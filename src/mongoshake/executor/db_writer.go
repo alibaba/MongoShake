@@ -344,9 +344,14 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 	}
 
 	if _, err := bulk.Run(); err != nil {
+		// parse error
+		index, errMsg, dup := utils.FindFirstErrorIndexAndMessage(err.Error())
+		LOG.Error("detail error info with index[%v] msg[%v] dup[%v]", index, errMsg, dup)
 		if mgo.IsDup(err) {
 			HandleDuplicated(bw.session.DB(database).C(collection), oplogs, OpUpdate)
-			return nil
+			// create single writer to write one by one
+			sw := NewDbWriter(bw.session, bson.M{}, false)
+			return sw.doUpdate(database, collection, metadata, oplogs[index:], upsert)
 		}
 		return fmt.Errorf("doUpdate run upsert/update[%v] failed[%v]", upsert, err)
 	}
@@ -506,7 +511,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 				errMsgs = append(errMsgs, errMsg)
 			}
 
-			LOG.Debug("writer: upsert %v", log.original.partialLog.Dump(nil, true))
+			LOG.Debug("writer: upsert %v", log.original.partialLog)
 		}
 	} else {
 		for _, log := range oplogs {
@@ -519,7 +524,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 			err := collectionHandle.Update(log.original.partialLog.Query, newObject)
 			if err != nil {
 				if utils.IsNotFound(err) {
-					LOG.Warn("doUpdate[update] data[%v] not found", log.original.partialLog.Query)
+					return fmt.Errorf("doUpdate[update] data[%v] not found", log.original.partialLog.Query)
 				} else if mgo.IsDup(err) {
 					HandleDuplicated(collectionHandle, oplogs, OpUpdate)
 				} else {
@@ -529,7 +534,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 				}
 			}
 
-			LOG.Debug("writer: update %v", log.original.partialLog.Dump(nil, true))
+			LOG.Debug("writer: update %v", log.original.partialLog)
 		}
 	}
 
