@@ -1,7 +1,7 @@
 2020-03-27 Alibaba Cloud.
 	* version: 2.0.10
 	* BUGFIX: data may lost when using batch update meets duplicate error.
-
+  
 2020-03-15 Alibaba Cloud.
 	* version: 2.0.9
 	* BUGFIX: transform namespace bug. see #302. thanks monkeyWie.
