@@ -275,8 +275,8 @@ func NewDBSyncer(
 
 func (syncer *DBSyncer) String() string {
 	return fmt.Sprintf("DBSyncer id[%v] source[%v] target[%v] startTime[%v]",
-		syncer.id, utils.BlockMongoUrlPassword(syncer.FromMongoUrl, "***"), syncer.ToMongoUrl,
-		syncer.startTime)
+		syncer.id, utils.BlockMongoUrlPassword(syncer.FromMongoUrl, "***"),
+		utils.BlockMongoUrlPassword(syncer.ToMongoUrl, "***"), syncer.startTime)
 }
 
 func (syncer *DBSyncer) GetIndexMap() map[utils.NS][]mgo.Index {
