@@ -118,16 +118,16 @@ func (er *ExampleReplayer) handler() {
 		}
 
 		// parse batched message
-		oplogs := make([]*oplog.PartialLog, len(msg.message.RawLogs))
+		oplogs := make([]oplog.ParsedLog, len(msg.message.RawLogs))
 		for i, raw := range msg.message.RawLogs {
-			oplogs[i] = new(oplog.PartialLog)
-			if err := bson.Unmarshal(raw, oplogs[i]); err != nil {
+			oplogs[i] = oplog.ParsedLog{}
+			if err := bson.Unmarshal(raw, &oplogs[i]); err != nil {
 				// impossible switch, need panic and exit
 				LOG.Crashf("unmarshal oplog[%v] failed[%v]", raw, err)
 				return
 			}
-			oplogs[i].RawSize = len(raw)
 			LOG.Info(oplogs[i]) // just print for test, users can modify to fulfill different needs
+			// fmt.Println(oplogs[i])
 		}
 
 		if callback := msg.completion; callback != nil {

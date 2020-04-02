@@ -55,7 +55,7 @@ func main() {
 		crash(fmt.Sprintf("initial log.dir[%v] log.name[%v] failed[%v].", conf.Options.LogDirectory,
 			conf.Options.LogFileName, err), -2)
 	}
-	nimo.Profiling(int(conf.Options.SystemProfile))
+	nimo.Profiling(int(conf.Options.SystemProfilePort))
 	signalProfile, _ := strconv.Atoi(utils.SIGNALPROFILE)
 	signalStack, _ := strconv.Atoi(utils.SIGNALSTACK)
 	if signalProfile > 0 {
