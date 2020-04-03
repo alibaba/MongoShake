@@ -10,9 +10,9 @@ var (
 )
 
 func FullSyncInitHttpApi(port int) {
-	FullSyncHttpApi = nimo.NewHttpRestProvdier(port)
+	FullSyncHttpApi = nimo.NewHttpRestProvider(port)
 }
 
 func IncrSyncInitHttpApi(port int) {
-	IncrSyncHttpApi = nimo.NewHttpRestProvdier(port)
+	IncrSyncHttpApi = nimo.NewHttpRestProvider(port)
 }

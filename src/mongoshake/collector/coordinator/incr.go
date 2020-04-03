@@ -46,10 +46,12 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	}
 
 	// start http server
-	if err := utils.IncrSyncHttpApi.Listen(); err != nil {
-		LOG.Critical("start incr sync server with port[%v] failed: %v", conf.Options.IncrSyncHTTPListenPort,
-			err)
-	}
+	nimo.GoRoutine(func(){
+		if err := utils.IncrSyncHttpApi.Listen(); err != nil {
+			LOG.Critical("start incr sync server with port[%v] failed: %v", conf.Options.IncrSyncHTTPListenPort,
+				err)
+		}
+	})
 
 	return nil
 }

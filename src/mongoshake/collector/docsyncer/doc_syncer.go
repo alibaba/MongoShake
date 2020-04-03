@@ -472,7 +472,7 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 // restful api
 func (syncer *DBSyncer) RestAPI() {
 	type OverviewInfo struct {
-		Progress             string               `json:"progress"`                     // synced_collection_number / total_collection_number
+		Progress             string            `json:"progress"`                     // synced_collection_number / total_collection_number
 		TotalCollection      int               `json:"total_collection_number"`      // total collection
 		FinishedCollection   int               `json:"finished_collection_number"`   // finished
 		ProcessingCollection int               `json:"processing_collection_number"` // in processing

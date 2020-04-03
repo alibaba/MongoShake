@@ -59,10 +59,10 @@ func checkDefaultValue() error {
 	}
 
 	if conf.Options.FullSyncHTTPListenPort <= 0 {
-		conf.Options.FullSyncHTTPListenPort = 9100
+		conf.Options.FullSyncHTTPListenPort = 9101
 	}
 	if conf.Options.IncrSyncHTTPListenPort <= 0 {
-		conf.Options.IncrSyncHTTPListenPort = 9101
+		conf.Options.IncrSyncHTTPListenPort = 9100
 	}
 	if conf.Options.SystemProfilePort <= 0 {
 		conf.Options.SystemProfilePort = 9200

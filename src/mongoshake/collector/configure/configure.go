@@ -109,6 +109,9 @@ func GetSafeOptions() Configuration {
 	// modify mongo_s_url
 	polish.MongoSUrl = utils.BlockMongoUrlPassword(Options.MongoSUrl, "***")
 	// modify tunnel.address
+	for i := range Options.TunnelAddress {
+		polish.TunnelAddress[i] = utils.BlockMongoUrlPassword(Options.TunnelAddress[i], "***")
+	}
 	for i := range Options.IncrSyncTunnelAddress {
 		polish.IncrSyncTunnelAddress[i] = utils.BlockMongoUrlPassword(Options.IncrSyncTunnelAddress[i], "***")
 	}
