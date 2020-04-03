@@ -3,10 +3,12 @@ package coordinator
 import (
 	"errors"
 
+	"mongoshake/common"
 	"mongoshake/collector"
 	"mongoshake/collector/configure"
 
 	"github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 )
 
 func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition, fullSyncFinishPosition int64) error {
@@ -42,5 +44,12 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	for _, syncer := range coordinator.syncerGroup {
 		go syncer.Start()
 	}
+
+	// start http server
+	if err := utils.IncrSyncHttpApi.Listen(); err != nil {
+		LOG.Critical("start incr sync server with port[%v] failed: %v", conf.Options.IncrSyncHTTPListenPort,
+			err)
+	}
+
 	return nil
 }

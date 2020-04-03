@@ -67,7 +67,7 @@ func main() {
 
 	conf.Options.Version = utils.BRANCH
 
-	nimo.Profiling(int(conf.Options.SystemProfile))
+	nimo.Profiling(int(conf.Options.SystemProfilePort))
 	signalProfile, _ := strconv.Atoi(utils.SIGNALPROFILE)
 	signalStack, _ := strconv.Atoi(utils.SIGNALSTACK)
 	if signalProfile > 0 {
@@ -90,12 +90,17 @@ func startup() {
 	selectLeader()
 
 	// initialize http api
-	utils.InitHttpApi(conf.Options.HTTPListenPort)
+	utils.FullSyncInitHttpApi(conf.Options.FullSyncHTTPListenPort)
+	utils.IncrSyncInitHttpApi(conf.Options.IncrSyncHTTPListenPort)
 	coordinator := &coordinator.ReplicationCoordinator{
 		MongoD: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
 	}
 
-	utils.HttpApi.RegisterAPI("/conf", nimo.HttpGet, func([]byte) interface{} {
+	// register conf
+	utils.FullSyncHttpApi.RegisterAPI("/conf", nimo.HttpGet, func([]byte) interface{} {
+		return conf.GetSafeOptions()
+	})
+	utils.IncrSyncHttpApi.RegisterAPI("/conf", nimo.HttpGet, func([]byte) interface{} {
 		return conf.GetSafeOptions()
 	})
 
@@ -131,11 +136,12 @@ func startup() {
 	}
 
 	// if the sync mode is "document", mongoshake should exit here.
-	if conf.Options.SyncMode != utils.VarSyncModeFull {
-		if err := utils.HttpApi.Listen(); err != nil {
-			LOG.Critical("Coordinator http api listen failed. %v", err)
-		}
+	if conf.Options.SyncMode == utils.VarSyncModeFull {
+		return
 	}
+
+	// do not exit
+	select{}
 }
 
 func selectLeader() {

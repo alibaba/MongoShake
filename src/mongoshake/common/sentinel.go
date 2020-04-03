@@ -22,11 +22,11 @@ type Sentinel struct {
 }
 
 func (sentinel *Sentinel) Register() {
-	HttpApi.RegisterAPI("/sentinel", nimo.HttpGet, func([]byte) interface{} {
+	IncrSyncHttpApi.RegisterAPI("/sentinel", nimo.HttpGet, func([]byte) interface{} {
 		return SentinelOptions
 	})
 
-	HttpApi.RegisterAPI("/sentinel/options", nimo.HttpPost, func(body []byte) interface{} {
+	IncrSyncHttpApi.RegisterAPI("/sentinel/options", nimo.HttpPost, func(body []byte) interface{} {
 		// check the exist of every option. options will be configured only
 		// if all the header kv pair are exist! this means that we ensure the
 		// operation consistency

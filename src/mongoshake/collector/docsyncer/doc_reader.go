@@ -14,41 +14,64 @@ import (
 	"math"
 )
 
-func GetAllNamespace(sources []*utils.MongoSource) (map[utils.NS]bool, error) {
-	nsSet := make(map[utils.NS]bool)
+/**
+ * return all namespace. return:
+ *     @map[utils.NS]struct{}: namespace set where key is the namespace while value is useless, e.g., "a.b"->nil, "a.c"->nil
+ *     @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}
+ *     @error: error info
+ */
+func GetAllNamespace(sources []*utils.MongoSource) (map[utils.NS]struct{}, map[string][]string, error) {
+	nsSet := make(map[utils.NS]struct{})
 	for _, src := range sources {
-		nsList, err := getDbNamespace(src.URL)
+		nsList, _, err := getDbNamespace(src.URL)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, ns := range nsList {
-			nsSet[ns] = true
+			nsSet[ns] = struct{}{}
 		}
 	}
-	return nsSet, nil
+
+	// copy
+	nsMap := make(map[string][]string, len(sources))
+	for ns := range nsSet {
+		if _, ok := nsMap[ns.Database]; !ok {
+			nsMap[ns.Database] = make([]string, 0)
+		}
+		nsMap[ns.Database] = append(nsMap[ns.Database], ns.Collection)
+	}
+
+	return nsSet, nsMap, nil
 }
 
-func getDbNamespace(url string) (nsList []utils.NS, err error) {
+/**
+ * return db namespace. return:
+ *     @[]utils.NS: namespace list, e.g., []{"a.b", "a.c"}
+ *     @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}
+ *     @error: error info
+ */
+func getDbNamespace(url string) ([]utils.NS, map[string][]string, error) {
+	var err error
 	var conn *utils.MongoConn
 	if conn, err = utils.NewMongoConn(url, utils.VarMongoConnectModeSecondaryPreferred, true); conn == nil || err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer conn.Close()
 
 	var dbNames []string
 	if dbNames, err = conn.Session.DatabaseNames(); err != nil {
 		err = fmt.Errorf("get database names of mongodb url=%s error. %v", url, err)
-		return nil, err
+		return nil, nil, err
 	}
 
 	filterList := filter.NewDocFilterList()
 
-	nsList = make([]utils.NS, 0, 128)
+	nsList := make([]utils.NS, 0, 128)
 	for _, db := range dbNames {
 		colNames, err := conn.Session.DB(db).CollectionNames()
 		if err != nil {
 			err = fmt.Errorf("get collection names of mongodb url=%s error. %v", url, err)
-			return nil, err
+			return nil, nil, err
 		}
 		for _, col := range colNames {
 			ns := utils.NS{Database: db, Collection: col}
@@ -63,7 +86,16 @@ func getDbNamespace(url string) (nsList []utils.NS, err error) {
 		}
 	}
 
-	return nsList, nil
+	// copy, convert nsList to map
+	nsMap := make(map[string][]string, 0)
+	for _, ns := range nsList {
+		if _, ok := nsMap[ns.Database]; !ok {
+			nsMap[ns.Database] = make([]string, 0)
+		}
+		nsMap[ns.Database] = append(nsMap[ns.Database], ns.Collection)
+	}
+
+	return nsList, nsMap, nil
 }
 
 /*************************************************/
@@ -73,16 +105,16 @@ type DocumentSplitter struct {
 	ns          utils.NS             // namespace
 	conn        *utils.MongoConn     // connection
 	readerChan  chan *DocumentReader // reader chan
-	pieceSize   int                  // each piece max size
-	count       int                  // total document number
+	pieceSize   uint64               // each piece max size
+	count       uint64               // total document number
 	pieceNumber int                  // how many piece
 }
 
 func NewDocumentSplitter(src string, ns utils.NS) *DocumentSplitter {
 	ds := &DocumentSplitter{
-		src:        src,
-		ns:         ns,
-		pieceSize:  conf.Options.FullSyncReaderReadDocumentCount,
+		src:       src,
+		ns:        ns,
+		pieceSize: conf.Options.FullSyncReaderReadDocumentCount,
 	}
 
 	// create connection
@@ -94,11 +126,12 @@ func NewDocumentSplitter(src string, ns utils.NS) *DocumentSplitter {
 	}
 
 	// get total count
-	ds.count, err = ds.conn.Session.DB(ds.ns.Database).C(ds.ns.Collection).Count()
+	count, err := ds.conn.Session.DB(ds.ns.Database).C(ds.ns.Collection).Count()
 	if err != nil {
 		LOG.Error("splitter[%s] connection mongo[%v] failed[%v]", ds, ds.src, err)
 		return nil
 	}
+	ds.count = uint64(count)
 
 	if ds.pieceSize <= 0 {
 		ds.pieceNumber = 1
@@ -156,12 +189,12 @@ func (ds *DocumentSplitter) Run() error {
 			query["_id"] = bson.M{"$gt": start}
 		}
 
-		// find the right boundary
+		// find the right boundary. the parameter of Skip() is int, what if overflow?
 		err := ds.conn.Session.DB(ds.ns.Database).C(ds.ns.Collection).Find(query).Sort("_id").
-			Skip(windowSize - 1).Limit(1).One(&result)
+			Skip(int(windowSize - 1)).Limit(1).One(&result)
 		if err != nil {
 			return fmt.Errorf("splitter[%s] piece[%d] with query[%v] and skip[%v] fetch boundary failed[%v]",
-				ds, i, query, windowSize - 1, err)
+				ds, i, query, windowSize-1, err)
 		}
 
 		end := result["_id"]

@@ -85,7 +85,7 @@ func TestDeserializer(t *testing.T) {
 		nr++
 
 		conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodChangeStream
-		conf.Options.IncrSyncTunnel = utils.VarIncrSyncTunnelRpc
+		conf.Options.Tunnel = utils.VarTunnelRpc
 
 		syncer := &OplogSyncer{}
 		syncer.startDeserializer()

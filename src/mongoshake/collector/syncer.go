@@ -364,9 +364,9 @@ func (sync *OplogSyncer) deserializer(index int) {
 	var combiner func(raw []byte, log *oplog.PartialLog) *oplog.GenericOplog
 	// change stream && !direct && !(kafka & json)
 	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream &&
-		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelDirect &&
-		!(conf.Options.IncrSyncTunnel == utils.VarIncrSyncTunnelKafka &&
-			conf.Options.IncrSyncTunnelMessage == utils.VarIncrSyncTunnelMessageJson) {
+		conf.Options.Tunnel != utils.VarTunnelDirect &&
+		!(conf.Options.Tunnel == utils.VarTunnelKafka &&
+			conf.Options.TunnelMessage == utils.VarTunnelMessageJson) {
 		// very time consuming!
 		combiner = func(raw []byte, log *oplog.PartialLog) *oplog.GenericOplog {
 			if out, err := bson.Marshal(log.ParsedLog); err != nil {
@@ -522,7 +522,7 @@ func (sync *OplogSyncer) RestAPI() {
 	}
 
 	// total replication info
-	utils.HttpApi.RegisterAPI("/repl", nimo.HttpGet, func([]byte) interface{} {
+	utils.IncrSyncHttpApi.RegisterAPI("/repl", nimo.HttpGet, func([]byte) interface{} {
 		return &Info{
 			Who:         conf.Options.Id,
 			Tag:         utils.BRANCH,
@@ -558,7 +558,7 @@ func (sync *OplogSyncer) RestAPI() {
 		PersisterBufferUsed int          `json:"persister_buffer_used"`
 	}
 
-	utils.HttpApi.RegisterAPI("/queue", nimo.HttpGet, func([]byte) interface{} {
+	utils.IncrSyncHttpApi.RegisterAPI("/queue", nimo.HttpGet, func([]byte) interface{} {
 		queue := make([]InnerQueue, calculatePendingQueueConcurrency())
 		for i := 0; i < len(queue); i++ {
 			queue[i] = InnerQueue{

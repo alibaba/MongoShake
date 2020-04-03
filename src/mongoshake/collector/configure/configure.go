@@ -13,8 +13,9 @@ type Configuration struct {
 	// 1. global
 	Id                          string   `config:"id"`
 	MasterQuorum                bool     `config:"master_quorum"`
-	HTTPListenPort              int      `config:"http_profile"`
-	SystemProfile               int      `config:"system_profile"`
+	FullSyncHTTPListenPort      int      `config:"full_sync.http_port"`
+	IncrSyncHTTPListenPort      int      `config:"incr_sync.http_port"`
+	SystemProfilePort           int      `config:"system_profile_port"`
 	LogLevel                    string   `config:"log.level"`
 	LogDirectory                string   `config:"log.dir"`
 	LogFileName                 string   `config:"log.file"`
@@ -24,6 +25,9 @@ type Configuration struct {
 	MongoCsUrl                  string   `config:"mongo_cs_url"`
 	MongoSUrl                   string   `config:"mongo_s_url"`
 	MongoConnectMode            string   `config:"mongo_connect_mode"`
+	Tunnel                      string   `config:"tunnel"`
+	TunnelAddress               []string `config:"tunnel.address"`
+	TunnelMessage               string   `config:"tunnel.message"`
 	FilterNamespaceBlack        []string `config:"filter.namespace.black"`
 	FilterNamespaceWhite        []string `config:"filter.namespace.white"`
 	FilterPassSpecialDb         []string `config:"filter.pass.special.db"`
@@ -37,7 +41,7 @@ type Configuration struct {
 	// 2. full sync
 	FullSyncReaderCollectionParallel     int    `config:"full_sync.reader.collection_parallel"`
 	FullSyncReaderWriteDocumentParallel  int    `config:"full_sync.reader.write_document_parallel"`
-	FullSyncReaderReadDocumentCount      int    `config:"full_sync.reader.read_document_count"`
+	FullSyncReaderReadDocumentCount      uint64 `config:"full_sync.reader.read_document_count"`
 	FullSyncReaderDocumentBatchSize      int    `config:"full_sync.reader.document_batch_size"`
 	FullSyncCollectionDrop               bool   `config:"full_sync.collection_exist_no_drop"`
 	FullSyncCreateIndex                  string `config:"full_sync.create_index"`
@@ -56,9 +60,6 @@ type Configuration struct {
 	IncrSyncWorkerBatchQueueSize      uint64   `config:"incr_sync.worker.batch_queue_size"`
 	IncrSyncAdaptiveBatchingMaxSize   int      `config:"incr_sync.adaptive.batching_max_size"`
 	IncrSyncFetcherBufferCapacity     int      `config:"incr_sync.fetcher.buffer_capacity"`
-	IncrSyncTunnel                    string   `config:"incr_sync.tunnel"`
-	IncrSyncTunnelAddress             []string `config:"incr_sync.tunnel.address"`
-	IncrSyncTunnelMessage             string   `config:"incr_sync.tunnel.message"`
 	IncrSyncExecutorUpsert            bool     `config:"incr_sync.executor.upsert"`
 	IncrSyncExecutorInsertOnDupUpdate bool     `config:"incr_sync.executor.insert_on_dup_update"`
 	IncrSyncConflictWriteTo           string   `config:"incr_sync.conflict_write_to"`
@@ -74,7 +75,7 @@ type Configuration struct {
 	IncrSyncExecutorDebug    bool   `config:"incr_sync.executor.debug"` // !ReplayerDurable
 	IncrSyncReaderDebug      string `config:"incr_sync.reader.debug"`
 	IncrSyncCollisionEnable  bool   `config:"incr_sync.collision_detection"`
-	IncrSyncReaderBufferTime uint   `config:"incr_sycn.reader.buffer_time"`
+	IncrSyncReaderBufferTime uint   `config:"incr_sync.reader.buffer_time"`
 
 	/*---------------------------------------------------------*/
 	// generated variables
@@ -82,6 +83,11 @@ type Configuration struct {
 
 	/*---------------------------------------------------------*/
 	// deprecate variables
+	IncrSyncTunnel        string   `config:"incr_sync.tunnel"`         // deprecate since v2.4.1
+	IncrSyncTunnelAddress []string `config:"incr_sync.tunnel.address"` // deprecate since v2.4.1
+	IncrSyncTunnelMessage string   `config:"incr_sync.tunnel.message"` // deprecate since v2.4.1
+	HTTPListenPort        int      `config:"http_profile"`             // deprecate since v2.4.1
+	SystemProfile         int      `config:"system_profile"`           // deprecate since v2.4.1
 }
 
 func (configuration *Configuration) IsShardCluster() bool {

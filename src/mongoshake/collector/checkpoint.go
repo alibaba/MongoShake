@@ -88,7 +88,7 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 	// in AckRequired() tunnel. such as "rpc". While collector is restarted,
 	// we can't get the correct worker ack offset since collector have lost
 	// the unack offset...
-	if !flush && conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelDirect &&
+	if !flush && conf.Options.Tunnel != utils.VarTunnelDirect &&
 		now.Before(sync.startTime.Add(1 * time.Minute)) {
 		// LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
 		return

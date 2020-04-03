@@ -333,6 +333,7 @@
 			"revisionTime": "2020-02-14T19:38:18Z"
 		},
 		{
+			"checksumSHA1": "fGwZghT99g9ykPPrek6AEY5WixU=",
 			"path": "go.mongodb.org/mongo-driver/x/mongo/driver/auth/internal/gssapi",
 			"revision": "71e2e0ee13c968fd7b05a1259714b80e0bf2b4e2"
 		},

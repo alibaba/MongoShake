@@ -38,17 +38,17 @@ const (
 	VarIncrSyncWorkerOplogCompressorSnappy  = "snappy"
 
 	// incr_sync.tunnel
-	VarIncrSyncTunnelDirect = "direct"
-	VarIncrSyncTunnelRpc    = "rpc"
-	VarIncrSyncTunnelFile   = "file"
-	VarIncrSyncTunnelTcp    = "tcp"
-	VarIncrSyncTunnelKafka  = "kafka"
-	VarIncrSyncTunnelMock   = "mock"
+	VarTunnelDirect = "direct"
+	VarTunnelRpc    = "rpc"
+	VarTunnelFile   = "file"
+	VarTunnelTcp    = "tcp"
+	VarTunnelKafka  = "kafka"
+	VarTunnelMock   = "mock"
 
 	// incr_sync.tunnel.message
-	VarIncrSyncTunnelMessageRaw  = "raw"
-	VarIncrSyncTunnelMessageJson = "json"
-	VarIncrSyncTunnelMessageBson = "bson"
+	VarTunnelMessageRaw  = "raw"
+	VarTunnelMessageJson = "json"
+	VarTunnelMessageBson = "bson"
 
 	// incr_sync.conflict_write_to
 	VarIncrSyncConflictWriteToNone = "none"

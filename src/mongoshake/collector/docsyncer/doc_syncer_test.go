@@ -377,10 +377,10 @@ func TestStartDropDestCollection(t *testing.T) {
 		err = conn.Session.DB("test").C("c3").Insert(bson.M{"c":1})
 		assert.Equal(t, nil, err, "should be equal")
 
-		nsSet := map[utils.NS]bool {}
-		nsSet[utils.NS{Database: "test", Collection:"c1"}] = true
-		nsSet[utils.NS{Database: "test", Collection:"c4"}] = true
-		nsSet[utils.NS{Database: "test", Collection:"c5"}] = true
+		nsSet := map[utils.NS]struct{}{}
+		nsSet[utils.NS{Database: "test", Collection:"c1"}] = struct{}{}
+		nsSet[utils.NS{Database: "test", Collection:"c4"}] = struct{}{}
+		nsSet[utils.NS{Database: "test", Collection:"c5"}] = struct{}{}
 
 		conf.Options.FullSyncCollectionDrop = true
 		nsTrans := transform.NewNamespaceTransform([]string{"test.c4:test.c3"})
@@ -420,10 +420,10 @@ func TestStartDropDestCollection(t *testing.T) {
 		err = conn.Session.DB("test").C("c3").Insert(bson.M{"c":1})
 		assert.Equal(t, nil, err, "should be equal")
 
-		nsSet := map[utils.NS]bool {}
-		nsSet[utils.NS{Database: "test", Collection:"c1"}] = true
-		nsSet[utils.NS{Database: "test", Collection:"c4"}] = true
-		nsSet[utils.NS{Database: "test", Collection:"c5"}] = true
+		nsSet := map[utils.NS]struct{} {}
+		nsSet[utils.NS{Database: "test", Collection:"c1"}] = struct{}{}
+		nsSet[utils.NS{Database: "test", Collection:"c4"}] = struct{}{}
+		nsSet[utils.NS{Database: "test", Collection:"c5"}] = struct{}{}
 
 		conf.Options.FullSyncCollectionDrop = false
 		nsTrans := transform.NewNamespaceTransform([]string{"test.c4:test.c3"})

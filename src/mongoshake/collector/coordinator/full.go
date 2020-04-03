@@ -18,6 +18,10 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
+var (
+
+)
+
 func fetchChunkMap(isSharding bool) (sharding.ShardingChunkMap, error) {
 	// return directly if source is replica set or fetch method is change stream
 	if !isSharding || conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
@@ -80,10 +84,11 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 
 	// get all namespace need to sync
-	nsSet, err := docsyncer.GetAllNamespace(coordinator.RealSource)
+	nsSet, _, err := docsyncer.GetAllNamespace(coordinator.RealSource)
 	if err != nil {
 		return err
 	}
+	LOG.Info("all namespace: %v", nsSet)
 
 	// get current newest timestamp
 	ckptMap, err := getTimestampMap(coordinator.MongoD)
@@ -92,14 +97,14 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 
 	// create target client
-	toUrl := conf.Options.IncrSyncTunnelAddress[0]
+	toUrl := conf.Options.TunnelAddress[0]
 	var toConn *utils.MongoConn
 	if toConn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, true); err != nil {
 		return err
 	}
 	defer toConn.Close()
 
-	// crate namespace transform
+	// create namespace transform
 	trans := transform.NewNamespaceTransform(conf.Options.TransformNamespace)
 
 	// drop target collection if possible
@@ -115,6 +120,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		}
 	}
 
+	// start sync each db
 	var wg sync.WaitGroup
 	var replError error
 	var mutex sync.Mutex
@@ -132,7 +138,9 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		}
 
 		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl, trans, orphanFilter)
+		dbSyncer.Init()
 		LOG.Info("document syncer-%d do replication for url=%v", i, src.URL)
+
 		wg.Add(1)
 		nimo.GoRoutine(func() {
 			defer wg.Done()
@@ -147,6 +155,17 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 			}
 		})
 	}
+
+	// start http server.
+	nimo.GoRoutine(func() {
+		// before starting, we must register all interface
+		if err := utils.FullSyncHttpApi.Listen(); err != nil {
+			LOG.Critical("start full sync server with port[%v] failed: %v", conf.Options.FullSyncHTTPListenPort,
+				err)
+		}
+	})
+
+	// wait all db finished
 	wg.Wait()
 	if replError != nil {
 		return replError

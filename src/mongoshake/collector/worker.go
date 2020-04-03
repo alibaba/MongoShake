@@ -252,7 +252,7 @@ func (worker *Worker) RestAPI() {
 		COUNT           uint64 `json:"count"`
 	}
 
-	utils.HttpApi.RegisterAPI("/worker", nimo.HttpGet, func([]byte) interface{} {
+	utils.IncrSyncHttpApi.RegisterAPI("/worker", nimo.HttpGet, func([]byte) interface{} {
 		return &WorkerInfo{
 			Id:              worker.id,
 			JobsQueued:      len(worker.queue),

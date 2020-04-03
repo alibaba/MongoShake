@@ -47,7 +47,7 @@ func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
 	return false
 }
 
-func StartDropDestCollection(nsSet map[utils.NS]bool, toConn *utils.MongoConn,
+func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoConn,
 	nsTrans *transform.NamespaceTransform) error {
 	for ns := range nsSet {
 		toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
@@ -233,6 +233,8 @@ func Checkpoint(ckptMap map[string]utils.TimestampNode) error {
 	return nil
 }
 
+/************************************************************************/
+// 1 shard -> 1 DBSyncer
 type DBSyncer struct {
 	// syncer id
 	id int
@@ -252,6 +254,10 @@ type DBSyncer struct {
 	mutex sync.Mutex
 
 	replMetric *utils.ReplicationMetric
+
+	// below are metric info
+	metricNsMapLock sync.Mutex
+	metricNsMap     map[utils.NS]*CollectionMetric // namespace map: db.collection -> collection metric
 }
 
 func NewDBSyncer(
@@ -268,6 +274,7 @@ func NewDBSyncer(
 		indexMap:     make(map[utils.NS][]mgo.Index),
 		nsTrans:      nsTrans,
 		orphanFilter: orphanFilter,
+		metricNsMap:  make(map[utils.NS]*CollectionMetric),
 	}
 
 	return syncer
@@ -279,6 +286,10 @@ func (syncer *DBSyncer) String() string {
 		utils.BlockMongoUrlPassword(syncer.ToMongoUrl, "***"), syncer.startTime)
 }
 
+func (syncer *DBSyncer) Init() {
+	syncer.RestAPI()
+}
+
 func (syncer *DBSyncer) GetIndexMap() map[utils.NS][]mgo.Index {
 	return syncer.indexMap
 }
@@ -287,13 +298,20 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	syncer.startTime = time.Now()
 	var wg sync.WaitGroup
 
-	nsList, err := getDbNamespace(syncer.FromMongoUrl)
+	// get all namespace
+	nsList, _, err := getDbNamespace(syncer.FromMongoUrl)
 	if err != nil {
 		return err
 	}
 
 	if len(nsList) == 0 {
 		LOG.Info("%s finish, but no data", syncer)
+		return
+	}
+
+	// create metric for each collection
+	for _, ns := range nsList {
+		syncer.metricNsMap[ns] = NewCollectionMetric()
 	}
 
 	collExecutorParallel := conf.Options.FullSyncReaderCollectionParallel
@@ -307,6 +325,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 		}
 	})
 
+	// run collection sync in parallel
 	var nsDoneCount int32 = 0
 	for i := 0; i < collExecutorParallel; i++ {
 		collExecutorId := GenerateCollExecutorId()
@@ -319,8 +338,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 
 				toNS := utils.NewNS(syncer.nsTrans.Transform(ns.Str()))
 
-				LOG.Info("%s collExecutor-%d sync ns %v to %v begin",
-					syncer, collExecutorId, ns, toNS)
+				LOG.Info("%s collExecutor-%d sync ns %v to %v begin", syncer, collExecutorId, ns, toNS)
 				err := syncer.collectionSync(collExecutorId, ns, toNS)
 				atomic.AddInt32(&nsDoneCount, 1)
 
@@ -344,6 +362,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	return syncError
 }
 
+// start sync single collection
 func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS utils.NS) error {
 	// writer
 	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS, syncer)
@@ -358,6 +377,11 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 	}
 	defer splitter.Close()
 
+	// metric
+	collectionMetric := syncer.metricNsMap[ns]
+	collectionMetric.CollectionStatus = StatusProcessing
+	collectionMetric.TotalCount = splitter.count
+
 	// run in several pieces
 	var wg sync.WaitGroup
 	wg.Add(splitter.pieceNumber)
@@ -369,7 +393,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 					break
 				}
 
-				if err := syncer.splitSync(reader, colExecutor); err != nil {
+				if err := syncer.splitSync(reader, colExecutor, collectionMetric); err != nil {
 					LOG.Crashf("%v", err)
 				}
 
@@ -393,10 +417,13 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 		syncer.indexMap[ns] = indexes
 	}
 
+	// set collection finish
+	collectionMetric.CollectionStatus = StatusFinish
+
 	return nil
 }
 
-func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *CollectionExecutor) error {
+func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *CollectionExecutor, collectionMetric *CollectionMetric) error {
 	bufferSize := conf.Options.FullSyncReaderDocumentBatchSize
 	buffer := make([]*bson.Raw, 0, bufferSize)
 	bufferByteSize := 0
@@ -407,11 +434,13 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 		if doc, err = reader.NextDoc(); err != nil {
 			return fmt.Errorf("splitter reader[%v] get next document failed: %v", reader, err)
 		} else if doc == nil {
+			atomic.AddUint64(&collectionMetric.FinishCount, uint64(len(buffer)))
 			colExecutor.Sync(buffer)
 			break
 		}
 
 		if bufferByteSize+len(doc.Data) > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
+			atomic.AddUint64(&collectionMetric.FinishCount, uint64(len(buffer)))
 			colExecutor.Sync(buffer)
 			buffer = make([]*bson.Raw, 0, bufferSize)
 			bufferByteSize = 0
@@ -437,4 +466,47 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 	LOG.Info("splitter reader[%v] finishes", reader)
 	reader.Close()
 	return nil
+}
+
+/************************************************************************/
+// restful api
+func (syncer *DBSyncer) RestAPI() {
+	type OverviewInfo struct {
+		Progress             string               `json:"progress"`                     // synced_collection_number / total_collection_number
+		TotalCollection      int               `json:"total_collection_number"`      // total collection
+		FinishedCollection   int               `json:"finished_collection_number"`   // finished
+		ProcessingCollection int               `json:"processing_collection_number"` // in processing
+		WaitCollection       int               `json:"wait_collection_number"`       // wait start
+		CollectionMetric     map[string]string `json:"collection_metric"`            // collection_name -> process
+	}
+
+	utils.FullSyncHttpApi.RegisterAPI("/progress", nimo.HttpGet, func([]byte) interface{} {
+		ret := OverviewInfo{
+			CollectionMetric: make(map[string]string),
+		}
+
+		syncer.metricNsMapLock.Lock()
+		defer syncer.metricNsMapLock.Unlock()
+
+		ret.TotalCollection = len(syncer.metricNsMap)
+		for ns, collectionMetric := range syncer.metricNsMap {
+			ret.CollectionMetric[ns.Str()] = collectionMetric.String()
+			switch collectionMetric.CollectionStatus {
+			case StatusWaitStart:
+				ret.WaitCollection += 1
+			case StatusProcessing:
+				ret.ProcessingCollection += 1
+			case StatusFinish:
+				ret.FinishedCollection += 1
+			}
+		}
+
+		if ret.TotalCollection == 0 {
+			ret.Progress = "100%"
+		} else {
+			ret.Progress = fmt.Sprintf("%.2f%%", float64(ret.FinishedCollection) / float64(ret.TotalCollection) * 100)
+		}
+
+		return ret
+	})
 }

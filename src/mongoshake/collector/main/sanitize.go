@@ -28,6 +28,27 @@ func SanitizeOptions() error {
 }
 
 func handleDeprecateConf() error {
+	// IncrSyncTunnel has deprecated since v2.4.1
+	if conf.Options.Tunnel == "" && conf.Options.IncrSyncTunnel != "" {
+		conf.Options.Tunnel = conf.Options.IncrSyncTunnel
+	}
+	// IncrSyncTunnelAddress has deprecated since v2.4.1
+	if len(conf.Options.TunnelAddress) == 0 && len(conf.Options.IncrSyncTunnelAddress) != 0 {
+		conf.Options.TunnelAddress = conf.Options.IncrSyncTunnelAddress
+	}
+	// IncrSyncTunnelMessage has deprecated since v2.4.1
+	if conf.Options.TunnelMessage == "" && conf.Options.IncrSyncTunnelMessage != "" {
+		conf.Options.TunnelMessage = conf.Options.IncrSyncTunnelMessage
+	}
+
+	// HTTPListenPort has deprecated since v2.4.1
+	if conf.Options.HTTPListenPort != 0 && conf.Options.IncrSyncHTTPListenPort == 0 {
+		conf.Options.IncrSyncHTTPListenPort = conf.Options.HTTPListenPort
+	}
+	// SystemProfile has deprecated since v2.4.1
+	if conf.Options.SystemProfile != 0 && conf.Options.SystemProfilePort == 0 {
+		conf.Options.SystemProfilePort = conf.Options.SystemProfile
+	}
 	return nil
 }
 
@@ -37,11 +58,14 @@ func checkDefaultValue() error {
 		conf.Options.Id = "mongoshake"
 	}
 
-	if conf.Options.HTTPListenPort <= 0 {
-		conf.Options.HTTPListenPort = 9100
+	if conf.Options.FullSyncHTTPListenPort <= 0 {
+		conf.Options.FullSyncHTTPListenPort = 9100
 	}
-	if conf.Options.SystemProfile <= 0 {
-		conf.Options.HTTPListenPort = 9200
+	if conf.Options.IncrSyncHTTPListenPort <= 0 {
+		conf.Options.IncrSyncHTTPListenPort = 9101
+	}
+	if conf.Options.SystemProfilePort <= 0 {
+		conf.Options.SystemProfilePort = 9200
 	}
 
 	if conf.Options.LogLevel == "" {
@@ -166,21 +190,21 @@ func checkDefaultValue() error {
 	if conf.Options.IncrSyncFetcherBufferCapacity <= 0 {
 		conf.Options.IncrSyncFetcherBufferCapacity = 256
 	}
-	if conf.Options.IncrSyncTunnel == "" {
-		conf.Options.IncrSyncTunnel = utils.VarIncrSyncTunnelDirect
-	} else if conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelDirect &&
-		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelRpc &&
-		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelTcp &&
-		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelFile &&
-		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelKafka &&
-		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelMock {
+	if conf.Options.Tunnel == "" {
+		conf.Options.Tunnel = utils.VarTunnelDirect
+	} else if conf.Options.Tunnel != utils.VarTunnelDirect &&
+		conf.Options.Tunnel != utils.VarTunnelRpc &&
+		conf.Options.Tunnel != utils.VarTunnelTcp &&
+		conf.Options.Tunnel != utils.VarTunnelFile &&
+		conf.Options.Tunnel != utils.VarTunnelKafka &&
+		conf.Options.Tunnel != utils.VarTunnelMock {
 		return fmt.Errorf("incr_sync.tunnel in {direct, rpc, tcp, file, kafka, mock}")
 	}
-	if conf.Options.IncrSyncTunnelMessage == "" {
-		conf.Options.IncrSyncTunnelMessage = utils.VarIncrSyncTunnelMessageRaw
-	} else if conf.Options.IncrSyncTunnelMessage != utils.VarIncrSyncTunnelMessageRaw &&
-		conf.Options.IncrSyncTunnelMessage != utils.VarIncrSyncTunnelMessageBson &&
-		conf.Options.IncrSyncTunnelMessage != utils.VarIncrSyncTunnelMessageJson {
+	if conf.Options.TunnelMessage == "" {
+		conf.Options.TunnelMessage = utils.VarTunnelMessageRaw
+	} else if conf.Options.TunnelMessage != utils.VarTunnelMessageRaw &&
+		conf.Options.TunnelMessage != utils.VarTunnelMessageBson &&
+		conf.Options.TunnelMessage != utils.VarTunnelMessageJson {
 		return fmt.Errorf("incr_sync.tunnel.message in {raw, bson, json}")
 	}
 	if conf.Options.IncrSyncExecutor <= 0 {
@@ -218,8 +242,8 @@ func checkConnection() error {
 	}
 
 	// check tunnel address
-	if conf.Options.IncrSyncTunnel == utils.VarIncrSyncTunnelDirect {
-		for _, mongo := range conf.Options.IncrSyncTunnelAddress {
+	if conf.Options.Tunnel == utils.VarTunnelDirect {
+		for _, mongo := range conf.Options.TunnelAddress {
 			_, err := utils.NewMongoConn(mongo, conf.Options.MongoConnectMode, true)
 			if err != nil {
 				return fmt.Errorf("connect target tunnel mongodb[%v] failed[%v]", mongo, err)
@@ -233,8 +257,9 @@ func checkConnection() error {
 func checkConflict() error {
 	/*****************************1. global settings******************************/
 	// http_profile & system_profile
-	conf.Options.HTTPListenPort = utils.MayBeRandom(conf.Options.HTTPListenPort)
-	conf.Options.SystemProfile = utils.MayBeRandom(conf.Options.SystemProfile)
+	conf.Options.FullSyncHTTPListenPort = utils.MayBeRandom(conf.Options.FullSyncHTTPListenPort)
+	conf.Options.IncrSyncHTTPListenPort = utils.MayBeRandom(conf.Options.IncrSyncHTTPListenPort)
+	conf.Options.SystemProfilePort = utils.MayBeRandom(conf.Options.SystemProfilePort)
 	// check mongo_cs_url
 	if conf.Options.MongoCsUrl == "" && len(conf.Options.MongoUrls) > 1 {
 		return fmt.Errorf("mongo_cs_url be config server address when source MongoDB is sharding")
@@ -280,16 +305,16 @@ func checkConflict() error {
 			return fmt.Errorf("DDL is not support for sharding when incr_sync.mongo_fetch_method == 'oplog'")
 		}
 	}
-	if conf.Options.IncrSyncTunnel == utils.VarIncrSyncTunnelDirect &&
+	if conf.Options.Tunnel == utils.VarTunnelDirect &&
 		conf.Options.IncrSyncWorkerOplogCompressor != utils.VarIncrSyncWorkerOplogCompressorNone {
 		conf.Options.IncrSyncWorkerOplogCompressor = utils.VarIncrSyncWorkerOplogCompressorNone
 	}
-	if len(conf.Options.IncrSyncTunnelAddress) == 0 &&
-		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelMock {
+	if len(conf.Options.TunnelAddress) == 0 &&
+		conf.Options.Tunnel != utils.VarTunnelMock {
 		return fmt.Errorf("incr_sync.tunnel.address shouldn't be empty when incr_sync.tunnel != 'mock'")
 	}
 	conf.Options.IncrSyncCollisionEnable = conf.Options.IncrSyncExecutor != 1
-	if conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelDirect &&
+	if conf.Options.Tunnel != utils.VarTunnelDirect &&
 		conf.Options.SyncMode != utils.VarSyncModeIncr {
 		return fmt.Errorf("full sync only support when tunnel type == direct")
 	}
@@ -321,7 +346,7 @@ func checkConflict() error {
 		conf.Options.MongoSUrl = ""
 	}
 	// set compressor to none when tunnel message is not 'raw'
-	if conf.Options.IncrSyncTunnelMessage != utils.VarIncrSyncTunnelMessageRaw {
+	if conf.Options.TunnelMessage != utils.VarTunnelMessageRaw {
 		if conf.Options.IncrSyncWorkerOplogCompressor != utils.VarIncrSyncWorkerOplogCompressorNone {
 			conf.Options.IncrSyncWorkerOplogCompressor = utils.VarIncrSyncWorkerOplogCompressorNone
 		}

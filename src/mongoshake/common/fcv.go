@@ -6,7 +6,7 @@ var (
 		FeatureCompatibleVersion: 1,
 	}
 	FcvConfiguration = Configuration{
-		CurrentVersion:           1,
+		CurrentVersion:           2,
 		FeatureCompatibleVersion: 1,
 	}
 
@@ -17,6 +17,7 @@ var (
 	LowestConfigurationVersion = map[int]string {
 		0: "1.0.0",
 		1: "2.4.0",
+		2: "2.4.1",
 	}
 )
 
