@@ -39,8 +39,22 @@ func (o *MetricDelta) Update() {
 
 type ReplicationStatus uint64
 
+const (
+	METRIC_NONE            = 0x0000000000000000
+	METRIC_CKPT_TIMES      = 0x0000000000000001
+	METRIC_TUNNEL_TRAFFIC  = 0x0000000000000010
+	METRIC_LSN             = 0x0000000000000100
+	METRIC_RETRANSIMISSION = 0x0000000000001000
+	METRIC_TPS             = 0x0000000000010000
+	METRIC_SUCCESS         = 0x0000000000100000
+	METRIC_WORKER          = 0x0000000001000000 // worker metric
+	METRIC_FULLSYNC_WRITE  = 0x0000000010000000 // full sync writer
+	METRIC_FILTER  = 0x0000000100000000
+)
+
 type ReplicationMetric struct {
 	NAME      string
+	STAGE     string
 	SUBSCRIBE uint64
 
 	OplogFilter     MetricDelta
@@ -49,6 +63,7 @@ type ReplicationMetric struct {
 	OplogApply      MetricDelta
 	OplogSuccess    MetricDelta
 	OplogFail       MetricDelta
+	OplogWriteFail  MetricDelta // full: write failed. currently, only used in full sync stage.
 	CheckpointTimes uint64
 	Retransmission  uint64
 	TunnelTraffic   uint64
@@ -63,30 +78,31 @@ type ReplicationMetric struct {
 
 	// replication status
 	ReplStatus ReplicationStatus
+
+	isClosed bool
 }
 
 //var Metric *ReplicationMetric
 
-func NewMetric(name string, subscribe uint64) *ReplicationMetric {
+func NewMetric(name, stage string, subscribe uint64) *ReplicationMetric {
 	metric := &ReplicationMetric{}
 	metric.NAME = name
+	metric.STAGE = stage
 	metric.SUBSCRIBE = subscribe
 	metric.startup()
 	return metric
 }
 
-const (
-	METRIC_NONE            = 0x0000000000000000
-	METRIC_CKPT_TIMES      = 0x0000000000000001
-	METRIC_TUNNEL_TRAFFIC  = 0x0000000000000010
-	METRIC_LSN_CKPT        = 0x0000000000000100
-	METRIC_RETRANSIMISSION = 0x0000000000001000
-	METRIC_TPS             = 0x0000000000010000
-	METRIC_SUCCESS         = 0x0000000000100000
-)
-
 func (metric *ReplicationMetric) init() {
 	metric.TableOperations = NewTableOps()
+}
+
+func (metric *ReplicationMetric) Close() {
+	metric.isClosed = true
+}
+
+func (metric *ReplicationMetric) String() string {
+	return fmt.Sprintf("name[%v] stage[%v]", metric.NAME, metric.STAGE)
 }
 
 func (metric *ReplicationMetric) resetEverySecond(items []*MetricDelta) {
@@ -102,6 +118,10 @@ func (metric *ReplicationMetric) startup() {
 		// items that need be reset
 		resetItems := []*MetricDelta{&metric.OplogSuccess}
 		for range time.NewTicker(1 * time.Second).C {
+			if metric.isClosed {
+				break
+			}
+
 			tick++
 			metric.resetEverySecond(resetItems)
 			if tick%FrequentInSeconds != 0 {
@@ -110,10 +130,20 @@ func (metric *ReplicationMetric) startup() {
 
 			ckpt := atomic.LoadUint64(&metric.CheckpointTimes)
 			lsnCkpt := atomic.LoadInt64(&metric.LSNCheckpoint)
-			retransimission := atomic.LoadUint64(&metric.Retransmission)
+			restrans := atomic.LoadUint64(&metric.Retransmission)
 			tps := atomic.LoadUint64(&metric.OplogSuccess.Delta)
 			success := atomic.LoadUint64(&metric.OplogSuccess.Value)
-			verbose := "[name=%s, filter=%d, get=%d, consume=%d, apply=%d, failed_times=%d"
+
+			verbose := "[name=%s, stage=%s, get=%d"
+			if metric.SUBSCRIBE&METRIC_FILTER != 0 {
+				verbose += fmt.Sprintf(", filter=%d", atomic.LoadUint64(&metric.OplogFilter.Value))
+			}
+			if metric.SUBSCRIBE&METRIC_WORKER != 0 {
+				verbose += fmt.Sprintf(", worker_consume=%d, worker_apply=%d, worker_failed_times=%d",
+					atomic.LoadUint64(&metric.OplogConsume.Value), // worker fetch
+					atomic.LoadUint64(&metric.OplogApply.Value),   // worker send
+					atomic.LoadUint64(&metric.OplogFail.Value)) // worker send fail
+			}
 			if metric.SUBSCRIBE&METRIC_SUCCESS != 0 {
 				verbose += fmt.Sprintf(", success=%d", success)
 			}
@@ -124,25 +154,29 @@ func (metric *ReplicationMetric) startup() {
 				verbose += fmt.Sprintf(", ckpt_times=%d", ckpt)
 			}
 			if metric.SUBSCRIBE&METRIC_RETRANSIMISSION != 0 {
-				verbose += fmt.Sprintf(", retransimit_times=%d", retransimission)
+				verbose += fmt.Sprintf(", retransimit_times=%d", restrans)
 			}
 			if metric.SUBSCRIBE&METRIC_TUNNEL_TRAFFIC != 0 {
 				verbose += fmt.Sprintf(", tunnel_traffic=%s", metric.getTunnelTraffic())
 			}
-			if metric.SUBSCRIBE&METRIC_LSN_CKPT != 0 {
-				verbose += fmt.Sprintf(", lsn_ckpt={%d,%s}", ExtractMongoTimestamp(lsnCkpt), TimestampToString(ExtractMongoTimestamp(lsnCkpt)))
+			if metric.SUBSCRIBE&METRIC_LSN != 0 {
+				verbose += fmt.Sprintf(", lsn_ckpt={%v,%s}",
+					ExtractTimestampForLog(lsnCkpt),
+					TimestampToString(ExtractMongoTimestamp(lsnCkpt)))
+				verbose += fmt.Sprintf(", lsn_ack={%d,%s}]",
+					ExtractMongoTimestamp(atomic.LoadInt64(&metric.LSNAck)),
+					TimestampToString(ExtractMongoTimestamp(atomic.LoadInt64(&metric.LSNAck))))
 			}
-			verbose += ", lsn_ack={%d,%s}]"
+			if metric.SUBSCRIBE&METRIC_FULLSYNC_WRITE != 0 {
+				verbose += fmt.Sprintf(", fail=%d", atomic.LoadUint64(&metric.OplogWriteFail.Value))
+			}
+			verbose += "]"
 
-			LOG.Info(verbose, metric.NAME,
-				atomic.LoadUint64(&metric.OplogFilter.Value),
-				atomic.LoadUint64(&metric.OplogGet.Value),
-				atomic.LoadUint64(&metric.OplogConsume.Value),
-				atomic.LoadUint64(&metric.OplogApply.Value),
-				atomic.LoadUint64(&metric.OplogFail.Value),
-				ExtractMongoTimestamp(atomic.LoadInt64(&metric.LSNAck)),
-				TimestampToString(ExtractMongoTimestamp(atomic.LoadInt64(&metric.LSNAck))))
+			LOG.Info(verbose, metric.NAME, metric.STAGE,
+				atomic.LoadUint64(&metric.OplogGet.Value))
 		}
+
+		LOG.Info("metric[%v] exit", metric)
 	}()
 }
 
@@ -245,6 +279,12 @@ func (metric *ReplicationMetric) AddTableOps(table string, n uint64) {
 func (metric *ReplicationMetric) TableOps() map[string]uint64 {
 	return metric.TableOperations.MakeCopy()
 }
+
+func (metric *ReplicationMetric) AddWriteFailed(incr uint64) {
+	atomic.AddUint64(&metric.OplogWriteFail.Value, incr)
+}
+
+/************************************************************/
 
 func forwardCas(v *int64, new int64) {
 	var current int64

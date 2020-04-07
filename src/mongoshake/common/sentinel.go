@@ -9,40 +9,85 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
-// SentinelOptions. option's value type should be
+const (
+	TypeFull = "full"
+	TypeIncr = "incr"
+)
+
+// IncrSentinelOptions. option's value type should be
 // String or Bool or Int64
-var SentinelOptions struct {
+// only used in incremental sync.
+var IncrSentinelOptions struct {
 	OplogDump      int64
 	DuplicatedDump bool
 	Pause          bool
 	TPS            int64
 }
 
+// only used in full sync.
+var FullSentinelOptions struct {
+	TPS int64
+}
+
 type Sentinel struct {
+	tp       string
+}
+
+func NewSentinel(tp string) *Sentinel {
+	return &Sentinel{
+		tp: tp,
+	}
+}
+
+func (sentinel *Sentinel) getOptions() interface{} {
+	switch sentinel.tp {
+	case TypeFull:
+		return &FullSentinelOptions
+	case TypeIncr:
+		return &IncrSentinelOptions
+	}
+
+	return nil
+}
+
+func (sentinel *Sentinel) getProvider() *nimo.HttpRestProvider {
+	switch sentinel.tp {
+	case TypeFull:
+		return FullSyncHttpApi
+	case TypeIncr:
+		return IncrSyncHttpApi
+	}
+
+	return nil
 }
 
 func (sentinel *Sentinel) Register() {
-	IncrSyncHttpApi.RegisterAPI("/sentinel", nimo.HttpGet, func([]byte) interface{} {
-		return SentinelOptions
+	provider := sentinel.getProvider()
+
+	provider.RegisterAPI("/sentinel", nimo.HttpGet, func([]byte) interface{} {
+		return sentinel.getOptions()
 	})
 
-	IncrSyncHttpApi.RegisterAPI("/sentinel/options", nimo.HttpPost, func(body []byte) interface{} {
+	provider.RegisterAPI("/sentinel/options", nimo.HttpPost, func(body []byte) interface{} {
 		// check the exist of every option. options will be configured only
 		// if all the header kv pair are exist! this means that we ensure the
 		// operation consistency
+
+		options := sentinel.getOptions()
+
 		kv := make(map[string]interface{})
 		if err := json.Unmarshal(body, &kv); err != nil {
 			LOG.Info("Register set options wrong format : %v", err)
 			return map[string]string{"sentinel": "request json options wrong format"}
 		}
 		for name := range kv {
-			if !reflect.ValueOf(&SentinelOptions).Elem().FieldByName(name).IsValid() {
+			if !reflect.ValueOf(options).Elem().FieldByName(name).IsValid() {
 				return map[string]string{"sentinel": fmt.Sprintf("%s is not exist", name)}
 			}
 		}
 
 		for name, value := range kv {
-			field := reflect.ValueOf(&SentinelOptions).Elem().FieldByName(name)
+			field := reflect.ValueOf(options).Elem().FieldByName(name)
 			switch field.Kind() {
 			case reflect.Bool:
 				if v, ok := value.(bool); ok {
@@ -64,6 +109,7 @@ func (sentinel *Sentinel) Register() {
 			}
 			return map[string]string{"sentinel": fmt.Sprintf("%s option isn't corret", name)}
 		}
+
 		return map[string]string{"sentinel": "success"}
 	})
 }

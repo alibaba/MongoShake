@@ -18,10 +18,6 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
-var (
-
-)
-
 func fetchChunkMap(isSharding bool) (sharding.ShardingChunkMap, error) {
 	// return directly if source is replica set or fetch method is change stream
 	if !isSharding || conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
@@ -120,6 +116,9 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		}
 	}
 
+	// global qps limit, all dbsyncer share only 1 Qos
+	qos := utils.StartQoS(0, int64(conf.Options.FullSyncReaderDocumentBatchSize), &utils.FullSentinelOptions.TPS)
+
 	// start sync each db
 	var wg sync.WaitGroup
 	var replError error
@@ -137,7 +136,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 			orphanFilter = filter.NewOrphanFilter(src.ReplicaName, dbChunkMap)
 		}
 
-		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl, trans, orphanFilter)
+		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, src.ReplicaName, toUrl, trans, orphanFilter, qos)
 		dbSyncer.Init()
 		LOG.Info("document syncer-%d do replication for url=%v", i, src.URL)
 
@@ -148,11 +147,14 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 				LOG.Critical("document replication for url=%v failed. %v", src.URL, err)
 				replError = err
 			}
+
 			mutex.Lock()
-			defer mutex.Unlock()
 			for ns, indexList := range dbSyncer.GetIndexMap() {
 				indexMap[ns] = indexList
 			}
+			mutex.Unlock()
+
+			dbSyncer.Close()
 		})
 	}
 

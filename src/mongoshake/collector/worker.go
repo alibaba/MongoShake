@@ -95,7 +95,7 @@ func (worker *Worker) shouldDelay() bool {
 func (worker *Worker) shouldStall() bool {
 	// suspend while system pause is set. This is always operated by outside
 	// manual system. It needs stopping here util turned off
-	return utils.SentinelOptions.Pause
+	return utils.IncrSentinelOptions.Pause
 }
 
 func (worker *Worker) findFirstAvailableBatch() []*oplog.GenericOplog {

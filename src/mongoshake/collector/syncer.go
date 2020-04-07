@@ -73,6 +73,9 @@ type OplogSyncer struct {
 	// data persist handler
 	persister *Persister
 
+	// qos
+	qos *utils.Qos
+
 	// timers for inner event
 	startTime time.Time
 	ckptTime  time.Time
@@ -109,6 +112,7 @@ func NewOplogSyncer(
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.Id, replset))),
 		reader: reader,
+		qos:    utils.StartQoS(0, 1, &utils.IncrSentinelOptions.TPS), // default is 0 which means do not limit
 	}
 
 	// concurrent level hasher
@@ -144,9 +148,15 @@ func NewOplogSyncer(
 }
 
 func (sync *OplogSyncer) Init() {
-	sync.replMetric = utils.NewMetric(sync.replset, utils.METRIC_CKPT_TIMES|
-		utils.METRIC_TUNNEL_TRAFFIC| utils.METRIC_LSN_CKPT| utils.METRIC_SUCCESS|
-		utils.METRIC_TPS| utils.METRIC_RETRANSIMISSION)
+	var options uint64 = utils.METRIC_CKPT_TIMES| utils.METRIC_LSN| utils.METRIC_SUCCESS|
+		utils.METRIC_TPS | utils.METRIC_FILTER
+	if conf.Options.Tunnel != utils.VarTunnelDirect {
+		options |= utils.METRIC_RETRANSIMISSION
+		options |= utils.METRIC_TUNNEL_TRAFFIC
+		options |= utils.METRIC_WORKER
+	}
+
+	sync.replMetric = utils.NewMetric(sync.replset, utils.TypeIncr, options)
 	sync.replMetric.ReplStatus.Update(utils.WorkGood)
 
 	sync.RestAPI()
@@ -419,28 +429,10 @@ func (sync *OplogSyncer) poll() {
 	sync.reader.SetQueryTimestampOnEmpty(checkpoint.Timestamp)
 	sync.reader.StartFetcher() // start reader fetcher if not exist
 
-	// every syncer should under the control of global rate limiter
-	rc := sync.rateController
-
 	for quorum.IsMaster() {
-		// SimpleRateController is too simple. the TPS flow may represent
-		// low -> high -> low.... and centralize to point time in somewhere
-		// However. not smooth is make sense in stream processing. This was
-		// more effected in request processing programing
-		//
-		//				    _             _
-		//		    	   / |           / |             <- peak
-		//			     /   |         /   |
-		//   _____/    |____/    |___    <-  controlled
-		//
-		//
-		// WARNING : in current version. we throttle the replicate tps in Receiver
-		// rather than limiting in Collector. since the real replication traffic happened
-		// in Receiver executor. Apparently it tends to change {SentinelOptions} in
-		// Receiver. The follows were kept for compatibility
-		if utils.SentinelOptions.TPS != 0 && rc.Control(utils.SentinelOptions.TPS, 1) {
-			utils.DelayFor(100)
-			continue
+		// limit the qps if enabled
+		if sync.qos.Limit > 0 {
+			<-sync.qos.Bucket
 		}
 
 		// only get one

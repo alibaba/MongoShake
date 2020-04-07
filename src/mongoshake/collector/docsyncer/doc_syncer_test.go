@@ -64,9 +64,14 @@ func TestDbSync(t *testing.T) {
 	assert.Equal(t, nil, err, "should be equal")
 
 	// init DocExecutor, ignore DBSyncer here
+	var meaningless int64 = 0
 	de := NewDocExecutor(0, &CollectionExecutor{
 		ns: utils.NS{Database: testDb, Collection: testCollection},
-	}, conn.Session, nil)
+	}, conn.Session, &DBSyncer{
+		qos: utils.StartQoS(0, 1, &meaningless),
+	})
+	assert.NotEqual(t, nil, de.syncer, "should be equal")
+	assert.NotEqual(t, nil, de.syncer.qos, "should be equal")
 
 	var nr int
 
@@ -224,6 +229,7 @@ func TestDbSync(t *testing.T) {
 		})
 		dbSyncer := &DBSyncer{
 			orphanFilter: of,
+			qos:          utils.StartQoS(0, 1, &meaningless),
 		}
 		de.syncer = dbSyncer
 

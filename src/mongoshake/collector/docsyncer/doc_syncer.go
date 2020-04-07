@@ -240,6 +240,7 @@ type DBSyncer struct {
 	id int
 	// source mongodb url
 	FromMongoUrl string
+	fromReplset string
 	// destination mongodb url
 	ToMongoUrl string
 	// index of namespace
@@ -253,6 +254,8 @@ type DBSyncer struct {
 
 	mutex sync.Mutex
 
+	qos *utils.Qos // not owned
+
 	replMetric *utils.ReplicationMetric
 
 	// below are metric info
@@ -263,18 +266,23 @@ type DBSyncer struct {
 func NewDBSyncer(
 	id int,
 	fromMongoUrl string,
+	fromReplset string,
 	toMongoUrl string,
 	nsTrans *transform.NamespaceTransform,
-	orphanFilter *filter.OrphanFilter) *DBSyncer {
+	orphanFilter *filter.OrphanFilter,
+	qos *utils.Qos) *DBSyncer {
 
 	syncer := &DBSyncer{
 		id:           id,
 		FromMongoUrl: fromMongoUrl,
+		fromReplset:  fromReplset,
 		ToMongoUrl:   toMongoUrl,
 		indexMap:     make(map[utils.NS][]mgo.Index),
 		nsTrans:      nsTrans,
 		orphanFilter: orphanFilter,
+		qos:          qos,
 		metricNsMap:  make(map[utils.NS]*CollectionMetric),
+		replMetric:   utils.NewMetric(fromReplset, utils.TypeFull, utils.METRIC_TPS),
 	}
 
 	return syncer
@@ -288,6 +296,11 @@ func (syncer *DBSyncer) String() string {
 
 func (syncer *DBSyncer) Init() {
 	syncer.RestAPI()
+}
+
+func (syncer *DBSyncer) Close() {
+	LOG.Info("syncer[%v] closed", syncer)
+	syncer.replMetric.Close()
 }
 
 func (syncer *DBSyncer) GetIndexMap() map[utils.NS][]mgo.Index {
@@ -359,6 +372,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 
 	wg.Wait()
 	close(namespaces)
+
 	return syncError
 }
 
@@ -429,15 +443,17 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 	bufferByteSize := 0
 
 	for {
-		var doc *bson.Raw
-		var err error
-		if doc, err = reader.NextDoc(); err != nil {
+		doc, err := reader.NextDoc()
+		if err != nil {
 			return fmt.Errorf("splitter reader[%v] get next document failed: %v", reader, err)
 		} else if doc == nil {
 			atomic.AddUint64(&collectionMetric.FinishCount, uint64(len(buffer)))
 			colExecutor.Sync(buffer)
 			break
 		}
+
+		syncer.replMetric.AddGet(1)
+		syncer.replMetric.AddSuccess(1) // only used to calculate the tps which is extract from "success"
 
 		if bufferByteSize+len(doc.Data) > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
 			atomic.AddUint64(&collectionMetric.FinishCount, uint64(len(buffer)))
@@ -471,6 +487,7 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 /************************************************************************/
 // restful api
 func (syncer *DBSyncer) RestAPI() {
+	// progress api
 	type OverviewInfo struct {
 		Progress             string            `json:"progress"`                     // synced_collection_number / total_collection_number
 		TotalCollection      int               `json:"total_collection_number"`      // total collection
@@ -509,4 +526,8 @@ func (syncer *DBSyncer) RestAPI() {
 
 		return ret
 	})
+
+	/***************************************************/
+
+
 }

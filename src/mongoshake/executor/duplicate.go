@@ -22,7 +22,7 @@ func HandleDuplicated(collection *mgo.Collection, records []*OplogRecord, op int
 		case DumpConflictToSDK, NoDumpConflict:
 		}
 
-		if utils.SentinelOptions.DuplicatedDump {
+		if utils.IncrSentinelOptions.DuplicatedDump {
 			SnapshotDiffer{op: op, log: log}.dump(collection)
 		}
 	}
