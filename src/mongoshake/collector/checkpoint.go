@@ -134,8 +134,8 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 	}
 
 	// this log will be print if no ack calculated
-	LOG.Warn("CheckpointOperation updated is not suitable. lowest [%d]. current [%d]. inputTs [%v]. reason : %v",
-		lowest, utils.TimestampToInt64(inMemoryTs), inputTs, err)
+	LOG.Warn("CheckpointOperation updated is not suitable. lowest [%d]. current [%v]. inputTs [%v]. reason : %v",
+		lowest, utils.ExtractTimestampForLog(inMemoryTs), inputTs, err)
 }
 
 func (sync *OplogSyncer) calculateWorkerLowestCheckpoint() (v int64, err error) {

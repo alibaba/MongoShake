@@ -31,6 +31,7 @@ const (
 	DDLCheckpointInterval         = 300  // unit: ms.
 	FilterCheckpointGap           = 180  // unit: seconds. no checkpoint update, flush checkpoint mandatory
 	FilterCheckpointCheckInterval = 180  // unit: seconds.
+	CheckCheckpointUpdateTimes    = 10   // at most times of time check
 )
 
 type OplogHandler interface {
@@ -282,9 +283,8 @@ func (sync *OplogSyncer) startBatcher() {
 				LOG.Info("waiting last checkpoint[%v] updated", newestTsLog)
 				// check last checkpoint updated
 
-				sync.checkCheckpointUpdate(true, log.Timestamp)
-
-				LOG.Info("last checkpoint[%v] updated ok", newestTsLog)
+				status := sync.checkCheckpointUpdate(true, log.Timestamp)
+				LOG.Info("last checkpoint[%v] updated [%v]", newestTsLog, status)
 			} else {
 				LOG.Info("last log is empty, skip waiting checkpoint updated")
 			}
@@ -298,11 +298,12 @@ func (sync *OplogSyncer) startBatcher() {
 	})
 }
 
-func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.MongoTimestamp) {
+func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.MongoTimestamp) bool {
 	// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
 	if barrier && newestTs > 0 && conf.Options.IncrSyncWorker > 1 {
 		LOG.Info("find barrier")
-		for {
+		var checkpointTs bson.MongoTimestamp
+		for i := 0; i < CheckCheckpointUpdateTimes; i++ {
 			// checkpointTs := sync.ckptManager.GetInMemory().Timestamp
 			checkpoint, _, err := sync.ckptManager.Get()
 			if err != nil {
@@ -311,20 +312,30 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.Mongo
 				continue
 			}
 
-			checkpointTs := checkpoint.Timestamp
+			checkpointTs = checkpoint.Timestamp
 
 			LOG.Info("compare remote checkpoint[%v] to local newestTs[%v]",
 				utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
 			if checkpointTs >= newestTs {
 				LOG.Info("barrier checkpoint updated to newest[%v]", utils.ExtractTimestampForLog(newestTs))
-				break
+				return true
 			}
 			utils.YieldInMs(DDLCheckpointInterval)
 
 			// re-flush
 			sync.checkpoint(true, 0)
 		}
+
+		/*
+		 * if code hits here, it means the checkpoint has not been updated(usually DDL).
+		 * it's ok because the checkpoint can still forward on the next time.
+		 * However, if MongoShake crashes here and restarts, there maybe a conflict when the
+		 * oplog is DDL that has been applied but checkpoint not updated.
+		 */
+		LOG.Warn("check checkpoint[%v] update[%v] failed, but do worry",
+			utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
 	}
+	return false
 }
 
 /********************************deserializer begin**********************************/

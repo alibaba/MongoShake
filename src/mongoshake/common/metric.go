@@ -160,11 +160,11 @@ func (metric *ReplicationMetric) startup() {
 				verbose += fmt.Sprintf(", tunnel_traffic=%s", metric.getTunnelTraffic())
 			}
 			if metric.SUBSCRIBE&METRIC_LSN != 0 {
-				verbose += fmt.Sprintf(", lsn_ckpt={%v,%s}",
+				verbose += fmt.Sprintf(", lsn_ckpt={%v, %s}",
 					ExtractTimestampForLog(lsnCkpt),
 					TimestampToString(ExtractMongoTimestamp(lsnCkpt)))
-				verbose += fmt.Sprintf(", lsn_ack={%d,%s}]",
-					ExtractMongoTimestamp(atomic.LoadInt64(&metric.LSNAck)),
+				verbose += fmt.Sprintf(", lsn_ack={%v, %s}]",
+					ExtractTimestampForLog(atomic.LoadInt64(&metric.LSNAck)),
 					TimestampToString(ExtractMongoTimestamp(atomic.LoadInt64(&metric.LSNAck))))
 			}
 			if metric.SUBSCRIBE&METRIC_FULLSYNC_WRITE != 0 {
