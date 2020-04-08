@@ -1,3 +1,7 @@
+2020-04-08 Alibaba Cloud.
+	* version: 2.0.11
+	* BUGFIX: add checkpoint flush max try times to 10. see #323.
+
 2020-03-27 Alibaba Cloud.
 	* version: 2.0.10
 	* BUGFIX: data may lost when using batch update meets duplicate error.
