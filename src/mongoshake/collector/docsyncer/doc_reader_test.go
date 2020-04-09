@@ -12,7 +12,7 @@ import (
 )
 
 func TestGtDbNamespace(t *testing.T) {
-	// test getDbNamespace
+	// test GetDbNamespace
 
 	var nr int
 
@@ -39,7 +39,7 @@ func TestGtDbNamespace(t *testing.T) {
 		// set whitelist
 		conf.Options.FilterNamespaceWhite = []string{"db1", "db2"}
 
-		nsList, nsMap, err := getDbNamespace(testMongoAddress)
+		nsList, nsMap, err := GetDbNamespace(testMongoAddress)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 5, len(nsList), "should be equal")
 		assert.Equal(t, 2, len(nsMap), "should be equal")

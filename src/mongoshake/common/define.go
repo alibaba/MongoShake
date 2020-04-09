@@ -20,6 +20,7 @@ const (
 	// full_sync.create_index
 	VarFullSyncCreateIndexNone       = "none"
 	VarFullSyncCreateIndexForeground = "foreground"
+	VarFullSyncCreateIndexBackground = "background"
 
 	// incr_sync.mongo_fetch_method
 	VarIncrSyncMongoFetchMethodOplog        = "oplog"

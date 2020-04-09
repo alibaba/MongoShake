@@ -160,15 +160,15 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 }
 
 func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
-	nsTrans *transform.NamespaceTransform) (syncError error) {
+		nsTrans *transform.NamespaceTransform, background bool) (syncError error) {
 	type IndexNS struct {
 		ns        utils.NS
 		indexList []mgo.Index
 	}
 
-	LOG.Info("document syncer sync index begin")
+	LOG.Info("start writing index with background[%v]", background)
 	if len(indexMap) == 0 {
-		LOG.Info("document syncer sync index finish, but no data")
+		LOG.Info("finish writing index, but no data")
 		return nil
 	}
 
@@ -204,7 +204,12 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 				toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
 
 				for _, index := range indexNs.indexList {
-					index.Background = false
+					// ignore _id
+					if len(index.Key) == 1 && index.Key[0] == "_id" {
+						continue
+					}
+
+					index.Background = background
 					if err = session.DB(toNS.Database).C(toNS.Collection).EnsureIndex(index); err != nil {
 						LOG.Warn("Create indexes for ns %v of dest mongodb failed. %v", ns, err)
 					}
@@ -218,7 +223,7 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 
 	wg.Wait()
 	close(namespaces)
-	LOG.Info("document syncer sync index finish")
+	LOG.Info("finish writing index")
 	return syncError
 }
 
@@ -303,6 +308,7 @@ func (syncer *DBSyncer) Close() {
 	syncer.replMetric.Close()
 }
 
+// @deprecated
 func (syncer *DBSyncer) GetIndexMap() map[utils.NS][]mgo.Index {
 	return syncer.indexMap
 }
@@ -312,7 +318,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	var wg sync.WaitGroup
 
 	// get all namespace
-	nsList, _, err := getDbNamespace(syncer.FromMongoUrl)
+	nsList, _, err := GetDbNamespace(syncer.FromMongoUrl)
 	if err != nil {
 		return err
 	}
@@ -422,6 +428,11 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 		return fmt.Errorf("close writer failed: %v", err)
 	}
 
+	/*
+	 * in the former version, we fetch indexes after all data finished. However, it'll
+	 * have problem if the index is build/delete/update in the full-sync stage, the oplog
+	 * will be replayed again, e.g., build index, which must be wrong.
+	 */
 	// fetch index
 	if indexes, err := splitter.GetIndexes(); err != nil {
 		return fmt.Errorf("get indexes from ns[%v] of src mongodb failed: %v", ns, err)

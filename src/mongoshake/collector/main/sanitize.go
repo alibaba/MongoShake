@@ -148,8 +148,9 @@ func checkDefaultValue() error {
 	if conf.Options.FullSyncCreateIndex == "" {
 		conf.Options.FullSyncCreateIndex = utils.VarFullSyncCreateIndexForeground
 	} else if conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexNone &&
-		conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexForeground {
-		return fmt.Errorf("full_sync.create_index should in {none, foreground}")
+		conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexForeground &&
+		conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexBackground {
+		return fmt.Errorf("full_sync.create_index should in {none, foreground, background}")
 	}
 	if conf.Options.FullSyncReaderOplogStoreDiskMaxSize <= 0 {
 		conf.Options.FullSyncReaderOplogStoreDiskMaxSize = 256000

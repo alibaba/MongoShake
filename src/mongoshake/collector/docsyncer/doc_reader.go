@@ -23,7 +23,7 @@ import (
 func GetAllNamespace(sources []*utils.MongoSource) (map[utils.NS]struct{}, map[string][]string, error) {
 	nsSet := make(map[utils.NS]struct{})
 	for _, src := range sources {
-		nsList, _, err := getDbNamespace(src.URL)
+		nsList, _, err := GetDbNamespace(src.URL)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -50,7 +50,7 @@ func GetAllNamespace(sources []*utils.MongoSource) (map[utils.NS]struct{}, map[s
  *     @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}
  *     @error: error info
  */
-func getDbNamespace(url string) ([]utils.NS, map[string][]string, error) {
+func GetDbNamespace(url string) ([]utils.NS, map[string][]string, error) {
 	var err error
 	var conn *utils.MongoConn
 	if conn, err = utils.NewMongoConn(url, utils.VarMongoConnectModeSecondaryPreferred, true); conn == nil || err != nil {
@@ -212,6 +212,7 @@ func (ds *DocumentSplitter) Run() error {
 	return nil
 }
 
+// @deprecated
 func (ds *DocumentSplitter) GetIndexes() ([]mgo.Index, error) {
 	return ds.conn.Session.DB(ds.ns.Database).C(ds.ns.Collection).Indexes()
 }
