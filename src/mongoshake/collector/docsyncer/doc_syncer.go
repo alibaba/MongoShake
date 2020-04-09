@@ -282,7 +282,7 @@ func NewDBSyncer(
 		FromMongoUrl: fromMongoUrl,
 		fromReplset:  fromReplset,
 		ToMongoUrl:   toMongoUrl,
-		indexMap:     make(map[utils.NS][]mgo.Index),
+		// indexMap:     make(map[utils.NS][]mgo.Index),
 		nsTrans:      nsTrans,
 		orphanFilter: orphanFilter,
 		qos:          qos,
@@ -434,13 +434,6 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 	 * will be replayed again, e.g., build index, which must be wrong.
 	 */
 	// fetch index
-	if indexes, err := splitter.GetIndexes(); err != nil {
-		return fmt.Errorf("get indexes from ns[%v] of src mongodb failed: %v", ns, err)
-	} else {
-		syncer.mutex.Lock()
-		defer syncer.mutex.Unlock()
-		syncer.indexMap[ns] = indexes
-	}
 
 	// set collection finish
 	collectionMetric.CollectionStatus = StatusFinish
