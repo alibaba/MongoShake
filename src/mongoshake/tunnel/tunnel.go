@@ -152,17 +152,17 @@ type WriterFactory struct {
 // or usefully meta
 func (factory *WriterFactory) Create(address []string, workerId uint32) Writer {
 	switch factory.Name {
-	case utils.VarIncrSyncTunnelKafka:
+	case utils.VarTunnelKafka:
 		return &KafkaWriter{RemoteAddr: address[0]}
-	case utils.VarIncrSyncTunnelTcp:
+	case utils.VarTunnelTcp:
 		return &TCPWriter{RemoteAddr: address[0]}
-	case utils.VarIncrSyncTunnelRpc:
+	case utils.VarTunnelRpc:
 		return &RPCWriter{RemoteAddr: address[0]}
-	case utils.VarIncrSyncTunnelMock:
+	case utils.VarTunnelMock:
 		return &MockWriter{}
-	case utils.VarIncrSyncTunnelFile:
+	case utils.VarTunnelFile:
 		return &FileWriter{Local: address[0]}
-	case utils.VarIncrSyncTunnelDirect:
+	case utils.VarTunnelDirect:
 		return &DirectWriter{RemoteAddrs: address, ReplayerId: workerId}
 	default:
 		LOG.Critical("Specific tunnel not found [%s]", factory.Name)
@@ -174,17 +174,17 @@ func (factory *WriterFactory) Create(address []string, workerId uint32) Writer {
 // or usefully meta
 func (factory *ReaderFactory) Create(address string) Reader {
 	switch factory.Name {
-	case utils.VarIncrSyncTunnelKafka:
+	case utils.VarTunnelKafka:
 		return &KafkaReader{address: address}
-	case utils.VarIncrSyncTunnelTcp:
+	case utils.VarTunnelTcp:
 		return &TCPReader{listenAddress: address}
-	case utils.VarIncrSyncTunnelRpc:
+	case utils.VarTunnelRpc:
 		return &RPCReader{address: address}
-	case utils.VarIncrSyncTunnelMock:
+	case utils.VarTunnelMock:
 		return &MockReader{}
-	case utils.VarIncrSyncTunnelFile:
+	case utils.VarTunnelFile:
 		return &FileReader{File: address}
-	case utils.VarIncrSyncTunnelDirect:
+	case utils.VarTunnelDirect:
 		LOG.Critical("direct mode not supported in reader")
 		return nil
 	default:

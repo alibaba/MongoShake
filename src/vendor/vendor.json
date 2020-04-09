@@ -57,10 +57,10 @@
 			"revisionTime": "2019-09-04T06:34:54Z"
 		},
 		{
-			"checksumSHA1": "52vjznwP2OHubLvZkLCUCC9Gp5o=",
+			"checksumSHA1": "PA8OcnbR5oMK1TI+eA8CIuO7gLY=",
 			"path": "github.com/gugemichael/nimo4go",
-			"revision": "32795d80f83ab8c37b47589c5068dfbb14545c34",
-			"revisionTime": "2019-09-04T07:30:57Z"
+			"revision": "647883f3a053414d7dc4f3771c6c69b5c4a8ea11",
+			"revisionTime": "2020-04-03T10:17:49Z"
 		},
 		{
 			"checksumSHA1": "5AxXPtBqAKyFGcttFzxT5hp/3Tk=",
@@ -333,6 +333,7 @@
 			"revisionTime": "2020-02-14T19:38:18Z"
 		},
 		{
+			"checksumSHA1": "fGwZghT99g9ykPPrek6AEY5WixU=",
 			"path": "go.mongodb.org/mongo-driver/x/mongo/driver/auth/internal/gssapi",
 			"revision": "71e2e0ee13c968fd7b05a1259714b80e0bf2b4e2"
 		},

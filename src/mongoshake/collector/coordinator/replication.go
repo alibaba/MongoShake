@@ -25,7 +25,8 @@ type ReplicationCoordinator struct {
 	RealSource []*utils.MongoSource // point to MongoD if source is mongod, otherwise MongoS
 
 	// Sentinel listener
-	sentinel *utils.Sentinel
+	fullSentinel *utils.Sentinel
+	incrSentinel *utils.Sentinel
 
 	// syncerGroup and workerGroup number is 1:N in ReplicaSet.
 	// 1:1 while replicated in shard cluster
@@ -47,8 +48,11 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	opts, _ := json.Marshal(conf.GetSafeOptions())
 	LOG.Info("Collector configuration %s", string(opts))
 
-	coordinator.sentinel = &utils.Sentinel{}
-	coordinator.sentinel.Register()
+	// sentinel: full and incr
+	coordinator.fullSentinel = utils.NewSentinel(utils.TypeFull)
+	coordinator.fullSentinel.Register()
+	coordinator.incrSentinel = utils.NewSentinel(utils.TypeIncr)
+	coordinator.incrSentinel.Register()
 
 	syncMode, fullBeginTs, err := coordinator.selectSyncMode(conf.Options.SyncMode)
 	if err != nil {

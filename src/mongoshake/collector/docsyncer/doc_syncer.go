@@ -47,7 +47,7 @@ func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
 	return false
 }
 
-func StartDropDestCollection(nsSet map[utils.NS]bool, toConn *utils.MongoConn,
+func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoConn,
 	nsTrans *transform.NamespaceTransform) error {
 	for ns := range nsSet {
 		toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
@@ -160,15 +160,15 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 }
 
 func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
-	nsTrans *transform.NamespaceTransform) (syncError error) {
+		nsTrans *transform.NamespaceTransform, background bool) (syncError error) {
 	type IndexNS struct {
 		ns        utils.NS
 		indexList []mgo.Index
 	}
 
-	LOG.Info("document syncer sync index begin")
+	LOG.Info("start writing index with background[%v]", background)
 	if len(indexMap) == 0 {
-		LOG.Info("document syncer sync index finish, but no data")
+		LOG.Info("finish writing index, but no data")
 		return nil
 	}
 
@@ -204,7 +204,12 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 				toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
 
 				for _, index := range indexNs.indexList {
-					index.Background = false
+					// ignore _id
+					if len(index.Key) == 1 && index.Key[0] == "_id" {
+						continue
+					}
+
+					index.Background = background
 					if err = session.DB(toNS.Database).C(toNS.Collection).EnsureIndex(index); err != nil {
 						LOG.Warn("Create indexes for ns %v of dest mongodb failed. %v", ns, err)
 					}
@@ -218,7 +223,7 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 
 	wg.Wait()
 	close(namespaces)
-	LOG.Info("document syncer sync index finish")
+	LOG.Info("finish writing index")
 	return syncError
 }
 
@@ -233,11 +238,14 @@ func Checkpoint(ckptMap map[string]utils.TimestampNode) error {
 	return nil
 }
 
+/************************************************************************/
+// 1 shard -> 1 DBSyncer
 type DBSyncer struct {
 	// syncer id
 	id int
 	// source mongodb url
 	FromMongoUrl string
+	fromReplset string
 	// destination mongodb url
 	ToMongoUrl string
 	// index of namespace
@@ -251,23 +259,35 @@ type DBSyncer struct {
 
 	mutex sync.Mutex
 
+	qos *utils.Qos // not owned
+
 	replMetric *utils.ReplicationMetric
+
+	// below are metric info
+	metricNsMapLock sync.Mutex
+	metricNsMap     map[utils.NS]*CollectionMetric // namespace map: db.collection -> collection metric
 }
 
 func NewDBSyncer(
 	id int,
 	fromMongoUrl string,
+	fromReplset string,
 	toMongoUrl string,
 	nsTrans *transform.NamespaceTransform,
-	orphanFilter *filter.OrphanFilter) *DBSyncer {
+	orphanFilter *filter.OrphanFilter,
+	qos *utils.Qos) *DBSyncer {
 
 	syncer := &DBSyncer{
 		id:           id,
 		FromMongoUrl: fromMongoUrl,
+		fromReplset:  fromReplset,
 		ToMongoUrl:   toMongoUrl,
-		indexMap:     make(map[utils.NS][]mgo.Index),
+		// indexMap:     make(map[utils.NS][]mgo.Index),
 		nsTrans:      nsTrans,
 		orphanFilter: orphanFilter,
+		qos:          qos,
+		metricNsMap:  make(map[utils.NS]*CollectionMetric),
+		replMetric:   utils.NewMetric(fromReplset, utils.TypeFull, utils.METRIC_TPS),
 	}
 
 	return syncer
@@ -279,6 +299,16 @@ func (syncer *DBSyncer) String() string {
 		utils.BlockMongoUrlPassword(syncer.ToMongoUrl, "***"), syncer.startTime)
 }
 
+func (syncer *DBSyncer) Init() {
+	syncer.RestAPI()
+}
+
+func (syncer *DBSyncer) Close() {
+	LOG.Info("syncer[%v] closed", syncer)
+	syncer.replMetric.Close()
+}
+
+// @deprecated
 func (syncer *DBSyncer) GetIndexMap() map[utils.NS][]mgo.Index {
 	return syncer.indexMap
 }
@@ -287,13 +317,20 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	syncer.startTime = time.Now()
 	var wg sync.WaitGroup
 
-	nsList, err := getDbNamespace(syncer.FromMongoUrl)
+	// get all namespace
+	nsList, _, err := GetDbNamespace(syncer.FromMongoUrl)
 	if err != nil {
 		return err
 	}
 
 	if len(nsList) == 0 {
 		LOG.Info("%s finish, but no data", syncer)
+		return
+	}
+
+	// create metric for each collection
+	for _, ns := range nsList {
+		syncer.metricNsMap[ns] = NewCollectionMetric()
 	}
 
 	collExecutorParallel := conf.Options.FullSyncReaderCollectionParallel
@@ -307,6 +344,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 		}
 	})
 
+	// run collection sync in parallel
 	var nsDoneCount int32 = 0
 	for i := 0; i < collExecutorParallel; i++ {
 		collExecutorId := GenerateCollExecutorId()
@@ -319,8 +357,7 @@ func (syncer *DBSyncer) Start() (syncError error) {
 
 				toNS := utils.NewNS(syncer.nsTrans.Transform(ns.Str()))
 
-				LOG.Info("%s collExecutor-%d sync ns %v to %v begin",
-					syncer, collExecutorId, ns, toNS)
+				LOG.Info("%s collExecutor-%d sync ns %v to %v begin", syncer, collExecutorId, ns, toNS)
 				err := syncer.collectionSync(collExecutorId, ns, toNS)
 				atomic.AddInt32(&nsDoneCount, 1)
 
@@ -341,9 +378,11 @@ func (syncer *DBSyncer) Start() (syncError error) {
 
 	wg.Wait()
 	close(namespaces)
+
 	return syncError
 }
 
+// start sync single collection
 func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS utils.NS) error {
 	// writer
 	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS, syncer)
@@ -358,6 +397,11 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 	}
 	defer splitter.Close()
 
+	// metric
+	collectionMetric := syncer.metricNsMap[ns]
+	collectionMetric.CollectionStatus = StatusProcessing
+	collectionMetric.TotalCount = splitter.count
+
 	// run in several pieces
 	var wg sync.WaitGroup
 	wg.Add(splitter.pieceNumber)
@@ -369,7 +413,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 					break
 				}
 
-				if err := syncer.splitSync(reader, colExecutor); err != nil {
+				if err := syncer.splitSync(reader, colExecutor, collectionMetric); err != nil {
 					LOG.Crashf("%v", err)
 				}
 
@@ -384,34 +428,39 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 		return fmt.Errorf("close writer failed: %v", err)
 	}
 
+	/*
+	 * in the former version, we fetch indexes after all data finished. However, it'll
+	 * have problem if the index is build/delete/update in the full-sync stage, the oplog
+	 * will be replayed again, e.g., build index, which must be wrong.
+	 */
 	// fetch index
-	if indexes, err := splitter.GetIndexes(); err != nil {
-		return fmt.Errorf("get indexes from ns[%v] of src mongodb failed: %v", ns, err)
-	} else {
-		syncer.mutex.Lock()
-		defer syncer.mutex.Unlock()
-		syncer.indexMap[ns] = indexes
-	}
+
+	// set collection finish
+	collectionMetric.CollectionStatus = StatusFinish
 
 	return nil
 }
 
-func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *CollectionExecutor) error {
+func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *CollectionExecutor, collectionMetric *CollectionMetric) error {
 	bufferSize := conf.Options.FullSyncReaderDocumentBatchSize
 	buffer := make([]*bson.Raw, 0, bufferSize)
 	bufferByteSize := 0
 
 	for {
-		var doc *bson.Raw
-		var err error
-		if doc, err = reader.NextDoc(); err != nil {
+		doc, err := reader.NextDoc()
+		if err != nil {
 			return fmt.Errorf("splitter reader[%v] get next document failed: %v", reader, err)
 		} else if doc == nil {
+			atomic.AddUint64(&collectionMetric.FinishCount, uint64(len(buffer)))
 			colExecutor.Sync(buffer)
 			break
 		}
 
+		syncer.replMetric.AddGet(1)
+		syncer.replMetric.AddSuccess(1) // only used to calculate the tps which is extract from "success"
+
 		if bufferByteSize+len(doc.Data) > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
+			atomic.AddUint64(&collectionMetric.FinishCount, uint64(len(buffer)))
 			colExecutor.Sync(buffer)
 			buffer = make([]*bson.Raw, 0, bufferSize)
 			bufferByteSize = 0
@@ -437,4 +486,52 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 	LOG.Info("splitter reader[%v] finishes", reader)
 	reader.Close()
 	return nil
+}
+
+/************************************************************************/
+// restful api
+func (syncer *DBSyncer) RestAPI() {
+	// progress api
+	type OverviewInfo struct {
+		Progress             string            `json:"progress"`                     // synced_collection_number / total_collection_number
+		TotalCollection      int               `json:"total_collection_number"`      // total collection
+		FinishedCollection   int               `json:"finished_collection_number"`   // finished
+		ProcessingCollection int               `json:"processing_collection_number"` // in processing
+		WaitCollection       int               `json:"wait_collection_number"`       // wait start
+		CollectionMetric     map[string]string `json:"collection_metric"`            // collection_name -> process
+	}
+
+	utils.FullSyncHttpApi.RegisterAPI("/progress", nimo.HttpGet, func([]byte) interface{} {
+		ret := OverviewInfo{
+			CollectionMetric: make(map[string]string),
+		}
+
+		syncer.metricNsMapLock.Lock()
+		defer syncer.metricNsMapLock.Unlock()
+
+		ret.TotalCollection = len(syncer.metricNsMap)
+		for ns, collectionMetric := range syncer.metricNsMap {
+			ret.CollectionMetric[ns.Str()] = collectionMetric.String()
+			switch collectionMetric.CollectionStatus {
+			case StatusWaitStart:
+				ret.WaitCollection += 1
+			case StatusProcessing:
+				ret.ProcessingCollection += 1
+			case StatusFinish:
+				ret.FinishedCollection += 1
+			}
+		}
+
+		if ret.TotalCollection == 0 {
+			ret.Progress = "100%"
+		} else {
+			ret.Progress = fmt.Sprintf("%.2f%%", float64(ret.FinishedCollection) / float64(ret.TotalCollection) * 100)
+		}
+
+		return ret
+	})
+
+	/***************************************************/
+
+
 }

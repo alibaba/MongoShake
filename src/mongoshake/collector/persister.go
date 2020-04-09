@@ -285,7 +285,7 @@ func (p *Persister) RestAPI() {
 		DiskReadCount     uint64 `json:"disk_read_count"`
 	}
 
-	utils.HttpApi.RegisterAPI("/persist", nimo.HttpGet, func([]byte) interface{} {
+	utils.IncrSyncHttpApi.RegisterAPI("/persist", nimo.HttpGet, func([]byte) interface{} {
 		return &PersistNode{
 			BufferSize:        conf.Options.IncrSyncFetcherBufferCapacity,
 			BufferUsed:        len(p.Buffer),

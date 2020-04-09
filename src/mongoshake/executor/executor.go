@@ -361,7 +361,7 @@ func (exec *Executor) RestAPI() {
 		// Noop uint64 `json:"noop"`
 	}
 
-	utils.HttpApi.RegisterAPI("/executor", nimo.HttpGet, func([]byte) interface{} {
+	utils.IncrSyncHttpApi.RegisterAPI("/executor", nimo.HttpGet, func([]byte) interface{} {
 		return &ExecutorInfo{
 			Id:      exec.id,
 			Insert:  exec.metricInsert,

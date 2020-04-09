@@ -225,7 +225,7 @@ func Welcome() {
 func Goodbye() {
 	goodbye := `
                 ##### | #####
-Ohh we crash ? # _ _ #|# _ _ #
+Oh we finish ? # _ _ #|# _ _ #
                #      |      #
          |       ############
                      # #

@@ -64,9 +64,14 @@ func TestDbSync(t *testing.T) {
 	assert.Equal(t, nil, err, "should be equal")
 
 	// init DocExecutor, ignore DBSyncer here
+	var meaningless int64 = 0
 	de := NewDocExecutor(0, &CollectionExecutor{
 		ns: utils.NS{Database: testDb, Collection: testCollection},
-	}, conn.Session, nil)
+	}, conn.Session, &DBSyncer{
+		qos: utils.StartQoS(0, 1, &meaningless),
+	})
+	assert.NotEqual(t, nil, de.syncer, "should be equal")
+	assert.NotEqual(t, nil, de.syncer.qos, "should be equal")
 
 	var nr int
 
@@ -224,6 +229,7 @@ func TestDbSync(t *testing.T) {
 		})
 		dbSyncer := &DBSyncer{
 			orphanFilter: of,
+			qos:          utils.StartQoS(0, 1, &meaningless),
 		}
 		de.syncer = dbSyncer
 
@@ -377,10 +383,10 @@ func TestStartDropDestCollection(t *testing.T) {
 		err = conn.Session.DB("test").C("c3").Insert(bson.M{"c":1})
 		assert.Equal(t, nil, err, "should be equal")
 
-		nsSet := map[utils.NS]bool {}
-		nsSet[utils.NS{Database: "test", Collection:"c1"}] = true
-		nsSet[utils.NS{Database: "test", Collection:"c4"}] = true
-		nsSet[utils.NS{Database: "test", Collection:"c5"}] = true
+		nsSet := map[utils.NS]struct{}{}
+		nsSet[utils.NS{Database: "test", Collection:"c1"}] = struct{}{}
+		nsSet[utils.NS{Database: "test", Collection:"c4"}] = struct{}{}
+		nsSet[utils.NS{Database: "test", Collection:"c5"}] = struct{}{}
 
 		conf.Options.FullSyncCollectionDrop = true
 		nsTrans := transform.NewNamespaceTransform([]string{"test.c4:test.c3"})
@@ -420,10 +426,10 @@ func TestStartDropDestCollection(t *testing.T) {
 		err = conn.Session.DB("test").C("c3").Insert(bson.M{"c":1})
 		assert.Equal(t, nil, err, "should be equal")
 
-		nsSet := map[utils.NS]bool {}
-		nsSet[utils.NS{Database: "test", Collection:"c1"}] = true
-		nsSet[utils.NS{Database: "test", Collection:"c4"}] = true
-		nsSet[utils.NS{Database: "test", Collection:"c5"}] = true
+		nsSet := map[utils.NS]struct{} {}
+		nsSet[utils.NS{Database: "test", Collection:"c1"}] = struct{}{}
+		nsSet[utils.NS{Database: "test", Collection:"c4"}] = struct{}{}
+		nsSet[utils.NS{Database: "test", Collection:"c5"}] = struct{}{}
 
 		conf.Options.FullSyncCollectionDrop = false
 		nsTrans := transform.NewNamespaceTransform([]string{"test.c4:test.c3"})

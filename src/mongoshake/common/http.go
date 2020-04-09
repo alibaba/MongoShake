@@ -5,9 +5,14 @@ import (
 )
 
 var (
-	HttpApi *nimo.HttpRestProvider
+	FullSyncHttpApi *nimo.HttpRestProvider
+	IncrSyncHttpApi *nimo.HttpRestProvider
 )
 
-func InitHttpApi(port int) {
-	HttpApi = nimo.NewHttpRestProvdier(port)
+func FullSyncInitHttpApi(port int) {
+	FullSyncHttpApi = nimo.NewHttpRestProvider(port)
+}
+
+func IncrSyncInitHttpApi(port int) {
+	IncrSyncHttpApi = nimo.NewHttpRestProvider(port)
 }

@@ -47,7 +47,7 @@ func (j *Journal) WriteRecord(oplog *oplog.PartialLog) {
 	// 0 -> no journal
 	// 1 -> sampling
 	// 2 -> journal all
-	switch SentinelOptions.OplogDump {
+	switch IncrSentinelOptions.OplogDump {
 	case JournalNothingOnDefault: // default. do nothing
 	case JournalSampling:
 		// object id will be sampled and all DDL oplog

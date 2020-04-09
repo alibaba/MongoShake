@@ -95,7 +95,7 @@ func (worker *Worker) shouldDelay() bool {
 func (worker *Worker) shouldStall() bool {
 	// suspend while system pause is set. This is always operated by outside
 	// manual system. It needs stopping here util turned off
-	return utils.SentinelOptions.Pause
+	return utils.IncrSentinelOptions.Pause
 }
 
 func (worker *Worker) findFirstAvailableBatch() []*oplog.GenericOplog {
@@ -252,7 +252,7 @@ func (worker *Worker) RestAPI() {
 		COUNT           uint64 `json:"count"`
 	}
 
-	utils.HttpApi.RegisterAPI("/worker", nimo.HttpGet, func([]byte) interface{} {
+	utils.IncrSyncHttpApi.RegisterAPI("/worker", nimo.HttpGet, func([]byte) interface{} {
 		return &WorkerInfo{
 			Id:              worker.id,
 			JobsQueued:      len(worker.queue),

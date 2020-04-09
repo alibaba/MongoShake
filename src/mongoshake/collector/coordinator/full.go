@@ -59,6 +59,45 @@ func getTimestampMap(sources []*utils.MongoSource) (map[string]utils.TimestampNo
 	return ckptMap, nil
 }
 
+/*
+ * fetch all indexes.
+ * the cost is low so that no need to run in parallel.
+ */
+func fetchIndexes(sourceList []*utils.MongoSource) (map[utils.NS][]mgo.Index, error) {
+	var mutex sync.Mutex
+	indexMap := make(map[utils.NS][]mgo.Index)
+	for _, src := range sourceList {
+		LOG.Info("source[%v %v] start fetching index", src.ReplicaName, src.URL)
+		// 1. fetch namespace
+		nsList, _, err := docsyncer.GetDbNamespace(src.URL)
+		if err != nil {
+			return nil, fmt.Errorf("source[%v %v] get namespace failed: %v", src.ReplicaName, src.URL, err)
+		}
+
+		// 2. build connection
+		conn, err := utils.NewMongoConn(src.URL, utils.VarMongoConnectModeSecondaryPreferred, true)
+		if err != nil {
+			return nil, fmt.Errorf("source[%v %v] build connection failed: %v", src.ReplicaName, src.URL, err)
+		}
+		defer conn.Close() // it's acceptable to call defer here
+
+		// 3. fetch all indexes
+		for _, ns := range nsList {
+			indexes, err := conn.Session.DB(ns.Database).C(ns.Collection).Indexes()
+			if err != nil {
+				return nil, fmt.Errorf("source[%v %v] fetch index failed: %v", src.ReplicaName, src.URL, err)
+			}
+
+			mutex.Lock()
+			indexMap[ns] = indexes
+			mutex.Unlock()
+		}
+
+		LOG.Info("source[%v %v] finish fetching index", src.ReplicaName, src.URL)
+	}
+	return indexMap, nil
+}
+
 func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// for change stream, we need to fetch current timestamp
 	/*fromConn0, err := utils.NewMongoConn(coordinator.Sources[0].URL, utils.VarMongoConnectModePrimary, true)
@@ -80,10 +119,11 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 
 	// get all namespace need to sync
-	nsSet, err := docsyncer.GetAllNamespace(coordinator.RealSource)
+	nsSet, _, err := docsyncer.GetAllNamespace(coordinator.RealSource)
 	if err != nil {
 		return err
 	}
+	LOG.Info("all namespace: %v", nsSet)
 
 	// get current newest timestamp
 	ckptMap, err := getTimestampMap(coordinator.MongoD)
@@ -92,14 +132,14 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 
 	// create target client
-	toUrl := conf.Options.IncrSyncTunnelAddress[0]
+	toUrl := conf.Options.TunnelAddress[0]
 	var toConn *utils.MongoConn
 	if toConn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, true); err != nil {
 		return err
 	}
 	defer toConn.Close()
 
-	// crate namespace transform
+	// create namespace transform
 	trans := transform.NewNamespaceTransform(conf.Options.TransformNamespace)
 
 	// drop target collection if possible
@@ -115,10 +155,33 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		}
 	}
 
+	// fetch all indexes
+	var indexMap map[utils.NS][]mgo.Index
+	if conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexNone {
+		if indexMap, err = fetchIndexes(coordinator.RealSource); err != nil {
+			return fmt.Errorf("fetch index failed[%v]", err)
+		}
+
+		// print
+		LOG.Info("index list below: ----------")
+		for ns, index := range indexMap {
+			LOG.Info("collection[%v] -> %s", ns, utils.MarshalStruct(index))
+		}
+		LOG.Info("index list above: ----------")
+
+		if conf.Options.FullSyncCreateIndex == utils.VarFullSyncCreateIndexBackground {
+			if err := docsyncer.StartIndexSync(indexMap, toUrl, trans, true); err != nil {
+				return fmt.Errorf("create background index failed[%v]", err)
+			}
+		}
+	}
+
+	// global qps limit, all dbsyncer share only 1 Qos
+	qos := utils.StartQoS(0, int64(conf.Options.FullSyncReaderDocumentBatchSize), &utils.FullSentinelOptions.TPS)
+
+	// start sync each db
 	var wg sync.WaitGroup
 	var replError error
-	var mutex sync.Mutex
-	indexMap := make(map[utils.NS][]mgo.Index)
 	for i, src := range coordinator.RealSource {
 		var orphanFilter *filter.OrphanFilter
 		if conf.Options.FullSyncExecutorFilterOrphanDocument {
@@ -131,8 +194,10 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 			orphanFilter = filter.NewOrphanFilter(src.ReplicaName, dbChunkMap)
 		}
 
-		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, toUrl, trans, orphanFilter)
+		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, src.ReplicaName, toUrl, trans, orphanFilter, qos)
+		dbSyncer.Init()
 		LOG.Info("document syncer-%d do replication for url=%v", i, src.URL)
+
 		wg.Add(1)
 		nimo.GoRoutine(func() {
 			defer wg.Done()
@@ -140,22 +205,29 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 				LOG.Critical("document replication for url=%v failed. %v", src.URL, err)
 				replError = err
 			}
-			mutex.Lock()
-			defer mutex.Unlock()
-			for ns, indexList := range dbSyncer.GetIndexMap() {
-				indexMap[ns] = indexList
-			}
+			dbSyncer.Close()
 		})
 	}
+
+	// start http server.
+	nimo.GoRoutine(func() {
+		// before starting, we must register all interface
+		if err := utils.FullSyncHttpApi.Listen(); err != nil {
+			LOG.Critical("start full sync server with port[%v] failed: %v", conf.Options.FullSyncHTTPListenPort,
+				err)
+		}
+	})
+
+	// wait all db finished
 	wg.Wait()
 	if replError != nil {
 		return replError
 	}
 
-	// create index if enable, current we only support foreground index
-	if conf.Options.FullSyncCreateIndex == "foreground" {
-		if err := docsyncer.StartIndexSync(indexMap, toUrl, trans); err != nil {
-			return fmt.Errorf("create index failed[%v]", err)
+	// create index if == foreground
+	if conf.Options.FullSyncCreateIndex == utils.VarFullSyncCreateIndexForeground {
+		if err := docsyncer.StartIndexSync(indexMap, toUrl, trans, false); err != nil {
+			return fmt.Errorf("create forground index failed[%v]", err)
 		}
 	}
 

@@ -154,6 +154,11 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 		docList = append(docList, doc)
 	}
 
+	// qps limit if enable
+	if exec.syncer.qos.Limit > 0 {
+		exec.syncer.qos.FetchBucket()
+	}
+
 	collectionHandler := exec.session.DB(ns.Database).C(ns.Collection)
 	bulk := collectionHandler.Bulk()
 	bulk.Insert(docList...)

@@ -7,6 +7,7 @@ import (
 
 	"github.com/nightlyone/lockfile"
 	LOG "github.com/vinllen/log4go"
+	"encoding/json"
 )
 
 // Build info
@@ -168,4 +169,13 @@ func BlockMongoUrlPassword(url, replace string) string {
 		}
 	}
 	return string(newUrl)
+}
+
+// marshal given strcut by json
+func MarshalStruct(input interface{}) string {
+	ret, err := json.Marshal(input)
+	if err != nil {
+		return fmt.Sprintf("marshal struct failed[%v]", err)
+	}
+	return string(ret)
 }

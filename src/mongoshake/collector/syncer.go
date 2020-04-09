@@ -31,6 +31,7 @@ const (
 	DDLCheckpointInterval         = 300  // unit: ms.
 	FilterCheckpointGap           = 180  // unit: seconds. no checkpoint update, flush checkpoint mandatory
 	FilterCheckpointCheckInterval = 180  // unit: seconds.
+	CheckCheckpointUpdateTimes    = 10   // at most times of time check
 )
 
 type OplogHandler interface {
@@ -73,6 +74,9 @@ type OplogSyncer struct {
 	// data persist handler
 	persister *Persister
 
+	// qos
+	qos *utils.Qos
+
 	// timers for inner event
 	startTime time.Time
 	ckptTime  time.Time
@@ -109,6 +113,7 @@ func NewOplogSyncer(
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.Id, replset))),
 		reader: reader,
+		qos:    utils.StartQoS(0, 1, &utils.IncrSentinelOptions.TPS), // default is 0 which means do not limit
 	}
 
 	// concurrent level hasher
@@ -144,9 +149,15 @@ func NewOplogSyncer(
 }
 
 func (sync *OplogSyncer) Init() {
-	sync.replMetric = utils.NewMetric(sync.replset, utils.METRIC_CKPT_TIMES|
-		utils.METRIC_TUNNEL_TRAFFIC| utils.METRIC_LSN_CKPT| utils.METRIC_SUCCESS|
-		utils.METRIC_TPS| utils.METRIC_RETRANSIMISSION)
+	var options uint64 = utils.METRIC_CKPT_TIMES| utils.METRIC_LSN| utils.METRIC_SUCCESS|
+		utils.METRIC_TPS | utils.METRIC_FILTER
+	if conf.Options.Tunnel != utils.VarTunnelDirect {
+		options |= utils.METRIC_RETRANSIMISSION
+		options |= utils.METRIC_TUNNEL_TRAFFIC
+		options |= utils.METRIC_WORKER
+	}
+
+	sync.replMetric = utils.NewMetric(sync.replset, utils.TypeIncr, options)
 	sync.replMetric.ReplStatus.Update(utils.WorkGood)
 
 	sync.RestAPI()
@@ -272,9 +283,8 @@ func (sync *OplogSyncer) startBatcher() {
 				LOG.Info("waiting last checkpoint[%v] updated", newestTsLog)
 				// check last checkpoint updated
 
-				sync.checkCheckpointUpdate(true, log.Timestamp)
-
-				LOG.Info("last checkpoint[%v] updated ok", newestTsLog)
+				status := sync.checkCheckpointUpdate(true, log.Timestamp)
+				LOG.Info("last checkpoint[%v] updated [%v]", newestTsLog, status)
 			} else {
 				LOG.Info("last log is empty, skip waiting checkpoint updated")
 			}
@@ -288,11 +298,12 @@ func (sync *OplogSyncer) startBatcher() {
 	})
 }
 
-func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.MongoTimestamp) {
+func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.MongoTimestamp) bool {
 	// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
 	if barrier && newestTs > 0 && conf.Options.IncrSyncWorker > 1 {
 		LOG.Info("find barrier")
-		for {
+		var checkpointTs bson.MongoTimestamp
+		for i := 0; i < CheckCheckpointUpdateTimes; i++ {
 			// checkpointTs := sync.ckptManager.GetInMemory().Timestamp
 			checkpoint, _, err := sync.ckptManager.Get()
 			if err != nil {
@@ -301,20 +312,30 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.Mongo
 				continue
 			}
 
-			checkpointTs := checkpoint.Timestamp
+			checkpointTs = checkpoint.Timestamp
 
 			LOG.Info("compare remote checkpoint[%v] to local newestTs[%v]",
 				utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
 			if checkpointTs >= newestTs {
 				LOG.Info("barrier checkpoint updated to newest[%v]", utils.ExtractTimestampForLog(newestTs))
-				break
+				return true
 			}
 			utils.YieldInMs(DDLCheckpointInterval)
 
 			// re-flush
 			sync.checkpoint(true, 0)
 		}
+
+		/*
+		 * if code hits here, it means the checkpoint has not been updated(usually DDL).
+		 * it's ok because the checkpoint can still forward on the next time.
+		 * However, if MongoShake crashes here and restarts, there maybe a conflict when the
+		 * oplog is DDL that has been applied but checkpoint not updated.
+		 */
+		LOG.Warn("check checkpoint[%v] update[%v] failed, but do worry",
+			utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
 	}
+	return false
 }
 
 /********************************deserializer begin**********************************/
@@ -364,9 +385,9 @@ func (sync *OplogSyncer) deserializer(index int) {
 	var combiner func(raw []byte, log *oplog.PartialLog) *oplog.GenericOplog
 	// change stream && !direct && !(kafka & json)
 	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream &&
-		conf.Options.IncrSyncTunnel != utils.VarIncrSyncTunnelDirect &&
-		!(conf.Options.IncrSyncTunnel == utils.VarIncrSyncTunnelKafka &&
-			conf.Options.IncrSyncTunnelMessage == utils.VarIncrSyncTunnelMessageJson) {
+		conf.Options.Tunnel != utils.VarTunnelDirect &&
+		!(conf.Options.Tunnel == utils.VarTunnelKafka &&
+			conf.Options.TunnelMessage == utils.VarTunnelMessageJson) {
 		// very time consuming!
 		combiner = func(raw []byte, log *oplog.PartialLog) *oplog.GenericOplog {
 			if out, err := bson.Marshal(log.ParsedLog); err != nil {
@@ -419,28 +440,10 @@ func (sync *OplogSyncer) poll() {
 	sync.reader.SetQueryTimestampOnEmpty(checkpoint.Timestamp)
 	sync.reader.StartFetcher() // start reader fetcher if not exist
 
-	// every syncer should under the control of global rate limiter
-	rc := sync.rateController
-
 	for quorum.IsMaster() {
-		// SimpleRateController is too simple. the TPS flow may represent
-		// low -> high -> low.... and centralize to point time in somewhere
-		// However. not smooth is make sense in stream processing. This was
-		// more effected in request processing programing
-		//
-		//				    _             _
-		//		    	   / |           / |             <- peak
-		//			     /   |         /   |
-		//   _____/    |____/    |___    <-  controlled
-		//
-		//
-		// WARNING : in current version. we throttle the replicate tps in Receiver
-		// rather than limiting in Collector. since the real replication traffic happened
-		// in Receiver executor. Apparently it tends to change {SentinelOptions} in
-		// Receiver. The follows were kept for compatibility
-		if utils.SentinelOptions.TPS != 0 && rc.Control(utils.SentinelOptions.TPS, 1) {
-			utils.DelayFor(100)
-			continue
+		// limit the qps if enabled
+		if sync.qos.Limit > 0 {
+			sync.qos.FetchBucket()
 		}
 
 		// only get one
@@ -522,7 +525,7 @@ func (sync *OplogSyncer) RestAPI() {
 	}
 
 	// total replication info
-	utils.HttpApi.RegisterAPI("/repl", nimo.HttpGet, func([]byte) interface{} {
+	utils.IncrSyncHttpApi.RegisterAPI("/repl", nimo.HttpGet, func([]byte) interface{} {
 		return &Info{
 			Who:         conf.Options.Id,
 			Tag:         utils.BRANCH,
@@ -558,7 +561,7 @@ func (sync *OplogSyncer) RestAPI() {
 		PersisterBufferUsed int          `json:"persister_buffer_used"`
 	}
 
-	utils.HttpApi.RegisterAPI("/queue", nimo.HttpGet, func([]byte) interface{} {
+	utils.IncrSyncHttpApi.RegisterAPI("/queue", nimo.HttpGet, func([]byte) interface{} {
 		queue := make([]InnerQueue, calculatePendingQueueConcurrency())
 		for i := 0; i < len(queue); i++ {
 			queue[i] = InnerQueue{

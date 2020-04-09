@@ -1,3 +1,13 @@
+2020-04-09 Alibaba Cloud.
+	* version: 2.4.1
+	* IMPROVE: add speed limit policy in full sync stage.
+	* IMPROVE: modify speed limit policy to token bucket algorithm in
+	incremental sync.
+	* IMPROVE: add background index build policy, see full_sync.create_index. #316
+	* IMPROVE: add monitor in full sync stage.
+	* BUGFIX: fix bug of parsing oplog empty from kafka. #317
+	* BUGFIX: fix bug of checkpoint flush block. #323
+
 2020-03-25 Alibaba Cloud.
 	* version: 2.4.0
 	* IMPROVE: support change stream to solve move chunk problem.
