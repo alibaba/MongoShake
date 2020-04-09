@@ -443,7 +443,7 @@ func (sync *OplogSyncer) poll() {
 	for quorum.IsMaster() {
 		// limit the qps if enabled
 		if sync.qos.Limit > 0 {
-			<-sync.qos.Bucket
+			sync.qos.FetchBucket()
 		}
 
 		// only get one

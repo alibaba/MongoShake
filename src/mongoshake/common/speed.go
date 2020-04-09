@@ -8,13 +8,13 @@ import (
 )
 
 type Qos struct {
-	Bucket chan struct{} // bucket channel
-	Limit  int64         // qps, <= 0 means disable limit
-	Ticket int64         // one tick size, default is 1
+	Limit  int64 // qps, <= 0 means disable limit
+	Ticket int64 // one tick size, default is 1
 
-	addr   *int64        // periodically check whether the address value is equal to Limit, and update if not.
-	close  bool          // channel is closed?
-	prevLimit int64 // previous address limit
+	bucket    chan struct{} // bucket channel
+	addr      *int64        // periodically check whether the address value is equal to Limit, and update if not.
+	close     bool          // channel is closed?
+	prevLimit int64         // previous address limit
 }
 
 func StartQoS(limit, ticket int64, addr *int64) *Qos {
@@ -27,16 +27,16 @@ func StartQoS(limit, ticket int64, addr *int64) *Qos {
 	q.Limit = limit
 	q.Ticket = ticket
 	q.addr = addr
-	q.Bucket = make(chan struct{}, limit)
+	q.bucket = make(chan struct{}, limit)
 
 	go q.timer()
 	return q
 }
 
 func (q *Qos) FetchBucket() {
-	for { // the old bucket channel maybe release, so we need to retry once timeout
+	for q.Limit > 0 { // the old bucket channel maybe release, so we need to retry once timeout
 		select {
-		case <-q.Bucket:
+		case <-q.bucket:
 			return
 		case <-time.After(time.Second * 1):
 			break
@@ -49,7 +49,7 @@ func (q *Qos) resizeLimit() {
 FOR:
 	for {
 		select {
-		case <-q.Bucket:
+		case <-q.bucket:
 		default:
 			// break if bucket if empty
 			break FOR
@@ -57,7 +57,7 @@ FOR:
 	}
 
 	LOG.Info("clear old channel, set new bucket size[%v]", q.Limit)
-	q.Bucket = make(chan struct{}, q.Limit)
+	q.bucket = make(chan struct{}, q.Limit)
 }
 
 func (q *Qos) timer() {
@@ -79,7 +79,7 @@ func (q *Qos) timer() {
 	INJECT:
 		for i = 0; i < q.Limit; i++ {
 			select {
-			case q.Bucket <- struct{}{}:
+			case q.bucket <- struct{}{}:
 			default:
 				// break if bucket if full
 				break INJECT
