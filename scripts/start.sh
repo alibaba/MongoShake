@@ -9,7 +9,7 @@ if [ $# != 1 ] ; then
 	exit 0
 fi
 
-name="collector"
+name="collector.linux"
 
 if [ "Darwin" == "$(uname -s)" ];then
 	printf "\\nWARNING !!! MacOs doesn't supply to use this script, please use \"./%s -conf=config_file_name\" manual command to run\\n" "$name"
