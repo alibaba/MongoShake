@@ -643,11 +643,29 @@ func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 				continue
 			}
 			if ele.Name == "applyOps" {
-				arr := ele.Value.([]interface{})
-				for i, ele := range arr {
-					doc := ele.(bson.D)
-					arr[i] = oplog.RemoveFiled(doc, uuidMark)
+				switch v := ele.Value.(type) {
+				case []interface{}:
+					for i, ele := range v {
+						doc := ele.(bson.D)
+						v[i] = oplog.RemoveFiled(doc, uuidMark)
+					}
+				case bson.D:
+					ret := make(bson.D, 0, len(v))
+					for _, ele := range v {
+						if ele.Name == uuidMark {
+							continue
+						}
+						ret = append(ret, ele)
+					}
+					ele.Value = ret
+				case []bson.M:
+					for _, ele := range v {
+						if _, ok := ele[uuidMark]; ok {
+							delete(ele, uuidMark)
+						}
+					}
 				}
+
 			}
 			store = append(store, ele)
 		}
