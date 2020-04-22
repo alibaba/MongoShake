@@ -1,3 +1,7 @@
+2020-04-22 Alibaba Cloud.
+	* version: 2.4.2
+	* BUGFIX: fix bug of applyOps run failed. #329
+
 2020-04-09 Alibaba Cloud.
 	* version: 2.4.1
 	* IMPROVE: add speed limit policy in full sync stage.
