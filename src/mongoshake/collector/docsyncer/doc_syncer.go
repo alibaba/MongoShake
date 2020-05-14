@@ -52,6 +52,7 @@ func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoCon
 	for ns := range nsSet {
 		toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
 		if !conf.Options.FullSyncCollectionDrop {
+			// do not drop
 			colNames, err := toConn.Session.DB(toNS.Database).CollectionNames()
 			if err != nil {
 				LOG.Critical("Get collection names of db %v of dest mongodb failed. %v", toNS.Database, err)
@@ -66,6 +67,7 @@ func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoCon
 				}
 			}
 		} else {
+			// need drop
 			err := toConn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
 			if err != nil && err.Error() != "ns not found" {
 				LOG.Critical("Drop collection ns %v of dest mongodb failed. %v", toNS, err)

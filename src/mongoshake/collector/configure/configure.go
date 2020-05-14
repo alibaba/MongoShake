@@ -43,7 +43,7 @@ type Configuration struct {
 	FullSyncReaderWriteDocumentParallel  int    `config:"full_sync.reader.write_document_parallel"`
 	FullSyncReaderReadDocumentCount      uint64 `config:"full_sync.reader.read_document_count"`
 	FullSyncReaderDocumentBatchSize      int    `config:"full_sync.reader.document_batch_size"`
-	FullSyncCollectionDrop               bool   `config:"full_sync.collection_exist_no_drop"`
+	FullSyncCollectionDrop               bool   `config:"full_sync.collection_exist_drop"`
 	FullSyncCreateIndex                  string `config:"full_sync.create_index"`
 	FullSyncReaderOplogStoreDisk         bool   `config:"full_sync.reader.oplog_store_disk"`
 	FullSyncReaderOplogStoreDiskMaxSize  int64  `config:"full_sync.reader.oplog_store_disk_max_size"`

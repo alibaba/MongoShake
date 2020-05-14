@@ -6,8 +6,8 @@ var (
 		FeatureCompatibleVersion: 1,
 	}
 	FcvConfiguration = Configuration{
-		CurrentVersion:           2,
-		FeatureCompatibleVersion: 1,
+		CurrentVersion:           3,
+		FeatureCompatibleVersion: 3,
 	}
 
 	LowestCheckpointVersion = map[int]string {
@@ -18,6 +18,7 @@ var (
 		0: "1.0.0",
 		1: "2.4.0",
 		2: "2.4.1",
+		3: "2.4.3",
 	}
 )
 
