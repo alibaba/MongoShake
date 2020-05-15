@@ -260,6 +260,10 @@ func checkConflict() error {
 	// http_profile & system_profile
 	conf.Options.FullSyncHTTPListenPort = utils.MayBeRandom(conf.Options.FullSyncHTTPListenPort)
 	conf.Options.IncrSyncHTTPListenPort = utils.MayBeRandom(conf.Options.IncrSyncHTTPListenPort)
+	if conf.Options.FullSyncHTTPListenPort == conf.Options.IncrSyncHTTPListenPort {
+		return fmt.Errorf("full_sync.http_port should not equal to incr_sync.http_port")
+	}
+
 	conf.Options.SystemProfilePort = utils.MayBeRandom(conf.Options.SystemProfilePort)
 	// check mongo_cs_url
 	if conf.Options.MongoCsUrl == "" && len(conf.Options.MongoUrls) > 1 {
