@@ -1,3 +1,8 @@
+2020-05-14 Alibaba Cloud.
+	* version: 2.4.3
+	* BUGFIX: rename `full_sync.collection_exist_no_drop` to
+	`full_sync.collection_exist_drop`.
+
 2020-04-22 Alibaba Cloud.
 	* version: 2.4.2
 	* BUGFIX: fix bug of applyOps run failed. #329
