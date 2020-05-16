@@ -109,7 +109,12 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// the source is sharding or replica-set
 	// fromIsSharding := len(coordinator.Sources) > 1 || fromConn0.IsMongos()
 
-	fromIsSharding := coordinator.MongoS != nil
+	fromIsSharding := false
+	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
+		fromIsSharding = coordinator.MongoS != nil
+	} else {
+		fromIsSharding = len(conf.Options.MongoUrls) > 1
+	}
 
 	// init orphan sharding chunk map if source is sharding
 	shardingChunkMap, err := fetchChunkMap(fromIsSharding)
