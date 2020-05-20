@@ -148,10 +148,10 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.M,
 		//if _, ok := newObject[versionMark]; ok {
 		//	delete(newObject, versionMark)
 		//}
-		newObject := oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+		log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
 		updates = append(updates, bson.M{
 			"q":      log.original.partialLog.Query,
-			"u":      newObject,
+			"u":      log.original.partialLog.Object,
 			"upsert": upsert,
 			"multi":  false})
 		LOG.Debug("writer: update %v", log.original.partialLog)
@@ -338,11 +338,13 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 		//if _, ok := newObject[versionMark]; ok {
 		//	delete(newObject, versionMark)
 		//}
-		newObject := oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-		update = append(update, log.original.partialLog.Query, newObject)
+		log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+		update = append(update, log.original.partialLog.Query, log.original.partialLog.Object)
 
-		LOG.Debug("writer: update %v", log.original.partialLog)
+		LOG.Debug("writer: update %v", log.original.partialLog.Object)
 	}
+
+	LOG.Debug("writer: update %v", update)
 
 	bulk := bw.session.DB(database).C(collection).Bulk()
 	if upsert {
@@ -508,15 +510,15 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 			//if _, ok := newObject[versionMark]; ok {
 			//	delete(newObject, versionMark)
 			//}
-			newObject := oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-			_, err := collectionHandle.Upsert(log.original.partialLog.Query, newObject)
+			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+			_, err := collectionHandle.Upsert(log.original.partialLog.Query, log.original.partialLog.Object)
 			if err != nil {
 				if mgo.IsDup(err) {
 					HandleDuplicated(collectionHandle, oplogs, OpUpdate)
 					continue
 				}
 				errMsg := fmt.Sprintf("doUpdate[upsert] old-data[%v] with new-data[%v] failed[%v]",
-					log.original.partialLog.Query, newObject, err)
+					log.original.partialLog.Query, log.original.partialLog.Object, err)
 				errMsgs = append(errMsgs, errMsg)
 			}
 
@@ -529,8 +531,8 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 			//if _, ok := newObject[versionMark]; ok {
 			//	delete(newObject, versionMark)
 			//}
-			newObject := oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-			err := collectionHandle.Update(log.original.partialLog.Query, newObject)
+			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+			err := collectionHandle.Update(log.original.partialLog.Query, log.original.partialLog.Object)
 			if err != nil {
 				if utils.IsNotFound(err) {
 					return fmt.Errorf("doUpdate[update] data[%v] not found", log.original.partialLog.Query)
@@ -538,7 +540,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 					HandleDuplicated(collectionHandle, oplogs, OpUpdate)
 				} else {
 					errMsg := fmt.Sprintf("doUpdate[update] old-data[%v] with new-data[%v] failed[%v]",
-						log.original.partialLog.Query, newObject, err)
+						log.original.partialLog.Query, log.original.partialLog.Object, err)
 					errMsgs = append(errMsgs, errMsg)
 				}
 			}

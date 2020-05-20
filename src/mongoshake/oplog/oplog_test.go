@@ -218,6 +218,40 @@ func TestRemoveFiled(t *testing.T) {
 		ret := RemoveFiled(input, "$v2")
 		assert.Equal(t, ret, input, "should be equal")
 	}
+
+	{
+		fmt.Printf("TestRemoveFiled case %d.\n", nr)
+		nr++
+
+		input := bson.D{
+			bson.DocElem{
+				Name:  "$v",
+				Value: 1,
+			},
+			bson.DocElem{
+				Name: "$set",
+				Value: bson.D{
+					bson.DocElem{
+						Name:  "workFlowNodeList.3.nodePersonList.0.attitude",
+						Value: "2",
+					},
+				},
+			},
+		}
+
+		ret := RemoveFiled(input, "$v")
+		assert.Equal(t, ret, bson.D{
+			bson.DocElem{
+				Name: "$set",
+				Value: bson.D{
+					bson.DocElem{
+						Name:  "workFlowNodeList.3.nodePersonList.0.attitude",
+						Value: "2",
+					},
+				},
+			},
+		}, "should be equal")
+	}
 }
 
 func TestGatherApplyOps(t *testing.T) {
