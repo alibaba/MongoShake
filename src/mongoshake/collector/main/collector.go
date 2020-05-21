@@ -22,6 +22,7 @@ import (
 type Exit struct{ Code int }
 
 func main() {
+	fmt.Println("更改日期：2020年5月21日")
 	var err error
 	defer handleExit()
 	defer LOG.Close()

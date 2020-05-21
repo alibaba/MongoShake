@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 	"fmt"
-	_ "strings"
 
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -24,7 +23,7 @@ type ChangeStreamConn struct {
 	ctx       context.Context
 }
 
-func NewChangeStreamConn(src string, mode string,fulldoc bool, watchStartTime int64, batchSize int32) (*ChangeStreamConn, error) {
+func NewChangeStreamConn(src string, mode string, fulldoc bool, watchStartTime int64, batchSize int32) (*ChangeStreamConn, error) {
 	// init client ops
 	clientOps := options.Client().ApplyURI(src)
 

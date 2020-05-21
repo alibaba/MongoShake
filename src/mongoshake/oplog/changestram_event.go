@@ -48,14 +48,14 @@ const (
 	        "uid" : <BinData>
 	    }
 	}
-*/
+ */
 type Event struct {
 	Id                bson.M              `bson:"_id" json:"_id"`
 	OperationType     string              `bson:"operationType" json:"operationType"`
-	FullDocument      bson.D              `bson:"fullDocument" json:"fullDocument"` // exists on "insert", "replace", "delete", "update"
+	FullDocument      bson.D              `bson:"fullDocument" json:"fullDocument"`  // exists on "insert", "replace", "delete", "update"
 	Ns                bson.M              `bson:"ns" json:"ns"`
 	To                bson.M              `bson:"to" json:"to"`
-	DocumentKey       bson.M              `bson:"documentKey" json:"documentKey"` // exists on "insert", "replace", "delete", "update"
+	DocumentKey       bson.M              `bson:"documentKey" json:"documentKey"`  // exists on "insert", "replace", "delete", "update"
 	UpdateDescription bson.M              `bson:"updateDescription" json:"updateDescription"`
 	ClusterTime       bson.MongoTimestamp `bson:"clusterTime" json:"clusterTime"`
 	TxnNumber         uint64              `bson:"txnNumber" json:"txnNumber"`
@@ -70,7 +70,7 @@ func (e *Event) String() string {
 	}
 }
 
-func ConvertEvent2Oplog(input []byte,fulldoc bool) (*PartialLog, error) {
+func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 	event := new(Event)
 	if err := bson.Unmarshal(input, event); err != nil {
 		return nil, fmt.Errorf("unmarshal raw bson[%s] failed: %v", input, err)
@@ -327,7 +327,7 @@ func ConvertEvent2Oplog(input []byte,fulldoc bool) (*PartialLog, error) {
 		oplog.Operation = "c"
 		oplog.Object = bson.D{
 			bson.DocElem{
-				Name:  "drop",
+				Name: "drop",
 				Value: ns["coll"],
 			},
 		}
@@ -373,11 +373,11 @@ func ConvertEvent2Oplog(input []byte,fulldoc bool) (*PartialLog, error) {
 		oplog.Operation = "c"
 		oplog.Object = bson.D{ // should enable drop_database option on the replayer by default
 			bson.DocElem{
-				Name:  "renameCollection",
+				Name: "renameCollection",
 				Value: fmt.Sprintf("%s.%s", ns["db"], ns["coll"]),
 			},
 			bson.DocElem{
-				Name:  "to",
+				Name: "to",
 				Value: fmt.Sprintf("%s.%s", event.To["db"], event.To["coll"]),
 			},
 		}
@@ -414,7 +414,7 @@ func ConvertEvent2Oplog(input []byte,fulldoc bool) (*PartialLog, error) {
 		oplog.Operation = "c"
 		oplog.Object = bson.D{
 			bson.DocElem{
-				Name:  "dropDatabase",
+				Name: "dropDatabase",
 				Value: 1,
 			},
 		}
