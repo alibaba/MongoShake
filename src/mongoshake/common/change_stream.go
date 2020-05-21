@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 	"fmt"
+	_ "strings"
 
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -23,7 +24,7 @@ type ChangeStreamConn struct {
 	ctx       context.Context
 }
 
-func NewChangeStreamConn(src string, mode string, watchStartTime int64, batchSize int32) (*ChangeStreamConn, error) {
+func NewChangeStreamConn(src string, mode string,fulldoc bool, watchStartTime int64, batchSize int32) (*ChangeStreamConn, error) {
 	// init client ops
 	clientOps := options.Client().ApplyURI(src)
 
@@ -69,6 +70,11 @@ func NewChangeStreamConn(src string, mode string, watchStartTime int64, batchSiz
 		MaxAwaitTime: &waitTime,
 		BatchSize:    &batchSize,
 	}
+
+	if  fulldoc {
+		ops.SetFullDocument(options.UpdateLookup)
+	}
+
 	csHandler, err := client.Watch(ctx, mongo.Pipeline{}, ops)
 	if err != nil {
 		return nil, fmt.Errorf("client[%v] create change stream handler failed[%v]", src, err)

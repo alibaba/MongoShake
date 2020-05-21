@@ -25,6 +25,7 @@ type Configuration struct {
 	MongoCsUrl                  string   `config:"mongo_cs_url"`
 	MongoSUrl                   string   `config:"mongo_s_url"`
 	MongoConnectMode            string   `config:"mongo_connect_mode"`
+	MongoWatchFulldocument      bool     `config:"mongo_watch_fulldocument"`
 	Tunnel                      string   `config:"tunnel"`
 	TunnelAddress               []string `config:"tunnel.address"`
 	TunnelMessage               string   `config:"tunnel.message"`
