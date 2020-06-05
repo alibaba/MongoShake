@@ -1,11 +1,14 @@
-2020-05-14 Alibaba Cloud.
-	* version: 2.4.3
-	* BUGFIX: rename `full_sync.collection_exist_no_drop` to
-	`full_sync.collection_exist_drop`.
+2020-06-05 Alibaba Cloud.
+	* version: 2.4.4
 	* BUGFIX: fix bug of "two $set" in update query. see #345.
 	* BUGFIX: fix bug of source mongodb judgement error. see #343.
 	* IMPROVE: solve the idempotency problem of oplog synchronization
 	during the initial sync period. see #345.
+
+2020-05-14 Alibaba Cloud.
+	* version: 2.4.3
+	* BUGFIX: rename `full_sync.collection_exist_no_drop` to
+	`full_sync.collection_exist_drop`.
 
 2020-04-22 Alibaba Cloud.
 	* version: 2.4.2
