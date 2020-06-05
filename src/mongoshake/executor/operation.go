@@ -61,7 +61,7 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 		// just use the first log. they has the same metadata
 		metadata := buildMetadata(group.oplogRecords[0].original.partialLog)
 		hasIndex := strings.Contains(group.ns, "system.indexes")
-		dbWriter := NewDbWriter(exec.session, metadata, exec.bulkInsert && !hasIndex)
+		dbWriter := NewDbWriter(exec.session, metadata, exec.bulkInsert && !hasIndex, exec.batchExecutor.FullFinishTs)
 		var err error
 
 		LOG.Debug("Replay-%d oplog collection ns [%s] with command [%s] batch count %d, metadata %v",

@@ -32,6 +32,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		if !w.Init() {
 			return errors.New("worker initialize error")
 		}
+		w.SetInitSyncFinishTs(fullSyncFinishPosition)
 
 		// syncer and worker are independent. the relationship between
 		// them needs binding here. one worker definitely belongs to a specific

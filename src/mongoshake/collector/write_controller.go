@@ -1,11 +1,15 @@
 package collector
 
 import (
+	"reflect"
+
 	"mongoshake/collector/configure"
 	"mongoshake/common"
 	"mongoshake/modules"
 	"mongoshake/oplog"
 	"mongoshake/tunnel"
+
+	LOG "github.com/vinllen/log4go"
 )
 
 type WriteController struct {
@@ -62,6 +66,15 @@ func NewWriteController(worker *Worker) *WriteController {
 		}
 	}
 	return nil
+}
+
+// set init sync finish timestamp if tunnel is direct
+func (controller *WriteController) SetInitSyncFinishTs(fullSyncFinishPosition int64) {
+	LOG.Info("tunnel name is %v", reflect.TypeOf(controller.tunnel).Name())
+	if reflect.TypeOf(controller.tunnel).Name() == "DirectWriter" {
+		dw := controller.tunnel.(*tunnel.DirectWriter)
+		dw.BatchExecutor.FullFinishTs = fullSyncFinishPosition
+	}
 }
 
 func (controller *WriteController) installModules() bool {

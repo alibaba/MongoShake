@@ -51,6 +51,8 @@ type BatchGroupExecutor struct {
 	MongoUrl string
 	// tranform namespace
 	NsTrans *transform.NamespaceTransform
+	// init sync finish timestamp
+	FullFinishTs int64
 }
 
 func (batchExecutor *BatchGroupExecutor) Start() {
