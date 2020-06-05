@@ -85,6 +85,10 @@ func (dataFile *DataFile) ReadHeader() *FileHeader {
 	return fileHeader
 }
 
+func (tunnel *FileWriter) Name() string {
+	return "file"
+}
+
 func (tunnel *FileWriter) Send(message *WMessage) int64 {
 	if message.Tag&MsgProbe == 0 {
 		oplogMessage <- message.TMessage

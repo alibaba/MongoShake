@@ -142,6 +142,11 @@ type Writer interface {
 	 * whether need parsed log or raw log
 	 */
 	ParsedLogsRequired() bool
+
+	/*
+	 * tunnel name
+	 */
+	Name() string
 }
 
 type WriterFactory struct {

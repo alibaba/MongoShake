@@ -14,6 +14,10 @@ type DirectWriter struct {
 	BatchExecutor *executor.BatchGroupExecutor
 }
 
+func (writer *DirectWriter) Name() string {
+	return "direct"
+}
+
 func (writer *DirectWriter) Prepare() bool {
 	nimo.AssertTrue(len(writer.RemoteAddrs) > 0, "RemoteAddrs must > 0")
 
