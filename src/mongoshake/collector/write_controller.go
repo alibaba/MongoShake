@@ -6,7 +6,6 @@ import (
 	"mongoshake/modules"
 	"mongoshake/oplog"
 	"mongoshake/tunnel"
-
 )
 
 type WriteController struct {
