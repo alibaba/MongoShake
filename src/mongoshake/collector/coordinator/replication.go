@@ -283,6 +283,7 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 	return coordinator.startOplogReplication(fullBeginTs, utils.TimestampToInt64(fullFinishTs))
 }
 
+// TODO, set initSyncFinishTs into worker
 // run full-sync and incr-sync in parallel
 func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs int64) error {
 	var docError error

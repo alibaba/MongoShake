@@ -18,6 +18,10 @@ type RPCWriter struct {
 	rpcClient *rpc.Client
 }
 
+func (tunnel *RPCWriter) Name() string {
+	return "rpc"
+}
+
 func (tunnel *RPCWriter) Send(message *WMessage) int64 {
 	var err error
 	if tunnel.rpcConn == nil {

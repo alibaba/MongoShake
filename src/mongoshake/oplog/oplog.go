@@ -148,6 +148,7 @@ func ConvertBsonM2D(input bson.M) bson.D {
 	return output
 }
 
+// pay attention: the input bson.D will be modified.
 func RemoveFiled(input bson.D, key string) bson.D {
 	flag := -1
 	for id := range input {

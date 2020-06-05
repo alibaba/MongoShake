@@ -11,7 +11,11 @@ import (
 type DirectWriter struct {
 	RemoteAddrs   []string
 	ReplayerId    uint32 // equal to worker-id
-	batchExecutor *executor.BatchGroupExecutor
+	BatchExecutor *executor.BatchGroupExecutor
+}
+
+func (writer *DirectWriter) Name() string {
+	return "direct"
 }
 
 func (writer *DirectWriter) Prepare() bool {
@@ -24,18 +28,18 @@ func (writer *DirectWriter) Prepare() bool {
 	}
 
 	urlChoose := writer.ReplayerId % uint32(len(writer.RemoteAddrs))
-	writer.batchExecutor = &executor.BatchGroupExecutor{
+	writer.BatchExecutor = &executor.BatchGroupExecutor{
 		ReplayerId: writer.ReplayerId,
 		MongoUrl:   writer.RemoteAddrs[urlChoose],
 	}
 	// writer.batchExecutor.RestAPI()
-	writer.batchExecutor.Start()
+	writer.BatchExecutor.Start()
 	return true
 }
 
 func (writer *DirectWriter) Send(message *WMessage) int64 {
 	// won't return when Sync has been finished which is a synchronous operation.
-	writer.batchExecutor.Sync(message.ParsedLogs, nil)
+	writer.BatchExecutor.Sync(message.ParsedLogs, nil)
 	return 0
 }
 

@@ -64,7 +64,15 @@ func (worker *Worker) String() string {
 func (worker *Worker) Init() bool {
 	worker.RestAPI()
 	worker.writeController = NewWriteController(worker)
-	return worker.writeController != nil
+	if worker.writeController == nil {
+		return false
+	}
+
+	return true
+}
+
+func (worker *Worker) SetInitSyncFinishTs(fullSyncFinishPosition int64) {
+	worker.writeController.SetInitSyncFinishTs(fullSyncFinishPosition)
 }
 
 func (worker *Worker) IsAllAcked() bool {
