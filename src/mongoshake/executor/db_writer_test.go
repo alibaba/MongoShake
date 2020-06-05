@@ -193,6 +193,9 @@ func TestSingleWriter(t *testing.T) {
 
 		writer := NewDbWriter(conn.Session, bson.M{}, false, 100)
 		inserts := []*OplogRecord{
+			mockOplogRecord(1, 1, -1),
+			mockOplogRecord(2, 2, -1),
+			mockOplogRecord(3, 3, -1),
 			{
 				original: &PartialLogWithCallbak {
 					partialLog: &oplog.PartialLog {
@@ -219,10 +222,11 @@ func TestSingleWriter(t *testing.T) {
 		err = conn.Session.DB(testDb).C(testCollection).Find(bson.M{}).Sort("_id").All(&result)
 		fmt.Println(result)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, 1, len(result), "should be equal")
-		assert.Equal(t, nil, result[0].(bson.M)["x"], "should be equal")
+		assert.Equal(t, 4, len(result), "should be equal")
+		assert.Equal(t, nil, result[3].(bson.M)["x"], "should be equal")
 
 		updates := []*OplogRecord{
+			mockOplogRecord(1, 10, 1),
 			{
 				original: &PartialLogWithCallbak {
 					partialLog: &oplog.PartialLog {
@@ -243,6 +247,8 @@ func TestSingleWriter(t *testing.T) {
 					},
 				},
 			},
+			mockOplogRecord(2, 20, 2),
+			mockOplogRecord(3, 30, 3),
 		}
 		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, true)
 		assert.Equal(t, nil, err, "should be equal")
@@ -250,8 +256,11 @@ func TestSingleWriter(t *testing.T) {
 		err = conn.Session.DB(testDb).C(testCollection).Find(bson.M{}).Sort("_id").All(&result)
 		fmt.Println(result)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, 1, len(result), "should be equal")
-		assert.Equal(t, nil, result[0].(bson.M)["x"], "should be equal")
+		assert.Equal(t, 4, len(result), "should be equal")
+		assert.Equal(t, nil, result[3].(bson.M)["x"], "should be equal")
+		assert.Equal(t, 10, result[0].(bson.M)["x"], "should be equal")
+		assert.Equal(t, 20, result[1].(bson.M)["x"], "should be equal")
+		assert.Equal(t, 30, result[2].(bson.M)["x"], "should be equal")
 	}
 }
 
@@ -511,6 +520,9 @@ func TestBulkWriter(t *testing.T) {
 
 		writer := NewDbWriter(conn.Session, bson.M{}, true, 100)
 		inserts := []*OplogRecord{
+			mockOplogRecord(1, 1, -1),
+			mockOplogRecord(2, 2, -1),
+			mockOplogRecord(3, 3, -1),
 			{
 				original: &PartialLogWithCallbak {
 					partialLog: &oplog.PartialLog {
@@ -537,10 +549,11 @@ func TestBulkWriter(t *testing.T) {
 		err = conn.Session.DB(testDb).C(testCollection).Find(bson.M{}).Sort("_id").All(&result)
 		fmt.Println(result)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, 1, len(result), "should be equal")
-		assert.Equal(t, nil, result[0].(bson.M)["x"], "should be equal")
+		assert.Equal(t, 4, len(result), "should be equal")
+		assert.Equal(t, nil, result[3].(bson.M)["x"], "should be equal")
 
 		updates := []*OplogRecord{
+			mockOplogRecord(1, 10, 1),
 			{
 				original: &PartialLogWithCallbak {
 					partialLog: &oplog.PartialLog {
@@ -561,6 +574,8 @@ func TestBulkWriter(t *testing.T) {
 					},
 				},
 			},
+			mockOplogRecord(2, 20, 2),
+			mockOplogRecord(3, 30, 3),
 		}
 		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, true)
 		assert.Equal(t, nil, err, "should be equal")
@@ -568,8 +583,11 @@ func TestBulkWriter(t *testing.T) {
 		err = conn.Session.DB(testDb).C(testCollection).Find(bson.M{}).Sort("_id").All(&result)
 		fmt.Println(result)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, 1, len(result), "should be equal")
-		assert.Equal(t, nil, result[0].(bson.M)["x"], "should be equal")
+		assert.Equal(t, 4, len(result), "should be equal")
+		assert.Equal(t, nil, result[3].(bson.M)["x"], "should be equal")
+		assert.Equal(t, 10, result[0].(bson.M)["x"], "should be equal")
+		assert.Equal(t, 20, result[1].(bson.M)["x"], "should be equal")
+		assert.Equal(t, 30, result[2].(bson.M)["x"], "should be equal")
 	}
 }
 
