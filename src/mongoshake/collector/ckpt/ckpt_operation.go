@@ -5,7 +5,7 @@ import (
 	"io/ioutil"
 	"encoding/json"
 	"bytes"
-	"errors"
+	"fmt"
 
 	"mongoshake/collector/configure"
 	"mongoshake/common"
@@ -47,6 +47,9 @@ type CheckpointOperation interface {
 
 	// save checkpoint
 	Insert(ckpt *CheckpointContext) error
+
+	// log info
+	String() string
 }
 
 // mongo
@@ -68,7 +71,7 @@ func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 			ckpt.Conn = conn
 			ckpt.QueryHandle = conn.Session.DB(ckpt.DB).C(ckpt.Table)
 		} else {
-			LOG.Warn("CheckpointOperation manager connect mongo cluster failed. %v", err)
+			LOG.Warn("%s CheckpointOperation manager connect mongo cluster failed. %v", ckpt.Name, err)
 			return false
 		}
 	}
@@ -87,14 +90,14 @@ func (ckpt *MongoCheckpoint) close() {
 
 func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 	if !ckpt.ensureNetwork() {
-		LOG.Warn("Reload ckpt ensure network failed. %v", ckpt.Conn)
+		LOG.Warn("%s Reload ckpt ensure network failed. %v", ckpt.Name, ckpt.Conn)
 		return nil, false
 	}
 
 	var err error
 	value := new(CheckpointContext)
 	if err = ckpt.QueryHandle.Find(bson.M{CheckpointName: ckpt.Name}).One(value); err == nil {
-		LOG.Info("Load exist checkpoint. content %v", value)
+		LOG.Info("%s Load exist checkpoint. content %v", ckpt.Name, value)
 		return value, true
 	} else if err == mgo.ErrNotFound {
 		if InitCheckpoint > ckpt.Timestamp {
@@ -105,30 +108,30 @@ func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 		value.Version = ckpt.Version
 		value.OplogDiskQueue = ckpt.OplogDiskQueue
 		value.OplogDiskQueueFinishTs = ckpt.OplogDiskQueueFinishTs
-		LOG.Info("Regenerate checkpoint but won't persist. content: %s", value)
+		LOG.Info("%s Regenerate checkpoint but won't persist. content: %s", ckpt.Name, value)
 		// insert current ckpt snapshot in memory
 		// ckpt.QueryHandle.Insert(value)
 		return value, false
 	}
 
 	ckpt.close()
-	LOG.Warn("Reload ckpt find context fail. %v", err)
+	LOG.Warn("%s Reload ckpt find context fail. %v", ckpt.Name, err)
 	return nil, false
 }
 
 func (ckpt *MongoCheckpoint) Insert(updates *CheckpointContext) error {
 	if !ckpt.ensureNetwork() {
-		LOG.Warn("Record ckpt ensure network failed. %v", ckpt.Conn)
-		return errors.New("record ckpt network failed")
+		LOG.Warn("%s Record ckpt ensure network failed. %v", ckpt.Name, ckpt.Conn)
+		return fmt.Errorf("%s record ckpt network failed", ckpt.Name)
 	}
 
 	if _, err := ckpt.QueryHandle.Upsert(bson.M{CheckpointName: ckpt.Name}, bson.M{"$set": updates}); err != nil {
-		LOG.Warn("Record checkpoint %v upsert error %v", updates, err)
+		LOG.Warn("%s Record checkpoint %v upsert error %v", ckpt.Name, updates, err)
 		ckpt.close()
 		return err
 	}
 
-	LOG.Info("Record new checkpoint success [%d]", int64(utils.ExtractMongoTimestamp(updates.Timestamp)))
+	LOG.Info("%s Record new checkpoint success [%d]", ckpt.Name, int64(utils.ExtractMongoTimestamp(updates.Timestamp)))
 	return nil
 }
 
@@ -145,7 +148,7 @@ func (ckpt *HttpApiCheckpoint) Get() (*CheckpointContext, bool) {
 	var stream []byte
 	value := new(CheckpointContext)
 	if resp, err = http.Get(ckpt.URL); err != nil {
-		LOG.Warn("Http api ckpt request failed, %v", err)
+		LOG.Warn("%s Http api ckpt request failed, %v", ckpt.Name, err)
 		return nil, false
 	}
 
@@ -170,10 +173,10 @@ func (ckpt *HttpApiCheckpoint) Get() (*CheckpointContext, bool) {
 func (ckpt *HttpApiCheckpoint) Insert(insert *CheckpointContext) error {
 	body, _ := json.Marshal(insert)
 	if resp, err := http.Post(ckpt.URL, "application/json", bytes.NewReader(body)); err != nil || resp.StatusCode != http.StatusOK {
-		LOG.Warn("Context api manager write request failed, %v", err)
+		LOG.Warn("%s Context api manager write request failed, %v", ckpt.Name, err)
 		return err
 	}
 
-	LOG.Info("Record new checkpoint success [%d]", int64(utils.ExtractMongoTimestamp(insert.Timestamp)))
+	LOG.Info("%s Record new checkpoint success [%d]", ckpt.Name, int64(utils.ExtractMongoTimestamp(insert.Timestamp)))
 	return nil
 }

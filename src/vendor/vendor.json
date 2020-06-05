@@ -171,34 +171,34 @@
 			"revisionTime": "2018-05-14T12:41:25Z"
 		},
 		{
-			"checksumSHA1": "AMnQahKe3Ar4eHyZsIb4z4bbvGU=",
+			"checksumSHA1": "xCpdyG+lSLiBpp4WXAejlFpC5z8=",
 			"path": "github.com/vinllen/mgo",
-			"revision": "520f0e6e34b816ec23e0a7c67971d581086b1451",
-			"revisionTime": "2019-08-30T03:33:24Z"
+			"revision": "6e8a76964ea9283ec792dcb8789a9e537328374e",
+			"revisionTime": "2020-06-03T09:46:26Z"
 		},
 		{
 			"checksumSHA1": "DqnKbupL7yiSYpmgKt30Uzp6Zlc=",
 			"path": "github.com/vinllen/mgo/bson",
-			"revision": "520f0e6e34b816ec23e0a7c67971d581086b1451",
-			"revisionTime": "2019-08-30T03:33:24Z"
+			"revision": "6e8a76964ea9283ec792dcb8789a9e537328374e",
+			"revisionTime": "2020-06-03T09:46:26Z"
 		},
 		{
 			"checksumSHA1": "1fOPYx7Y7eFeSBbajEEb6ZLQct4=",
 			"path": "github.com/vinllen/mgo/internal/json",
-			"revision": "520f0e6e34b816ec23e0a7c67971d581086b1451",
-			"revisionTime": "2019-08-30T03:33:24Z"
+			"revision": "6e8a76964ea9283ec792dcb8789a9e537328374e",
+			"revisionTime": "2020-06-03T09:46:26Z"
 		},
 		{
 			"checksumSHA1": "ai/5rRSh/6kWhGfA1dHaQNUXiMU=",
 			"path": "github.com/vinllen/mgo/internal/sasl",
-			"revision": "520f0e6e34b816ec23e0a7c67971d581086b1451",
-			"revisionTime": "2019-08-30T03:33:24Z"
+			"revision": "6e8a76964ea9283ec792dcb8789a9e537328374e",
+			"revisionTime": "2020-06-03T09:46:26Z"
 		},
 		{
 			"checksumSHA1": "TwmlhTUpQBCa0oO20tw9EnlF6xs=",
 			"path": "github.com/vinllen/mgo/internal/scram",
-			"revision": "520f0e6e34b816ec23e0a7c67971d581086b1451",
-			"revisionTime": "2019-08-30T03:33:24Z"
+			"revision": "6e8a76964ea9283ec792dcb8789a9e537328374e",
+			"revisionTime": "2020-06-03T09:46:26Z"
 		},
 		{
 			"checksumSHA1": "uE78U34xjlJ815TX/bhLROkjmeI=",

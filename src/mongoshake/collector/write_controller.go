@@ -64,6 +64,14 @@ func NewWriteController(worker *Worker) *WriteController {
 	return nil
 }
 
+// set init sync finish timestamp if tunnel is direct
+func (controller *WriteController) SetInitSyncFinishTs(fullSyncFinishPosition int64) {
+	if controller.tunnel.Name() == "direct" {
+		dw := controller.tunnel.(*tunnel.DirectWriter)
+		dw.BatchExecutor.FullFinishTs = fullSyncFinishPosition
+	}
+}
+
 func (controller *WriteController) installModules() bool {
 	for _, m := range orderedModuleList {
 		if m.IsRegistered() {
