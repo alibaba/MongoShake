@@ -79,15 +79,21 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 	}
 
 	if _, err := bulk.Run(); err != nil {
-		// error can be ignored
-		if IgnoreError(err, "u", parseLastTimestamp(oplogs) <= bw.fullFinishTs) {
-			LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]", err, "u", parseLastTimestamp(oplogs) <= bw.fullFinishTs)
-			return nil
-		}
-
 		// parse error
 		index, errMsg, dup := utils.FindFirstErrorIndexAndMessage(err.Error())
 		LOG.Error("detail error info with index[%v] msg[%v] dup[%v]", index, errMsg, dup)
+
+		// error can be ignored
+		if IgnoreError(err, "u", parseLastTimestamp(oplogs) <= bw.fullFinishTs) {
+			var oplogRecord *OplogRecord
+			if index != -1 {
+				oplogRecord = oplogs[index]
+			}
+			LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v], oplog[%v]",
+				err, "u", parseLastTimestamp(oplogs) <= bw.fullFinishTs, oplogRecord)
+			return nil
+		}
+
 		if mgo.IsDup(err) {
 			// create single writer to write one by one
 			sw := NewDbWriter(bw.session, bson.M{}, false, bw.fullFinishTs)
@@ -126,9 +132,13 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 	if _, err := bulk.Run(); err != nil {
 		// parse error
 		index, errMsg, dup := utils.FindFirstErrorIndexAndMessage(err.Error())
+		var oplogRecord *OplogRecord
+		if index != -1 {
+			oplogRecord = oplogs[index]
+		}
 		LOG.Warn(parseLastTimestamp(oplogs), bw.fullFinishTs)
-		LOG.Warn("detail error info with index[%v] msg[%v] dup[%v], isFullSyncStage[%v]",
-			index, errMsg, dup, parseLastTimestamp(oplogs) <= bw.fullFinishTs)
+		LOG.Warn("detail error info with index[%v] msg[%v] dup[%v], isFullSyncStage[%v], oplog[%v]",
+			index, errMsg, dup, parseLastTimestamp(oplogs) <= bw.fullFinishTs, oplogRecord)
 
 		// error can be ignored
 		if IgnoreError(err, "u", parseLastTimestamp(oplogs) <= bw.fullFinishTs) {
