@@ -1,3 +1,7 @@
+2020-06-08 Alibaba Cloud.
+	* version: 2.4.5
+	* BUGFIX: fix bug of ignore error wrong when parsed error list is nil.
+
 2020-06-05 Alibaba Cloud.
 	* version: 2.4.4
 	* BUGFIX: fix bug of "two $set" in update query. see #345.
