@@ -1,3 +1,10 @@
+2020-06-09 Alibaba Cloud.
+	* version: 2.4.6
+	* IMPROVE: when running full sync, change sync source from mongod to
+	mongos. #360
+	* IMPROVE: when source type is sharding, change checkpoint position from
+	config-server to mongos.
+
 2020-06-08 Alibaba Cloud.
 	* version: 2.4.5
 	* BUGFIX: fix bug of ignore error wrong when parsed error list is nil.

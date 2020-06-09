@@ -19,10 +19,11 @@ import (
 // ReplicationCoordinator global coordinator instance. consist of
 // one syncerGroup and a number of workers
 type ReplicationCoordinator struct {
-	MongoD     []*utils.MongoSource // the source mongod
-	MongoS     *utils.MongoSource   // the source mongos
-	MongoCS    *utils.MongoSource   // the source mongos
-	RealSource []*utils.MongoSource // point to MongoD if source is mongod, otherwise MongoS
+	MongoD             []*utils.MongoSource // the source mongod
+	MongoS             *utils.MongoSource   // the source mongos
+	MongoCS            *utils.MongoSource   // the source mongocs
+	RealSourceFullSync []*utils.MongoSource // point to MongoD if source is mongod, otherwise MongoS
+	RealSourceIncrSync []*utils.MongoSource // point to MongoD if source is mongod, otherwise MongoS
 
 	// Sentinel listener
 	fullSentinel *utils.Sentinel

@@ -87,6 +87,10 @@ func checkDefaultValue() error {
 	}
 	if len(conf.Options.MongoUrls) == 0 {
 		return fmt.Errorf("mongo_urls shouldn't be empty")
+	} else if len(conf.Options.MongoUrls) > 1 {
+		if len(conf.Options.MongoSUrl) == 0 {
+			return fmt.Errorf("mongo_s_urls shouldn't be empty when source is sharding")
+		}
 	}
 	if conf.Options.MongoConnectMode == "" {
 		conf.Options.MongoConnectMode = utils.VarMongoConnectModeSecondaryPreferred
@@ -274,7 +278,11 @@ func checkConflict() error {
 		if len(conf.Options.MongoUrls) == 1 {
 			// replica-set
 			conf.Options.CheckpointStorageUrl = conf.Options.MongoUrls[0]
+		} else if len(conf.Options.MongoSUrl) > 1 {
+			conf.Options.CheckpointStorageUrl = conf.Options.MongoSUrl
 		} else {
+			return fmt.Errorf("mongo_s_url should be given when source is sharding")
+			// deprecated.
 			// sharding
 			conf.Options.CheckpointStorageUrl = conf.Options.MongoCsUrl
 		}
@@ -348,7 +356,7 @@ func checkConflict() error {
 		}
 	} else {
 		// disable mongos if fetch method != 'change_stream'
-		conf.Options.MongoSUrl = ""
+		// conf.Options.MongoSUrl = ""
 	}
 	// set compressor to none when tunnel message is not 'raw'
 	if conf.Options.TunnelMessage != utils.VarTunnelMessageRaw {
