@@ -13,7 +13,7 @@ var (
 	LowestCheckpointVersion = map[int]string {
 		0: "1.0.0",
 		1: "2.4.0",
-		2: "2.4.6",
+		2: "2.4.6", // change sharding checkpoint position from cs to mongos
 	}
 	LowestConfigurationVersion = map[int]string {
 		0: "1.0.0",
