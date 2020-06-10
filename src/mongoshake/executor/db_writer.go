@@ -182,7 +182,7 @@ func IgnoreError(err error, op string, isFullSyncStage bool) bool {
 	if err != nil && len(errorCode) == 0 {
 		return false
 	}
-	
+
 	for _, err := range errorCode {
 		switch op {
 		case "i":

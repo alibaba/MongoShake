@@ -130,7 +130,7 @@ func TestSingleWriter(t *testing.T) {
 		err = writer.doUpdate(testDb, testCollection, bson.M{}, []*OplogRecord{
 			mockOplogRecord(6, 10, 6),
 		}, false)
-		assert.Equal(t, nil, err, "should be equal")
+		assert.NotEqual(t, nil, err, "should be equal")
 
 		// upsert 6->10
 		err = writer.doUpdate(testDb, testCollection, bson.M{}, []*OplogRecord{
@@ -174,7 +174,7 @@ func TestSingleWriter(t *testing.T) {
 		err = writer.doDelete(testDb, testCollection, bson.M{}, []*OplogRecord{
 			mockOplogRecord(20, 20, 20),
 		})
-		assert.Equal(t, nil, err, "should be equal")
+		assert.NotEqual(t, nil, err, "should be equal")
 	}
 
 	// test ignore error
@@ -481,7 +481,7 @@ func TestBulkWriter(t *testing.T) {
 
 		// upsert = false
 		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, false)
-		assert.Equal(t, nil, err, "should be equal")
+		assert.NotEqual(t, nil, err, "should be equal")
 		fmt.Println(err)
 
 		result := make([]interface{}, 0)
