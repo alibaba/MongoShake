@@ -278,7 +278,7 @@ func checkConflict() error {
 		if len(conf.Options.MongoUrls) == 1 {
 			// replica-set
 			conf.Options.CheckpointStorageUrl = conf.Options.MongoUrls[0]
-		} else if len(conf.Options.MongoSUrl) > 1 {
+		} else if len(conf.Options.MongoSUrl) > 0 {
 			conf.Options.CheckpointStorageUrl = conf.Options.MongoSUrl
 		} else {
 			return fmt.Errorf("mongo_s_url should be given when source is sharding")
