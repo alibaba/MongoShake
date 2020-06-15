@@ -104,9 +104,10 @@ func (coordinator *ReplicationCoordinator) Run() error {
 				LOG.Info("ignore check oldest timestamp exist when source is mongos")
 			} else {
 				// the oldest oplog is lost
-				if utils.ExtractMongoTimestamp(bigOldTs) >= beginTs64 {
+				if utils.ExtractMongoTimestamp(bigOldTs) >= beginTs32 {
 					return fmt.Errorf("incr sync beginTs[%v] is less than current the biggest old timestamp[%v], " +
-						"this error usually means illegal start timestamp or capped collection error happen",
+						"this error usually means illegal start timestamp(checkpoint.start_position) or " +
+						"capped collection error happen",
 						utils.ExtractMongoTimestamp(beginTs64), utils.ExtractMongoTimestamp(bigOldTs))
 				}
 			}
