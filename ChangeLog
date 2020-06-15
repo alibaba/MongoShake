@@ -4,6 +4,10 @@
 	mongos. #360
 	* IMPROVE: when source type is sharding, change checkpoint position from
 	config-server to mongos.
+	* BUGFIX: fix bug of whether the starting time oplog is legal: the oldest
+	oplog timestamp > checkpoint.start_position
+	* IMPROVE: convert kafka producer MaxMessageBytes configuration from 1MB
+	to 16MB. #369.
 
 2020-06-08 Alibaba Cloud.
 	* version: 2.4.5

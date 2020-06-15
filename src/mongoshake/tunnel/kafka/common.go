@@ -7,6 +7,7 @@ import (
 
 	"github.com/Shopify/sarama"
 	"github.com/rcrowley/go-metrics"
+	"mongoshake/common"
 )
 
 var (
@@ -35,6 +36,7 @@ func NewConfig() *Config {
 	config.Producer.Return.Errors = true
 	config.Producer.Return.Successes = true
 	config.Producer.Partitioner = sarama.NewManualPartitioner
+	config.Producer.MaxMessageBytes = 16 * utils.MB + 1
 
 	return &Config{
 		Config: config,
