@@ -32,6 +32,14 @@ var (
 
 )
 
+func getTargetDelay() int64 {
+	if utils.IncrSentinelOptions.TargetDelay < 0 {
+		return conf.Options.IncrSyncTargetDelay
+	} else {
+		return utils.IncrSentinelOptions.TargetDelay
+	}
+}
+
 /*
  * as we mentioned in syncer.go, Batcher is used to batch oplog before sending in order to
  * improve performance.
@@ -67,6 +75,9 @@ type Batcher struct {
 	// batchMore inner usage
 	batchGroup        [][]*oplog.GenericOplog
 	transactionOplogs []*oplog.PartialLog
+
+	// for ut only
+	utDispatchBatchesDelay int
 }
 
 func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
@@ -116,6 +127,33 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 }
 
 func (batcher *Batcher) dispatchBatches(batchGroup [][]*oplog.GenericOplog) (work bool) {
+	delay := getTargetDelay()
+	if delay > 0 {
+		lastOplog, _ := batcher.getLastOplog()
+		// do not wait delay when oplog time less than fullSyncFinishPosition
+		if lastOplog.Timestamp > batcher.syncer.fullSyncFinishPosition {
+			for {
+				// only run sleep if delay > 0
+				// re-fetch delay in every round
+				delay = getTargetDelay()
+				delayBoundary := time.Now().Unix() - delay + 3 // 3 is for NTP drift
+
+				lastOplog, _ = batcher.getLastOplog()
+				if utils.ExtractMongoTimestamp(lastOplog.Timestamp) > delayBoundary {
+					LOG.Info("--- wait target delay[%v seconds]: last oplog timestamp[%v] > delayBoundary[%v], fullSyncFinishPosition[%v]",
+						delay, utils.ExtractTimestampForLog(lastOplog.Timestamp), delayBoundary,
+						utils.ExtractTimestampForLog(batcher.syncer.fullSyncFinishPosition))
+					time.Sleep(5 * time.Second)
+
+					// for ut only
+					batcher.utDispatchBatchesDelay++
+				} else {
+					break
+				}
+			}
+		}
+	}
+
 	for i, batch := range batchGroup {
 		// we still push logs even if length is zero. so without length check
 		if batch != nil {

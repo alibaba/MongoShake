@@ -8,6 +8,8 @@
 	oplog timestamp > checkpoint.start_position
 	* IMPROVE: convert kafka producer MaxMessageBytes configuration from 1MB
 	to 16MB. #369.
+	* IMPROVE: add target delay parameter just like MongoDB primary-secondary
+	SlaveDelay. #371.
 
 2020-06-08 Alibaba Cloud.
 	* version: 2.4.5

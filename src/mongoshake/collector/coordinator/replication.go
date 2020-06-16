@@ -206,9 +206,10 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 		return syncMode, 0, err
 	}
 
-	// fetch mongos checkpoint
+	// fetch mongos checkpoint when using change stream
 	var mongosCkpt *ckpt.CheckpointContext
-	if coordinator.MongoS != nil {
+	if coordinator.MongoS != nil && conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
+		LOG.Info("try to fetch mongos checkpoint")
 		ckptManager := ckpt.NewCheckpointManager(coordinator.MongoS.ReplicaName, 0)
 		ckpt, _, err := ckptManager.Get()
 		if err != nil {
@@ -227,8 +228,10 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 				return "", 0, err
 			}
 			ckptRemote = ckpt
+			LOG.Info("%s checkpoint using mongod/replica_set: %s", replName, ckpt)
 		} else {
 			ckptRemote = mongosCkpt
+			LOG.Info("%s checkpoint using mongos: %s", replName, mongosCkpt)
 		}
 
 		// checkpoint less than the oldest timestamp, ckpt.OplogDiskQueue == "" means not enable

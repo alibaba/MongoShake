@@ -186,6 +186,9 @@ func checkDefaultValue() error {
 		conf.Options.IncrSyncWorkerOplogCompressor != utils.VarIncrSyncWorkerOplogCompressorSnappy {
 		return fmt.Errorf("incr_sync.worker.oplog_compressor in {none, gzip, zlib, deflate, snappy}")
 	}
+	if conf.Options.IncrSyncTargetDelay < 0 {
+		conf.Options.IncrSyncTargetDelay = 0
+	}
 	if conf.Options.IncrSyncWorkerBatchQueueSize <= 0 {
 		conf.Options.IncrSyncWorkerBatchQueueSize = 64
 	}
