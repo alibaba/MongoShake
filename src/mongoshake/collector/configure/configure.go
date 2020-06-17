@@ -57,6 +57,7 @@ type Configuration struct {
 	IncrSyncShardKey                  string   `config:"incr_sync.shard_key"`
 	IncrSyncWorker                    int      `config:"incr_sync.worker"`
 	IncrSyncWorkerOplogCompressor     string   `config:"incr_sync.worker.oplog_compressor"`
+	IncrSyncTargetDelay               int64    `config:"incr_sync.target_delay"`
 	IncrSyncWorkerBatchQueueSize      uint64   `config:"incr_sync.worker.batch_queue_size"`
 	IncrSyncAdaptiveBatchingMaxSize   int      `config:"incr_sync.adaptive.batching_max_size"`
 	IncrSyncFetcherBufferCapacity     int      `config:"incr_sync.fetcher.buffer_capacity"`

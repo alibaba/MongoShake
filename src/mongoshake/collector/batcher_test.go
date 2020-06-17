@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
+	"time"
 )
 
 func mockSyncer() *OplogSyncer {
@@ -34,7 +35,7 @@ func mockSyncer() *OplogSyncer {
  * noopGiven array marks the noop.
  * sameTsGiven array marks the index that ts is the same with before.
  */
-func mockOplogs(length int, ddlGiven []int, noopGiven []int, sameTsGiven []int, startTs int) []*oplog.GenericOplog {
+func mockOplogs(length int, ddlGiven []int, noopGiven []int, sameTsGiven []int, startTs int64) []*oplog.GenericOplog {
 	output := make([]*oplog.GenericOplog, length)
 	ddlIndex := 0
 	noopIndex := 0
@@ -53,7 +54,7 @@ func mockOplogs(length int, ddlGiven []int, noopGiven []int, sameTsGiven []int, 
 				ParsedLog: oplog.ParsedLog{
 					Namespace: "a.b",
 					Operation: op,
-					Timestamp: bson.MongoTimestamp(startTs + i),
+					Timestamp: bson.MongoTimestamp(startTs + int64(i)),
 				},
 			},
 		}
@@ -1229,3 +1230,209 @@ func TestFilterPartialLog(t *testing.T) {
 	}
 }
 */
+
+
+func TestDispatchBatches(t *testing.T) {
+	// test dispatchBatches
+
+	var nr int
+
+	// 1. input array is empty
+	{
+		fmt.Printf("TestDispatchBatches case %d.\n", nr)
+		nr++
+
+		batcher := &Batcher{
+			workerGroup: []*Worker{
+				{
+					queue: make(chan []*oplog.GenericOplog, 100),
+				},
+			},
+		}
+		utils.IncrSentinelOptions.TargetDelay = -1
+		conf.Options.IncrSyncTargetDelay = 0
+		ret := batcher.dispatchBatches(nil)
+		assert.Equal(t, false, ret, "should be equal")
+	}
+}
+
+func TestGetTargetDelay(t *testing.T) {
+	var nr int
+
+	{
+		fmt.Printf("TestGetTargetDelay case %d.\n", nr)
+		nr++
+
+		utils.IncrSentinelOptions.TargetDelay = -1
+		conf.Options.IncrSyncTargetDelay = 10
+		assert.Equal(t, int64(10), getTargetDelay(), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestGetTargetDelay case %d.\n", nr)
+		nr++
+
+		utils.IncrSentinelOptions.TargetDelay = 12
+		conf.Options.IncrSyncTargetDelay = 10
+		assert.Equal(t, int64(12), getTargetDelay(), "should be equal")
+	}
+}
+
+func TestGetBatchWithDelay(t *testing.T) {
+	// test getBatchWithDelay
+
+	var nr int
+
+	utils.InitialLogger("", "", "info", true, true)
+
+	// 1. input is nil
+	{
+		fmt.Printf("TestGetBatchWithDelay case %d.\n", nr)
+		nr++
+
+		batcher := &Batcher{
+			syncer: mockSyncer(),
+		}
+		batcher.syncer.fullSyncFinishPosition = 1
+
+		batcher.utBatchesDelay.flag = true
+		batcher.utBatchesDelay.injectBatch = nil
+		batcher.utBatchesDelay.delay = 0
+
+		ret := batcher.getBatchWithDelay()
+		assert.Equal(t, 0, len(ret), "should be equal")
+	}
+
+	// 2. normal case: input array is not empty
+	{
+		fmt.Printf("TestGetBatchWithDelay case %d.\n", nr)
+		nr++
+
+		batcher := &Batcher{
+			syncer: mockSyncer(),
+		}
+		batcher.syncer.fullSyncFinishPosition = 1
+
+		batcher.utBatchesDelay.flag = true
+		batcher.utBatchesDelay.injectBatch = mockOplogs(20, nil, nil, nil, time.Now().Unix() << 32)
+		batcher.utBatchesDelay.delay = 0
+
+		ret := batcher.getBatchWithDelay()
+		assert.Equal(t, 20, len(ret), "should be equal")
+		assert.Equal(t, 0, batcher.utBatchesDelay.delay, "should be equal")
+	}
+
+	// 3. delay == 1s
+	{
+		fmt.Printf("TestGetBatchWithDelay case %d.\n", nr)
+		nr++
+
+		batcher := &Batcher{
+			syncer: mockSyncer(),
+		}
+		batcher.syncer.fullSyncFinishPosition = 1
+
+		batcher.utBatchesDelay.flag = true
+		batcher.utBatchesDelay.injectBatch = mockOplogs(20, nil, nil, nil, time.Now().Unix() << 32)
+		batcher.utBatchesDelay.delay = 0
+
+		utils.IncrSentinelOptions.TargetDelay = -1
+		conf.Options.IncrSyncTargetDelay = 1
+
+		ret := batcher.getBatchWithDelay()
+		assert.Equal(t, 20, len(ret), "should be equal")
+		assert.Equal(t, 0, batcher.utBatchesDelay.delay, "should be equal")
+	}
+
+	// 4. delay == 10s
+	{
+		fmt.Printf("TestGetBatchWithDelay case %d.\n", nr)
+		nr++
+
+		batcher := &Batcher{
+			syncer: mockSyncer(),
+		}
+		batcher.syncer.fullSyncFinishPosition = 1
+
+		batcher.utBatchesDelay.flag = true
+		batcher.utBatchesDelay.injectBatch = mockOplogs(20, nil, nil, nil, time.Now().Unix() << 32)
+		batcher.utBatchesDelay.delay = 0
+
+		utils.IncrSentinelOptions.TargetDelay = -1
+		conf.Options.IncrSyncTargetDelay = 10
+
+		ret := batcher.getBatchWithDelay()
+		fmt.Println(batcher.utBatchesDelay.delay)
+		assert.Equal(t, 20, len(ret), "should be equal")
+		assert.Equal(t, true, batcher.utBatchesDelay.delay > 1, "should be equal")
+	}
+
+	// 5. delay == 10s, but before fullSyncFinishPosition
+	{
+		fmt.Printf("TestGetBatchWithDelay case %d.\n", nr)
+		nr++
+
+		batcher := &Batcher{
+			syncer: mockSyncer(),
+		}
+		batcher.syncer.fullSyncFinishPosition = bson.MongoTimestamp(time.Now().Unix() << 32) + 100
+
+		batcher.utBatchesDelay.flag = true
+		batcher.utBatchesDelay.injectBatch = mockOplogs(20, nil, nil, nil, time.Now().Unix() << 32)
+		batcher.utBatchesDelay.delay = 0
+
+		utils.IncrSentinelOptions.TargetDelay = -1
+		conf.Options.IncrSyncTargetDelay = 10
+
+		ret := batcher.getBatchWithDelay()
+		fmt.Println(batcher.utBatchesDelay.delay)
+		assert.Equal(t, 20, len(ret), "should be equal")
+		assert.Equal(t, 0, batcher.utBatchesDelay.delay, "should be equal")
+	}
+
+	// 6. delay == 60s
+	{
+		fmt.Printf("TestGetBatchWithDelay case %d.\n", nr)
+		nr++
+
+		batcher := &Batcher{
+			syncer: mockSyncer(),
+		}
+		batcher.syncer.fullSyncFinishPosition = 1
+
+		batcher.utBatchesDelay.flag = true
+		batcher.utBatchesDelay.injectBatch = mockOplogs(20, nil, nil, nil, time.Now().Unix() << 32)
+		batcher.utBatchesDelay.delay = 0
+
+		utils.IncrSentinelOptions.TargetDelay = 60
+		conf.Options.IncrSyncTargetDelay = 10
+
+		ret := batcher.getBatchWithDelay()
+		fmt.Println(batcher.utBatchesDelay.delay)
+		assert.Equal(t, 20, len(ret), "should be equal")
+		assert.Equal(t, true, batcher.utBatchesDelay.delay > 11, "should be equal")
+	}
+
+	// 7. delay == 1s, no delay
+	{
+		fmt.Printf("TestGetBatchWithDelay case %d.\n", nr)
+		nr++
+
+		batcher := &Batcher{
+			syncer: mockSyncer(),
+		}
+		batcher.syncer.fullSyncFinishPosition = 1
+
+		batcher.utBatchesDelay.flag = true
+		batcher.utBatchesDelay.injectBatch = mockOplogs(20, nil, nil, nil, time.Now().Unix() << 32)
+		batcher.utBatchesDelay.delay = 0
+
+		utils.IncrSentinelOptions.TargetDelay = 1
+		conf.Options.IncrSyncTargetDelay = 10
+
+		ret := batcher.getBatchWithDelay()
+		fmt.Println(batcher.utBatchesDelay.delay)
+		assert.Equal(t, 20, len(ret), "should be equal")
+		assert.Equal(t, 0, batcher.utBatchesDelay.delay, "should be equal")
+	}
+}

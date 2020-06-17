@@ -32,6 +32,14 @@ var (
 
 )
 
+func getTargetDelay() int64 {
+	if utils.IncrSentinelOptions.TargetDelay < 0 {
+		return conf.Options.IncrSyncTargetDelay
+	} else {
+		return utils.IncrSentinelOptions.TargetDelay
+	}
+}
+
 /*
  * as we mentioned in syncer.go, Batcher is used to batch oplog before sending in order to
  * improve performance.
@@ -67,6 +75,13 @@ type Batcher struct {
 	// batchMore inner usage
 	batchGroup        [][]*oplog.GenericOplog
 	transactionOplogs []*oplog.PartialLog
+
+	// for ut only
+	utBatchesDelay struct {
+		flag        bool                  // ut enable?
+		injectBatch []*oplog.GenericOplog // input batched oplog
+		delay       int                   // the delay times
+	}
 }
 
 func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
@@ -182,6 +197,51 @@ func (batcher *Batcher) getBatch() []*oplog.GenericOplog {
 	return mergeBatch
 }
 
+/*
+ * if delay > 0, this function wait till delay timeout.
+ * However, if the mergeBatch contain may oplogs, the delay time will depends on the first
+ * oplog timestamp. So, if the time span of the included batched oplog is too large, the
+ * delay time is inaccurate.
+ */
+func (batcher *Batcher) getBatchWithDelay() []*oplog.GenericOplog {
+	var mergeBatch []*oplog.GenericOplog
+	if !batcher.utBatchesDelay.flag {
+		mergeBatch = batcher.getBatch()
+	} else { // for ut only
+		mergeBatch = batcher.utBatchesDelay.injectBatch
+	}
+	if mergeBatch == nil {
+		return mergeBatch
+	}
+
+	delay := getTargetDelay()
+	if delay > 0 {
+		firstOplog := mergeBatch[0].Parsed
+		// do not wait delay when oplog time less than fullSyncFinishPosition
+		if firstOplog.Timestamp > batcher.syncer.fullSyncFinishPosition {
+			for {
+				// only run sleep if delay > 0
+				// re-fetch delay in every round
+				delay = getTargetDelay()
+				delayBoundary := time.Now().Unix() - delay + 3 // 3 is for NTP drift
+
+				if utils.ExtractMongoTimestamp(firstOplog.Timestamp) > delayBoundary {
+					LOG.Info("--- wait target delay[%v seconds]: first oplog timestamp[%v] > delayBoundary[%v], fullSyncFinishPosition[%v]",
+						delay, utils.ExtractTimestampForLog(firstOplog.Timestamp), delayBoundary,
+						utils.ExtractTimestampForLog(batcher.syncer.fullSyncFinishPosition))
+					time.Sleep(5 * time.Second)
+
+					// for ut only
+					batcher.utBatchesDelay.delay++
+				} else {
+					break
+				}
+			}
+		}
+	}
+	return mergeBatch
+}
+
 /**
  * this function is used to gather oplogs together.
  * honestly speaking, it's complicate so that reading unit tests may help you
@@ -202,7 +262,7 @@ func (batcher *Batcher) BatchMore() ([][]*oplog.GenericOplog, bool, bool) {
 	barrier := false
 
 	// try to get batch
-	mergeBatch := batcher.getBatch()
+	mergeBatch := batcher.getBatchWithDelay()
 
 	// heartbeat
 	if mergeBatch == nil {

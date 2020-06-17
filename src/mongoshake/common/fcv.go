@@ -6,7 +6,7 @@ var (
 		FeatureCompatibleVersion: 1,
 	}
 	FcvConfiguration = Configuration{
-		CurrentVersion:           3,
+		CurrentVersion:           4,
 		FeatureCompatibleVersion: 3,
 	}
 
@@ -20,6 +20,7 @@ var (
 		1: "2.4.0",
 		2: "2.4.1",
 		3: "2.4.3",
+		4: "2.4.6", // add incr_sync.target_delay
 	}
 )
 
