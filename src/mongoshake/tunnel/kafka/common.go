@@ -36,7 +36,7 @@ func NewConfig() *Config {
 	config.Producer.Return.Errors = true
 	config.Producer.Return.Successes = true
 	config.Producer.Partitioner = sarama.NewManualPartitioner
-	config.Producer.MaxMessageBytes = 16 * utils.MB + 1
+	config.Producer.MaxMessageBytes = 16 * utils.MB + 2 * utils.MB // 2MB for the reserve gap
 
 	return &Config{
 		Config: config,
