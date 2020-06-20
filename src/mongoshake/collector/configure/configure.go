@@ -25,7 +25,6 @@ type Configuration struct {
 	MongoCsUrl                  string   `config:"mongo_cs_url"`
 	MongoSUrl                   string   `config:"mongo_s_url"`
 	MongoConnectMode            string   `config:"mongo_connect_mode"`
-	MongoWatchFulldocument      bool     `config:"mongo_watch_fulldocument"`
 	Tunnel                      string   `config:"tunnel"`
 	TunnelAddress               []string `config:"tunnel.address"`
 	TunnelMessage               string   `config:"tunnel.message"`
@@ -54,6 +53,7 @@ type Configuration struct {
 
 	// 3. incr sync
 	IncrSyncMongoFetchMethod          string   `config:"incr_sync.mongo_fetch_method"`
+	WatchFullDocument				  bool     `config:"incr_sync.change_stream.watch_full_document"`
 	IncrSyncOplogGIDS                 []string `config:"incr_sync.oplog.gids"`
 	IncrSyncShardKey                  string   `config:"incr_sync.shard_key"`
 	IncrSyncWorker                    int      `config:"incr_sync.worker"`

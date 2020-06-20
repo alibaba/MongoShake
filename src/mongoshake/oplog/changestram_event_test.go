@@ -119,7 +119,6 @@ func RunCommand(database, operation string, log *PartialLog, session *mgo.Sessio
 	return err
 }
 
-
 func runOplog(data *PartialLog) error {
 	ns := strings.Split(data.Namespace, ".")
 	switch data.Operation {
@@ -143,7 +142,7 @@ func runOplog(data *PartialLog) error {
 }
 
 func runByte(input []byte) error {
-	data, err := ConvertEvent2Oplog(input)
+	data, err := ConvertEvent2Oplog(input, false)
 	if err != nil {
 		return err
 	}
@@ -587,7 +586,7 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		eventRename1 := Event{
 			OperationType: "dropDatabase",
 			Ns: bson.M{
-				"db":   "testDb",
+				"db": "testDb",
 			},
 		}
 		out, err = bson.Marshal(eventRename1)

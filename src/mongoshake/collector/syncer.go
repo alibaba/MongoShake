@@ -368,7 +368,7 @@ func (sync *OplogSyncer) deserializer(index int) {
 	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
 		// parse []byte (change stream event format) -> oplog
 		parser = func(input []byte) (*oplog.PartialLog, error) {
-			return oplog.ConvertEvent2Oplog(input, conf.Options.MongoWatchFulldocument)
+			return oplog.ConvertEvent2Oplog(input, conf.Options.WatchFullDocument)
 		}
 	} else {
 		// parse []byte (oplog format) -> oplog
