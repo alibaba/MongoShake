@@ -41,9 +41,9 @@ const (
 	        "updatedFields" : { <document> }, // 更新的field的值
 	        "removedFields" : [ "<field>", ... ] // 删除的field列表
 	    },
-		"FullDocument" : { //永不为 nil
-			"fullDocument" : { <document> }, // 开启 full_document 之后，全部的field的值，否则与 updateDescription 相同
-		}
+        "FullDocument" : { //永不为 nil
+            "fullDocument" : { <document> }, // 开启 full_document 之后，全部的field的值，否则与 updateDescription 相同
+        }
 	    "clusterTime" : <Timestamp>, // 相当于ts字段
 	    "txnNumber" : <NumberLong>, // 相当于oplog里面的txnNumber，只在事务里面出现。事务号在一个事务里面单调递增
 	    "lsid" : { // 相当于lsid字段，只在事务里面出现。logic session id，请求所在的session的id。

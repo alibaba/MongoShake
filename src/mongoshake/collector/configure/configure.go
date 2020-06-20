@@ -53,7 +53,7 @@ type Configuration struct {
 
 	// 3. incr sync
 	IncrSyncMongoFetchMethod          string   `config:"incr_sync.mongo_fetch_method"`
-	WatchFullDocument				  bool     `config:"incr_sync.change_stream.watch_full_document"`
+	WatchFullDocument                 bool     `config:"incr_sync.change_stream.watch_full_document"`
 	IncrSyncOplogGIDS                 []string `config:"incr_sync.oplog.gids"`
 	IncrSyncShardKey                  string   `config:"incr_sync.shard_key"`
 	IncrSyncWorker                    int      `config:"incr_sync.worker"`
