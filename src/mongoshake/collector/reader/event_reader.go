@@ -141,7 +141,7 @@ func (er *EventReader) EnsureNetwork() error {
 	}
 
 	var err error
-	if er.client, err = utils.NewChangeStreamConn(er.src, conf.Options.MongoConnectMode, conf.Options.WatchFullDocument, er.startAtOperationTime,
+	if er.client, err = utils.NewChangeStreamConn(er.src, conf.Options.MongoConnectMode, conf.Options.IncrSyncChangeStreamWatchFullDocument, er.startAtOperationTime,
 		int32(BatchSize)); err != nil {
 		return err
 	}
