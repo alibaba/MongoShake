@@ -44,7 +44,7 @@ type OplogSyncer struct {
 	OplogHandler
 
 	// source mongodb replica set name
-	replset string
+	Replset string
 	// oplog start position of source mongodb
 	startPosition int64
 	// full sync finish position, used to check DDL between full sync and incr sync
@@ -63,6 +63,7 @@ type OplogSyncer struct {
 	// buffer            []*bson.Raw // move to persister
 	PendingQueue []chan [][]byte
 	logsQueue    []chan []*oplog.GenericOplog
+	LastFetchTs  bson.MongoTimestamp // the previous last fetch timestamp
 	// nextQueuePosition uint64 // move to persister
 
 	// source mongo oplog/event reader
@@ -82,6 +83,11 @@ type OplogSyncer struct {
 	ckptTime  time.Time
 
 	replMetric *utils.ReplicationMetric
+
+	// can be closed
+	CanClose        bool
+	SyncGroup       []*OplogSyncer
+	shutdownWorking bool // shutdown routine starts?
 }
 
 /*
@@ -106,7 +112,7 @@ func NewOplogSyncer(
 	}
 
 	syncer := &OplogSyncer{
-		replset:                replset,
+		Replset:                replset,
 		startPosition:          startPosition,
 		fullSyncFinishPosition: bson.MongoTimestamp(fullSyncFinishPosition),
 		rateController:         rateController,
@@ -157,11 +163,15 @@ func (sync *OplogSyncer) Init() {
 		options |= utils.METRIC_WORKER
 	}
 
-	sync.replMetric = utils.NewMetric(sync.replset, utils.TypeIncr, options)
+	sync.replMetric = utils.NewMetric(sync.Replset, utils.TypeIncr, options)
 	sync.replMetric.ReplStatus.Update(utils.WorkGood)
 
 	sync.RestAPI()
 	sync.persister.RestAPI()
+}
+
+func (sync *OplogSyncer) String() string {
+	return fmt.Sprintf("Syncer[%s]", sync.Replset)
 }
 
 // bind different worker
@@ -175,8 +185,8 @@ func (sync *OplogSyncer) StartDiskApply() {
 
 // start to polling oplog
 func (sync *OplogSyncer) Start() {
-	LOG.Info("Poll oplog syncer start. ckpt_interval[%dms], gid[%s], shard_key[%s]",
-		conf.Options.CheckpointInterval, conf.Options.IncrSyncOplogGIDS, conf.Options.IncrSyncShardKey)
+	LOG.Info("%s poll oplog syncer start. ckpt_interval[%dms], gid[%s], shard_key[%s]",
+		sync, conf.Options.CheckpointInterval, conf.Options.IncrSyncOplogGIDS, conf.Options.IncrSyncShardKey)
 
 	sync.startTime = time.Now()
 
@@ -188,7 +198,7 @@ func (sync *OplogSyncer) Start() {
 	// 1. create checkpoint manager
 	// 2. load existing ckpt from remote storage
 	// 3. start checkpoint persist routine
-	sync.newCheckpointManager(sync.replset, sync.startPosition)
+	sync.newCheckpointManager(sync.Replset, sync.startPosition)
 	// load checkpoint and set stage
 	if err := sync.loadCheckpoint(); err != nil {
 		LOG.Crash(err)
@@ -204,7 +214,7 @@ func (sync *OplogSyncer) Start() {
 		sync.poll()
 
 		// error or exception occur
-		LOG.Warn("Oplog syncer polling yield. master:%t, yield:%dms", quorum.IsMaster(), DurationTime)
+		LOG.Warn("%s polling yield. master:%t, yield:%dms", sync, quorum.IsMaster(), DurationTime)
 		utils.YieldInMs(DurationTime)
 	}
 }
@@ -219,10 +229,37 @@ func (sync *OplogSyncer) startBatcher() {
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
 		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
-		batchedOplog, barrier, allEmpty := batcher.BatchMore()
+		batchedOplog, barrier, allEmpty, exit := batcher.BatchMore()
 
 		var newestTs bson.MongoTimestamp
-		if log, filterLog := batcher.getLastOplog(); log != nil && !allEmpty {
+		if exit {
+			LOG.Info("%s find exit signal", sync)
+			// should exit now, make sure the checkpoint is updated before that
+			lastLog, lastFilterLog := batcher.getLastOplog()
+			var newestTs bson.MongoTimestamp = 1 // default is 1
+			if lastLog != nil && lastLog.Timestamp > newestTs {
+				newestTs = lastLog.Timestamp
+			} else if newestTs == 1 && lastFilterLog != nil {
+				// only set to the lastFilterLog timestamp if all before oplog filtered.
+				newestTs = lastFilterLog.Timestamp
+			}
+
+			if lastLog != nil && !allEmpty {
+				// push to worker
+				if worked := batcher.dispatchBatches(batchedOplog); worked {
+					sync.replMetric.SetLSN(utils.TimestampToInt64(newestTs))
+					// update latest fetched timestamp in memory
+					sync.reader.UpdateQueryTimestamp(newestTs)
+				}
+			}
+
+			// flush checkpoint value
+			sync.checkpoint(true, 0)
+			sync.checkCheckpointUpdate(true, newestTs) // check if need
+			sync.CanClose = true
+			LOG.Info("%s blocking and waiting exits, checkpoint: %v", sync, utils.ExtractTimestampForLog(newestTs))
+			select{} // block forever, wait outer routine exits
+		} else if log, filterLog := batcher.getLastOplog(); log != nil && !allEmpty {
 			// if all filtered, still update checkpoint
 			newestTs = log.Timestamp
 
@@ -263,7 +300,7 @@ func (sync *OplogSyncer) startBatcher() {
 					// if checkpoint has not been update for {FilterCheckpointGap} seconds, update
 					// checkpoint mandatory.
 					newestTs = filterLog.Timestamp
-					LOG.Info("try to update checkpoint mandatory from %v to %v",
+					LOG.Info("%s try to update checkpoint mandatory from %v to %v", sync,
 						utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp),
 						utils.ExtractTimestampForLog(filterLog.Timestamp))
 				} else {
@@ -276,17 +313,17 @@ func (sync *OplogSyncer) startBatcher() {
 			if log != nil {
 				newestTsLog := utils.ExtractTimestampForLog(newestTs)
 				if newestTs < log.Timestamp {
-					LOG.Crashf("filter newestTs[%v] smaller than previous timestamp[%v]",
-						newestTsLog, utils.ExtractTimestampForLog(log.Timestamp))
+					LOG.Crashf("%s filter newestTs[%v] smaller than previous timestamp[%v]",
+						sync, newestTsLog, utils.ExtractTimestampForLog(log.Timestamp))
 				}
 
-				LOG.Info("waiting last checkpoint[%v] updated", newestTsLog)
+				LOG.Info("%s waiting last checkpoint[%v] updated", sync, newestTsLog)
 				// check last checkpoint updated
 
 				status := sync.checkCheckpointUpdate(true, log.Timestamp)
-				LOG.Info("last checkpoint[%v] updated [%v]", newestTsLog, status)
+				LOG.Info("%s last checkpoint[%v] updated [%v]", sync, newestTsLog, status)
 			} else {
-				LOG.Info("last log is empty, skip waiting checkpoint updated")
+				LOG.Info("%s last log is empty, skip waiting checkpoint updated", sync)
 			}
 
 			// update latest fetched timestamp in memory
@@ -300,24 +337,24 @@ func (sync *OplogSyncer) startBatcher() {
 
 func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.MongoTimestamp) bool {
 	// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
-	if barrier && newestTs > 0 && conf.Options.IncrSyncWorker > 1 {
-		LOG.Info("find barrier")
+	if barrier && newestTs > 0 {
+		LOG.Info("%s find barrier", sync)
 		var checkpointTs bson.MongoTimestamp
 		for i := 0; i < CheckCheckpointUpdateTimes; i++ {
 			// checkpointTs := sync.ckptManager.GetInMemory().Timestamp
 			checkpoint, _, err := sync.ckptManager.Get()
 			if err != nil {
-				LOG.Error("get remote checkpoint failed: %v", err)
+				LOG.Error("%s get remote checkpoint failed: %v", sync, err)
 				utils.YieldInMs(DDLCheckpointInterval * 3)
 				continue
 			}
 
 			checkpointTs = checkpoint.Timestamp
 
-			LOG.Info("compare remote checkpoint[%v] to local newestTs[%v]",
+			LOG.Info("%s compare remote checkpoint[%v] to local newestTs[%v]", sync,
 				utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
 			if checkpointTs >= newestTs {
-				LOG.Info("barrier checkpoint updated to newest[%v]", utils.ExtractTimestampForLog(newestTs))
+				LOG.Info("%s barrier checkpoint updated to newest[%v]", sync, utils.ExtractTimestampForLog(newestTs))
 				return true
 			}
 			utils.YieldInMs(DDLCheckpointInterval)
@@ -391,7 +428,7 @@ func (sync *OplogSyncer) deserializer(index int) {
 		// very time consuming!
 		combiner = func(raw []byte, log *oplog.PartialLog) *oplog.GenericOplog {
 			if out, err := bson.Marshal(log.ParsedLog); err != nil {
-				LOG.Crashf("deserializer marshal[%v] failed: %v", log.ParsedLog, err)
+				LOG.Crashf("%s deserializer marshal[%v] failed: %v", sync, log.ParsedLog, err)
 				return nil
 			} else {
 				return &oplog.GenericOplog{Raw: out, Parsed: log}
@@ -412,10 +449,15 @@ func (sync *OplogSyncer) deserializer(index int) {
 		for _, rawLog := range batchRawLogs {
 			log, err := parser(rawLog)
 			if err != nil {
-				LOG.Crashf("deserializer parse data failed[%v]", err)
+				LOG.Crashf("%s deserializer parse data failed[%v]", sync, err)
 			}
 			log.RawSize = len(rawLog)
 			deserializeLogs = append(deserializeLogs, combiner(rawLog, log))
+		}
+
+		// set the fetch timestamp
+		if len(deserializeLogs) > 0 {
+			sync.LastFetchTs = deserializeLogs[0].Parsed.Timestamp
 		}
 		sync.logsQueue[index] <- deserializeLogs
 	}
@@ -432,7 +474,7 @@ func (sync *OplogSyncer) poll() {
 	if err != nil {
 		// we doesn't continue working on ckpt fetched failed. because we should
 		// confirm the exist checkpoint value or exactly knows that it doesn't exist
-		LOG.Critical("Acquire the existing checkpoint from remote[%s %s.%s] failed !",
+		LOG.Critical("%s Acquire the existing checkpoint from remote[%s %s.%s] failed !", sync,
 			conf.Options.CheckpointStorage, conf.Options.CheckpointStorageDb,
 			conf.Options.CheckpointStorageCollection)
 		return
@@ -445,6 +487,9 @@ func (sync *OplogSyncer) poll() {
 		if sync.qos.Limit > 0 {
 			sync.qos.FetchBucket()
 		}
+
+		// check shutdown
+		sync.checkShutdown()
 
 		// only get one
 		sync.next()
@@ -462,15 +507,15 @@ func (sync *OplogSyncer) next() bool {
 		sync.replMetric.SetOplogAvg(payload)
 		sync.replMetric.ReplStatus.Clear(utils.FetchBad)
 	} else if err == sourceReader.CollectionCappedError {
-		LOG.Error("oplog collection capped error, users should fix it manually")
+		LOG.Error("%s oplog collection capped error, users should fix it manually", sync)
 		utils.YieldInMs(DurationTime)
 		return false
 	} else if err != nil && err != sourceReader.TimeoutError {
-		LOG.Error("syncer[%s] internal error: %v", sync.reader.Name(), err)
+		LOG.Error("%s %s internal error: %v", sync, sync.reader.Name(), err)
 		// error is nil indicate that only timeout incur syncer.next()
 		// return false. so we regardless that
 		if sync.isCrashError(err.Error()) {
-			LOG.Crashf("I can't handle this error, please solve it manually!")
+			LOG.Crashf("%s I can't handle this error, please solve it manually!", sync)
 		}
 
 		sync.replMetric.ReplStatus.Update(utils.FetchBad)
@@ -485,6 +530,41 @@ func (sync *OplogSyncer) next() bool {
 	// inject into persist handler
 	sync.persister.Inject(log)
 	return true
+}
+
+func (sync *OplogSyncer) checkShutdown() {
+	if (!utils.IncrSentinelOptions.Shutdown && utils.IncrSentinelOptions.ExitPoint <= 0) ||
+			sync.SyncGroup == nil || sync.shutdownWorking {
+		return
+	}
+
+	sync.shutdownWorking = true
+
+	nimo.GoRoutine(func() {
+		if utils.IncrSentinelOptions.Shutdown {
+			utils.IncrSentinelOptions.ExitPoint = utils.ExtractMongoTimestamp(sync.LastFetchTs)
+		}
+
+		LOG.Info("%s check shutdown, set exit-point[%v]", sync, utils.IncrSentinelOptions.ExitPoint)
+		for range time.NewTicker(500 * time.Millisecond).C {
+			exitCount := 0
+			for _, syncer := range sync.SyncGroup {
+				if syncer.CanClose {
+					exitCount++
+				} else {
+					LOG.Info("%s syncer[%v] wait close, last fetch oplog timestamp[%v], exit-point[%v]",
+						sync, syncer.Replset, utils.ExtractMongoTimestamp(syncer.LastFetchTs),
+						utils.IncrSentinelOptions.ExitPoint)
+				}
+			}
+
+			if exitCount == len(sync.SyncGroup) {
+				break
+			}
+		}
+
+		LOG.Crashf("%s all syncer shutdown, try exit, don't be panic", sync)
+	})
 }
 
 func (sync *OplogSyncer) isCrashError(errMsg string) bool {
@@ -529,7 +609,7 @@ func (sync *OplogSyncer) RestAPI() {
 		return &Info{
 			Who:         conf.Options.Id,
 			Tag:         utils.BRANCH,
-			ReplicaSet:  sync.replset,
+			ReplicaSet:  sync.Replset,
 			Logs:        sync.replMetric.Get(),
 			LogsRepl:    sync.replMetric.Apply(),
 			LogsSuccess: sync.replMetric.Success(),
@@ -571,7 +651,7 @@ func (sync *OplogSyncer) RestAPI() {
 			}
 		}
 		return &Queue{
-			SyncerId:            sync.replset,
+			SyncerId:            sync.Replset,
 			LogsQueuePerSize:    cap(sync.logsQueue[0]),
 			PendingQueuePerSize: cap(sync.PendingQueue[0]),
 			InnerQueue:          queue,
