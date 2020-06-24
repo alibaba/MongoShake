@@ -68,7 +68,9 @@ func RunStatusMessage(status uint64) string {
 func InitialLogger(logDir, logFile, level string, logFlush bool, verbose bool) error {
 	logLevel := parseLogLevel(level)
 	if verbose {
-		LOG.AddFilter("console", logLevel, LOG.NewConsoleLogWriter())
+		writer := LOG.NewConsoleLogWriter()
+		writer.SetFormat("[%D %T] [%L] %M")
+		LOG.AddFilter("console", logLevel, writer)
 	}
 
 	if len(logDir) == 0 {
@@ -89,7 +91,8 @@ func InitialLogger(logDir, logFile, level string, logFlush bool, verbose bool) e
 		}
 		fileLogger := LOG.NewFileLogWriter(fmt.Sprintf("%s/%s", logDir, logFile), true)
 		fileLogger.SetRotateDaily(true)
-		fileLogger.SetFormat("[%D %T] [%L] [%s] %M")
+		// fileLogger.SetFormat("[%D %T] [%L] [%s] %M") // print function
+		fileLogger.SetFormat("[%D %T] [%L] %M")
 		fileLogger.SetRotateMaxBackup(7)
 		LOG.AddFilter("file", logLevel, fileLogger)
 	} else {

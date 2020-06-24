@@ -23,6 +23,8 @@ var IncrSentinelOptions struct {
 	Pause          bool
 	TPS            int64
 	TargetDelay    int64
+	ExitPoint      int64 // 32 bits timestamp
+	Shutdown       bool  // close shake
 }
 
 // only used in full sync.
@@ -32,10 +34,11 @@ var FullSentinelOptions struct {
 
 func init() {
 	IncrSentinelOptions.TargetDelay = -1
+	IncrSentinelOptions.ExitPoint = -1
 }
 
 type Sentinel struct {
-	tp       string
+	tp string
 }
 
 func NewSentinel(tp string) *Sentinel {
