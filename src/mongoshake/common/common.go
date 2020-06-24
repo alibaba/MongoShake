@@ -33,7 +33,7 @@ const (
 
 	MajorityWriteConcern = "majority"
 
-	Int32max = (int64(1) << 33) - 1
+	Int32max = (int64(1) << 32) - 1
 )
 
 var (

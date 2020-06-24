@@ -153,6 +153,10 @@ func (tcp *TcpSocket) release() {
 	tcp.socket = nil
 }
 
+func (tunnel *TCPWriter) Name() string {
+	return "rpc"
+}
+
 func (writer *TCPWriter) pollRemoteAckValue() {
 	queryAck := NewPacketV1(PacketGetACK, nil).encode()
 	header := [HeaderLen]byte{}

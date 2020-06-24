@@ -17,7 +17,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
-	for _, src := range coordinator.RealSource {
+	for _, src := range coordinator.RealSourceIncrSync {
 		syncer := collector.NewOplogSyncer(src.ReplicaName, oplogStartPosition, fullSyncFinishPosition, src.URL,
 			src.Gids, coordinator.rateController)
 		// syncerGroup http api registry
@@ -32,6 +32,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		if !w.Init() {
 			return errors.New("worker initialize error")
 		}
+		w.SetInitSyncFinishTs(fullSyncFinishPosition)
 
 		// syncer and worker are independent. the relationship between
 		// them needs binding here. one worker definitely belongs to a specific

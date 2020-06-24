@@ -43,7 +43,7 @@ type Configuration struct {
 	FullSyncReaderWriteDocumentParallel  int    `config:"full_sync.reader.write_document_parallel"`
 	FullSyncReaderReadDocumentCount      uint64 `config:"full_sync.reader.read_document_count"`
 	FullSyncReaderDocumentBatchSize      int    `config:"full_sync.reader.document_batch_size"`
-	FullSyncCollectionDrop               bool   `config:"full_sync.collection_exist_no_drop"`
+	FullSyncCollectionDrop               bool   `config:"full_sync.collection_exist_drop"`
 	FullSyncCreateIndex                  string `config:"full_sync.create_index"`
 	FullSyncReaderOplogStoreDisk         bool   `config:"full_sync.reader.oplog_store_disk"`
 	FullSyncReaderOplogStoreDiskMaxSize  int64  `config:"full_sync.reader.oplog_store_disk_max_size"`
@@ -57,6 +57,7 @@ type Configuration struct {
 	IncrSyncOplogGIDS                      []string `config:"incr_sync.oplog.gids"`
 	IncrSyncShardKey                       string   `config:"incr_sync.shard_key"`
 	IncrSyncWorker                         int      `config:"incr_sync.worker"`
+  IncrSyncTargetDelay                    int64    `config:"incr_sync.target_delay"`
 	IncrSyncWorkerOplogCompressor          string   `config:"incr_sync.worker.oplog_compressor"`
 	IncrSyncWorkerBatchQueueSize           uint64   `config:"incr_sync.worker.batch_queue_size"`
 	IncrSyncAdaptiveBatchingMaxSize        int      `config:"incr_sync.adaptive.batching_max_size"`

@@ -17,6 +17,10 @@ type KafkaWriter struct {
 	writer     *kafka.SyncWriter
 }
 
+func (tunnel *KafkaWriter) Name() string {
+	return "kafka"
+}
+
 func (tunnel *KafkaWriter) Prepare() bool {
 	writer, err := kafka.NewSyncWriter(tunnel.RemoteAddr)
 	if err != nil {

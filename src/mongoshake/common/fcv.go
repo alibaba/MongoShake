@@ -2,22 +2,25 @@ package utils
 
 var (
 	FcvCheckpoint = Checkpoint{
-		CurrentVersion:           1,
+		CurrentVersion:           2,
 		FeatureCompatibleVersion: 1,
 	}
 	FcvConfiguration = Configuration{
-		CurrentVersion:           2,
-		FeatureCompatibleVersion: 1,
+		CurrentVersion:           4,
+		FeatureCompatibleVersion: 3,
 	}
 
 	LowestCheckpointVersion = map[int]string {
 		0: "1.0.0",
 		1: "2.4.0",
+		2: "2.4.6", // change sharding checkpoint position from cs to mongos
 	}
 	LowestConfigurationVersion = map[int]string {
 		0: "1.0.0",
 		1: "2.4.0",
 		2: "2.4.1",
+		3: "2.4.3",
+		4: "2.4.6", // add incr_sync.target_delay
 	}
 )
 

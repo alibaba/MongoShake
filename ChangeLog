@@ -1,3 +1,32 @@
+2020-06-17 Alibaba Cloud.
+	* version: 2.4.6
+	* IMPROVE: when running full sync, change sync source from mongod to
+	mongos. #360
+	* IMPROVE: when source type is sharding, change checkpoint position from
+	config-server to mongos.
+	* BUGFIX: fix bug of whether the starting time oplog is legal: the oldest
+	oplog timestamp > checkpoint.start_position
+	* IMPROVE: convert kafka producer MaxMessageBytes configuration from 1MB
+	to 16MB. #369.
+	* IMPROVE: add target delay parameter just like MongoDB primary-secondary
+	SlaveDelay. #371.
+
+2020-06-08 Alibaba Cloud.
+	* version: 2.4.5
+	* BUGFIX: fix bug of ignore error wrong when parsed error list is nil.
+
+2020-06-05 Alibaba Cloud.
+	* version: 2.4.4
+	* BUGFIX: fix bug of "two $set" in update query. see #345.
+	* BUGFIX: fix bug of source mongodb judgement error. see #343.
+	* IMPROVE: solve the idempotency problem of oplog synchronization
+	during the initial sync period. see #345.
+
+2020-05-14 Alibaba Cloud.
+	* version: 2.4.3
+	* BUGFIX: rename `full_sync.collection_exist_no_drop` to
+	`full_sync.collection_exist_drop`.
+
 2020-04-22 Alibaba Cloud.
 	* version: 2.4.2
 	* BUGFIX: fix bug of applyOps run failed. #329
