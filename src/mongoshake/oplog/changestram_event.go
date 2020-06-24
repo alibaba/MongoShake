@@ -40,7 +40,10 @@ const (
 	    "updateDescription" : { // 只在operationType==update的时候出现，相当于是增量的修改，而replace是替换。
 	        "updatedFields" : { <document> }, // 更新的field的值
 	        "removedFields" : [ "<field>", ... ] // 删除的field列表
-	    }
+	    },
+        "FullDocument" : { //永不为 nil
+            "fullDocument" : { <document> }, // 开启full_document之后，为updateLookup，不开启则为default
+        }
 	    "clusterTime" : <Timestamp>, // 相当于ts字段
 	    "txnNumber" : <NumberLong>, // 相当于oplog里面的txnNumber，只在事务里面出现。事务号在一个事务里面单调递增
 	    "lsid" : { // 相当于lsid字段，只在事务里面出现。logic session id，请求所在的session的id。
@@ -70,7 +73,7 @@ func (e *Event) String() string {
 	}
 }
 
-func ConvertEvent2Oplog(input []byte) (*PartialLog, error) {
+func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 	event := new(Event)
 	if err := bson.Unmarshal(input, event); err != nil {
 		return nil, fmt.Errorf("unmarshal raw bson[%s] failed: %v", input, err)
@@ -187,24 +190,24 @@ func ConvertEvent2Oplog(input []byte) (*PartialLog, error) {
 		}
 		*/
 		/*
-		{
-		    "ts" : Timestamp(1582531841, 1),
-		    "t" : NumberLong(1),
-		    "h" : NumberLong(0),
-		    "v" : 2,
-		    "op" : "u",
-		    "ns" : "zz.test",
-		    "ui" : UUID("ee9b60d8-845f-42ff-989d-09018a730d60"),
-		    "o2" : {
-		        "_id" : ObjectId("5e5384f97dc0f30426f01b79")
-		    },
-		    "wall" : ISODate("2020-02-24T08:10:41.636Z"),
-		    "o" : {
-		        "_id" : ObjectId("5e5384f97dc0f30426f01b79"),
-		        "kick" : 10,
-		        "ok" : true
-		    }
-		}
+			{
+			    "ts" : Timestamp(1582531841, 1),
+			    "t" : NumberLong(1),
+			    "h" : NumberLong(0),
+			    "v" : 2,
+			    "op" : "u",
+			    "ns" : "zz.test",
+			    "ui" : UUID("ee9b60d8-845f-42ff-989d-09018a730d60"),
+			    "o2" : {
+			        "_id" : ObjectId("5e5384f97dc0f30426f01b79")
+			    },
+			    "wall" : ISODate("2020-02-24T08:10:41.636Z"),
+			    "o" : {
+			        "_id" : ObjectId("5e5384f97dc0f30426f01b79"),
+			        "kick" : 10,
+			        "ok" : true
+			    }
+			}
 		*/
 		oplog.Namespace = fmt.Sprintf("%s.%s", ns["db"], ns["coll"])
 		oplog.Operation = "u"
@@ -267,22 +270,27 @@ func ConvertEvent2Oplog(input []byte) (*PartialLog, error) {
 		oplog.Namespace = fmt.Sprintf("%s.%s", ns["db"], ns["coll"])
 		oplog.Operation = "u"
 		oplog.Query = event.DocumentKey
-		oplog.Object = make(bson.D, 0, 2)
-		if updatedFields, ok := event.UpdateDescription["updatedFields"]; ok && len(updatedFields.(bson.M)) > 0 {
-			oplog.Object = append(oplog.Object, bson.DocElem{
-				Name: "$set",
-				Value: updatedFields,
-			})
-		}
-		if removedFields, ok := event.UpdateDescription["removedFields"]; ok && len(removedFields.([]interface{})) > 0 {
-			removedFieldsMap := make(bson.M)
-			for _, ele := range removedFields.([]interface{}) {
-				removedFieldsMap[ele.(string)] = 1
+
+		if fulldoc {
+			oplog.Object = event.FullDocument
+		} else {
+			oplog.Object = make(bson.D, 0, 2)
+			if updatedFields, ok := event.UpdateDescription["updatedFields"]; ok && len(updatedFields.(bson.M)) > 0 {
+				oplog.Object = append(oplog.Object, bson.DocElem{
+					Name:  "$set",
+					Value: updatedFields,
+				})
 			}
-			oplog.Object = append(oplog.Object, bson.DocElem{
-				Name: "$unset",
-				Value: removedFieldsMap,
-			})
+			if removedFields, ok := event.UpdateDescription["removedFields"]; ok && len(removedFields.([]interface{})) > 0 {
+				removedFieldsMap := make(bson.M)
+				for _, ele := range removedFields.([]interface{}) {
+					removedFieldsMap[ele.(string)] = 1
+				}
+				oplog.Object = append(oplog.Object, bson.DocElem{
+					Name:  "$unset",
+					Value: removedFieldsMap,
+				})
+			}
 		}
 
 	case "drop":
