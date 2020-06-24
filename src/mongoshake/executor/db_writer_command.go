@@ -40,8 +40,11 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.M, 
 		return nil
 	}
 
+	LOG.Warn("doInsert failed: %v", err)
+
 	// error can be ignored
 	if IgnoreError(err, "i", parseLastTimestamp(oplogs) <= cw.fullFinishTs) {
+		LOG.Warn("error[%v] can be ignored", err)
 		return nil
 	}
 
@@ -88,6 +91,8 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 		return nil
 	}
 
+	LOG.Warn("doUpdateOnInsert failed: %v", err)
+
 	// error can be ignored
 	if IgnoreError(err, "u", parseLastTimestamp(oplogs) <= cw.fullFinishTs) {
 		return nil
@@ -132,6 +137,8 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.M,
 		return nil
 	}
 
+	LOG.Warn("doUpdate failed: %v", err)
+
 	// error can be ignored
 	if IgnoreError(err, "u", parseLastTimestamp(oplogs) <= cw.fullFinishTs) {
 		return nil
@@ -164,6 +171,8 @@ func (cw *CommandWriter) doDelete(database, collection string, metadata bson.M,
 
 		return nil
 	}
+
+	LOG.Warn("doDelete failed: %v", err)
 
 	// error can be ignored
 	if IgnoreError(err, "d", parseLastTimestamp(oplogs) <= cw.fullFinishTs) {

@@ -22,11 +22,16 @@ var IncrSentinelOptions struct {
 	DuplicatedDump bool
 	Pause          bool
 	TPS            int64
+	TargetDelay    int64
 }
 
 // only used in full sync.
 var FullSentinelOptions struct {
 	TPS int64
+}
+
+func init() {
+	IncrSentinelOptions.TargetDelay = -1
 }
 
 type Sentinel struct {
@@ -95,8 +100,11 @@ func (sentinel *Sentinel) Register() {
 					continue
 				}
 			case reflect.Int64:
-				//fmt.Printf("%v, %s", value, reflect.TypeOf(value).String())
+				// fmt.Printf("%s, %v, %s", name, value, reflect.TypeOf(value).String())
 				if v, ok := value.(float64); ok {
+					if name == "TargetDelay" && int64(v) < 0 {
+						v = 0
+					}
 					field.SetInt(int64(v))
 					continue
 				}
@@ -109,6 +117,8 @@ func (sentinel *Sentinel) Register() {
 			}
 			return map[string]string{"sentinel": fmt.Sprintf("%s option isn't corret", name)}
 		}
+
+		LOG.Info("new sentinel options: %v", options)
 
 		return map[string]string{"sentinel": "success"}
 	})

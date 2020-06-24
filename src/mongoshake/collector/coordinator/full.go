@@ -116,15 +116,22 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		fromIsSharding = len(conf.Options.MongoUrls) > 1
 	}
 
-	// init orphan sharding chunk map if source is sharding
-	shardingChunkMap, err := fetchChunkMap(fromIsSharding)
-	if err != nil {
-		LOG.Critical("fetch chunk map failed[%v]", err)
-		return err
+	var shardingChunkMap sharding.ShardingChunkMap
+	var err error
+	// init orphan sharding chunk map if source is mongod
+	if fromIsSharding && coordinator.MongoS == nil {
+		LOG.Info("source is mongod, need to fetching chunk map")
+		shardingChunkMap, err = fetchChunkMap(fromIsSharding)
+		if err != nil {
+			LOG.Critical("fetch chunk map failed[%v]", err)
+			return err
+		}
+	} else {
+		LOG.Info("source is replica or mongos, no need to fetching chunk map")
 	}
 
 	// get all namespace need to sync
-	nsSet, _, err := docsyncer.GetAllNamespace(coordinator.RealSource)
+	nsSet, _, err := docsyncer.GetAllNamespace(coordinator.RealSourceFullSync)
 	if err != nil {
 		return err
 	}
@@ -163,7 +170,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// fetch all indexes
 	var indexMap map[utils.NS][]mgo.Index
 	if conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexNone {
-		if indexMap, err = fetchIndexes(coordinator.RealSource); err != nil {
+		if indexMap, err = fetchIndexes(coordinator.RealSourceFullSync); err != nil {
 			return fmt.Errorf("fetch index failed[%v]", err)
 		}
 
@@ -187,9 +194,9 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// start sync each db
 	var wg sync.WaitGroup
 	var replError error
-	for i, src := range coordinator.RealSource {
+	for i, src := range coordinator.RealSourceFullSync {
 		var orphanFilter *filter.OrphanFilter
-		if conf.Options.FullSyncExecutorFilterOrphanDocument {
+		if conf.Options.FullSyncExecutorFilterOrphanDocument && shardingChunkMap != nil {
 			dbChunkMap := make(sharding.DBChunkMap)
 			if chunkMap, ok := shardingChunkMap[src.ReplicaName]; ok {
 				dbChunkMap = chunkMap
@@ -238,8 +245,8 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 
 	// update checkpoint after full sync
 	if conf.Options.SyncMode != utils.VarSyncModeFull {
-		// need merge to one when from mongos
-		if coordinator.MongoS != nil {
+		// need merge to one when from mongos and fetch_mothod=="change_stream"
+		if coordinator.MongoS != nil && conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
 			var smallestNew bson.MongoTimestamp = math.MaxInt64
 			for _, val := range ckptMap {
 				if smallestNew > val.Newest {

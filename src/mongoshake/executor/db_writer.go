@@ -179,6 +179,10 @@ func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 // https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.yml
 func IgnoreError(err error, op string, isFullSyncStage bool) bool {
 	errorCode := mgo.ErrorCodeList(err)
+	if err != nil && len(errorCode) == 0 {
+		return false
+	}
+
 	for _, err := range errorCode {
 		switch op {
 		case "i":

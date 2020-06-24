@@ -117,9 +117,14 @@ func startup() {
 			URL:         conf.Options.MongoSUrl,
 			ReplicaName: "mongos",
 		}
-		coordinator.RealSource = []*utils.MongoSource{coordinator.MongoS}
+		coordinator.RealSourceFullSync = []*utils.MongoSource{coordinator.MongoS}
+		coordinator.RealSourceIncrSync = []*utils.MongoSource{coordinator.MongoS}
+		if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
+			coordinator.RealSourceIncrSync = coordinator.MongoD
+		}
 	} else {
-		coordinator.RealSource = coordinator.MongoD
+		coordinator.RealSourceFullSync = coordinator.MongoD
+		coordinator.RealSourceIncrSync = coordinator.MongoD
 	}
 
 	if conf.Options.MongoCsUrl != "" {
