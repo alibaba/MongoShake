@@ -533,6 +533,7 @@ func (sync *OplogSyncer) next() bool {
 }
 
 func (sync *OplogSyncer) checkShutdown() {
+	// single run, no need to adding lock or CAS
 	if (!utils.IncrSentinelOptions.Shutdown && utils.IncrSentinelOptions.ExitPoint <= 0) ||
 			sync.SyncGroup == nil || sync.shutdownWorking {
 		return

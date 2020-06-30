@@ -5,6 +5,7 @@
 	the PR by Raydy.
 	* IMPROVE: open full_sync.reader.read_document_count parameter to improve
 	full sync performance when meeting jumbo table.
+	* IMPROVE: polish log: remove function information in log.
 
 2020-06-17 Alibaba Cloud.
 	* version: 2.4.6
