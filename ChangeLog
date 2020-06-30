@@ -1,8 +1,11 @@
-2020-06-xx Alibaba Cloud.
+2020-06-30 Alibaba Cloud.
 	* version: 2.4.7
-	* IMPROVE: add exit point and safe shutdown mechanism. #375, #162
+	* IMPROVE: add exit-point and safe shutdown mechanism. #375, #162
 	* IMPROVE: add UpdateLookup options in change stream. #350. thanks for
 	the PR by Raydy.
+	* IMPROVE: open full_sync.reader.read_document_count parameter to improve
+	full sync performance when meeting jumbo table.
+
 2020-06-17 Alibaba Cloud.
 	* version: 2.4.6
 	* IMPROVE: when running full sync, change sync source from mongod to
