@@ -24,6 +24,8 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		syncer.Init()
 		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)
 	}
+	// set to group 0 as a leader
+	coordinator.syncerGroup[0].SyncGroup = coordinator.syncerGroup
 
 	// prepare worker routine and bind it to syncer
 	for i := 0; i < conf.Options.IncrSyncWorker; i++ {

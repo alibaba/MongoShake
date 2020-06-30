@@ -140,8 +140,8 @@ func checkDefaultValue() error {
 	}
 	if conf.Options.FullSyncReaderReadDocumentCount < 0 {
 		conf.Options.FullSyncReaderReadDocumentCount = 0
-	} else if conf.Options.FullSyncReaderReadDocumentCount > 0 && conf.Options.FullSyncReaderReadDocumentCount < 1024 {
-		return fmt.Errorf("full_sync.reader.read_document_count should == 0 or > 1024")
+	} else if conf.Options.FullSyncReaderReadDocumentCount > 0 && conf.Options.FullSyncReaderReadDocumentCount < 10000 {
+		return fmt.Errorf("full_sync.reader.read_document_count should == 0 or >= 10000")
 	}
 	if conf.Options.FullSyncReaderDocumentBatchSize <= 0 {
 		conf.Options.FullSyncReaderDocumentBatchSize = 128
