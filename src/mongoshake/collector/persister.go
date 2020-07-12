@@ -155,6 +155,7 @@ func (p *Persister) Inject(input []byte) {
 
 			// store local
 			p.diskQueueMutex.Lock()
+			defer p.diskQueueMutex.Unlock()
 			if p.DiskQueue != nil { // double check
 				// should send to diskQueue
 				atomic.AddUint64(&p.diskWriteCount, 1)
