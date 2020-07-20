@@ -1,3 +1,8 @@
+2020-0x-xx Alibaba Cloud.
+	* version: 2.4.8
+	* BUGFIX: fix bug that checkpoint.storage.db does not work since v2.4.6.
+	* BUGFIX: fix bug of orphan document filter core. #389.
+
 2020-06-30 Alibaba Cloud.
 	* version: 2.4.7
 	* IMPROVE: add exit-point and safe shutdown mechanism. #375, #162

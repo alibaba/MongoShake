@@ -254,6 +254,8 @@ type DBSyncer struct {
 	indexMap map[utils.NS][]mgo.Index
 	// start time of sync
 	startTime time.Time
+	// source is sharding?
+	FromIsSharding bool
 
 	nsTrans *transform.NamespaceTransform
 	// filter orphan duplicate record
@@ -277,19 +279,20 @@ func NewDBSyncer(
 	toMongoUrl string,
 	nsTrans *transform.NamespaceTransform,
 	orphanFilter *filter.OrphanFilter,
-	qos *utils.Qos) *DBSyncer {
+	qos *utils.Qos,
+	fromIsSharding bool) *DBSyncer {
 
 	syncer := &DBSyncer{
-		id:           id,
-		FromMongoUrl: fromMongoUrl,
-		fromReplset:  fromReplset,
-		ToMongoUrl:   toMongoUrl,
-		// indexMap:     make(map[utils.NS][]mgo.Index),
-		nsTrans:      nsTrans,
-		orphanFilter: orphanFilter,
-		qos:          qos,
-		metricNsMap:  make(map[utils.NS]*CollectionMetric),
-		replMetric:   utils.NewMetric(fromReplset, utils.TypeFull, utils.METRIC_TPS),
+		id:             id,
+		FromMongoUrl:   fromMongoUrl,
+		fromReplset:    fromReplset,
+		ToMongoUrl:     toMongoUrl,
+		nsTrans:        nsTrans,
+		orphanFilter:   orphanFilter,
+		qos:            qos,
+		metricNsMap:    make(map[utils.NS]*CollectionMetric),
+		replMetric:     utils.NewMetric(fromReplset, utils.TypeFull, utils.METRIC_TPS),
+		FromIsSharding: fromIsSharding,
 	}
 
 	return syncer

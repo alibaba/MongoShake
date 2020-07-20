@@ -202,7 +202,7 @@ func (exec *DocExecutor) tryOneByOne(input []interface{}, index int, collectionH
 		id := oplog.GetKey(docD, "")
 
 		// orphan document enable and source is sharding
-		if conf.Options.FullSyncExecutorFilterOrphanDocument && len(conf.Options.MongoUrls) > 1 {
+		if conf.Options.FullSyncExecutorFilterOrphanDocument && exec.syncer.orphanFilter != nil {
 			// judge whether is orphan document, pass if so
 			if exec.syncer.orphanFilter.Filter(docD, collectionHandler.FullName) {
 				LOG.Info("orphan document with _id[%v] filter", id)
