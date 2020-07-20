@@ -2,6 +2,8 @@
 	* version: 2.4.8
 	* BUGFIX: fix bug that checkpoint.storage.db does not work since v2.4.6.
 	* BUGFIX: fix bug of orphan document filter core. #389.
+	* IMPROVE: remove listDatabase request when incr_sync.shard_key != auto.
+	#385.
 
 2020-06-30 Alibaba Cloud.
 	* version: 2.4.7

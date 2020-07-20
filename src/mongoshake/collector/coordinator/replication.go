@@ -173,7 +173,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		src.ReplicaName = rsName
 
 		// look around if there has uniq index
-		if !hasUniqIndex {
+		if !hasUniqIndex && conf.Options.IncrSyncShardKey == oplog.ShardAutomatic {
 			hasUniqIndex = conn.HasUniqueIndex()
 		}
 		// doesn't reuse current connection

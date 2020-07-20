@@ -128,7 +128,7 @@ func (conn *MongoConn) HasUniqueIndex() bool {
 	var databases []string
 	var err error
 	if databases, err = conn.Session.DatabaseNames(); err != nil {
-		LOG.Critical("Couldn't get databases from remote server %v", err)
+		LOG.Critical("Couldn't get databases from remote server: %v", err)
 		return false
 	}
 
