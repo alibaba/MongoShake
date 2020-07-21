@@ -5,6 +5,7 @@
 	* IMPROVE: remove listDatabase request when incr_sync.shard_key != auto.
 	#385.
 	* IMPROVE: add oplog_max_size and oplog_avg_size metric in restful: "repl/".
+	* BUGFIX: fix bug of checkpoint duplicate updating when HA switch.
 
 2020-06-30 Alibaba Cloud.
 	* version: 2.4.7
