@@ -182,20 +182,7 @@ func (metric *ReplicationMetric) startup() {
 
 func (metric *ReplicationMetric) getTunnelTraffic() string {
 	traffic := atomic.LoadUint64(&metric.TunnelTraffic)
-	switch {
-	case traffic > PB:
-		return fmt.Sprintf("%dPB", traffic/PB)
-	case traffic > TB:
-		return fmt.Sprintf("%dTB", traffic/TB)
-	case traffic > GB:
-		return fmt.Sprintf("%dGB", traffic/GB)
-	case traffic > MB:
-		return fmt.Sprintf("%dMB", traffic/MB)
-	case traffic > KB:
-		return fmt.Sprintf("%dKB", traffic/KB)
-	default:
-		return fmt.Sprintf("%dB", traffic)
-	}
+	return GetMetricWithSize(traffic)
 }
 
 func (metric *ReplicationMetric) Get() uint64 {
@@ -336,4 +323,43 @@ func (t *TableOps) MakeCopy() map[string]uint64 {
 		c[k] = v
 	}
 	return c
+}
+
+func GetMetricWithSize(input interface{}) string {
+	var val float64
+	switch v := input.(type) {
+	case uint64:
+		val = float64(v)
+	case uint32:
+		val = float64(v)
+	case uint16:
+		val = float64(v)
+	case uint:
+		val = float64(v)
+	case int64:
+		val = float64(v)
+	case int32:
+		val = float64(v)
+	case int16:
+		val = float64(v)
+	case int:
+		val = float64(v)
+	default:
+		return "unknown type"
+	}
+
+	switch {
+	case val > PB:
+		return fmt.Sprintf("%.2fPB", val/PB)
+	case val > TB:
+		return fmt.Sprintf("%.2fTB", val/TB)
+	case val > GB:
+		return fmt.Sprintf("%.2fGB", val/GB)
+	case val > MB:
+		return fmt.Sprintf("%.2fMB", val/MB)
+	case val > KB:
+		return fmt.Sprintf("%.2fKB", val/KB)
+	default:
+		return fmt.Sprintf("%.2fB", val)
+	}
 }

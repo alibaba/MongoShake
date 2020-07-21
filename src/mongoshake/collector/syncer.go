@@ -155,7 +155,7 @@ func NewOplogSyncer(
 }
 
 func (sync *OplogSyncer) Init() {
-	var options uint64 = utils.METRIC_CKPT_TIMES| utils.METRIC_LSN| utils.METRIC_SUCCESS|
+	var options uint64 = utils.METRIC_CKPT_TIMES | utils.METRIC_LSN | utils.METRIC_SUCCESS |
 		utils.METRIC_TPS | utils.METRIC_FILTER
 	if conf.Options.Tunnel != utils.VarTunnelDirect {
 		options |= utils.METRIC_RETRANSIMISSION
@@ -258,7 +258,7 @@ func (sync *OplogSyncer) startBatcher() {
 			sync.checkCheckpointUpdate(true, newestTs) // check if need
 			sync.CanClose = true
 			LOG.Info("%s blocking and waiting exits, checkpoint: %v", sync, utils.ExtractTimestampForLog(newestTs))
-			select{} // block forever, wait outer routine exits
+			select {} // block forever, wait outer routine exits
 		} else if log, filterLog := batcher.getLastOplog(); log != nil && !allEmpty {
 			// if all filtered, still update checkpoint
 			newestTs = log.Timestamp
@@ -535,7 +535,7 @@ func (sync *OplogSyncer) next() bool {
 func (sync *OplogSyncer) checkShutdown() {
 	// single run, no need to adding lock or CAS
 	if (!utils.IncrSentinelOptions.Shutdown && utils.IncrSentinelOptions.ExitPoint <= 0) ||
-			sync.SyncGroup == nil || sync.shutdownWorking {
+		sync.SyncGroup == nil || sync.shutdownWorking {
 		return
 	}
 
@@ -603,6 +603,8 @@ func (sync *OplogSyncer) RestAPI() {
 		LsnAck      *MongoTime `json:"lsn_ack"`
 		LsnCkpt     *MongoTime `json:"lsn_ckpt"`
 		Now         *Time      `json:"now"`
+		OplogAvg    string      `json:"log_size_avg"`
+		OplogMax    string      `json:"log_size_max"`
 	}
 
 	// total replication info
@@ -624,7 +626,9 @@ func (sync *OplogSyncer) RestAPI() {
 			LsnAck: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSNAck),
 				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSNAck),
 					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSNAck))}},
-			Now: &Time{TimestampUnix: time.Now().Unix(), TimestampTime: utils.TimestampToString(time.Now().Unix())},
+			Now:      &Time{TimestampUnix: time.Now().Unix(), TimestampTime: utils.TimestampToString(time.Now().Unix())},
+			OplogAvg: utils.GetMetricWithSize(sync.replMetric.OplogAvgSize),
+			OplogMax: utils.GetMetricWithSize(sync.replMetric.OplogMaxSize),
 		}
 	})
 
