@@ -4,6 +4,7 @@
 	* BUGFIX: fix bug of orphan document filter core. #389.
 	* IMPROVE: remove listDatabase request when incr_sync.shard_key != auto.
 	#385.
+	* IMPROVE: add oplog_max_size and oplog_avg_size metric in restful: "repl/".
 
 2020-06-30 Alibaba Cloud.
 	* version: 2.4.7
