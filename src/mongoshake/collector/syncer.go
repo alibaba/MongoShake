@@ -226,6 +226,14 @@ func (sync *OplogSyncer) startBatcher() {
 	filterFlag := false // marks whether previous log is filter
 
 	nimo.GoRoutineInLoop(func() {
+		/*
+		 * judge self is master?
+		 */
+		if !quorum.IsMaster() {
+			utils.YieldInMs(DurationTime)
+			return
+		}
+
 		// As much as we can batch more from logs queue. batcher can merge
 		// a sort of oplogs from different logs queue one by one. the max number
 		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
@@ -278,6 +286,10 @@ func (sync *OplogSyncer) startBatcher() {
 		} else {
 			// if log is nil, check whether filterLog is empty
 			if filterLog == nil {
+				// no need to update
+				return
+			} else if filterLog.Timestamp <= sync.ckptManager.GetInMemory().Timestamp {
+				// no need to update
 				return
 			} else {
 				now := time.Now()
