@@ -23,9 +23,10 @@ const (
 	// AdaptiveBatchingMaxSize = 16384 // 16k
 
 	// bson deserialize workload is CPU-intensive task
-	PipelineQueueMaxNr = 4
-	PipelineQueueMinNr = 1
-	PipelineQueueLen   = 64
+	PipelineQueueMaxNr    = 6
+	PipelineQueueMiddleNr = 4
+	PipelineQueueMinNr    = 1
+	PipelineQueueLen      = 64
 
 	DurationTime                  = 6000 // unit: ms.
 	DDLCheckpointInterval         = 300  // unit: ms.
@@ -393,8 +394,13 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.Mongo
 // how many pending queue we create
 func calculatePendingQueueConcurrency() int {
 	// single {pending|logs}queue while it'is multi source shard
+	// need more thread when fetching method is change stream, no matter replica or sharding.
+	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
+		return PipelineQueueMaxNr
+	}
+
 	if conf.Options.IsShardCluster() {
-		return PipelineQueueMinNr
+		return PipelineQueueMiddleNr
 	}
 	return PipelineQueueMaxNr
 }

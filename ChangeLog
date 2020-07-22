@@ -6,6 +6,7 @@
 	#385.
 	* IMPROVE: add oplog_max_size and oplog_avg_size metric in restful: "repl/".
 	* BUGFIX: fix bug of checkpoint duplicate updating when HA switch.
+	* IMPROVE: increase syncer thread when fetching method is change stream.
 
 2020-06-30 Alibaba Cloud.
 	* version: 2.4.7

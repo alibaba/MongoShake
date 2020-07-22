@@ -30,6 +30,10 @@ type MongoSource struct {
 	Gids        []string
 }
 
+func (ms *MongoSource) String() string {
+	return fmt.Sprintf("url[%v], name[%v]", ms.URL, ms.ReplicaName)
+}
+
 // get db version, return string with format like "3.0.1"
 func GetDBVersion(session *mgo.Session) (string, error) {
 	var result bson.M
