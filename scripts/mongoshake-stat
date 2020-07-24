@@ -50,7 +50,7 @@ def __crash(message):
 
 
 def usage():
-    print "Usage: ./blsstat [--host=127.0.0.1] [--port=8080] [--tables] [--queue]"
+    print "Usage: ./mongoshake-stat [--host=127.0.0.1] [--port=8080] [--tables] [--queue]"
     exit(0)
 
 
@@ -217,7 +217,7 @@ if __name__ == "__main__":
 
     elif VERBOSE_TABLE:
         if module != MODULE_RECEIVER:
-            print "blsstat --tables not support collector" 
+            print "Command `mongoshake-stat --tables` is not supported by collector" 
         else:
             # show tables operations
             #
