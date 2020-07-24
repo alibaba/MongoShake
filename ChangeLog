@@ -9,6 +9,8 @@
 	* IMPROVE: increase syncer thread when fetching method is change stream.
 	* IMPROVE: add readConcern and writeConcern in client to solve the
 	orphan document problem reading from MongoS. #392
+	* IMPROVE: fix wrong name usage in mongoshake-stat script, thanks @Neal
+	Gosalia. #393.
 
 2020-06-30 Alibaba Cloud.
 	* version: 2.4.7
