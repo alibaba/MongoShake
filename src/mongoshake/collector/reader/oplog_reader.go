@@ -37,6 +37,7 @@ type OplogReader struct {
 	// source mongo address url
 	src     string
 	replset string
+
 	// mongo oplog reader
 	conn           *utils.MongoConn
 	oplogsIterator *mgo.Iter
@@ -62,6 +63,10 @@ func NewOplogReader(src string, replset string) *OplogReader {
 		oplogChan:       make(chan *retOplog, 0),
 		firstRead:       true,
 	}
+}
+
+func (or *OplogReader) String() string {
+	return fmt.Sprintf("oplogReader[src:%s replset:%s]", or.src, or.replset)
 }
 
 func (or *OplogReader) Name() string {
@@ -148,7 +153,7 @@ func (or *OplogReader) fetcher() {
 					LOG.Error("oplog collection capped may happen: %v", err)
 					or.oplogChan <- &retOplog{nil, CollectionCappedError}
 				} else {
-					or.oplogChan <- &retOplog{nil, fmt.Errorf("get next oplog failed. release oplogsIterator, %s", err.Error())}
+					or.oplogChan <- &retOplog{nil, fmt.Errorf("get next oplog failed, release oplogsIterator, %s", err.Error())}
 				}
 				// wait a moment
 				time.Sleep(1 * time.Second)
@@ -169,6 +174,8 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 	if or.oplogsIterator != nil {
 		return nil
 	}
+	LOG.Info("%s ensure network", or.String())
+
 	if or.conn == nil || (or.conn != nil && !or.conn.IsGood()) {
 		if or.conn != nil {
 			or.conn.Close()
@@ -178,6 +185,9 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 			err = fmt.Errorf("oplog_reader reconnect mongo instance [%s] error. %s", or.src, err.Error())
 			return err
 		}
+
+		or.conn.Session.SetBatch(BatchSize)
+		or.conn.Session.SetPrefetch(PrefetchPercent)
 	}
 
 	var queryTs bson.MongoTimestamp
@@ -210,8 +220,6 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 	or.firstRead = false
 
 	// rebuild syncerGroup condition statement with current checkpoint timestamp
-	or.conn.Session.SetBatch(BatchSize)
-	or.conn.Session.SetPrefetch(PrefetchPercent)
 	or.oplogsIterator = or.conn.Session.DB(localDB).C(utils.OplogNS).
 		Find(or.query).LogReplay().Tail(time.Second * tailTimeout) // this timeout is useless
 	return

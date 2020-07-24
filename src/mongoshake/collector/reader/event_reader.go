@@ -12,6 +12,7 @@ import (
 	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/go-diskqueue"
+	"fmt"
 )
 
 const (
@@ -55,6 +56,10 @@ func NewEventReader(src string, replset string) *EventReader {
 		firstRead:            true,
 		diskQueueLastTs:      -1,
 	}
+}
+
+func (er *EventReader) String() string {
+	return fmt.Sprintf("EventReader[src:%s replset:%s]", er.src, er.replset)
 }
 
 func (er *EventReader) Name() string {
@@ -135,6 +140,8 @@ func (er *EventReader) EnsureNetwork() error {
 	if er.client != nil && er.client.IsNotNil() {
 		return nil
 	}
+
+	LOG.Info("%s ensure network", er.String())
 
 	if er.client != nil {
 		er.client.Close() // close old client

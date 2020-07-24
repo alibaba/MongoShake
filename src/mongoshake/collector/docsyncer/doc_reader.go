@@ -125,6 +125,7 @@ func NewDocumentSplitter(src string, ns utils.NS) *DocumentSplitter {
 		return nil
 	}
 
+
 	// get total count
 	count, err := ds.conn.Session.DB(ds.ns.Database).C(ds.ns.Collection).Count()
 	if err != nil {
