@@ -75,7 +75,8 @@ func fetchIndexes(sourceList []*utils.MongoSource) (map[utils.NS][]mgo.Index, er
 		}
 
 		// 2. build connection
-		conn, err := utils.NewMongoConn(src.URL, utils.VarMongoConnectModeSecondaryPreferred, true)
+		conn, err := utils.NewMongoConn(src.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
 		if err != nil {
 			return nil, fmt.Errorf("source[%v %v] build connection failed: %v", src.ReplicaName, src.URL, err)
 		}
@@ -141,7 +142,8 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// create target client
 	toUrl := conf.Options.TunnelAddress[0]
 	var toConn *utils.MongoConn
-	if toConn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, true); err != nil {
+	if toConn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, true,
+		utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault); err != nil {
 		return err
 	}
 	defer toConn.Close()

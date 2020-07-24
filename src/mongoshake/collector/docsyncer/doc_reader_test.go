@@ -21,7 +21,8 @@ func TestGtDbNamespace(t *testing.T) {
 		fmt.Printf("TestGtDbNamespace case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoConn(testMongoAddress, utils.VarMongoConnectModePrimary, true)
+		conn, err := utils.NewMongoConn(testMongoAddress, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
 		assert.Equal(t, nil, err, "should be equal")
 
 		err = conn.Session.DB("db1").DropDatabase()

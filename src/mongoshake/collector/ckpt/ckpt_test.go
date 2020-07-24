@@ -31,7 +31,8 @@ func TestMongoCheckpoint(t *testing.T) {
 		conf.Options.CheckpointStorage = utils.VarCheckpointStorageDatabase
 
 		name := "ut_tet"
-		conn, err := utils.NewMongoConn(testUrl, utils.VarMongoConnectModePrimary, true)
+		conn, err := utils.NewMongoConn(testUrl, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop test db
@@ -53,9 +54,11 @@ func TestMongoCheckpoint(t *testing.T) {
 		conf.Options.CheckpointStorageUrl = testUrl
 		conf.Options.CheckpointStorageCollection = "ut_ckpt_table"
 		conf.Options.CheckpointStorage = utils.VarCheckpointStorageDatabase
+		conf.Options.CheckpointStorageDb = utils.VarCheckpointStorageDbReplicaDefault
 
 		name := "ut_tet"
-		conn, err := utils.NewMongoConn(testUrl, utils.VarMongoConnectModePrimary, true)
+		conn, err := utils.NewMongoConn(testUrl, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop test db
@@ -98,9 +101,11 @@ func TestMongoCheckpoint(t *testing.T) {
 		conf.Options.CheckpointStorageUrl = testUrl
 		conf.Options.CheckpointStorageCollection = "ut_ckpt_table"
 		conf.Options.CheckpointStorage = utils.VarCheckpointStorageDatabase
+		conf.Options.CheckpointStorageDb = utils.VarCheckpointStorageDbReplicaDefault
 
 		name := "ut_tet"
-		conn, err := utils.NewMongoConn(testUrl, utils.VarMongoConnectModePrimary, true)
+		conn, err := utils.NewMongoConn(testUrl, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop test db
@@ -134,9 +139,12 @@ func TestMongoCheckpoint(t *testing.T) {
 		conf.Options.CheckpointStorageUrl = testUrl
 		conf.Options.CheckpointStorageCollection = "ut_ckpt_table"
 		conf.Options.CheckpointStorage = utils.VarCheckpointStorageDatabase
+		conf.Options.CheckpointStorageDb = utils.VarCheckpointStorageDbReplicaDefault
+		utils.FcvCheckpoint.CurrentVersion = 1
 
 		name := "ut_tet"
-		conn, err := utils.NewMongoConn(testUrl, utils.VarMongoConnectModePrimary, true)
+		conn, err := utils.NewMongoConn(testUrl, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop test db
@@ -189,9 +197,12 @@ func TestMongoCheckpoint(t *testing.T) {
 		conf.Options.CheckpointStorageUrl = testUrl
 		conf.Options.CheckpointStorageCollection = "ut_ckpt_table"
 		conf.Options.CheckpointStorage = utils.VarCheckpointStorageDatabase
+		conf.Options.CheckpointStorageDb = utils.VarCheckpointStorageDbReplicaDefault
+		utils.FcvCheckpoint.CurrentVersion = 1
 
 		name := "ut_tet"
-		conn, err := utils.NewMongoConn(testUrl, utils.VarMongoConnectModePrimary, true)
+		conn, err := utils.NewMongoConn(testUrl, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop test db

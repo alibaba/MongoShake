@@ -181,7 +181,8 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 			or.conn.Close()
 		}
 		// reconnect
-		if or.conn, err = utils.NewMongoConn(or.src, conf.Options.MongoConnectMode, true); or.conn == nil || err != nil {
+		if or.conn, err = utils.NewMongoConn(or.src, conf.Options.MongoConnectMode, true,
+				utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault); or.conn == nil || err != nil {
 			err = fmt.Errorf("oplog_reader reconnect mongo instance [%s] error. %s", or.src, err.Error())
 			return err
 		}

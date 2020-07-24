@@ -134,7 +134,8 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 
 	// try to connect CheckpointStorage
 	checkpointStorageUrl := conf.Options.CheckpointStorageUrl
-	if conn, err = utils.NewMongoConn(checkpointStorageUrl, utils.VarMongoConnectModePrimary, true); conn == nil || !conn.IsGood() || err != nil {
+	if conn, err = utils.NewMongoConn(checkpointStorageUrl, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault); conn == nil || !conn.IsGood() || err != nil {
 		LOG.Critical("Connect checkpointStorageUrl[%v] error[%v]. Please add primary node into 'mongo_urls' " +
 			"if 'context.storage.url' is empty", checkpointStorageUrl, err)
 		return err
@@ -142,7 +143,8 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	conn.Close()
 
 	for i, src := range coordinator.MongoD {
-		if conn, err = utils.NewMongoConn(src.URL, conf.Options.MongoConnectMode, true); conn == nil || !conn.IsGood() || err != nil {
+		if conn, err = utils.NewMongoConn(src.URL, conf.Options.MongoConnectMode, true,
+				utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault); conn == nil || !conn.IsGood() || err != nil {
 			LOG.Critical("Connect mongo server error. %v, url : %s. See https://github.com/alibaba/MongoShake/wiki/FAQ#q-how-to-solve-the-oplog-tailer-initialize-failed-no-reachable-servers-error", err, src.URL)
 			return err
 		}

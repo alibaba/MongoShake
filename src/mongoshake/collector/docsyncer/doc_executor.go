@@ -55,7 +55,8 @@ func NewCollectionExecutor(id int, mongoUrl string, ns utils.NS, syncer *DBSynce
 
 func (colExecutor *CollectionExecutor) Start() error {
 	var err error
-	if colExecutor.conn, err = utils.NewMongoConn(colExecutor.mongoUrl, utils.VarMongoConnectModePrimary, true); err != nil {
+	if colExecutor.conn, err = utils.NewMongoConn(colExecutor.mongoUrl, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault); err != nil {
 		return err
 	}
 	if conf.Options.FullSyncExecutorMajorityEnable {

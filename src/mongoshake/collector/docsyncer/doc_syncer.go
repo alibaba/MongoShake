@@ -84,7 +84,8 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 
 	var fromConn *utils.MongoConn
 	var err error
-	if fromConn, err = utils.NewMongoConn(csUrl, utils.VarMongoConnectModePrimary, true); err != nil {
+	if fromConn, err = utils.NewMongoConn(csUrl, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault); err != nil {
 		return err
 	}
 	defer fromConn.Close()
@@ -187,7 +188,8 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 
 	var conn *utils.MongoConn
 	var err error
-	if conn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, false); err != nil {
+	if conn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, false,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernMajority); err != nil {
 		return err
 	}
 	defer conn.Close()

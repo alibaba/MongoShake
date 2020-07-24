@@ -235,7 +235,8 @@ func checkDefaultValue() error {
 func checkConnection() error {
 	// check mongo_urls
 	for _, mongo := range conf.Options.MongoUrls {
-		_, err := utils.NewMongoConn(mongo, conf.Options.MongoConnectMode, true)
+		_, err := utils.NewMongoConn(mongo, conf.Options.MongoConnectMode, true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		if err != nil {
 			return fmt.Errorf("connect source mongodb[%v] failed[%v]", mongo, err)
 		}
@@ -243,7 +244,8 @@ func checkConnection() error {
 
 	// check mongo_cs_url
 	if conf.Options.MongoCsUrl != "" {
-		_, err := utils.NewMongoConn(conf.Options.MongoCsUrl, utils.VarMongoConnectModeSecondaryPreferred, true)
+		_, err := utils.NewMongoConn(conf.Options.MongoCsUrl, utils.VarMongoConnectModeSecondaryPreferred, true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		if err != nil {
 			return fmt.Errorf("connect config-server[%v] failed[%v]", conf.Options.MongoCsUrl, err)
 		}
@@ -252,7 +254,8 @@ func checkConnection() error {
 	// check tunnel address
 	if conf.Options.Tunnel == utils.VarTunnelDirect {
 		for _, mongo := range conf.Options.TunnelAddress {
-			_, err := utils.NewMongoConn(mongo, conf.Options.MongoConnectMode, true)
+			_, err := utils.NewMongoConn(mongo, conf.Options.MongoConnectMode, true,
+				utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 			if err != nil {
 				return fmt.Errorf("connect target tunnel mongodb[%v] failed[%v]", mongo, err)
 			}
@@ -347,7 +350,8 @@ func checkConflict() error {
 			source = conf.Options.MongoUrls[0]
 		}
 
-		conn, err := utils.NewMongoConn(source, utils.VarMongoConnectModeSecondaryPreferred, true)
+		conn, err := utils.NewMongoConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		if err != nil {
 			return fmt.Errorf("connect source[%v] failed[%v]", source, err)
 		}

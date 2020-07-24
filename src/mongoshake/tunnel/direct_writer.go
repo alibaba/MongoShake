@@ -22,7 +22,8 @@ func (writer *DirectWriter) Prepare() bool {
 	nimo.AssertTrue(len(writer.RemoteAddrs) > 0, "RemoteAddrs must > 0")
 
 	first := writer.RemoteAddrs[0]
-	if _, err := utils.NewMongoConn(first, utils.VarMongoConnectModeSecondaryPreferred, true); err != nil {
+	if _, err := utils.NewMongoConn(first, utils.VarMongoConnectModeSecondaryPreferred, true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault); err != nil {
 		LOG.Critical("target mongo server[%s] connect failed: %s", first, err.Error())
 		return false
 	}
