@@ -175,7 +175,8 @@ func competeMaster(coll *mgo.Collection) bool {
 }
 
 func makeSession(uri string) (*utils.MongoConn, error) {
-	if conn, err := utils.NewMongoConn(uri, utils.VarMongoConnectModePrimary, true); err == nil {
+	if conn, err := utils.NewMongoConn(uri, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault); err == nil {
 		return conn, nil
 	} else {
 		return nil, err

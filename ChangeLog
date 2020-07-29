@@ -1,3 +1,17 @@
+2020-07-29 Alibaba Cloud.
+	* version: 2.4.8
+	* BUGFIX: fix bug that checkpoint.storage.db does not work since v2.4.6.
+	* BUGFIX: fix bug of orphan document filter core. #389.
+	* IMPROVE: remove listDatabase request when incr_sync.shard_key != auto.
+	#385.
+	* IMPROVE: add oplog_max_size and oplog_avg_size metric in restful: "repl/".
+	* BUGFIX: fix bug of checkpoint duplicate updating when HA switch.
+	* IMPROVE: increase syncer thread when fetching method is change stream.
+	* IMPROVE: add readConcern and writeConcern in client to solve the
+	orphan document problem reading from MongoS. #392
+	* IMPROVE: fix wrong name usage in mongoshake-stat script, thanks @Neal
+	Gosalia. #393.
+
 2020-06-30 Alibaba Cloud.
 	* version: 2.4.7
 	* IMPROVE: add exit-point and safe shutdown mechanism. #375, #162

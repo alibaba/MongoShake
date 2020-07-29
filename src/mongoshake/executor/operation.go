@@ -22,7 +22,8 @@ var ErrorsShouldSkip = map[int]string{
 func (exec *Executor) ensureConnection() bool {
 	// reconnect if necessary
 	if exec.session == nil {
-		if conn, err := utils.NewMongoConn(exec.MongoUrl, utils.VarMongoConnectModePrimary, true); err != nil {
+		if conn, err := utils.NewMongoConn(exec.MongoUrl, utils.VarMongoConnectModePrimary, true,
+				utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault); err != nil {
 			LOG.Critical("Connect to mongo cluster failed. %v", err)
 			return false
 		} else {

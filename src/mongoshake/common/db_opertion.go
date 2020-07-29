@@ -30,6 +30,10 @@ type MongoSource struct {
 	Gids        []string
 }
 
+func (ms *MongoSource) String() string {
+	return fmt.Sprintf("url[%v], name[%v]", ms.URL, ms.ReplicaName)
+}
+
 // get db version, return string with format like "3.0.1"
 func GetDBVersion(session *mgo.Session) (string, error) {
 	var result bson.M
@@ -117,7 +121,8 @@ func GetOldestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, err
 func GetNewestTimestampByUrl(url string, fromMongoS bool) (bson.MongoTimestamp, error) {
 	var conn *MongoConn
 	var err error
-	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true); conn == nil || err != nil {
+	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true,
+			ReadWriteConcernDefault, ReadWriteConcernDefault); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()
@@ -137,7 +142,8 @@ func GetOldestTimestampByUrl(url string, fromMongoS bool) (bson.MongoTimestamp, 
 
 	var conn *MongoConn
 	var err error
-	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true); conn == nil || err != nil {
+	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true,
+			ReadWriteConcernDefault, ReadWriteConcernDefault); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()
@@ -148,7 +154,8 @@ func GetOldestTimestampByUrl(url string, fromMongoS bool) (bson.MongoTimestamp, 
 func IsFromMongos(url string) (bool, error) {
 	var conn *MongoConn
 	var err error
-	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true); conn == nil || err != nil {
+	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true,
+			ReadWriteConcernDefault, ReadWriteConcernDefault); conn == nil || err != nil {
 		return false, err
 	}
 	return conn.IsMongos(), nil

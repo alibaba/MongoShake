@@ -53,7 +53,8 @@ func GetAllNamespace(sources []*utils.MongoSource) (map[utils.NS]struct{}, map[s
 func GetDbNamespace(url string) ([]utils.NS, map[string][]string, error) {
 	var err error
 	var conn *utils.MongoConn
-	if conn, err = utils.NewMongoConn(url, utils.VarMongoConnectModeSecondaryPreferred, true); conn == nil || err != nil {
+	if conn, err = utils.NewMongoConn(url, utils.VarMongoConnectModeSecondaryPreferred, true,
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault); conn == nil || err != nil {
 		return nil, nil, err
 	}
 	defer conn.Close()
@@ -119,7 +120,8 @@ func NewDocumentSplitter(src string, ns utils.NS) *DocumentSplitter {
 
 	// create connection
 	var err error
-	ds.conn, err = utils.NewMongoConn(ds.src, conf.Options.MongoConnectMode, true)
+	ds.conn, err = utils.NewMongoConn(ds.src, conf.Options.MongoConnectMode, true,
+		utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
 	if err != nil {
 		LOG.Error("splitter[%s] connection mongo[%v] failed[%v]", ds, ds.src, err)
 		return nil
@@ -289,7 +291,8 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 			reader.conn.Close()
 		}
 		// reconnect
-		if reader.conn, err = utils.NewMongoConn(reader.src, conf.Options.MongoConnectMode, true); reader.conn == nil || err != nil {
+		if reader.conn, err = utils.NewMongoConn(reader.src, conf.Options.MongoConnectMode, true,
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault); reader.conn == nil || err != nil {
 			return err
 		}
 	}

@@ -178,6 +178,10 @@ func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 // true means error can be ignored
 // https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.yml
 func IgnoreError(err error, op string, isFullSyncStage bool) bool {
+	if err == nil {
+		return true
+	}
+
 	errorCode := mgo.ErrorCodeList(err)
 	if err != nil && len(errorCode) == 0 {
 		return false

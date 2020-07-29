@@ -58,7 +58,7 @@ func TestSingleWriter(t *testing.T) {
 		fmt.Printf("TestSingleWriter case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true)
+		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop database
@@ -104,7 +104,7 @@ func TestSingleWriter(t *testing.T) {
 		fmt.Printf("TestSingleWriter case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true)
+		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		assert.Equal(t, nil, err, "should be equal")
 
 		writer := NewDbWriter(conn.Session, bson.M{}, false, 0)
@@ -184,7 +184,7 @@ func TestSingleWriter(t *testing.T) {
 
 		utils.InitialLogger("", "", "info", true, true)
 
-		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true)
+		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop database
@@ -274,7 +274,7 @@ func TestBulkWriter(t *testing.T) {
 		fmt.Printf("TestBulkWriter case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true)
+		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop database
@@ -365,7 +365,7 @@ func TestBulkWriter(t *testing.T) {
 		fmt.Printf("TestBulkWriter case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true)
+		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop database
@@ -443,7 +443,7 @@ func TestBulkWriter(t *testing.T) {
 		fmt.Printf("TestBulkWriter case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true)
+		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop database
@@ -511,7 +511,7 @@ func TestBulkWriter(t *testing.T) {
 
 		utils.InitialLogger("", "", "info", true, true)
 
-		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true)
+		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop database
@@ -601,7 +601,7 @@ func TestRunCommand(t *testing.T) {
 		fmt.Printf("TestRunCommand case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true)
+		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop database
@@ -669,7 +669,7 @@ func TestRunCommand(t *testing.T) {
 		fmt.Printf("TestRunCommand case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true)
+		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		assert.Equal(t, nil, err, "should be equal")
 
 		err = conn.Session.DB("zz").C("y").Insert(bson.M{"x": 1})
@@ -715,7 +715,7 @@ func TestRunCommand(t *testing.T) {
 		fmt.Printf("TestRunCommand case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true)
+		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		assert.Equal(t, nil, err, "should be equal")
 
 		err = conn.Session.DB("zz").C("y").Insert(bson.M{"x": 1})
@@ -753,7 +753,7 @@ func TestRunCommand(t *testing.T) {
 		fmt.Printf("TestRunCommand case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true)
+		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		assert.Equal(t, nil, err, "should be equal")
 
 		err = conn.Session.DB("zz").C("y").Insert(bson.M{"x": 1})

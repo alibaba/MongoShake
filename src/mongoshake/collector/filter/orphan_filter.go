@@ -34,6 +34,11 @@ func NewOrphanFilter(replset string, chunkMap sharding.DBChunkMap) *OrphanFilter
 }
 
 func (filter *OrphanFilter) Filter(docD bson.D, namespace string) bool {
+	if filter.chunkMap == nil {
+		LOG.Warn("chunk map is nil")
+		return false
+	}
+
 	shardCol, hasChunk := filter.chunkMap[namespace]
 	if !hasChunk {
 		return false

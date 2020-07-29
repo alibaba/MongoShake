@@ -84,7 +84,8 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 
 	var fromConn *utils.MongoConn
 	var err error
-	if fromConn, err = utils.NewMongoConn(csUrl, utils.VarMongoConnectModePrimary, true); err != nil {
+	if fromConn, err = utils.NewMongoConn(csUrl, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault); err != nil {
 		return err
 	}
 	defer fromConn.Close()
@@ -187,7 +188,8 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 
 	var conn *utils.MongoConn
 	var err error
-	if conn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, false); err != nil {
+	if conn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, false,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernMajority); err != nil {
 		return err
 	}
 	defer conn.Close()
@@ -254,6 +256,8 @@ type DBSyncer struct {
 	indexMap map[utils.NS][]mgo.Index
 	// start time of sync
 	startTime time.Time
+	// source is sharding?
+	FromIsSharding bool
 
 	nsTrans *transform.NamespaceTransform
 	// filter orphan duplicate record
@@ -277,19 +281,20 @@ func NewDBSyncer(
 	toMongoUrl string,
 	nsTrans *transform.NamespaceTransform,
 	orphanFilter *filter.OrphanFilter,
-	qos *utils.Qos) *DBSyncer {
+	qos *utils.Qos,
+	fromIsSharding bool) *DBSyncer {
 
 	syncer := &DBSyncer{
-		id:           id,
-		FromMongoUrl: fromMongoUrl,
-		fromReplset:  fromReplset,
-		ToMongoUrl:   toMongoUrl,
-		// indexMap:     make(map[utils.NS][]mgo.Index),
-		nsTrans:      nsTrans,
-		orphanFilter: orphanFilter,
-		qos:          qos,
-		metricNsMap:  make(map[utils.NS]*CollectionMetric),
-		replMetric:   utils.NewMetric(fromReplset, utils.TypeFull, utils.METRIC_TPS),
+		id:             id,
+		FromMongoUrl:   fromMongoUrl,
+		fromReplset:    fromReplset,
+		ToMongoUrl:     toMongoUrl,
+		nsTrans:        nsTrans,
+		orphanFilter:   orphanFilter,
+		qos:            qos,
+		metricNsMap:    make(map[utils.NS]*CollectionMetric),
+		replMetric:     utils.NewMetric(fromReplset, utils.TypeFull, utils.METRIC_TPS),
+		FromIsSharding: fromIsSharding,
 	}
 
 	return syncer
