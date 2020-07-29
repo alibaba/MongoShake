@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"fmt"
 
-	"mongoshake/collector/configure"
 	"mongoshake/common"
 
 	LOG "github.com/vinllen/log4go"
@@ -67,7 +66,8 @@ type MongoCheckpoint struct {
 func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 	// make connection if we haven't already established one
 	if ckpt.Conn == nil {
-		if conn, err := utils.NewMongoConn(ckpt.URL, utils.VarMongoConnectModePrimary, true); err == nil {
+		if conn, err := utils.NewMongoConn(ckpt.URL, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority); err == nil {
 			ckpt.Conn = conn
 			ckpt.QueryHandle = conn.Session.DB(ckpt.DB).C(ckpt.Table)
 		} else {
@@ -76,10 +76,6 @@ func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 		}
 	}
 
-	// set WriteMajority while checkpoint is writing to ConfigServer
-	if conf.Options.IsShardCluster() {
-		ckpt.Conn.Session.EnsureSafe(&mgo.Safe{WMode: utils.MajorityWriteConcern})
-	}
 	return true
 }
 

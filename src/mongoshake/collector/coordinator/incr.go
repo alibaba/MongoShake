@@ -17,13 +17,17 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
-	for _, src := range coordinator.RealSourceIncrSync {
+	LOG.Info("start incr replication")
+	for i, src := range coordinator.RealSourceIncrSync {
+		LOG.Info("RealSourceIncrSync[%d]: %s", i, src)
 		syncer := collector.NewOplogSyncer(src.ReplicaName, oplogStartPosition, fullSyncFinishPosition, src.URL,
 			src.Gids, coordinator.rateController)
 		// syncerGroup http api registry
 		syncer.Init()
 		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)
 	}
+	// set to group 0 as a leader
+	coordinator.syncerGroup[0].SyncGroup = coordinator.syncerGroup
 
 	// prepare worker routine and bind it to syncer
 	for i := 0; i < conf.Options.IncrSyncWorker; i++ {

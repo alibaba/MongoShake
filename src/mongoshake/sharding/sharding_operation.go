@@ -31,7 +31,8 @@ const (
 func GetBalancerStatusByUrl(csUrl string) (bool, error) {
 	var conn *utils.MongoConn
 	var err error
-	if conn, err = utils.NewMongoConn(csUrl, utils.VarMongoConnectModePrimary, true); conn == nil || err != nil {
+	if conn, err = utils.NewMongoConn(csUrl, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault); conn == nil || err != nil {
 		return true, err
 	}
 	defer conn.Close()
@@ -69,7 +70,8 @@ type DBChunkMap map[string]*ShardCollection
 func GetChunkMapByUrl(csUrl string) (ShardingChunkMap, error) {
 	var conn *utils.MongoConn
 	var err error
-	if conn, err = utils.NewMongoConn(csUrl, utils.VarMongoConnectModePrimary, true); conn == nil || err != nil {
+	if conn, err = utils.NewMongoConn(csUrl, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault); conn == nil || err != nil {
 		return nil, err
 	}
 	defer conn.Close()

@@ -40,10 +40,7 @@ func NewCheckpointManager(name string, startPosition int64) *CheckpointManager {
 			URL: conf.Options.CheckpointStorageCollection,
 		}
 	case utils.VarCheckpointStorageDatabase:
-		db := utils.AppDatabase
-		/*if conf.Options.IsShardCluster() {
-			db = utils.VarCheckpointStorageDbShardingDefault
-		}*/
+		db := conf.Options.CheckpointStorageDb
 		newManager.delegate = &MongoCheckpoint{
 			CheckpointContext: CheckpointContext{
 				Name:                   name,

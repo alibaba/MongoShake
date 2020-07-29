@@ -75,7 +75,8 @@ func fetchIndexes(sourceList []*utils.MongoSource) (map[utils.NS][]mgo.Index, er
 		}
 
 		// 2. build connection
-		conn, err := utils.NewMongoConn(src.URL, utils.VarMongoConnectModeSecondaryPreferred, true)
+		conn, err := utils.NewMongoConn(src.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
 		if err != nil {
 			return nil, fmt.Errorf("source[%v %v] build connection failed: %v", src.ReplicaName, src.URL, err)
 		}
@@ -109,12 +110,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// the source is sharding or replica-set
 	// fromIsSharding := len(coordinator.Sources) > 1 || fromConn0.IsMongos()
 
-	fromIsSharding := false
-	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
-		fromIsSharding = coordinator.MongoS != nil
-	} else {
-		fromIsSharding = len(conf.Options.MongoUrls) > 1
-	}
+	fromIsSharding := coordinator.SourceIsSharding()
 
 	var shardingChunkMap sharding.ShardingChunkMap
 	var err error
@@ -146,7 +142,8 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// create target client
 	toUrl := conf.Options.TunnelAddress[0]
 	var toConn *utils.MongoConn
-	if toConn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, true); err != nil {
+	if toConn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, true,
+		utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault); err != nil {
 		return err
 	}
 	defer toConn.Close()
@@ -206,7 +203,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 			orphanFilter = filter.NewOrphanFilter(src.ReplicaName, dbChunkMap)
 		}
 
-		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, src.ReplicaName, toUrl, trans, orphanFilter, qos)
+		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, src.ReplicaName, toUrl, trans, orphanFilter, qos, fromIsSharding)
 		dbSyncer.Init()
 		LOG.Info("document syncer-%d do replication for url=%v", i, src.URL)
 
@@ -268,4 +265,12 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 
 	LOG.Info("document syncer sync end")
 	return nil
+}
+
+func (coordinator *ReplicationCoordinator) SourceIsSharding() bool {
+	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
+		return coordinator.MongoS != nil
+	} else {
+		return len(conf.Options.MongoUrls) > 1
+	}
 }

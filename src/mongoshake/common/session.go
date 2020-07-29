@@ -10,7 +10,14 @@ import (
 	"github.com/vinllen/mgo/bson"
 )
 
-const OplogNS = "oplog.rs"
+const (
+	OplogNS                      = "oplog.rs"
+	ReadWriteConcernDefault      = ""
+	ReadWriteConcernLocal        = "local"
+	ReadWriteConcernAvailable    = "available" // for >= 3.6
+	ReadWriteConcernMajority     = "majority"
+	ReadWriteConcernLinearizable = "linearizable"
+)
 
 type NS struct {
 	Database   string
@@ -31,7 +38,7 @@ type MongoConn struct {
 	URL     string
 }
 
-func NewMongoConn(url string, connectMode string, timeout bool) (*MongoConn, error) {
+func NewMongoConn(url string, connectMode string, timeout bool, readConcern, writeConcern string) (*MongoConn, error) {
 	if connectMode == VarMongoConnectModeStandalone {
 		url += "?connect=direct"
 	}
@@ -48,6 +55,12 @@ func NewMongoConn(url string, connectMode string, timeout bool) (*MongoConn, err
 		session.SetSocketTimeout(10 * time.Minute)
 	} else {
 		session.SetSocketTimeout(0)
+	}
+	if readConcern != ReadWriteConcernDefault || writeConcern != ReadWriteConcernDefault {
+		session.EnsureSafe(&mgo.Safe{
+			RMode: readConcern,
+			WMode: writeConcern,
+		})
 	}
 
 	// already ping in the session
@@ -128,7 +141,7 @@ func (conn *MongoConn) HasUniqueIndex() bool {
 	var databases []string
 	var err error
 	if databases, err = conn.Session.DatabaseNames(); err != nil {
-		LOG.Critical("Couldn't get databases from remote server %v", err)
+		LOG.Critical("Couldn't get databases from remote server: %v", err)
 		return false
 	}
 

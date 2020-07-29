@@ -60,7 +60,8 @@ func fetchAllDocument(conn *utils.MongoConn) ([]bson.D, error) {
 func TestDbSync(t *testing.T) {
 	// test doSync
 
-	conn, err := utils.NewMongoConn(testMongoAddress, utils.VarMongoConnectModePrimary, false)
+	conn, err := utils.NewMongoConn(testMongoAddress, utils.VarMongoConnectModePrimary, false,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 	assert.Equal(t, nil, err, "should be equal")
 
 	// init DocExecutor, ignore DBSyncer here
@@ -364,7 +365,8 @@ func TestStartDropDestCollection(t *testing.T) {
 		fmt.Printf("TestStartDropDestCollection case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoConn(testMongoAddress, utils.VarMongoConnectModePrimary, true)
+		conn, err := utils.NewMongoConn(testMongoAddress, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernMajority)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop old db
@@ -407,7 +409,8 @@ func TestStartDropDestCollection(t *testing.T) {
 		fmt.Printf("TestStartDropDestCollection case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoConn(testMongoAddress, utils.VarMongoConnectModePrimary, true)
+		conn, err := utils.NewMongoConn(testMongoAddress, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernMajority)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop old db

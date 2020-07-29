@@ -28,7 +28,7 @@ func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int64) 
 func (sync *OplogSyncer) loadCheckpoint() error {
 	checkpoint, exists, err := sync.ckptManager.Get()
 	if err != nil {
-		return fmt.Errorf("load checkpoint[%v] failed[%v]", sync.replset, err)
+		return fmt.Errorf("load checkpoint[%v] failed[%v]", sync.Replset, err)
 	}
 	LOG.Info("load checkpoint value: %s", checkpoint)
 
@@ -48,7 +48,7 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 	// if no checkpoint exists
 	if !exists {
 		sync.persister.SetFetchStage(utils.FetchStageStoreDiskNoApply)
-		dqName := fmt.Sprintf("diskqueue-%v-%v", sync.replset, ts.Format("20060102-150405"))
+		dqName := fmt.Sprintf("diskqueue-%v-%v", sync.Replset, ts.Format("20060102-150405"))
 		sync.persister.InitDiskQueue(dqName)
 		sync.ckptManager.SetOplogDiskQueueName(dqName)
 		sync.ckptManager.SetOplogDiskFinishTs(ckpt.InitCheckpoint) // set as init

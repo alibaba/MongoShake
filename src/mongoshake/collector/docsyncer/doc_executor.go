@@ -55,7 +55,8 @@ func NewCollectionExecutor(id int, mongoUrl string, ns utils.NS, syncer *DBSynce
 
 func (colExecutor *CollectionExecutor) Start() error {
 	var err error
-	if colExecutor.conn, err = utils.NewMongoConn(colExecutor.mongoUrl, utils.VarMongoConnectModePrimary, true); err != nil {
+	if colExecutor.conn, err = utils.NewMongoConn(colExecutor.mongoUrl, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault); err != nil {
 		return err
 	}
 	if conf.Options.FullSyncExecutorMajorityEnable {
@@ -202,7 +203,7 @@ func (exec *DocExecutor) tryOneByOne(input []interface{}, index int, collectionH
 		id := oplog.GetKey(docD, "")
 
 		// orphan document enable and source is sharding
-		if conf.Options.FullSyncExecutorFilterOrphanDocument && len(conf.Options.MongoUrls) > 1 {
+		if conf.Options.FullSyncExecutorFilterOrphanDocument && exec.syncer.orphanFilter != nil {
 			// judge whether is orphan document, pass if so
 			if exec.syncer.orphanFilter.Filter(docD, collectionHandler.FullName) {
 				LOG.Info("orphan document with _id[%v] filter", id)

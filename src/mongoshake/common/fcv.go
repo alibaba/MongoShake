@@ -6,7 +6,7 @@ var (
 		FeatureCompatibleVersion: 1,
 	}
 	FcvConfiguration = Configuration{
-		CurrentVersion:           4,
+		CurrentVersion:           5,
 		FeatureCompatibleVersion: 3,
 	}
 
@@ -21,6 +21,7 @@ var (
 		2: "2.4.1",
 		3: "2.4.3",
 		4: "2.4.6", // add incr_sync.target_delay
+		5: "2.4.7", // add full_sync.reader.read_document_count
 	}
 )
 
