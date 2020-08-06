@@ -81,7 +81,7 @@ func TestSelectSyncMode(t *testing.T) {
 		coordinator := &ReplicationCoordinator{
 			MongoD: []*utils.MongoSource{
 				{
-					URL: "1.1.1.1",
+					URL:         "1.1.1.1",
 					ReplicaName: testReplicaName,
 				},
 			},
@@ -92,7 +92,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(bson.MongoTimestamp(100 << 32)), ts, "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
 
 		// incr sync
 		err = ckptManager.Update(bson.MongoTimestamp(50 << 32))
@@ -101,7 +101,7 @@ func TestSelectSyncMode(t *testing.T) {
 		checkpoint, exist, err := ckptManager.Get()
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, exist, "should be equal")
-		assert.Equal(t, bson.MongoTimestamp(50 << 32), checkpoint.Timestamp, "should be equal")
+		assert.Equal(t, bson.MongoTimestamp(50<<32), checkpoint.Timestamp, "should be equal")
 
 		// run
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeAll)
@@ -144,7 +144,7 @@ func TestSelectSyncMode(t *testing.T) {
 		coordinator := &ReplicationCoordinator{
 			MongoD: []*utils.MongoSource{
 				{
-					URL: "1.1.1.1",
+					URL:         "1.1.1.1",
 					ReplicaName: testReplicaName,
 				},
 			},
@@ -155,7 +155,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(bson.MongoTimestamp(100 << 32)), ts, "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
 
 		conf.Options.CheckpointStartPosition = 50
 
@@ -230,15 +230,15 @@ func TestSelectSyncMode(t *testing.T) {
 		coordinator := &ReplicationCoordinator{
 			MongoD: []*utils.MongoSource{
 				{
-					URL: "1.1.1.1",
+					URL:         "1.1.1.1",
 					ReplicaName: "mockReplicaSet1",
 				},
 				{
-					URL: "2.2.2.2",
+					URL:         "2.2.2.2",
 					ReplicaName: "mockReplicaSet2",
 				},
 				{
-					URL: "3.3.3.3",
+					URL:         "3.3.3.3",
 					ReplicaName: "mockReplicaSet3",
 				},
 			},
@@ -249,7 +249,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(bson.MongoTimestamp(100 << 32)), ts, "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
 
 		// run, return incr
 		err = ckptManager3.Update(bson.MongoTimestamp(35 << 32))
@@ -319,30 +319,6 @@ func TestSelectSyncMode(t *testing.T) {
 		conn.Session.DB(testDb).C(testCollection).DropCollection()
 		// assert.Equal(t, nil, err, "should be equal")
 
-		// insert mockReplicaSet1
-		ckptManager1 := ckpt.NewCheckpointManager("mockReplicaSet1", 0)
-		assert.Equal(t, true, ckptManager1 != nil, "should be equal")
-
-		ckptManager1.Get()
-		err = ckptManager1.Update(bson.MongoTimestamp(20 << 32))
-		assert.Equal(t, nil, err, "should be equal")
-
-		// insert mockReplicaSet2
-		ckptManager2 := ckpt.NewCheckpointManager("mockReplicaSet2", 0)
-		assert.Equal(t, true, ckptManager2 != nil, "should be equal")
-
-		ckptManager2.Get()
-		err = ckptManager2.Update(bson.MongoTimestamp(25 << 32))
-		assert.Equal(t, nil, err, "should be equal")
-
-		// insert mockReplicaSet3
-		ckptManager3 := ckpt.NewCheckpointManager("mockReplicaSet3", 0)
-		assert.Equal(t, true, ckptManager3 != nil, "should be equal")
-
-		ckptManager3.Get()
-		err = ckptManager3.Update(bson.MongoTimestamp(20 << 32))
-		assert.Equal(t, nil, err, "should be equal")
-
 		// insert mockMongoS
 		ckptManager4 := ckpt.NewCheckpointManager("mockMongoS", 0)
 		assert.Equal(t, true, ckptManager4 != nil, "should be equal")
@@ -354,20 +330,20 @@ func TestSelectSyncMode(t *testing.T) {
 		coordinator := &ReplicationCoordinator{
 			MongoD: []*utils.MongoSource{
 				{
-					URL: "1.1.1.1",
+					URL:         "1.1.1.1",
 					ReplicaName: "mockReplicaSet1",
 				},
 				{
-					URL: "2.2.2.2",
+					URL:         "2.2.2.2",
 					ReplicaName: "mockReplicaSet2",
 				},
 				{
-					URL: "3.3.3.3",
+					URL:         "3.3.3.3",
 					ReplicaName: "mockReplicaSet3",
 				},
 			},
 			MongoS: &utils.MongoSource{
-				URL: "100.100.100.100",
+				URL:         "100.100.100.100",
 				ReplicaName: "mockMongoS",
 			},
 		}
@@ -377,7 +353,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(bson.MongoTimestamp(100 << 32)), ts, "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
 
 		// run, return all
 		err = ckptManager4.Update(bson.MongoTimestamp(20 << 32))
@@ -387,7 +363,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(bson.MongoTimestamp(100 << 32)), ts, "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
 
 		// run, return all
 		err = ckptManager4.Update(bson.MongoTimestamp(30 << 32))
@@ -397,7 +373,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(bson.MongoTimestamp(100 << 32)), ts, "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
 
 		// run, return incr
 		err = ckptManager4.Update(bson.MongoTimestamp(35 << 32))
@@ -406,6 +382,7 @@ func TestSelectSyncMode(t *testing.T) {
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeAll)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, map[string]int64{
+			"mockMongoS":      int64(35) << 32,
 			"mockReplicaSet1": int64(35) << 32,
 			"mockReplicaSet2": int64(35) << 32,
 			"mockReplicaSet3": int64(35) << 32,
@@ -425,6 +402,7 @@ func TestSelectSyncMode(t *testing.T) {
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeAll)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, map[string]int64{
+			"mockMongoS":      int64(55) << 32,
 			"mockReplicaSet1": int64(55) << 32,
 			"mockReplicaSet2": int64(55) << 32,
 			"mockReplicaSet3": int64(55) << 32,

@@ -41,6 +41,9 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs() (bson.Mong
 
 	LOG.Info("all node timestamp map: %v", tsMap)
 
+	confTs32 := conf.Options.CheckpointStartPosition
+	confTsMongoTs := bson.MongoTimestamp(confTs32 << 32)
+
 	// fetch mongos checkpoint when using change stream
 	var mongosCkpt *ckpt.CheckpointContext
 	if coordinator.MongoS != nil && conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
@@ -52,14 +55,12 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs() (bson.Mong
 				coordinator.MongoS.ReplicaName, err)
 		} else if !exist || ckptVar.Timestamp <= 1 { // empty
 			mongosCkpt = nil
+			startTsMap[coordinator.MongoS.ReplicaName] = int64(confTsMongoTs) // using configuration
 		} else {
 			mongosCkpt = ckptVar
-			// startTsMap[coordinator.MongoS.ReplicaName] = int64(ckptVar.Timestamp)
+			startTsMap[coordinator.MongoS.ReplicaName] = int64(ckptVar.Timestamp)
 		}
 	}
-
-	confTs32 := conf.Options.CheckpointStartPosition
-	confTsMongoTs := bson.MongoTimestamp(confTs32 << 32)
 
 	for replName, ts := range tsMap {
 		var ckptRemote *ckpt.CheckpointContext
