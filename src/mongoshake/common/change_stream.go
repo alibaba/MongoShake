@@ -10,6 +10,7 @@ import (
 	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.mongodb.org/mongo-driver/mongo/readconcern"
 )
 
 const (
@@ -41,6 +42,7 @@ func NewChangeStreamConn(src string, mode string, fulldoc bool, watchStartTime i
 		readPreference = readpref.Nearest()
 	}
 	clientOps.SetReadPreference(readPreference)
+	clientOps.ReadConcern = readconcern.Majority() // mandatory set read concern to majority for change stream
 
 	// create client
 	client, err := mongo.NewClient(clientOps)
@@ -70,7 +72,7 @@ func NewChangeStreamConn(src string, mode string, fulldoc bool, watchStartTime i
 		BatchSize:    &batchSize,
 	}
 
-	if  fulldoc {
+	if fulldoc {
 		ops.SetFullDocument(options.UpdateLookup)
 	}
 

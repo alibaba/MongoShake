@@ -229,6 +229,12 @@ func checkDefaultValue() error {
 		conf.Options.IncrSyncReaderBufferTime = 1
 	}
 
+	/********************************/
+	// set utils
+
+	utils.AppDatabase = conf.Options.CheckpointStorageDb
+	utils.APPConflictDatabase = fmt.Sprintf("%s_%s", utils.AppDatabase, "_conflict")
+
 	return nil
 }
 
