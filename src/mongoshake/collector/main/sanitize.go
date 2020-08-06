@@ -234,6 +234,8 @@ func checkDefaultValue() error {
 
 	utils.AppDatabase = conf.Options.CheckpointStorageDb
 	utils.APPConflictDatabase = fmt.Sprintf("%s_%s", utils.AppDatabase, "_conflict")
+	filter.NsShouldBeIgnore[utils.AppDatabase + "."] = true
+	filter.NsShouldBeIgnore[utils.APPConflictDatabase + "."] = true
 
 	return nil
 }
