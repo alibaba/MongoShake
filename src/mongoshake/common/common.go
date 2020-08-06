@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"encoding/json"
 
 	"github.com/nightlyone/lockfile"
 	LOG "github.com/vinllen/log4go"
-	"encoding/json"
+
 )
 
 // Build info
