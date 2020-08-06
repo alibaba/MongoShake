@@ -1,3 +1,9 @@
+2020-08-06 Alibaba Cloud.
+	* version: 2.4.9
+	* BUGFIX: checkpoint doesn't work after restart. #403
+	* IMPROVE: mandatory set read concern to majority for change stream. #406
+	* BUGFIX: filter checkpoint.storage.db, not only mongoshake.
+
 2020-07-29 Alibaba Cloud.
 	* version: 2.4.8
 	* BUGFIX: fix bug that checkpoint.storage.db does not work since v2.4.6.
