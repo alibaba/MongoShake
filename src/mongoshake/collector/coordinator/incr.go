@@ -9,9 +9,11 @@ import (
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
+	"fmt"
 )
 
-func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition, fullSyncFinishPosition int64) error {
+func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition, fullSyncFinishPosition int64,
+		startTsMap map[string]int64) error {
 	// replicate speed limit on all syncer
 	coordinator.rateController = nimo.NewSimpleRateController()
 
@@ -19,8 +21,19 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	// otherwise one syncer connects to one shard
 	LOG.Info("start incr replication")
 	for i, src := range coordinator.RealSourceIncrSync {
-		LOG.Info("RealSourceIncrSync[%d]: %s", i, src)
-		syncer := collector.NewOplogSyncer(src.ReplicaName, oplogStartPosition, fullSyncFinishPosition, src.URL,
+		var syncerTs int64
+		if oplogStartPosition == 0 {
+			if v, ok := startTsMap[src.ReplicaName]; !ok {
+				return fmt.Errorf("db[%v] not exists on startTsMap", src.ReplicaName)
+			} else {
+				syncerTs = v
+			}
+		} else {
+			syncerTs = oplogStartPosition
+		}
+
+		LOG.Info("RealSourceIncrSync[%d]: %s, startTimestamp[%v]", i, src, syncerTs)
+		syncer := collector.NewOplogSyncer(src.ReplicaName, syncerTs, fullSyncFinishPosition, src.URL,
 			src.Gids, coordinator.rateController)
 		// syncerGroup http api registry
 		syncer.Init()

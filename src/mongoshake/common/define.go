@@ -70,3 +70,8 @@ const (
 	VarIncrSyncReaderDebugDiscard = "discard" // throw all
 	VarIncrSyncReaderDebugPrint   = "print"   // print
 )
+
+type Pair struct {
+	First  interface{}
+	Second interface{}
+}

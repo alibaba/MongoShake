@@ -70,7 +70,7 @@ func NewChangeStreamConn(src string, mode string, fulldoc bool, watchStartTime i
 		BatchSize:    &batchSize,
 	}
 
-	if  fulldoc {
+	if fulldoc {
 		ops.SetFullDocument(options.UpdateLookup)
 	}
 
