@@ -94,6 +94,13 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
 		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
 
+		// run sync mode incr
+		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeIncr)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, true, startTsMap == nil, "should be equal")
+		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
+
 		// incr sync
 		err = ckptManager.Update(bson.MongoTimestamp(50 << 32))
 		assert.Equal(t, nil, err, "should be equal")
@@ -105,6 +112,15 @@ func TestSelectSyncMode(t *testing.T) {
 
 		// run
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeAll)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, map[string]int64{
+			testReplicaName: int64(50) << 32,
+		}, startTsMap, "should be equal")
+		assert.Equal(t, utils.VarSyncModeIncr, mode, "should be equal")
+		assert.Equal(t, int64(0), ts, "should be equal")
+
+		// run sync mode incr
+		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeIncr)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, map[string]int64{
 			testReplicaName: int64(50) << 32,
@@ -157,6 +173,13 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
 		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
 
+		// run sync_mode incr
+		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeIncr)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, true, startTsMap == nil, "should be equal")
+		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
+
 		conf.Options.CheckpointStartPosition = 50
 
 		// run
@@ -167,6 +190,21 @@ func TestSelectSyncMode(t *testing.T) {
 		}, startTsMap, "should be equal")
 		assert.Equal(t, utils.VarSyncModeIncr, mode, "should be equal")
 		assert.Equal(t, int64(0), ts, "should be equal")
+
+		// run sync_mode incr
+		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeIncr)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, map[string]int64{
+			testReplicaName: int64(50) << 32,
+		}, startTsMap, "should be equal")
+		assert.Equal(t, utils.VarSyncModeIncr, mode, "should be equal")
+		assert.Equal(t, int64(0), ts, "should be equal")
+
+		syncMode, startTsMap, ts, err := coordinator.selectSyncMode(utils.VarSyncModeFull)
+		assert.Equal(t, utils.VarSyncModeFull, syncMode, "should be equal")
+		assert.Equal(t, true, startTsMap == nil, "should be equal")
+		assert.Equal(t, int64(0), ts, "should be equal")
+		assert.Equal(t, true, err == nil, "should be equal")
 	}
 
 	// test sharding with fetch_method = "oplog"
@@ -251,6 +289,13 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
 		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
 
+		// run, return all
+		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeIncr)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, true, startTsMap == nil, "should be equal")
+		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
+
 		// run, return incr
 		err = ckptManager3.Update(bson.MongoTimestamp(35 << 32))
 		assert.Equal(t, nil, err, "should be equal")
@@ -275,6 +320,17 @@ func TestSelectSyncMode(t *testing.T) {
 
 		conf.Options.CheckpointStartPosition = 45
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeAll)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, map[string]int64{
+			"mockReplicaSet1": int64(45) << 32,
+			"mockReplicaSet2": int64(45) << 32,
+			"mockReplicaSet3": int64(45) << 32,
+		}, startTsMap, "should be equal")
+		assert.Equal(t, utils.VarSyncModeIncr, mode, "should be equal")
+		assert.Equal(t, int64(0), ts, "should be equal")
+
+		// run sync_mode incr
+		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeIncr)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, map[string]int64{
 			"mockReplicaSet1": int64(45) << 32,
