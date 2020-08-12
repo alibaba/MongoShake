@@ -55,6 +55,11 @@ func mockOplogs(length int, ddlGiven []int, noopGiven []int, sameTsGiven []int, 
 					Namespace: "a.b",
 					Operation: op,
 					Timestamp: bson.MongoTimestamp(startTs + int64(i)) << 32,
+					TxnNumber: 1,
+					Lsid: bson.M{
+						"id": "xx",
+						"uid": "xx2",
+					},
 				},
 			},
 		}
@@ -1275,6 +1280,158 @@ func TestGetTargetDelay(t *testing.T) {
 		utils.IncrSentinelOptions.TargetDelay = 12
 		conf.Options.IncrSyncTargetDelay = 10
 		assert.Equal(t, int64(12), getTargetDelay(), "should be equal")
+	}
+}
+
+func TestNeedMergeTransaction(t *testing.T) {
+	var nr int
+
+	{
+		fmt.Printf("TestNeedMergeTransaction case %d.\n", nr)
+		nr++
+
+		batcher := &Batcher{}
+		x := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Timestamp: 123,
+			},
+		}
+		y := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Timestamp: 123,
+			},
+		}
+		assert.Equal(t, false, batcher.needMergeTransaction(x, y), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestNeedMergeTransaction case %d.\n", nr)
+		nr++
+
+		batcher := &Batcher{}
+		x := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Timestamp: 123,
+				Lsid: bson.M{
+					"id" : "70c47e76-7f48-46cb-ad07-cbeefd29d664",
+					"uid" : "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
+				},
+			},
+		}
+		y := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Timestamp: 123,
+			},
+		}
+		assert.Equal(t, false, batcher.needMergeTransaction(x, y), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestNeedMergeTransaction case %d.\n", nr)
+		nr++
+
+		batcher := &Batcher{}
+		x := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Timestamp: 123,
+				Lsid: bson.M{
+					"id" : "70c47e76-7f48-46cb-ad07-cbeefd29d664",
+					"uid" : "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
+				},
+			},
+		}
+		y := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Timestamp: 123,
+				Lsid: bson.M{
+					"id" : "xxx",
+					"uid" : "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
+				},
+			},
+		}
+		assert.Equal(t, false, batcher.needMergeTransaction(x, y), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestNeedMergeTransaction case %d.\n", nr)
+		nr++
+
+		batcher := &Batcher{}
+		x := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Timestamp: 123,
+				Lsid: bson.M{
+					"id" : "70c47e76-7f48-46cb-ad07-cbeefd29d664",
+					"uid" : "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
+				},
+			},
+		}
+		y := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Timestamp: 123,
+				Lsid: bson.M{
+					"id" : "70c47e76-7f48-46cb-ad07-cbeefd29d664",
+					"uid" : "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
+				},
+			},
+		}
+		assert.Equal(t, true, batcher.needMergeTransaction(x, y), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestNeedMergeTransaction case %d.\n", nr)
+		nr++
+
+		batcher := &Batcher{}
+		x := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Timestamp: 123,
+				Lsid: bson.M{
+					"id" : "70c47e76-7f48-46cb-ad07-cbeefd29d664",
+					"uid" : "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
+				},
+				TxnNumber: 1,
+			},
+		}
+		y := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Timestamp: 123,
+				Lsid: bson.M{
+					"id" : "70c47e76-7f48-46cb-ad07-cbeefd29d664",
+					"uid" : "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
+				},
+				TxnNumber: 2,
+			},
+		}
+		assert.Equal(t, false, batcher.needMergeTransaction(x, y), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestNeedMergeTransaction case %d.\n", nr)
+		nr++
+
+		batcher := &Batcher{}
+		x := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Timestamp: 123,
+				Lsid: bson.M{
+					"id" : "70c47e76-7f48-46cb-ad07-cbeefd29d664",
+					"uid" : "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
+				},
+				TxnNumber: 2,
+			},
+		}
+		y := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Timestamp: 123,
+				Lsid: bson.M{
+					"id" : "70c47e76-7f48-46cb-ad07-cbeefd29d664",
+					"uid" : "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
+				},
+				TxnNumber: 2,
+			},
+		}
+		assert.Equal(t, true, batcher.needMergeTransaction(x, y), "should be equal")
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/vinllen/mgo/bson"
 	"mongoshake/common"
 	"time"
+	"reflect"
 )
 
 
@@ -371,7 +372,8 @@ func (batcher *Batcher) BatchMore() ([][]*oplog.GenericOplog, bool, bool, bool) 
 		}
 
 		// need merge transaction?
-		if genericLog.Parsed.Timestamp == batcher.previousOplog.Parsed.Timestamp {
+		// if genericLog.Parsed.Timestamp == batcher.previousOplog.Parsed.Timestamp {
+		if batcher.needMergeTransaction(genericLog.Parsed, batcher.previousOplog.Parsed) {
 			if len(batcher.transactionOplogs) == 0 && batcher.previousFlush == false {
 				// no transaction before, flush batchGroup
 				batcher.transactionOplogs = append(batcher.transactionOplogs, batcher.previousOplog.Parsed)
@@ -439,6 +441,12 @@ func (batcher *Batcher) gatherTransaction() *oplog.GenericOplog {
 		LOG.Crashf("%s gather applyOps failed[%v]", batcher.syncer, err)
 	}
 	return gathered
+}
+
+func (bathcer *Batcher) needMergeTransaction(x, y *oplog.PartialLog) bool {
+	return x.Timestamp == y.Timestamp &&
+		x.Lsid != nil && len(x.Lsid.(bson.M)) >= 1 && reflect.DeepEqual(x.Lsid, y.Lsid) &&
+		x.TxnNumber == y.TxnNumber
 }
 
 // flush previous buffered oplog, true means should add barrier

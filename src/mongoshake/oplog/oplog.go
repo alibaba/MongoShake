@@ -29,6 +29,7 @@ type ParsedLog struct {
 	UniqueIndexes bson.M              `bson:"uk" json:"uk"`
 	Lsid          interface{}         `bson:"lsid" json:"lsid"`               // mark the session id, used in transaction
 	FromMigrate   bool                `bson:"fromMigrate" json:"fromMigrate"` // move chunk
+	TxnNumber     uint64              `bson:"txnNumber" json:"txnNumber"`     // transaction number in session
 }
 
 type PartialLog struct {
