@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"encoding/json"
 
-	"github.com/gugemichael/nimo4go"
 	"github.com/vinllen/mgo/bson"
 
 )
@@ -122,7 +121,6 @@ func GetKeyWithIndex(log bson.D, wanted string) (interface{}, int) {
 		}
 	}
 
-	nimo.Assert("you can't see me")
 	return nil, 0
 }
 

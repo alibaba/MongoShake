@@ -125,6 +125,11 @@ func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 	case "dropDatabase":
 		err = dbHandler.DropDatabase()
 	case "create":
+		if oplog.GetKey(log.Object, "autoIndexId") != nil &&
+			oplog.GetKey(log.Object, "idIndex") != nil {
+			// exits "autoIndexId" and "idIndex", remove "autoIndexId"
+			log.Object = oplog.RemoveFiled(log.Object, "autoIndexId")
+		}
 		fallthrough
 	case "collMod":
 		fallthrough
