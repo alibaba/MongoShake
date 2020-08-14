@@ -1286,6 +1286,8 @@ func TestGetTargetDelay(t *testing.T) {
 func TestNeedMergeTransaction(t *testing.T) {
 	var nr int
 
+	conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodChangeStream
+
 	{
 		fmt.Printf("TestNeedMergeTransaction case %d.\n", nr)
 		nr++
@@ -1432,6 +1434,9 @@ func TestNeedMergeTransaction(t *testing.T) {
 			},
 		}
 		assert.Equal(t, true, batcher.needMergeTransaction(x, y), "should be equal")
+
+		conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodOplog
+		assert.Equal(t, false, batcher.needMergeTransaction(x, y), "should be equal")
 	}
 }
 
