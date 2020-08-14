@@ -24,6 +24,13 @@ const (
 	CollectionCappedLowVersion = "UnknownError"                                  // <= 3.0 version
 )
 
+// for UT only
+var (
+	GetAllTimestampInUTInput map[string]Pair // replicaSet/MongoS name => <oldest timestamp, newest timestamp>
+)
+
+/************************************************/
+
 type MongoSource struct {
 	URL         string
 	ReplicaName string
@@ -213,6 +220,39 @@ func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.Mon
 			smallestOld = oldest
 		}
 	}
+	return tsMap, biggestNew, smallestNew, biggestOld, smallestOld, nil
+}
+
+// only used in unit test
+func GetAllTimestampInUT() (map[string]TimestampNode, bson.MongoTimestamp,
+		bson.MongoTimestamp, bson.MongoTimestamp, bson.MongoTimestamp, error) {
+	smallestNew := bson.MongoTimestamp(math.MaxInt64)
+	biggestNew := bson.MongoTimestamp(0)
+	smallestOld := bson.MongoTimestamp(math.MaxInt64)
+	biggestOld := bson.MongoTimestamp(0)
+	tsMap := make(map[string]TimestampNode)
+	for name, ele := range GetAllTimestampInUTInput {
+		oldest := ele.First.(bson.MongoTimestamp)
+		newest := ele.Second.(bson.MongoTimestamp)
+		tsMap[name] = TimestampNode{
+			Oldest: oldest,
+			Newest: newest,
+		}
+
+		if newest > biggestNew {
+			biggestNew = newest
+		}
+		if newest < smallestNew {
+			smallestNew = newest
+		}
+		if oldest > biggestOld {
+			biggestOld = oldest
+		}
+		if oldest < smallestOld {
+			smallestOld = oldest
+		}
+	}
+
 	return tsMap, biggestNew, smallestNew, biggestOld, smallestOld, nil
 }
 

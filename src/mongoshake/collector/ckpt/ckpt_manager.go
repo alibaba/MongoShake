@@ -40,7 +40,6 @@ func NewCheckpointManager(name string, startPosition int64) *CheckpointManager {
 			URL: conf.Options.CheckpointStorageCollection,
 		}
 	case utils.VarCheckpointStorageDatabase:
-		db := conf.Options.CheckpointStorageDb
 		newManager.delegate = &MongoCheckpoint{
 			CheckpointContext: CheckpointContext{
 				Name:                   name,
@@ -49,7 +48,7 @@ func NewCheckpointManager(name string, startPosition int64) *CheckpointManager {
 				OplogDiskQueue:         "",
 				OplogDiskQueueFinishTs: InitCheckpoint,
 			},
-			DB:    db,
+			DB:    conf.Options.CheckpointStorageDb,
 			URL:   conf.Options.CheckpointStorageUrl,
 			Table: conf.Options.CheckpointStorageCollection,
 		}
@@ -84,6 +83,7 @@ func (manager *CheckpointManager) GetInMemory() *CheckpointContext {
 
 func (manager *CheckpointManager) Update(ts bson.MongoTimestamp) error {
 	if manager.ctx == nil || len(manager.ctx.Name) == 0 {
+		// must run Get() first
 		return errors.New("current ckpt context is empty")
 	}
 

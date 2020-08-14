@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"encoding/json"
 
 	"github.com/nightlyone/lockfile"
 	LOG "github.com/vinllen/log4go"
-	"encoding/json"
+
 )
 
 // Build info
@@ -64,7 +65,6 @@ func RunStatusMessage(status uint64) string {
 		return "unknown"
 	}
 }
-
 func InitialLogger(logDir, logFile, level string, logFlush bool, verbose bool) error {
 	logLevel := parseLogLevel(level)
 	if verbose {
@@ -101,6 +101,7 @@ func InitialLogger(logDir, logFile, level string, logFlush bool, verbose bool) e
 
 	return nil
 }
+
 
 func parseLogLevel(level string) LOG.Level {
 	switch strings.ToLower(level) {

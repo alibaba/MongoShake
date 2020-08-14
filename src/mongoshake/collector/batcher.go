@@ -10,6 +10,7 @@ import (
 	"github.com/vinllen/mgo/bson"
 	"mongoshake/common"
 	"time"
+	"reflect"
 )
 
 
@@ -129,7 +130,9 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 	}
 
 	// DDL is disable when timestamp <= fullSyncFinishPosition
-	if ddlFilter.Filter(log) && log.Timestamp <= batcher.syncer.fullSyncFinishPosition {
+	// v2.4.10: do not crash when "fetch_method" == "change_stream"
+	if ddlFilter.Filter(log) && log.Timestamp <= batcher.syncer.fullSyncFinishPosition &&
+			conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
 		LOG.Crashf("%s ddl oplog found[%v] when oplog timestamp[%v] less than fullSyncFinishPosition[%v]",
 			batcher.syncer, log, utils.ExtractTimestampForLog(log.Timestamp),
 			utils.ExtractTimestampForLog(batcher.syncer.fullSyncFinishPosition))
@@ -371,7 +374,8 @@ func (batcher *Batcher) BatchMore() ([][]*oplog.GenericOplog, bool, bool, bool) 
 		}
 
 		// need merge transaction?
-		if genericLog.Parsed.Timestamp == batcher.previousOplog.Parsed.Timestamp {
+		// if genericLog.Parsed.Timestamp == batcher.previousOplog.Parsed.Timestamp {
+		if batcher.needMergeTransaction(genericLog.Parsed, batcher.previousOplog.Parsed) {
 			if len(batcher.transactionOplogs) == 0 && batcher.previousFlush == false {
 				// no transaction before, flush batchGroup
 				batcher.transactionOplogs = append(batcher.transactionOplogs, batcher.previousOplog.Parsed)
@@ -430,6 +434,8 @@ func (batcher *Batcher) addIntoBatchGroup(genericLog *oplog.GenericOplog) {
 	batcher.handler.Handle(genericLog.Parsed)
 	which := batcher.syncer.hasher.DistributeOplogByMod(genericLog.Parsed, len(batcher.workerGroup))
 	batcher.batchGroup[which] = append(batcher.batchGroup[which], genericLog)
+
+	// LOG.Debug("add into worker[%v]: %v", which, genericLog.Parsed.ParsedLog)
 }
 
 func (batcher *Batcher) gatherTransaction() *oplog.GenericOplog {
@@ -439,6 +445,17 @@ func (batcher *Batcher) gatherTransaction() *oplog.GenericOplog {
 		LOG.Crashf("%s gather applyOps failed[%v]", batcher.syncer, err)
 	}
 	return gathered
+}
+
+func (batcher *Batcher) needMergeTransaction(x, y *oplog.PartialLog) bool {
+	// only run in change stream mode.
+	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
+		return false
+	}
+
+	return x.Timestamp == y.Timestamp &&
+		x.Lsid != nil && len(x.Lsid.(bson.M)) >= 1 && reflect.DeepEqual(x.Lsid, y.Lsid) &&
+		x.TxnNumber == y.TxnNumber
 }
 
 // flush previous buffered oplog, true means should add barrier
@@ -452,7 +469,8 @@ func (batcher *Batcher) flushBufferOplogs() bool {
 		if batcher.previousOplog == fakeOplog {
 			LOG.Crashf("%s previous is fakeOplog when transaction oplogs is empty", batcher.syncer)
 		}
-		if batcher.previousOplog.Parsed.Timestamp != batcher.transactionOplogs[txLength - 1].Timestamp {
+		//if batcher.previousOplog.Parsed.Timestamp != batcher.transactionOplogs[txLength - 1].Timestamp {
+		if !batcher.needMergeTransaction(batcher.previousOplog.Parsed, batcher.transactionOplogs[txLength - 1]) {
 			LOG.Crashf("%s previous oplog timestamp[%v] != transaction oplog timestamp[%v]",
 				batcher.syncer, batcher.previousOplog.Parsed.Timestamp, batcher.transactionOplogs[txLength - 1].Timestamp)
 		}

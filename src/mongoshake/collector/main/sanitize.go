@@ -229,6 +229,14 @@ func checkDefaultValue() error {
 		conf.Options.IncrSyncReaderBufferTime = 1
 	}
 
+	/********************************/
+	// set utils
+
+	utils.AppDatabase = conf.Options.CheckpointStorageDb
+	utils.APPConflictDatabase = fmt.Sprintf("%s_%s", utils.AppDatabase, "_conflict")
+	filter.NsShouldBeIgnore[utils.AppDatabase + "."] = true
+	filter.NsShouldBeIgnore[utils.APPConflictDatabase + "."] = true
+
 	return nil
 }
 
@@ -316,7 +324,9 @@ func checkConflict() error {
 	/*****************************3. incr sync******************************/
 	// set incr_sync.worker = shards number if source is sharding
 	if len(conf.Options.MongoUrls) > 1 {
-		if conf.Options.IncrSyncWorker != len(conf.Options.MongoUrls) {
+		if conf.Options.IncrSyncWorker != len(conf.Options.MongoUrls) &&
+			conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
+			// only change when incr_sync.mongo_fetch_method = oplog
 			conf.Options.IncrSyncWorker = len(conf.Options.MongoUrls)
 		}
 		if conf.Options.FilterDDLEnable == true &&

@@ -169,14 +169,11 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 		indexList []mgo.Index
 	}
 
-	LOG.Info("start writing index with background[%v]", background)
+	LOG.Info("start writing index with background[%v], indexMap length[%v]", background, len(indexMap))
 	if len(indexMap) == 0 {
 		LOG.Info("finish writing index, but no data")
 		return nil
 	}
-
-	var wg sync.WaitGroup
-	wg.Add(len(indexMap))
 
 	collExecutorParallel := conf.Options.FullSyncReaderCollectionParallel
 	namespaces := make(chan *IndexNS, collExecutorParallel)
@@ -184,6 +181,7 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 		for ns, indexList := range indexMap {
 			namespaces <- &IndexNS{ns: ns, indexList: indexList}
 		}
+		close(namespaces)
 	})
 
 	var conn *utils.MongoConn
@@ -194,10 +192,13 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 	}
 	defer conn.Close()
 
+	var wg sync.WaitGroup
+	wg.Add(collExecutorParallel)
 	for i := 0; i < collExecutorParallel; i++ {
 		nimo.GoRoutine(func() {
 			session := conn.Session.Clone()
 			defer session.Close()
+			defer wg.Done()
 
 			for {
 				indexNs, ok := <-namespaces
@@ -219,14 +220,11 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 					}
 				}
 				LOG.Info("Create indexes for ns %v of dest mongodb finish", toNS)
-
-				wg.Done()
 			}
 		})
 	}
 
 	wg.Wait()
-	close(namespaces)
 	LOG.Info("finish writing index")
 	return syncError
 }
