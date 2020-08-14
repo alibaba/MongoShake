@@ -23,6 +23,7 @@ func mockLog(ns string, ts bson.MongoTimestamp, withDefault bool) *oplog.ParsedL
 			Object:        bson.D{},
 			Query:         bson.M{},
 			UniqueIndexes: bson.M{},
+			Lsid:          bson.M{},
 		}
 	case false:
 		return &oplog.ParsedLog{
@@ -30,6 +31,7 @@ func mockLog(ns string, ts bson.MongoTimestamp, withDefault bool) *oplog.ParsedL
 			Operation: "i",
 			Namespace: ns,
 			Object:    bson.D{},
+			Lsid:      bson.M{},
 		}
 	}
 	return nil

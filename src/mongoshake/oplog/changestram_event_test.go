@@ -599,4 +599,72 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 0, len(list), "should be equal")
 	}
+
+	// test simple transaction
+	{
+		fmt.Printf("TestConvertEvent2Oplog case %d.\n", nr)
+		nr++
+
+		var err error
+		session, err = mgo.Dial(testUrl)
+		assert.Equal(t, nil, err, "should be equal")
+
+		err = session.DB("testDb").DropDatabase()
+		assert.Equal(t, nil, err, "should be equal")
+
+		// insert a:1
+		eventInsert1 := Event{
+			OperationType: "insert",
+			FullDocument: bson.D{
+				bson.DocElem{
+					Name:  "_id",
+					Value: "1",
+				},
+				bson.DocElem{
+					Name:  "a",
+					Value: "1",
+				},
+			},
+			Ns: bson.M{
+				"db":   "testDb",
+				"coll": "testColl",
+			},
+			TxnNumber: 1,
+			Lsid: bson.M{
+				"id" : "70c47e76-7f48-46cb-ad07-cbeefd29d664",
+				"uid" : "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
+			},
+		}
+		out, err := bson.Marshal(eventInsert1)
+		assert.Equal(t, nil, err, "should be equal")
+
+		err = runByte(out)
+		assert.Equal(t, nil, err, "should be equal")
+
+		all := getAllDoc("testDb", "testColl")
+		assert.Equal(t, 1, len(all), "should be equal")
+		assert.Equal(t, "1", all["1"]["a"], "should be equal")
+
+		// drop testDb
+		eventRename1 := Event{
+			OperationType: "dropDatabase",
+			Ns: bson.M{
+				"db": "testDb",
+			},
+			TxnNumber: 2,
+			Lsid: bson.M{
+				"id" : "70c47e76-7f48-46cb-ad07-cbeefd29d664",
+				"uid" : "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
+			},
+		}
+		out, err = bson.Marshal(eventRename1)
+		assert.Equal(t, nil, err, "should be equal")
+
+		err = runByte(out)
+		assert.Equal(t, nil, err, "should be equal")
+
+		list, err := session.DB("testDb").CollectionNames()
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 0, len(list), "should be equal")
+	}
 }

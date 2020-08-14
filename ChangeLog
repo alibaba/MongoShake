@@ -1,3 +1,16 @@
+2020-08-14 Alibaba Cloud.
+	* version: 2.4.10
+	* IMPROVE: modify the logic of transaction merging in change stream mode
+	to improve synchronization performance. #370
+	* BUGFIX: fix bug of "panic with session already closed" in StartIndexSync
+	function.
+	* BUGFIX: remove autoIndexId when autoIndexId and idIndex co-exists in
+	create collection oplog. #400
+	* IMPROVE: when meets DDL in sharding, do not crash when fetch_method is
+	change_stream.
+	* IMPROVE: when fetch_method is change_stream, do not set worker thread
+	to MongoD number when source side is sharding. 
+
 2020-08-06 Alibaba Cloud.
 	* version: 2.4.9
 	* BUGFIX: checkpoint doesn't work after restart. #403

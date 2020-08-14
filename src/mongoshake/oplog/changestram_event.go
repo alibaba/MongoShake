@@ -83,6 +83,10 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 
 	// ts
 	oplog.Timestamp = event.ClusterTime
+	// transaction number
+	oplog.TxnNumber = event.TxnNumber
+	// lsid
+	oplog.Lsid = event.Lsid
 
 	ns := event.Ns
 
