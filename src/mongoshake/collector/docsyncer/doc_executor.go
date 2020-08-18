@@ -160,6 +160,14 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 		exec.syncer.qos.FetchBucket()
 	}
 
+	if conf.Options.LogLevel == utils.VarLogLevelDebug {
+		var docBeg, docEnd bson.M
+		bson.Unmarshal(docs[0].Data, &docBeg)
+		bson.Unmarshal(docs[len(docs) - 1].Data, &docEnd)
+		LOG.Debug("DBSyncer id[%v] doSync batch _id interval [%v, %v]", exec.syncer.id,
+			docBeg["_id"], docEnd["_id"])
+	}
+
 	collectionHandler := exec.session.DB(ns.Database).C(ns.Collection)
 	bulk := collectionHandler.Bulk()
 	bulk.Insert(docList...)
