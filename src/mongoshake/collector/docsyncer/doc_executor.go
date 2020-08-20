@@ -3,7 +3,6 @@ package docsyncer
 import (
 	"errors"
 	"fmt"
-	"sync"
 	"sync/atomic"
 
 	"mongoshake/collector/configure"
@@ -30,7 +29,8 @@ type CollectionExecutor struct {
 
 	ns utils.NS
 
-	wg sync.WaitGroup
+	// wg sync.WaitGroup
+	batchCount int64
 
 	conn *utils.MongoConn
 
@@ -46,10 +46,11 @@ func GenerateCollExecutorId() int {
 
 func NewCollectionExecutor(id int, mongoUrl string, ns utils.NS, syncer *DBSyncer) *CollectionExecutor {
 	return &CollectionExecutor{
-		id:       id,
-		mongoUrl: mongoUrl,
-		ns:       ns,
-		syncer:   syncer,
+		id:         id,
+		mongoUrl:   mongoUrl,
+		ns:         ns,
+		syncer:     syncer,
+		batchCount: 0,
 	}
 }
 
@@ -82,12 +83,21 @@ func (colExecutor *CollectionExecutor) Sync(docs []*bson.Raw) {
 		return
 	}
 
-	colExecutor.wg.Add(1)
+	/*
+	 * since v2.4.11: waitGroup.Add may overflow, so use atomic to replace waitGroup
+	 * // colExecutor.wg.Add(1)
+	 */
+	atomic.AddInt64(&colExecutor.batchCount, 1)
 	colExecutor.docBatch <- docs
 }
 
 func (colExecutor *CollectionExecutor) Wait() error {
-	colExecutor.wg.Wait()
+	// colExecutor.wg.Wait()
+	for atomic.LoadInt64(&colExecutor.batchCount) != 0 {
+		utils.YieldInMs(1000)
+		LOG.Info("wait batchCount == 0")
+	}
+
 	close(colExecutor.docBatch)
 	colExecutor.conn.Close()
 
@@ -126,6 +136,10 @@ func NewDocExecutor(id int, colExecutor *CollectionExecutor, session *mgo.Sessio
 	}
 }
 
+func (exec *DocExecutor) String() string {
+	return fmt.Sprintf("DocExecutor[%v] collectionExecutor[%v]", exec.id, exec.colExecutor.ns)
+}
+
 func (exec *DocExecutor) start() {
 	defer exec.session.Close()
 	for {
@@ -137,9 +151,13 @@ func (exec *DocExecutor) start() {
 		if exec.error == nil {
 			if err := exec.doSync(docs); err != nil {
 				exec.error = err
+				// since v2.4.11: panic directly if meets error
+				LOG.Crashf("%s sync failed: %v", exec, err)
 			}
 		}
-		exec.colExecutor.wg.Done()
+
+		// exec.colExecutor.wg.Done()
+		atomic.AddInt64(&exec.colExecutor.batchCount, -1)
 	}
 }
 

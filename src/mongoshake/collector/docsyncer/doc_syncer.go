@@ -488,7 +488,7 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 		bufferByteSize += len(doc.Data)
 	}
 
-	LOG.Info("splitter reader[%v] finishes", reader)
+	LOG.Info("splitter reader finishes: %v", reader)
 	reader.Close()
 	return nil
 }
