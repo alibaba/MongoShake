@@ -107,7 +107,9 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs() (bson.Mong
 
 // if the oplog of checkpoint timestamp exist in all source db, then only do oplog replication instead of document replication
 func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, map[string]int64, int64, error) {
-	if syncMode != utils.VarSyncModeAll && syncMode != utils.VarSyncModeIncr {
+	// bugfix 2.4.11: do not change sync_mode whn tunnel != "direct"
+	if conf.Options.Tunnel != utils.VarTunnelDirect ||
+			syncMode != utils.VarSyncModeAll && syncMode != utils.VarSyncModeIncr {
 		return syncMode, nil, 0, nil
 	}
 
