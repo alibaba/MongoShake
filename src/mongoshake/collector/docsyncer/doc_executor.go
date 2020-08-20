@@ -164,7 +164,7 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 		var docBeg, docEnd bson.M
 		bson.Unmarshal(docs[0].Data, &docBeg)
 		bson.Unmarshal(docs[len(docs) - 1].Data, &docEnd)
-		LOG.Debug("DBSyncer id[%v] doSync batch _id interval [%v, %v]", exec.syncer.id,
+		LOG.Debug("DBSyncer id[%v] doSync with table[%v] batch _id interval [%v, %v]", exec.syncer.id, ns,
 			docBeg["_id"], docEnd["_id"])
 	}
 

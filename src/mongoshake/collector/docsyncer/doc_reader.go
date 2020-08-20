@@ -301,8 +301,9 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	reader.conn.Session.SetBatch(8192)
 	reader.conn.Session.SetPrefetch(0.2)
 	reader.conn.Session.SetCursorTimeout(0)
+	// adjust since v2.4.11: sort data
 	reader.docIterator = reader.conn.Session.DB(reader.ns.Database).C(reader.ns.Collection).
-		Find(reader.query).Iter()
+		Find(reader.query).Sort("_id").Iter()
 	return nil
 }
 
