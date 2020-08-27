@@ -17,7 +17,7 @@ import (
  *     bool: can run incremental sync directly?
  *     error: error
  */
-func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs() (bson.MongoTimestamp, map[string]int64, bool, error) {
+func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll bool) (bson.MongoTimestamp, map[string]int64, bool, error) {
 	var (
 		tsMap       map[string]utils.TimestampNode
 		startTsMap  map[string]int64 // replica-set name => timestamp
@@ -84,7 +84,7 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs() (bson.Mong
 		}
 
 		if ckptRemote == nil {
-			if confTsMongoTs > 1 && ts.Oldest >= confTsMongoTs {
+			if syncModeAll || confTsMongoTs > 1 && ts.Oldest >= confTsMongoTs {
 				return smallestNew, nil, false, nil
 			}
 			startTsMap[replName] = int64(confTsMongoTs)
@@ -113,7 +113,7 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 		return syncMode, nil, 0, nil
 	}
 
-	smallestNewTs, startTsMap, canIncrSync, err := coordinator.compareCheckpointAndDbTs()
+	smallestNewTs, startTsMap, canIncrSync, err := coordinator.compareCheckpointAndDbTs(syncMode == utils.VarSyncModeAll)
 	if err != nil {
 		return "", nil, 0, err
 	}

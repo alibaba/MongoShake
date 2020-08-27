@@ -12,6 +12,7 @@ import (
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
+	"sync"
 )
 
 var (
@@ -29,8 +30,8 @@ type CollectionExecutor struct {
 
 	ns utils.NS
 
-	// wg sync.WaitGroup
-	batchCount int64
+	wg sync.WaitGroup
+	// batchCount int64
 
 	conn *utils.MongoConn
 
@@ -50,7 +51,7 @@ func NewCollectionExecutor(id int, mongoUrl string, ns utils.NS, syncer *DBSynce
 		mongoUrl:   mongoUrl,
 		ns:         ns,
 		syncer:     syncer,
-		batchCount: 0,
+		// batchCount: 0,
 	}
 }
 
@@ -84,19 +85,20 @@ func (colExecutor *CollectionExecutor) Sync(docs []*bson.Raw) {
 	}
 
 	/*
-	 * since v2.4.11: waitGroup.Add may overflow, so use atomic to replace waitGroup
+	 * TODO, waitGroup.Add may overflow, so use atomic to replace waitGroup
 	 * // colExecutor.wg.Add(1)
 	 */
-	atomic.AddInt64(&colExecutor.batchCount, 1)
+	colExecutor.wg.Add(1)
+	// atomic.AddInt64(&colExecutor.batchCount, 1)
 	colExecutor.docBatch <- docs
 }
 
 func (colExecutor *CollectionExecutor) Wait() error {
-	// colExecutor.wg.Wait()
-	for atomic.LoadInt64(&colExecutor.batchCount) != 0 {
+	colExecutor.wg.Wait()
+	/*for v := atomic.LoadInt64(&colExecutor.batchCount); v != 0; {
 		utils.YieldInMs(1000)
-		LOG.Info("wait batchCount == 0")
-	}
+		LOG.Info("CollectionExecutor[%v %v] wait batchCount[%v] == 0", colExecutor.ns, colExecutor.id, v)
+	}*/
 
 	close(colExecutor.docBatch)
 	colExecutor.conn.Close()
@@ -156,8 +158,8 @@ func (exec *DocExecutor) start() {
 			}
 		}
 
-		// exec.colExecutor.wg.Done()
-		atomic.AddInt64(&exec.colExecutor.batchCount, -1)
+		exec.colExecutor.wg.Done()
+		// atomic.AddInt64(&exec.colExecutor.batchCount, -1)
 	}
 }
 
