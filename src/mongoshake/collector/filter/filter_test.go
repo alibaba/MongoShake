@@ -185,3 +185,19 @@ func TestAutologousFilter(t *testing.T) {
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
 	}
 }
+
+// only for print
+func TestComputeHash(t *testing.T) {
+	// test ComputeHash
+
+	var nr int
+	{
+		fmt.Printf("TestComputeHash case %d.\n", nr)
+		nr++
+
+		v1 := ComputeHash(106402199)
+		v2 := ComputeHash(106296614)
+		// assert.Equal(t, false, filter.Filter(log), "should be equal")
+		fmt.Println(v1, v2)
+	}
+}

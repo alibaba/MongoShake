@@ -470,6 +470,7 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 			buffer = make([]*bson.Raw, 0, bufferSize)
 			bufferByteSize = 0
 		}
+
 		// transform dbref for document
 		if len(conf.Options.TransformNamespace) > 0 && conf.Options.IncrSyncDBRef {
 			var docData bson.D
@@ -488,7 +489,7 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 		bufferByteSize += len(doc.Data)
 	}
 
-	LOG.Info("splitter reader[%v] finishes", reader)
+	LOG.Info("splitter reader finishes: %v", reader)
 	reader.Close()
 	return nil
 }
