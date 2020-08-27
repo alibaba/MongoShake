@@ -211,7 +211,8 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		nimo.GoRoutine(func() {
 			defer wg.Done()
 			if err := dbSyncer.Start(); err != nil {
-				LOG.Critical("document replication for url=%v failed. %v", src.URL, err)
+				LOG.Critical("document replication for url=%v failed. %v",
+					utils.BlockMongoUrlPassword(src.URL, "***"), err)
 				replError = err
 			}
 			dbSyncer.Close()
