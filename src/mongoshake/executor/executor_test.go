@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
+	"sync"
 )
 
 func mockLogs(op, ns string, size int, cb bool) *OplogRecord {
@@ -499,5 +500,92 @@ func TestTransformLog(t *testing.T) {
 				},
 			},
 		}), logs[0], "should be equal")
+	}
+}
+
+func TestCalculateTop3(t *testing.T) {
+	// test TestCalculateTop3
+
+	var nr int
+	{
+		fmt.Printf("TestCalculateTop3 case %d.\n", nr)
+		nr++
+
+		var mp sync.Map
+
+		ret := calculateTop3(mp)
+		assert.Equal(t, 0, len(ret), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestCalculateTop3 case %d.\n", nr)
+		nr++
+
+		var mp sync.Map
+		val1 := uint64(10)
+		mp.Store("test1", &val1)
+
+		ret := calculateTop3(mp)
+		assert.Equal(t, []Item{
+			{
+				Key: "test1",
+				Val: uint64(10),
+			},
+		}, ret, "should be equal")
+	}
+
+	{
+		fmt.Printf("TestCalculateTop3 case %d.\n", nr)
+		nr++
+
+		var mp sync.Map
+		val1 := uint64(10)
+		val2 := uint64(5)
+		mp.Store("test1", &val1)
+		mp.Store("test2", &val2)
+
+		ret := calculateTop3(mp)
+		assert.Equal(t, []Item{
+			{
+				Key: "test1",
+				Val: uint64(10),
+			},
+			{
+				Key: "test2",
+				Val: uint64(5),
+			},
+		}, ret, "should be equal")
+	}
+
+	{
+		fmt.Printf("TestCalculateTop3 case %d.\n", nr)
+		nr++
+
+		var mp sync.Map
+		val1 := uint64(10)
+		val2 := uint64(5)
+		val4 := uint64(20000)
+		val5 := uint64(40000)
+		mp.Store("test1", &val1)
+		mp.Store("test2", &val2)
+		mp.Store("test4", &val4)
+		mp.Store("test5", &val5)
+
+
+		ret := calculateTop3(mp)
+		assert.Equal(t, []Item{
+			{
+				Key: "test5",
+				Val: uint64(40000),
+			},
+			{
+				Key: "test4",
+				Val: uint64(20000),
+			},
+			{
+				Key: "test1",
+				Val: uint64(10),
+			},
+		}, ret, "should be equal")
 	}
 }
