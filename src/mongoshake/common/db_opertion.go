@@ -376,3 +376,12 @@ func FindFirstErrorIndexAndMessage(error string) (int, string, bool) {
 
 	return indexVal, msg, dupVal == "true"
 }
+
+func HasUniqueIndex(index []mgo.Index) bool {
+	for _, idx := range index {
+		if !strings.HasPrefix(idx.Name, "_id") && idx.Unique == true {
+			return true
+		}
+	}
+	return false
+}

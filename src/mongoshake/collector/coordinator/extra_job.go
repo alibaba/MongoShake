@@ -1,11 +1,13 @@
 package coordinator
 
 import (
-	LOG "github.com/vinllen/log4go"
 	"sync"
+	"time"
 	"mongoshake/collector/configure"
 	"mongoshake/common"
-	"time"
+
+	LOG "github.com/vinllen/log4go"
+
 )
 
 const (
@@ -95,11 +97,9 @@ func (cui *CheckUniqueIndexExistsJob) Run() {
 						ns.Str(), err)
 				}
 
-				for _, idx := range index {
-					if idx.Unique == true {
-						LOG.Crashf("extra job[%s] with source[%v] query index[%v] find unique index: %v",
-							cui.Name(), source.URL, ns.Str(), idx)
-					}
+				if utils.HasUniqueIndex(index) {
+					LOG.Crashf("extra job[%s] with source[%v] query index[%v] find unique index: %v",
+						cui.Name(), source.URL, ns.Str(), index)
 				}
 			}
 		}
