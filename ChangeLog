@@ -1,3 +1,8 @@
+2020-0x-xx Alibaba Cloud.
+	* version: 2.4.12
+	* IMPROVE: add sort by _id in full sync stage.
+	* IMPROVE: add executor namespace writing count metric.
+
 2020-08-27 Alibaba Cloud.
 	* version: 2.4.11
 	* IMPROVE: add ut_test script.
