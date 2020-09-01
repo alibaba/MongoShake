@@ -310,6 +310,9 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 		"_id": 1,
 	})
 	findOptions.SetBatchSize(8192)
+	findOptions.SetHint(map[string]interface{}{
+		"_id": 1,
+	})
 	// findOptions.SetNoCursorTimeout(true)
 	reader.docCursor, err = reader.client.Client.Database(reader.ns.Database).Collection(reader.ns.Collection, nil).
 		Find(nil, reader.query, findOptions)

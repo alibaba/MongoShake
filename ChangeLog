@@ -1,3 +1,11 @@
+2020-09-01 Alibaba Cloud.
+	* version: 2.4.12
+	* IMPROVE: add sort by _id in full sync stage.
+	* IMPROVE: add executor namespace writing count metric.
+	* IMPROVE: add WhiteListObjectIdHasher to solve the jumbo table without
+	unique index.
+	* BUGFIX: solve error: "db[xx] not exists on startTsMap". #434
+
 2020-08-27 Alibaba Cloud.
 	* version: 2.4.11
 	* IMPROVE: add ut_test script.

@@ -81,24 +81,30 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 			err = dbWriter.doInsert(dc[0], dc[1], metadata, group.oplogRecords,
 				conf.Options.IncrSyncExecutorInsertOnDupUpdate)
 			atomic.AddUint64(&exec.metricInsert, uint64(len(group.oplogRecords)))
+			exec.addNsMapMetric(group.ns, "i", len(group.oplogRecords))
 		case "u":
 			err = dbWriter.doUpdate(dc[0], dc[1], metadata, group.oplogRecords,
 				conf.Options.IncrSyncExecutorUpsert)
 			atomic.AddUint64(&exec.metricUpdate, uint64(len(group.oplogRecords)))
+			exec.addNsMapMetric(group.ns, "u", len(group.oplogRecords))
 		case "d":
 			err = dbWriter.doDelete(dc[0], dc[1], metadata, group.oplogRecords)
 			atomic.AddUint64(&exec.metricDelete, uint64(len(group.oplogRecords)))
+			exec.addNsMapMetric(group.ns, "d", len(group.oplogRecords))
 		case "c":
 			LOG.Info("Replay-%d run DDL with metadata[%v] in db[%v], firstLog: %v", exec.batchExecutor.ReplayerId,
 				dc[0], metadata, group.oplogRecords[0].original.partialLog)
 			err = dbWriter.doCommand(dc[0], metadata, group.oplogRecords)
 			atomic.AddUint64(&exec.metricDDL, uint64(len(group.oplogRecords)))
+			exec.addNsMapMetric(group.ns, "c", len(group.oplogRecords))
 		case "n":
 			// exec.batchExecutor.ReplMetric.AddFilter(count)
 			atomic.AddUint64(&exec.metricNoop, uint64(len(group.oplogRecords)))
+			exec.addNsMapMetric(group.ns, "n", len(group.oplogRecords))
 		default:
 			atomic.AddUint64(&exec.metricUnknown, uint64(len(group.oplogRecords)))
 			LOG.Warn("Replay-%d meets unknown type oplogs found. op '%s'", exec.batchExecutor.ReplayerId, group.op)
+			exec.addNsMapMetric(group.ns, "x", len(group.oplogRecords))
 		}
 
 		// a few known error we can skip !! such as "ShardKeyNotFound" returned
@@ -115,6 +121,7 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 				group.oplogRecords[0].original.partialLog)
 			exec.dropConnection()
 			atomic.AddUint64(&exec.metricError, uint64(len(group.oplogRecords)))
+			exec.addNsMapMetric(group.ns, "e", len(group.oplogRecords))
 
 			return err
 		}
@@ -138,6 +145,68 @@ func (exec *Executor) errorIgnore(err error) bool {
 		return skip
 	}
 	return false
+}
+
+func (exec *Executor) addNsMapMetric(ns, op string, count int) {
+	var metricSum *uint64
+	switch op {
+	case "i":
+		val, ok := exec.metricInsertMap.Load(ns)
+		if !ok {
+			storeVal := uint64(0)
+			exec.metricInsertMap.Store(ns, &storeVal)
+			metricSum = &storeVal
+		} else {
+			metricSum = val.(*uint64)
+		}
+	case "u":
+		val, ok := exec.metricUpdateMap.Load(ns)
+		if !ok {
+			storeVal := uint64(0)
+			exec.metricUpdateMap.Store(ns, &storeVal)
+			metricSum = &storeVal
+		} else {
+			metricSum = val.(*uint64)
+		}
+	case "d":
+		val, ok := exec.metricDeleteMap.Load(ns)
+		if !ok {
+			storeVal := uint64(0)
+			exec.metricDeleteMap.Store(ns, &storeVal)
+			metricSum = &storeVal
+		} else {
+			metricSum = val.(*uint64)
+		}
+	case "c":
+		val, ok := exec.metricDDLMap.Load(ns)
+		if !ok {
+			storeVal := uint64(0)
+			exec.metricDDLMap.Store(ns, &storeVal)
+			metricSum = &storeVal
+		} else {
+			metricSum = val.(*uint64)
+		}
+	case "x":
+		val, ok := exec.metricUnknownMap.Load(ns)
+		if !ok {
+			storeVal := uint64(0)
+			exec.metricUnknownMap.Store(ns, &storeVal)
+			metricSum = &storeVal
+		} else {
+			metricSum = val.(*uint64)
+		}
+	case "e":
+		val, ok := exec.metricErrorMap.Load(ns)
+		if !ok {
+			storeVal := uint64(0)
+			exec.metricErrorMap.Store(ns, &storeVal)
+			metricSum = &storeVal
+		} else {
+			metricSum = val.(*uint64)
+		}
+	}
+
+	atomic.AddUint64(metricSum, uint64(count))
 }
 
 func buildMetadata(oplog *oplog.PartialLog) bson.M {

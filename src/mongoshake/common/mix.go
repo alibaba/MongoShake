@@ -12,6 +12,7 @@ import (
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
 	"reflect"
+	"path"
 )
 
 func YieldInMs(n int64) {
@@ -198,7 +199,12 @@ func Mkdirs(dirs ...string) error {
 func WritePidById(dir, id string) bool {
 	if len(dir) == 0 {
 		dir, _ = os.Getwd()
+	} else if dir[0] != '/' {
+		// relative path
+		baseDir, _ := os.Getwd()
+		dir = path.Join(baseDir, dir)
 	}
+
 	pidfile := filepath.Join(dir, id) + ".pid"
 	if err := WritePid(pidfile); err != nil {
 		LOG.Critical("Process write pid and lock file failed : %v", err)

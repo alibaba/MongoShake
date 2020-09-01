@@ -52,20 +52,21 @@ type Configuration struct {
 	FullSyncExecutorMajorityEnable       bool   `config:"full_sync.executor.majority_enable"`
 
 	// 3. incr sync
-	IncrSyncMongoFetchMethod               string   `config:"incr_sync.mongo_fetch_method"`
-	IncrSyncChangeStreamWatchFullDocument  bool     `config:"incr_sync.change_stream.watch_full_document"`
-	IncrSyncOplogGIDS                      []string `config:"incr_sync.oplog.gids"`
-	IncrSyncShardKey                       string   `config:"incr_sync.shard_key"`
-	IncrSyncWorker                         int      `config:"incr_sync.worker"`
-	IncrSyncTargetDelay                    int64    `config:"incr_sync.target_delay"`
-	IncrSyncWorkerOplogCompressor          string   `config:"incr_sync.worker.oplog_compressor"`
-	IncrSyncWorkerBatchQueueSize           uint64   `config:"incr_sync.worker.batch_queue_size"`
-	IncrSyncAdaptiveBatchingMaxSize        int      `config:"incr_sync.adaptive.batching_max_size"`
-	IncrSyncFetcherBufferCapacity          int      `config:"incr_sync.fetcher.buffer_capacity"`
-	IncrSyncExecutorUpsert                 bool     `config:"incr_sync.executor.upsert"`
-	IncrSyncExecutorInsertOnDupUpdate      bool     `config:"incr_sync.executor.insert_on_dup_update"`
-	IncrSyncConflictWriteTo                string   `config:"incr_sync.conflict_write_to"`
-	IncrSyncExecutorMajorityEnable         bool     `config:"incr_sync.executor.majority_enable"`
+	IncrSyncMongoFetchMethod              string   `config:"incr_sync.mongo_fetch_method"`
+	IncrSyncChangeStreamWatchFullDocument bool     `config:"incr_sync.change_stream.watch_full_document"`
+	IncrSyncOplogGIDS                     []string `config:"incr_sync.oplog.gids"`
+	IncrSyncShardKey                      string   `config:"incr_sync.shard_key"`
+	IncrSyncShardByObjectIdWhiteList      []string `config:"incr_sync.shard_by_object_id_whitelist"`
+	IncrSyncWorker                        int      `config:"incr_sync.worker"`
+	IncrSyncTargetDelay                   int64    `config:"incr_sync.target_delay"`
+	IncrSyncWorkerOplogCompressor         string   `config:"incr_sync.worker.oplog_compressor"`
+	IncrSyncWorkerBatchQueueSize          uint64   `config:"incr_sync.worker.batch_queue_size"`
+	IncrSyncAdaptiveBatchingMaxSize       int      `config:"incr_sync.adaptive.batching_max_size"`
+	IncrSyncFetcherBufferCapacity         int      `config:"incr_sync.fetcher.buffer_capacity"`
+	IncrSyncExecutorUpsert                bool     `config:"incr_sync.executor.upsert"`
+	IncrSyncExecutorInsertOnDupUpdate     bool     `config:"incr_sync.executor.insert_on_dup_update"`
+	IncrSyncConflictWriteTo               string   `config:"incr_sync.conflict_write_to"`
+	IncrSyncExecutorMajorityEnable        bool     `config:"incr_sync.executor.majority_enable"`
 
 	/*---------------------------------------------------------*/
 	// inner variables, not open to user

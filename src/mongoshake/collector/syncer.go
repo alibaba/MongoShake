@@ -130,6 +130,9 @@ func NewOplogSyncer(
 	case oplog.ShardByID:
 		syncer.hasher = &oplog.PrimaryKeyHasher{}
 	}
+	if len(conf.Options.IncrSyncShardByObjectIdWhiteList) != 0 {
+		syncer.hasher = oplog.NewWhiteListObjectIdHasher(conf.Options.IncrSyncShardByObjectIdWhiteList)
+	}
 
 	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter), filter.NewGidFilter(gids)}
 

@@ -59,7 +59,8 @@ func NewEventReader(src string, replset string) *EventReader {
 }
 
 func (er *EventReader) String() string {
-	return fmt.Sprintf("EventReader[src:%s replset:%s]", er.src, er.replset)
+	return fmt.Sprintf("EventReader[src:%s replset:%s]", utils.BlockMongoUrlPassword(er.src, "***"),
+		er.replset)
 }
 
 func (er *EventReader) Name() string {

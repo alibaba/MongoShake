@@ -66,7 +66,8 @@ func NewOplogReader(src string, replset string) *OplogReader {
 }
 
 func (or *OplogReader) String() string {
-	return fmt.Sprintf("oplogReader[src:%s replset:%s]", or.src, or.replset)
+	return fmt.Sprintf("oplogReader[src:%s replset:%s]", utils.BlockMongoUrlPassword(or.src, "***"),
+		or.replset)
 }
 
 func (or *OplogReader) Name() string {

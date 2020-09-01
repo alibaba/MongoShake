@@ -19,10 +19,8 @@ type Hasher interface {
 	DistributeOplogByMod(log *PartialLog, mod int) uint32
 }
 
-type PrimaryKeyHasher struct {
-	Hasher
-}
-
+/*********************************************/
+// PrimaryKeyHasher
 type TableHasher struct {
 	Hasher
 }
@@ -42,6 +40,75 @@ func (collectionHasher *TableHasher) DistributeOplogByMod(log *PartialLog, mod i
 
 	return stringHashValue(log.Namespace) % uint32(mod)
 }
+
+/*********************************************/
+// PrimaryKeyHasher
+type PrimaryKeyHasher struct {
+	Hasher
+}
+
+// we need to ensure that oplog entry will be sent to the same job[$hash]
+// if they have the same ObjectID. thus we can consume the oplog entry
+// sequentially
+func (objectIdHasher *PrimaryKeyHasher) DistributeOplogByMod(log *PartialLog, mod int) uint32 {
+	if mod == 1 {
+		return 0
+	}
+
+	var hashObject interface{}
+
+	switch log.Operation {
+	case "i", "d", "u", "c":
+		hashObject = GetIdOrNSFromOplog(log)
+	case "n":
+		return DefaultHashValue
+	}
+
+	if hashObject == nil {
+		LOG.Warn("Couldn't extract hash object. collector has mixed up. use Oplog.Namespace instead %v", log)
+		hashObject = log.Namespace
+	}
+
+	return Hash(hashObject) % uint32(mod)
+}
+
+/*********************************************/
+// WhiteListObjectIdHasher: hash by collection in general, when hit white list, hash by _id
+type WhiteListObjectIdHasher struct {
+	Hasher
+
+	TableHasher
+	PrimaryKeyHasher
+
+	whiteList map[string]struct{} // no need to add lock, only reading operation
+}
+
+func NewWhiteListObjectIdHasher(whiteList []string) *WhiteListObjectIdHasher {
+	mp := make(map[string]struct{}, len(whiteList))
+	for _, ele := range whiteList {
+		mp[ele] = struct{}{}
+	}
+
+	return &WhiteListObjectIdHasher{
+		TableHasher:      TableHasher{},
+		PrimaryKeyHasher: PrimaryKeyHasher{},
+		whiteList:        mp,
+	}
+}
+
+func (wloi *WhiteListObjectIdHasher) DistributeOplogByMod(log *PartialLog, mod int) uint32 {
+	ns := log.Namespace
+	if len(ns) == 0 {
+		return DefaultHashValue
+	}
+
+	if _, ok := wloi.whiteList[ns]; ok {
+		return wloi.PrimaryKeyHasher.DistributeOplogByMod(log, mod)
+	}
+	return wloi.TableHasher.DistributeOplogByMod(log, mod)
+}
+
+/*********************************************/
 
 func GetIdOrNSFromOplog(log *PartialLog) interface{} {
 	switch log.Operation {
@@ -91,29 +158,4 @@ func Hash(hashObject interface{}) uint32 {
 	}
 
 	return DefaultHashValue
-}
-
-// we need to ensure that oplog entry will be sent to the same job[$hash]
-// if they have the same ObjectID. thus we can consume the oplog entry
-// sequentially
-func (objectIdHasher *PrimaryKeyHasher) DistributeOplogByMod(log *PartialLog, mod int) uint32 {
-	if mod == 1 {
-		return 0
-	}
-
-	var hashObject interface{}
-
-	switch log.Operation {
-	case "i", "d", "u", "c":
-		hashObject = GetIdOrNSFromOplog(log)
-	case "n":
-		return DefaultHashValue
-	}
-
-	if hashObject == nil {
-		LOG.Warn("Couldn't extract hash object. collector has mixed up. use Oplog.Namespace instead %v", log)
-		hashObject = log.Namespace
-	}
-
-	return Hash(hashObject) % uint32(mod)
 }
