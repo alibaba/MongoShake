@@ -84,7 +84,9 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 		}
 
 		if ckptRemote == nil {
-			if syncModeAll || confTsMongoTs > 1 && ts.Oldest >= confTsMongoTs {
+			if syncModeAll || confTsMongoTs > bson.MongoTimestamp(1 << 32) && ts.Oldest >= confTsMongoTs {
+				LOG.Info("%s syncModeAll[%v] ts.Oldest[%v], confTsMongoTs[%v]", replName, syncModeAll, ts.Oldest,
+					confTsMongoTs)
 				return smallestNew, nil, false, nil
 			}
 			startTsMap[replName] = int64(confTsMongoTs)

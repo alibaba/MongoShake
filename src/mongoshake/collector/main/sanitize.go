@@ -174,6 +174,11 @@ func checkDefaultValue() error {
 		conf.Options.IncrSyncShardKey != utils.VarIncrSyncShardKeyCollection {
 		return fmt.Errorf("incr_sync.shard_key should in {auto, id, collection}")
 	}
+	if len(conf.Options.IncrSyncShardByObjectIdWhiteList) != 0 {
+		if conf.Options.IncrSyncShardKey != utils.VarIncrSyncShardKeyCollection {
+			return fmt.Errorf("incr_sync.shard_by_object_id_whitelist should only be set when 'incr_sync.shard_key == collection'")
+		}
+	}
 	if conf.Options.IncrSyncWorker <= 0 || conf.Options.IncrSyncWorker > 256 {
 		return fmt.Errorf("incr_sync.worker should in range [1, 256]")
 	}
