@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 
 	"github.com/vinllen/mgo/bson"
-
 )
 
 const (
@@ -124,12 +123,41 @@ func GetKeyWithIndex(log bson.D, wanted string) (interface{}, int) {
 	return nil, 0
 }
 
+func ConvertBsonD2MExcept(input bson.D, except map[string]struct{}) (bson.M, map[string]struct{}) {
+	m := bson.M{}
+	keys := make(map[string]struct{}, len(input))
+	for _, ele := range input {
+		switch ele.Value.(type) {
+		case bson.D:
+			if _, ok := except[ele.Name]; ok {
+				m[ele.Name] = ele.Value
+			} else {
+				son, _ := ConvertBsonD2M(ele.Value.(bson.D))
+				m[ele.Name] = son
+			}
+		default:
+			m[ele.Name] = ele.Value
+		}
+
+		keys[ele.Name] = struct{}{}
+	}
+
+	return m, keys
+}
+
 // convert bson.D to bson.M
 func ConvertBsonD2M(input bson.D) (bson.M, map[string]struct{}) {
 	m := bson.M{}
 	keys := make(map[string]struct{}, len(input))
 	for _, ele := range input {
 		m[ele.Name] = ele.Value
+		switch ele.Value.(type) {
+		case bson.D:
+			son, _ := ConvertBsonD2M(ele.Value.(bson.D))
+			m[ele.Name] = son
+		default:
+			m[ele.Name] = ele.Value
+		}
 		keys[ele.Name] = struct{}{}
 	}
 

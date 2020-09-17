@@ -6,6 +6,7 @@ import (
 	"mongoshake/oplog"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/getlantern/deepcopy"
 )
 
 func TestNamespaceFilter(t *testing.T) {
@@ -132,6 +133,9 @@ func TestAutologousFilter(t *testing.T) {
 		assert.Equal(t, true, filter.Filter(log), "should be equal")
 	}
 
+	rec := make(map[string]bool)
+	deepcopy.Copy(&rec, &NsShouldBeIgnore)
+
 	{
 		fmt.Printf("TestAutologousFilter case %d.\n", nr)
 		nr++
@@ -180,6 +184,42 @@ func TestAutologousFilter(t *testing.T) {
 		log = &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Namespace: "admin.x",
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+	}
+
+	fmt.Println(rec, NsShouldBeIgnore)
+
+	// test transaction
+	{
+		fmt.Printf("TestAutologousFilter case %d.\n", nr)
+		nr++
+
+		deepcopy.Copy(&NsShouldBeIgnore, &rec)
+
+		InitNs([]string{})
+		filter := new(AutologousFilter)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.xx",
+				Operation: "c",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "adminx",
+				Operation: "d",
 			},
 		}
 		assert.Equal(t, false, filter.Filter(log), "should be equal")

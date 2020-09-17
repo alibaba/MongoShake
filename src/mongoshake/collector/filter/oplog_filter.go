@@ -152,11 +152,13 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 		return result
 	} else {
 		// DDL
+		LOG.Info("NamespaceFilter check %v", log.Object)
 		operation, found := oplog.ExtraCommandName(log.Object)
 		if !found {
 			LOG.Warn("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
 			return false
 		}
+
 		switch operation {
 		case "create":
 			fallthrough
@@ -208,14 +210,21 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 			default:
 			}
 
+			// except field 'o'
+			except := map[string]struct{}{
+				"o": {},
+			}
+
 			for _, ele := range ops {
-				m, _ := oplog.ConvertBsonD2M(ele)
+				m, _ := oplog.ConvertBsonD2MExcept(ele, except)
 				subLog := oplog.NewPartialLog(m)
 				if ok := filter.Filter(subLog); !ok {
 					filterOps = append(filterOps, ele)
 				}
 			}
 			oplog.SetFiled(log.Object, "applyOps", filterOps)
+
+			LOG.Info("NamespaceFilter filter filter?[%v], filterOps: %v", len(filterOps) > 0, filterOps)
 			return len(filterOps) > 0
 		default:
 			// such as: dropDatabase
