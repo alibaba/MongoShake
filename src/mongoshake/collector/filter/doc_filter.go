@@ -99,6 +99,7 @@ func (filter *NamespaceFilter) FilterNs(namespace string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 
