@@ -55,14 +55,14 @@ const (
 type Event struct {
 	Id                bson.M              `bson:"_id" json:"_id"`
 	OperationType     string              `bson:"operationType" json:"operationType"`
-	FullDocument      bson.D              `bson:"fullDocument" json:"fullDocument"`  // exists on "insert", "replace", "delete", "update"
+	FullDocument      bson.D              `bson:"fullDocument,omitempty" json:"fullDocument,omitempty"`  // exists on "insert", "replace", "delete", "update"
 	Ns                bson.M              `bson:"ns" json:"ns"`
-	To                bson.M              `bson:"to" json:"to"`
-	DocumentKey       bson.M              `bson:"documentKey" json:"documentKey"`  // exists on "insert", "replace", "delete", "update"
-	UpdateDescription bson.M              `bson:"updateDescription" json:"updateDescription"`
-	ClusterTime       bson.MongoTimestamp `bson:"clusterTime" json:"clusterTime"`
-	TxnNumber         uint64              `bson:"txnNumber" json:"txnNumber"`
-	Lsid              bson.M              `bson:"lsid" json:"lsid"`
+	To                bson.M              `bson:"to,omitempty" json:"to,omitempty"`
+	DocumentKey       bson.M              `bson:"documentKey,omitempty" json:"documentKey,omitempty"`  // exists on "insert", "replace", "delete", "update"
+	UpdateDescription bson.M              `bson:"updateDescription,omitempty" json:"updateDescription,omitempty"`
+	ClusterTime       bson.MongoTimestamp `bson:"clusterTime,omitempty" json:"clusterTime,omitempty"`
+	TxnNumber         uint64              `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`
+	Lsid              bson.M              `bson:"lsid,omitempty" json:"lsid,omitempty"`
 }
 
 func (e *Event) String() string {
@@ -433,6 +433,14 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 		return nil, fmt.Errorf("invalidate event happen, should be handle manually: %s", event)
 	default:
 		return nil, fmt.Errorf("unknown event[%v]", event.OperationType)
+	}
+
+	// set default for "o", "o2"
+	if oplog.Object == nil {
+		oplog.Object = bson.D{}
+	}
+	if oplog.Query == nil {
+		oplog.Query = bson.M{}
 	}
 
 	return oplog, nil

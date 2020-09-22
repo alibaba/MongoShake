@@ -8,7 +8,9 @@ import (
 	"github.com/vinllen/mgo/bson"
 )
 
+// deprecated
 func TestAdjustDBRef(t *testing.T) {
+	return
 	var nr int
 	{
 		fmt.Printf("TestAdjustDBRef case %d.\n", nr)

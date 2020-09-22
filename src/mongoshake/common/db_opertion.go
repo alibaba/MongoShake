@@ -264,6 +264,7 @@ func IsCollectionCappedError(err error) bool {
 	return false
 }
 
+// deprecated
 // adjust dbRef order: $ref, $id, $db, others
 func AdjustDBRef(input bson.M, dbRef bool) bson.M {
 	if dbRef {
