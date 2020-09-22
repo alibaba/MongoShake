@@ -339,8 +339,13 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			oplog.SetFiled(partialLog.Object, "to", nsTrans.Transform(toNs))
 		case "applyOps":
 			if ops := oplog.GetKey(partialLog.Object, "applyOps").([]bson.D); ops != nil {
+				// except field 'o'
+				except := map[string]struct{}{
+					"o": {},
+				}
 				for i, ele := range ops {
-					m, keys := oplog.ConvertBsonD2M(ele)
+					// m, keys := oplog.ConvertBsonD2M(ele)
+					m, keys := oplog.ConvertBsonD2MExcept(ele, except)
 					subLog := oplog.NewPartialLog(m)
 					transSubLog := transformPartialLog(subLog, nsTrans, transformRef)
 					if transSubLog == nil {

@@ -1,3 +1,8 @@
+2020-09-22 Alibaba Cloud.
+	* version: 2.4.13
+	* BUGFIX: do not filter ns=admin.$cmd so that transaction works.
+	* IMPROVE: enable NoCursorTimeout in full-sync reader.
+
 2020-09-01 Alibaba Cloud.
 	* version: 2.4.12
 	* IMPROVE: add sort and hint by _id in full sync stage.
