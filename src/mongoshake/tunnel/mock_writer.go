@@ -15,7 +15,8 @@ func (tunnel *MockWriter) Name() string {
 func (tunnel *MockWriter) Send(message *WMessage) int64 {
 	nimo.AssertTrue(len(message.RawLogs) > 0,
 		"ack is not required. we should never receive empty messages")
-	LOG.Debug("MockTunnel received message length %d, shard %d ", len(message.RawLogs), message.Shard)
+	LOG.Info("MockTunnel received message length %d, shard %d, message: %v ",
+		len(message.RawLogs), message.Shard, message.ParsedLogs)
 
 	return 0
 }

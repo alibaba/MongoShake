@@ -3,6 +3,7 @@
 	* BUGFIX: do not filter ns=admin.$cmd so that transaction works.
 	* IMPROVE: enable NoCursorTimeout in full-sync reader.
 	* IMPROVE: set "omitempty" flag for oplog and change stream event parser.
+	* IMPROVE: polish Mock tunnel log for debugging.
 
 2020-09-01 Alibaba Cloud.
 	* version: 2.4.12
