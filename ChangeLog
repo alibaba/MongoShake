@@ -1,6 +1,13 @@
+2020-09-22 Alibaba Cloud.
+	* version: 2.4.13
+	* BUGFIX: do not filter ns=admin.$cmd so that transaction works. #439
+	* IMPROVE: enable NoCursorTimeout in full-sync reader. #443, #451
+	* IMPROVE: set "omitempty" flag for oplog and change stream event parser.
+	* IMPROVE: polish Mock tunnel log for debugging.
+
 2020-09-01 Alibaba Cloud.
 	* version: 2.4.12
-	* IMPROVE: add sort by _id in full sync stage.
+	* IMPROVE: add sort and hint by _id in full sync stage.
 	* IMPROVE: add executor namespace writing count metric.
 	* IMPROVE: add WhiteListObjectIdHasher to solve the jumbo table without
 	unique index.

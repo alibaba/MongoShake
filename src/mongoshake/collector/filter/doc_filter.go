@@ -8,6 +8,7 @@ import (
 	"fmt"
 )
 
+// namespace should be filtered.
 // key: ns, value: true means prefix, false means contain
 var NsShouldBeIgnore = map[string]bool{
 	"admin.":                        true,
@@ -16,6 +17,13 @@ var NsShouldBeIgnore = map[string]bool{
 	utils.AppDatabase + ".":         true,
 	utils.APPConflictDatabase + ".": true,
 	"system.views":                  false,
+}
+
+// namespace should not be filtered.
+// NsShouldNotBeIgnore has a higher priority than NsShouldBeIgnore
+// key: ns, value: true means prefix, false means contain
+var NsShouldNotBeIgnore = map[string]bool {
+	"admin.$cmd": true,
 }
 
 func InitNs(specialNsList []string) {
@@ -49,6 +57,17 @@ func (chain DocFilterChain) IterateFilter(namespace string) bool {
 func (filter *AutologousFilter) FilterNs(namespace string) bool {
 	// for namespace. we filter noop operation and collection name
 	// that are admin, local, config, mongoshake, mongoshake_conflict
+
+	// v2.4.13, don't filter admin.$cmd which may include transaction
+	for key, val := range NsShouldNotBeIgnore {
+		if val == true && strings.HasPrefix(namespace, key) {
+			return false
+		}
+		if val == false && strings.Contains(namespace, key) {
+			return false
+		}
+	}
+
 	for key, val := range NsShouldBeIgnore {
 		if val == true && strings.HasPrefix(namespace, key) {
 			return true
@@ -80,6 +99,7 @@ func (filter *NamespaceFilter) FilterNs(namespace string) bool {
 			return true
 		}
 	}
+
 	return false
 }
 

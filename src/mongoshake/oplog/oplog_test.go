@@ -479,4 +479,91 @@ func TestConvertBson(t *testing.T) {
 		output, _ := ConvertBsonD2M(m)
 		assert.Equal(t, input, output, "should be equal")
 	}
+
+	{
+		fmt.Printf("TestConvertBson case %d.\n", nr)
+		nr++
+
+		input := bson.M{
+			"k1": "b",
+			"k2": 12,
+			"k3": []string{"1", "2", "3"},
+			"k4": map[string]int{
+				"hello": 1,
+				"world": 2,
+			},
+			"r": bson.D {
+				{
+					Name: "xxx",
+					Value: "yyy",
+				},
+				{
+					Name: "aaa",
+					Value: "bbb",
+				},
+			},
+		}
+
+		m := ConvertBsonM2D(input)
+		output, _ := ConvertBsonD2M(m)
+		assert.Equal(t, output, bson.M{
+			"k1": "b",
+			"k2": 12,
+			"k3": []string{"1", "2", "3"},
+			"k4": map[string]int{
+				"hello": 1,
+				"world": 2,
+			},
+			"r": bson.M {
+				"xxx": "yyy",
+				"aaa": "bbb",
+			},
+		}, "should be equal")
+	}
+
+	{
+		fmt.Printf("TestConvertBson case %d.\n", nr)
+		nr++
+
+		input := bson.M{
+			"k1": "b",
+			"k2": 12,
+			"k3": []string{"1", "2", "3"},
+			"k4": map[string]int{
+				"hello": 1,
+				"world": 2,
+			},
+			"r": bson.D {
+				{
+					Name: "xxx",
+					Value: "yyy",
+				},
+				{
+					Name: "aaa",
+					Value: "bbb",
+				},
+			},
+		}
+
+		m := ConvertBsonM2D(input)
+		output, _ := ConvertBsonD2MExcept(m, nil)
+		assert.Equal(t, output, bson.M{
+			"k1": "b",
+			"k2": 12,
+			"k3": []string{"1", "2", "3"},
+			"k4": map[string]int{
+				"hello": 1,
+				"world": 2,
+			},
+			"r": bson.M {
+				"xxx": "yyy",
+				"aaa": "bbb",
+			},
+		}, "should be equal")
+
+		output, _ = ConvertBsonD2MExcept(m, map[string]struct{}{
+			"r": {},
+		})
+		assert.Equal(t, output, input, "should be equal")
+	}
 }

@@ -24,7 +24,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		var syncerTs int64
 		if oplogStartPosition == 0 {
 			if v, ok := startTsMap[src.ReplicaName]; !ok {
-				return fmt.Errorf("db[%v] not exists on startTsMap[%v]", src.ReplicaName, startTsMap)
+				return fmt.Errorf("replia[%v] not exists on startTsMap[%v]", src.ReplicaName, startTsMap)
 			} else {
 				syncerTs = v
 			}

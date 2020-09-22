@@ -313,7 +313,7 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	findOptions.SetHint(map[string]interface{}{
 		"_id": 1,
 	})
-	// findOptions.SetNoCursorTimeout(true)
+	findOptions.SetNoCursorTimeout(true)
 	reader.docCursor, err = reader.client.Client.Database(reader.ns.Database).Collection(reader.ns.Collection, nil).
 		Find(nil, reader.query, findOptions)
 	if err != nil {

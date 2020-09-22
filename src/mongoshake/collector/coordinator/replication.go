@@ -152,7 +152,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		rs[rsName] = 1
 		src.ReplicaName = rsName
 
-		// look around if there has uniq index
+		// look around if there has unique index
 		if !hasUniqIndex && conf.Options.IncrSyncShardKey == oplog.ShardAutomatic {
 			hasUniqIndex = conn.HasUniqueIndex()
 		}
@@ -168,6 +168,11 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		} else {
 			conf.Options.IncrSyncShardKey = oplog.ShardByID
 		}
+	}
+
+	// TODO, check unique exist on given namespace
+	if len(conf.Options.IncrSyncShardByObjectIdWhiteList) != 0 {
+
 	}
 
 	return nil

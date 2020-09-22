@@ -264,6 +264,7 @@ func IsCollectionCappedError(err error) bool {
 	return false
 }
 
+// deprecated
 // adjust dbRef order: $ref, $id, $db, others
 func AdjustDBRef(input bson.M, dbRef bool) bson.M {
 	if dbRef {
@@ -375,4 +376,13 @@ func FindFirstErrorIndexAndMessage(error string) (int, string, bool) {
 	dupVal := error[index + len(subMsg):i]
 
 	return indexVal, msg, dupVal == "true"
+}
+
+func HasUniqueIndex(index []mgo.Index) bool {
+	for _, idx := range index {
+		if !strings.HasPrefix(idx.Name, "_id") && idx.Unique == true {
+			return true
+		}
+	}
+	return false
 }
