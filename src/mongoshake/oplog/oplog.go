@@ -48,7 +48,7 @@ type PartialLog struct {
 }
 
 func LogEntryEncode(logs []*GenericOplog) [][]byte {
-	var encodedLogs [][]byte
+	encodedLogs := make([][]byte, 0, len(logs))
 	// log entry encode
 	for _, log := range logs {
 		encodedLogs = append(encodedLogs, log.Raw)
