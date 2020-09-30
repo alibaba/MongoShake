@@ -275,7 +275,7 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 		oplog.Operation = "u"
 		oplog.Query = event.DocumentKey
 
-		if fulldoc {
+		if fulldoc && event.FullDocument != nil && len(event.FullDocument) > 0 {
 			oplog.Object = event.FullDocument
 		} else {
 			oplog.Object = make(bson.D, 0, 2)
