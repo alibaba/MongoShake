@@ -1,3 +1,8 @@
+2020-09-30 Alibaba Cloud.
+	* version: 2.4.14
+	* BUGFIX: 'o' field is empty when set
+	"incr_sync.change_stream.watch_full_document = true". #454
+
 2020-09-22 Alibaba Cloud.
 	* version: 2.4.13
 	* BUGFIX: do not filter ns=admin.$cmd so that transaction works. #439
