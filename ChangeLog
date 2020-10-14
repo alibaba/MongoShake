@@ -1,3 +1,8 @@
+2020-10-14 Alibaba Cloud.
+	* version: 2.4.15
+	* BUGFIX: in kafka tunnel, solve json marshal failed when meets NaN, Inf,
+	-Inf field. #430
+
 2020-09-30 Alibaba Cloud.
 	* version: 2.4.14
 	* BUGFIX: 'o' field is empty when set
