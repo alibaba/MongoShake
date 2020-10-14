@@ -392,6 +392,12 @@ func checkConflict() error {
 			conf.Options.FullSyncReaderOplogStoreDisk = false
 		}
 	}
+	// only enable 'incr_sync.change_stream.watch_full_document' when tunnel != direct.
+	if conf.Options.IncrSyncChangeStreamWatchFullDocument {
+		if conf.Options.Tunnel == utils.VarTunnelDirect {
+			conf.Options.IncrSyncChangeStreamWatchFullDocument = false
+		}
+	}
 
 	/*****************************4. inner variables******************************/
 	if conf.Options.IncrSyncReaderDebug != utils.VarIncrSyncReaderDebugNone &&

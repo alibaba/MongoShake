@@ -313,7 +313,9 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	findOptions.SetHint(map[string]interface{}{
 		"_id": 1,
 	})
-	findOptions.SetNoCursorTimeout(true)
+	// findOptions.SetNoCursorTimeout(true)
+	findOptions.SetComment(fmt.Sprintf("mongo-shake full sync: ns[%v] query[%v]", reader.ns, reader.query))
+
 	reader.docCursor, err = reader.client.Client.Database(reader.ns.Database).Collection(reader.ns.Collection, nil).
 		Find(nil, reader.query, findOptions)
 	if err != nil {
@@ -325,7 +327,8 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 
 func (reader *DocumentReader) releaseCursor() {
 	if reader.docCursor != nil {
-		_ = reader.docCursor.Close(reader.ctx)
+		err := reader.docCursor.Close(reader.ctx)
+		LOG.Error("release cursor fail: %v", err)
 	}
 	reader.docCursor = nil
 }

@@ -136,7 +136,6 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 		if index != -1 {
 			oplogRecord = oplogs[index]
 		}
-		LOG.Warn(parseLastTimestamp(oplogs), bw.fullFinishTs)
 		LOG.Warn("detail error info with index[%v] msg[%v] dup[%v], isFullSyncStage[%v], oplog[%v]",
 			index, errMsg, dup, parseLastTimestamp(oplogs) <= bw.fullFinishTs, oplogRecord)
 
