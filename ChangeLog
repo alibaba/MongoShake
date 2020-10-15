@@ -1,3 +1,39 @@
+2020-10-14 Alibaba Cloud.
+	* version: 2.4.15
+	* BUGFIX: in kafka tunnel, solve json marshal failed when meets NaN, Inf,
+	-Inf field. #430
+
+2020-09-30 Alibaba Cloud.
+	* version: 2.4.14
+	* BUGFIX: 'o' field is empty when set
+	"incr_sync.change_stream.watch_full_document = true". #454
+
+2020-09-22 Alibaba Cloud.
+	* version: 2.4.13
+	* BUGFIX: do not filter ns=admin.$cmd so that transaction works. #439
+	* IMPROVE: enable NoCursorTimeout in full-sync reader. #443, #451
+	* IMPROVE: set "omitempty" flag for oplog and change stream event parser.
+	* IMPROVE: polish Mock tunnel log for debugging.
+
+2020-09-01 Alibaba Cloud.
+	* version: 2.4.12
+	* IMPROVE: add sort and hint by _id in full sync stage.
+	* IMPROVE: add executor namespace writing count metric.
+	* IMPROVE: add WhiteListObjectIdHasher to solve the jumbo table without
+	unique index.
+	* BUGFIX: solve error: "db[xx] not exists on startTsMap". #434
+
+2020-08-27 Alibaba Cloud.
+	* version: 2.4.11
+	* IMPROVE: add ut_test script.
+	* IMPORVE: in full sync stage: replace mgo driver with mongo-go-driver in
+	reading.
+	* BUGFIX: if can not run incr sync directly, return error when sync_mode
+	== incr.
+	* IMPROVE: docSync crash directly when meest error in full sync.
+	* BUGFIX: do not change sync_mode whn tunnel != direct. #424
+	* IMPROVE: sort data before return in full sync stage.
+
 2020-08-14 Alibaba Cloud.
 	* version: 2.4.10
 	* IMPROVE: modify the logic of transaction merging in change stream mode

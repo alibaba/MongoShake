@@ -6,6 +6,8 @@ import (
 	"mongoshake/oplog"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/getlantern/deepcopy"
+	"github.com/vinllen/mgo/bson"
 )
 
 func TestNamespaceFilter(t *testing.T) {
@@ -23,6 +25,151 @@ func TestNamespaceFilter(t *testing.T) {
 			},
 		}
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestNamespaceFilter case %d.\n", nr)
+		nr++
+
+		filter := NewNamespaceFilter(nil, nil)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "zz.mm",
+				Operation: "i",
+			},
+		}
+
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestNamespaceFilter case %d.\n", nr)
+		nr++
+
+		filter := NewNamespaceFilter(nil, []string{"zz", "cc.x"})
+		log1 := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "zz.mm",
+				Operation: "i",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log1), "should be equal")
+
+		log2 := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "cc.$cmd",
+				Operation: "i",
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log2), "should be equal")
+
+		log3 := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "cc.x",
+				Operation: "i",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log3), "should be equal")
+
+		log4 := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "cc.y",
+				Operation: "i",
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log4), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestNamespaceFilter case %d.\n", nr)
+		nr++
+
+		filter := NewNamespaceFilter(nil, nil)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+			},
+		}
+
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+	}
+
+	// test applyOps
+	{
+		fmt.Printf("TestNamespaceFilter case %d.\n", nr)
+		nr++
+
+		filter := NewNamespaceFilter(nil, nil)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog {
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Name: "applyOps",
+						Value: []bson.D{
+							{
+								bson.DocElem{"op", "i"},
+								bson.DocElem{"ns", "zz.mmm"},
+								bson.DocElem{"o", bson.D{
+									bson.DocElem{"a", 1},
+									bson.DocElem{"_id", "xxx"},
+								}},
+							},
+							{
+								bson.DocElem{"op", "i"},
+								bson.DocElem{"ns", "zz.x"},
+								bson.DocElem{"o", bson.D{
+									bson.DocElem{"xyz", "ff"},
+									bson.DocElem{"_id", "yyy"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+		assert.Equal(t, 2, len(log.Object[0].Value.([]interface{})), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestNamespaceFilter case %d.\n", nr)
+		nr++
+
+		filter := NewNamespaceFilter(nil, []string{"ff"})
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog {
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Name: "applyOps",
+						Value: []bson.D{
+							{
+								bson.DocElem{"op", "i"},
+								bson.DocElem{"ns", "zz.mmm"},
+								bson.DocElem{"o", bson.D{
+									bson.DocElem{"a", 1},
+									bson.DocElem{"_id", "xxx"},
+								}},
+							},
+							{
+								bson.DocElem{"op", "i"},
+								bson.DocElem{"ns", "ff.x"},
+								bson.DocElem{"o", bson.D{
+									bson.DocElem{"xyz", "ff"},
+									bson.DocElem{"_id", "yyy"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+		assert.Equal(t, 1, len(log.Object[0].Value.([]interface{})), "should be equal")
 	}
 }
 
@@ -132,6 +279,9 @@ func TestAutologousFilter(t *testing.T) {
 		assert.Equal(t, true, filter.Filter(log), "should be equal")
 	}
 
+	rec := make(map[string]bool)
+	deepcopy.Copy(&rec, &NsShouldBeIgnore)
+
 	{
 		fmt.Printf("TestAutologousFilter case %d.\n", nr)
 		nr++
@@ -183,5 +333,57 @@ func TestAutologousFilter(t *testing.T) {
 			},
 		}
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
+	}
+
+	fmt.Println(rec, NsShouldBeIgnore)
+
+	// test transaction
+	{
+		fmt.Printf("TestAutologousFilter case %d.\n", nr)
+		nr++
+
+		deepcopy.Copy(&NsShouldBeIgnore, &rec)
+
+		InitNs([]string{})
+		filter := new(AutologousFilter)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.xx",
+				Operation: "c",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "adminx",
+				Operation: "d",
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+	}
+}
+
+// only for print
+func TestComputeHash(t *testing.T) {
+	// test ComputeHash
+
+	var nr int
+	{
+		fmt.Printf("TestComputeHash case %d.\n", nr)
+		nr++
+
+		v1 := ComputeHash(106402199)
+		v2 := ComputeHash(106296614)
+		// assert.Equal(t, false, filter.Filter(log), "should be equal")
+		fmt.Println(v1, v2)
 	}
 }

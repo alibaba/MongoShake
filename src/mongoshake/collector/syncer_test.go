@@ -31,7 +31,7 @@ func mockLog(ns string, ts bson.MongoTimestamp, withDefault bool) *oplog.ParsedL
 			Operation: "i",
 			Namespace: ns,
 			Object:    bson.D{},
-			Lsid:      bson.M{},
+			Query:     bson.M{},
 		}
 	}
 	return nil
@@ -63,11 +63,11 @@ func TestDeserializer(t *testing.T) {
 		syncer := &OplogSyncer{}
 		syncer.startDeserializer()
 
-		log1 := mockLog("a.b", 1, true)
+		log1 := mockLog("a.b", 1, false)
 		data1, err := bson.Marshal(log1)
 		assert.Equal(t, nil, err, "should be equal")
 
-		log2 := mockLog("a.b", 2, true)
+		log2 := mockLog("a.b", 2, false)
 		data2, err := bson.Marshal(log2)
 		assert.Equal(t, nil, err, "should be equal")
 
@@ -118,10 +118,10 @@ func TestDeserializer(t *testing.T) {
 		rawParsed1 := new(oplog.ParsedLog)
 		err = bson.Unmarshal(out1[0].Raw, rawParsed1)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, *mockLog("testDB.b", 1, true), *rawParsed1, "should be equal")
+		assert.Equal(t, *mockLog("testDB.b", 1, false), *rawParsed1, "should be equal")
 		rawParsed2 := new(oplog.ParsedLog)
 		err = bson.Unmarshal(out2[0].Raw, rawParsed2)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, *mockLog("testDB.c", 2, true), *rawParsed2, "should be equal")
+		assert.Equal(t, *mockLog("testDB.c", 2, false), *rawParsed2, "should be equal")
 	}
 }

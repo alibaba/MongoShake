@@ -98,8 +98,7 @@ We also provide some tools for synchronization in Shake series.<br>
 * [RedisShake](https://github.com/aliyun/RedisShake): redis data synchronization tool.
 * [RedisFullCheck](https://github.com/aliyun/RedisFullCheck): redis data synchronization verification tool.
 
-Plus, we have a DingDing(钉钉) group so that users can join and discuss, please scan the code.
-![DingDing](resources/dingding_group.png)<br>
+Plus, we have a DingDing(钉钉) group so that users can join and discuss, group id（钉钉群号）: 23165540.
 
 # Thanks
 ---
@@ -117,3 +116,4 @@ Plus, we have a DingDing(钉钉) group so that users can join and discuss, pleas
 | dx8439 | 171390022@qq.com |
 | monkeyWie |  |
 | raydy.yan | yajuyan@hotmail.com |
+| loda507 | 741536172@qq.com |

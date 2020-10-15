@@ -10,6 +10,7 @@ import (
 	"mongoshake/collector/configure"
 	"mongoshake/common"
 	"encoding/json"
+	"strings"
 )
 
 type KafkaWriter struct {
@@ -55,15 +56,21 @@ func (tunnel *KafkaWriter) Send(message *WMessage) int64 {
 	case utils.VarTunnelMessageJson:
 		for _, log := range message.ParsedLogs {
 			// json marshal
-			if encode, err := json.Marshal(log.ParsedLog); err != nil {
-				LOG.Error("KafkaWriter json marshal data[%v] error[%v]", log, err)
-				return ReplyError
-			} else {
-				if err := tunnel.writer.SimpleWrite(encode); err != nil {
-					LOG.Error("KafkaWriter send [%v] with type[%v] error[%v]", tunnel.RemoteAddr,
-						conf.Options.TunnelMessage, err)
-					return ReplyError
+			encode, err := json.Marshal(log.ParsedLog)
+			if err != nil {
+				if strings.Contains(err.Error(), "unsupported value:") {
+					LOG.Error("KafkaWriter json marshal data[%v] meets unsupported value[%v], skip current oplog",
+						log.ParsedLog, err)
+					continue
+				} else {
+					LOG.Error("KafkaWriter json marshal data[%v] error[%v]", log.ParsedLog, err)
+					return ReplyServerFault
 				}
+			}
+			if err := tunnel.writer.SimpleWrite(encode); err != nil {
+				LOG.Error("KafkaWriter send [%v] with type[%v] error[%v]", tunnel.RemoteAddr,
+					conf.Options.TunnelMessage, err)
+				return ReplyError
 			}
 		}
 	case utils.VarTunnelMessageRaw:

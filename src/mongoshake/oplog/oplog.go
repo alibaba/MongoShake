@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 
 	"github.com/vinllen/mgo/bson"
-
+	"strings"
 )
 
 const (
@@ -20,15 +20,18 @@ type GenericOplog struct {
 
 type ParsedLog struct {
 	Timestamp     bson.MongoTimestamp `bson:"ts" json:"ts"`
+	HistoryId     int64               `bson:"h,omitempty" json:"h,omitempty"`
+	Version       int                 `bson:"v,omitempty" json:"v,omitempty"`
 	Operation     string              `bson:"op" json:"op"`
-	Gid           string              `bson:"g" json:"g"`
+	Gid           string              `bson:"g,omitempty" json:"g,omitempty"`
 	Namespace     string              `bson:"ns" json:"ns"`
 	Object        bson.D              `bson:"o" json:"o"`
 	Query         bson.M              `bson:"o2" json:"o2"`
-	UniqueIndexes bson.M              `bson:"uk" json:"uk"`
-	Lsid          interface{}         `bson:"lsid" json:"lsid"`               // mark the session id, used in transaction
-	FromMigrate   bool                `bson:"fromMigrate" json:"fromMigrate"` // move chunk
-	TxnNumber     uint64              `bson:"txnNumber" json:"txnNumber"`     // transaction number in session
+	UniqueIndexes bson.M              `bson:"uk,omitempty" json:"uk,omitempty"`
+	Lsid          bson.M              `bson:"lsid,omitempty" json:"lsid,omitempty"`               // mark the session id, used in transaction
+	FromMigrate   bool                `bson:"fromMigrate,omitempty" json:"fromMigrate,omitempty"` // move chunk
+	TxnNumber     uint64              `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`     // transaction number in session
+	// Ui            bson.Binary         `bson:"ui,omitempty" json:"ui,omitempty"` // do not enable currently
 }
 
 type PartialLog struct {
@@ -45,7 +48,7 @@ type PartialLog struct {
 }
 
 func LogEntryEncode(logs []*GenericOplog) [][]byte {
-	var encodedLogs [][]byte
+	encodedLogs := make([][]byte, 0, len(logs))
 	// log entry encode
 	for _, log := range logs {
 		encodedLogs = append(encodedLogs, log.Raw)
@@ -66,7 +69,8 @@ func NewPartialLog(data bson.M) *PartialLog {
 	parsedLog := new(ParsedLog)
 	logType := reflect.TypeOf(*parsedLog)
 	for i := 0; i < logType.NumField(); i++ {
-		tagName := logType.Field(i).Tag.Get("bson")
+		tagNameWithOption := logType.Field(i).Tag.Get("bson")
+		tagName := strings.Split(tagNameWithOption, ",")[0]
 		if v, ok := data[tagName]; ok {
 			reflect.ValueOf(parsedLog).Elem().Field(i).Set(reflect.ValueOf(v))
 		}
@@ -89,9 +93,10 @@ func (partialLog *PartialLog) Dump(keys map[string]struct{}, all bool) bson.D {
 	var out bson.D
 	logType := reflect.TypeOf(partialLog.ParsedLog)
 	for i := 0; i < logType.NumField(); i++ {
-		if tagName, ok := logType.Field(i).Tag.Lookup("bson"); ok {
+		if tagNameWithOption, ok := logType.Field(i).Tag.Lookup("bson"); ok {
 			// out[tagName] = reflect.ValueOf(partialLog).Elem().Field(i).Interface()
 			value := reflect.ValueOf(partialLog.ParsedLog).Field(i).Interface()
+			tagName := strings.Split(tagNameWithOption, ",")[0]
 			if !all {
 				if _, ok := keys[tagName]; !ok {
 					continue
@@ -124,12 +129,41 @@ func GetKeyWithIndex(log bson.D, wanted string) (interface{}, int) {
 	return nil, 0
 }
 
+func ConvertBsonD2MExcept(input bson.D, except map[string]struct{}) (bson.M, map[string]struct{}) {
+	m := bson.M{}
+	keys := make(map[string]struct{}, len(input))
+	for _, ele := range input {
+		switch ele.Value.(type) {
+		case bson.D:
+			if _, ok := except[ele.Name]; ok {
+				m[ele.Name] = ele.Value
+			} else {
+				son, _ := ConvertBsonD2M(ele.Value.(bson.D))
+				m[ele.Name] = son
+			}
+		default:
+			m[ele.Name] = ele.Value
+		}
+
+		keys[ele.Name] = struct{}{}
+	}
+
+	return m, keys
+}
+
 // convert bson.D to bson.M
 func ConvertBsonD2M(input bson.D) (bson.M, map[string]struct{}) {
 	m := bson.M{}
 	keys := make(map[string]struct{}, len(input))
 	for _, ele := range input {
 		m[ele.Name] = ele.Value
+		switch ele.Value.(type) {
+		case bson.D:
+			son, _ := ConvertBsonD2M(ele.Value.(bson.D))
+			m[ele.Name] = son
+		default:
+			m[ele.Name] = ele.Value
+		}
 		keys[ele.Name] = struct{}{}
 	}
 

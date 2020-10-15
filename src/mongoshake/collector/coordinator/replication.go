@@ -47,6 +47,11 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	}
 	LOG.Info("Collector startup. shard_by[%s] gids[%s]", conf.Options.IncrSyncShardKey, conf.Options.IncrSyncOplogGIDS)
 
+	// run extra job if has
+	if err := RunExtraJob(coordinator.RealSourceIncrSync); err != nil {
+		return err
+	}
+
 	// all configurations has changed to immutable
 	// opts, _ := json.Marshal(conf.Options)
 	opts, _ := json.Marshal(conf.GetSafeOptions())
@@ -147,7 +152,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		rs[rsName] = 1
 		src.ReplicaName = rsName
 
-		// look around if there has uniq index
+		// look around if there has unique index
 		if !hasUniqIndex && conf.Options.IncrSyncShardKey == oplog.ShardAutomatic {
 			hasUniqIndex = conn.HasUniqueIndex()
 		}
@@ -163,6 +168,11 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		} else {
 			conf.Options.IncrSyncShardKey = oplog.ShardByID
 		}
+	}
+
+	// TODO, check unique exist on given namespace
+	if len(conf.Options.IncrSyncShardByObjectIdWhiteList) != 0 {
+
 	}
 
 	return nil

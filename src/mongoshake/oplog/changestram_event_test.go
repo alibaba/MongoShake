@@ -667,4 +667,35 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 0, len(list), "should be equal")
 	}
+
+	// test update without FullDocument field but with IncrSyncChangeStreamWatchFullDocument
+	{
+		fmt.Printf("TestConvertEvent2Oplog case %d.\n", nr)
+		nr++
+
+		eventUpdate1 := Event{
+			OperationType: "update",
+			DocumentKey: bson.M{
+				"_id": "2",
+			},
+			UpdateDescription: bson.M{
+				"updatedFields": bson.M{
+					"b": "300",
+					"c": "400",
+				},
+				"removedFields": []string{"a"},
+			},
+			Ns: bson.M{
+				"db":   "testDb",
+				"coll": "testColl",
+			},
+		}
+		out, err := bson.Marshal(eventUpdate1)
+		assert.Equal(t, nil, err, "should be equal")
+
+		oplog, err := ConvertEvent2Oplog(out, true)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, true, oplog.Object != nil && len(oplog.Object) > 0, "should be equal")
+		fmt.Println(oplog)
+	}
 }

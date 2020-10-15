@@ -17,7 +17,7 @@ import (
  *     bool: can run incremental sync directly?
  *     error: error
  */
-func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs() (bson.MongoTimestamp, map[string]int64, bool, error) {
+func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll bool) (bson.MongoTimestamp, map[string]int64, bool, error) {
 	var (
 		tsMap       map[string]utils.TimestampNode
 		startTsMap  map[string]int64 // replica-set name => timestamp
@@ -84,7 +84,9 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs() (bson.Mong
 		}
 
 		if ckptRemote == nil {
-			if confTsMongoTs > 1 && ts.Oldest >= confTsMongoTs {
+			if syncModeAll || confTsMongoTs > bson.MongoTimestamp(1 << 32) && ts.Oldest >= confTsMongoTs {
+				LOG.Info("%s syncModeAll[%v] ts.Oldest[%v], confTsMongoTs[%v]", replName, syncModeAll, ts.Oldest,
+					confTsMongoTs)
 				return smallestNew, nil, false, nil
 			}
 			startTsMap[replName] = int64(confTsMongoTs)
@@ -111,7 +113,7 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 		return syncMode, nil, 0, nil
 	}
 
-	smallestNewTs, startTsMap, canIncrSync, err := coordinator.compareCheckpointAndDbTs()
+	smallestNewTs, startTsMap, canIncrSync, err := coordinator.compareCheckpointAndDbTs(syncMode == utils.VarSyncModeAll)
 	if err != nil {
 		return "", nil, 0, err
 	}
@@ -119,6 +121,10 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	if canIncrSync {
 		LOG.Info("sync mode run %v", utils.VarSyncModeIncr)
 		return utils.VarSyncModeIncr, startTsMap, 0, nil
+	} else if syncMode == utils.VarSyncModeIncr || conf.Options.Tunnel != utils.VarTunnelDirect {
+		// bugfix v2.4.11: if can not run incr sync directly, return error when sync_mode == "incr"
+		// bugfix v2.4.12: return error when tunnel != "direct"
+		return "", nil, 0, fmt.Errorf("start time illegal, can't run incr sync")
 	} else {
 		return utils.VarSyncModeAll, nil, utils.TimestampToInt64(smallestNewTs), nil
 	}

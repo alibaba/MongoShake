@@ -3,15 +3,18 @@ package docsyncer
 import (
 	"fmt"
 	"strings"
+	"math"
 
 	"mongoshake/collector/filter"
 	"mongoshake/common"
+	"mongoshake/collector/configure"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-	"mongoshake/collector/configure"
-	"math"
+	"go.mongodb.org/mongo-driver/mongo"
+	"context"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 /**
@@ -227,8 +230,9 @@ type DocumentReader struct {
 	ns  utils.NS
 
 	// mongo document reader
-	conn        *utils.MongoConn
-	docIterator *mgo.Iter
+	client    *utils.MongoCommunityConn
+	docCursor *mongo.Cursor
+	ctx       context.Context
 
 	// query statement and current max cursor
 	query bson.M
@@ -248,10 +252,13 @@ func NewDocumentReader(src string, ns utils.NS, start, end interface{}) *Documen
 		q["_id"] = innerQ
 	}
 
+	ctx := context.Background()
+
 	return &DocumentReader{
 		src:   src,
 		ns:    ns,
 		query: q,
+		ctx:   ctx,
 	}
 }
 
@@ -268,54 +275,71 @@ func (reader *DocumentReader) NextDoc() (doc *bson.Raw, err error) {
 
 	doc = new(bson.Raw)
 
-	if !reader.docIterator.Next(doc) {
-		if err := reader.docIterator.Err(); err != nil {
+	if !reader.docCursor.Next(reader.ctx) {
+		if err := reader.docCursor.Err(); err != nil {
 			// some internal error. need rebuild the oplogsIterator
-			reader.releaseIterator()
+			reader.releaseCursor()
 			return nil, err
 		} else {
 			return nil, nil
 		}
 	}
-	return doc, nil
+
+	err = bson.Unmarshal(reader.docCursor.Current, doc)
+	// err = reader.docCursor.Decode(doc)
+	return doc, err
 }
 
 // ensureNetwork establish the mongodb connection at first
 // if current connection is not ready or disconnected
 func (reader *DocumentReader) ensureNetwork() (err error) {
-	if reader.docIterator != nil {
+	if reader.docCursor != nil {
 		return nil
 	}
-	if reader.conn == nil || (reader.conn != nil && !reader.conn.IsGood()) {
-		if reader.conn != nil {
-			reader.conn.Close()
-		}
-		// reconnect
-		if reader.conn, err = utils.NewMongoConn(reader.src, conf.Options.MongoConnectMode, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault); reader.conn == nil || err != nil {
+
+	if reader.client == nil {
+		reader.client, err = utils.NewMongoCommunityConn(reader.src, conf.Options.MongoConnectMode, true,
+				utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
+		if err != nil {
 			return err
 		}
 	}
 
-	// rebuild syncerGroup condition statement with current checkpoint timestamp
-	reader.conn.Session.SetBatch(8192)
-	reader.conn.Session.SetPrefetch(0.2)
-	reader.conn.Session.SetCursorTimeout(0)
-	reader.docIterator = reader.conn.Session.DB(reader.ns.Database).C(reader.ns.Collection).
-		Find(reader.query).Iter()
+	findOptions := new(options.FindOptions)
+	findOptions.SetSort(map[string]interface{}{
+		"_id": 1,
+	})
+	findOptions.SetBatchSize(8192)
+	findOptions.SetHint(map[string]interface{}{
+		"_id": 1,
+	})
+	// findOptions.SetNoCursorTimeout(true)
+	findOptions.SetComment(fmt.Sprintf("mongo-shake full sync: ns[%v] query[%v]", reader.ns, reader.query))
+
+	reader.docCursor, err = reader.client.Client.Database(reader.ns.Database).Collection(reader.ns.Collection, nil).
+		Find(nil, reader.query, findOptions)
+	if err != nil {
+		return fmt.Errorf("run find failed: %v", err)
+	}
+
 	return nil
 }
 
-func (reader *DocumentReader) releaseIterator() {
-	if reader.docIterator != nil {
-		_ = reader.docIterator.Close()
+func (reader *DocumentReader) releaseCursor() {
+	if reader.docCursor != nil {
+		err := reader.docCursor.Close(reader.ctx)
+		LOG.Error("release cursor fail: %v", err)
 	}
-	reader.docIterator = nil
+	reader.docCursor = nil
 }
 
 func (reader *DocumentReader) Close() {
-	if reader.conn != nil {
-		reader.conn.Close()
-		reader.conn = nil
+	if reader.docCursor != nil {
+		reader.docCursor.Close(reader.ctx)
+	}
+
+	if reader.client != nil {
+		reader.client.Client.Disconnect(reader.ctx)
+		reader.client = nil
 	}
 }

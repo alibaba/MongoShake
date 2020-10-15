@@ -152,11 +152,13 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 		return result
 	} else {
 		// DDL
+		LOG.Info("NamespaceFilter check %v", log.Object)
 		operation, found := oplog.ExtraCommandName(log.Object)
 		if !found {
 			LOG.Warn("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
 			return false
 		}
+
 		switch operation {
 		case "create":
 			fallthrough
@@ -195,7 +197,7 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 			return filter.filter(log)
 		case "applyOps":
 			var ops []bson.D
-			var filterOps []interface{} // return []interface{}
+			var remainOps []interface{} // return []interface{}
 
 			// it's very strange, some documents are []interface, some are []bson.D
 			switch v := oplog.GetKey(log.Object, "applyOps").(type) {
@@ -208,15 +210,22 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 			default:
 			}
 
+			// except field 'o'
+			except := map[string]struct{}{
+				"o": {},
+			}
+
 			for _, ele := range ops {
-				m, _ := oplog.ConvertBsonD2M(ele)
+				m, _ := oplog.ConvertBsonD2MExcept(ele, except)
 				subLog := oplog.NewPartialLog(m)
 				if ok := filter.Filter(subLog); !ok {
-					filterOps = append(filterOps, ele)
+					remainOps = append(remainOps, ele)
 				}
 			}
-			oplog.SetFiled(log.Object, "applyOps", filterOps)
-			return len(filterOps) > 0
+			oplog.SetFiled(log.Object, "applyOps", remainOps)
+
+			LOG.Info("NamespaceFilter applyOps filter?[%v], remainOps: %v", len(remainOps) == 0, remainOps)
+			return len(remainOps) == 0
 		default:
 			// such as: dropDatabase
 			return filter.filter(log)

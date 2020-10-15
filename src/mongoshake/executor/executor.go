@@ -185,13 +185,20 @@ type Executor struct {
 	bulkInsert bool
 
 	// metric
-	metricInsert  uint64
-	metricUpdate  uint64
-	metricDelete  uint64
-	metricDDL     uint64
-	metricUnknown uint64
-	metricNoop    uint64
-	metricError   uint64
+	metricInsert     uint64
+	metricInsertMap  sync.Map
+	metricUpdate     uint64
+	metricUpdateMap  sync.Map
+	metricDelete     uint64
+	metricDeleteMap  sync.Map
+	metricDDL        uint64
+	metricDDLMap     sync.Map
+	metricUnknown    uint64
+	metricUnknownMap sync.Map
+	metricNoop       uint64
+	metricNoopMap    sync.Map
+	metricError      uint64
+	metricErrorMap   sync.Map
 }
 
 func GenerateExecutorId() int {
@@ -332,8 +339,13 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			oplog.SetFiled(partialLog.Object, "to", nsTrans.Transform(toNs))
 		case "applyOps":
 			if ops := oplog.GetKey(partialLog.Object, "applyOps").([]bson.D); ops != nil {
+				// except field 'o'
+				except := map[string]struct{}{
+					"o": {},
+				}
 				for i, ele := range ops {
-					m, keys := oplog.ConvertBsonD2M(ele)
+					// m, keys := oplog.ConvertBsonD2M(ele)
+					m, keys := oplog.ConvertBsonD2MExcept(ele, except)
 					subLog := oplog.NewPartialLog(m)
 					transSubLog := transformPartialLog(subLog, nsTrans, transformRef)
 					if transSubLog == nil {
@@ -351,6 +363,11 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 	return partialLog
 }
 
+type Item struct {
+	Key string
+	Val uint64
+}
+
 func (exec *Executor) RestAPI() {
 	type ExecutorInfo struct {
 		Id      int    `json:"id"`
@@ -361,17 +378,85 @@ func (exec *Executor) RestAPI() {
 		Unknown uint64 `json:"unknown"`
 		Error   uint64 `json:"error"`
 		// Noop uint64 `json:"noop"`
+		InsertMap  []Item `json:"insert_ns_top_3"`
+		UpdateMap  []Item `json:"update_ns_top_3"`
+		DeleteMap  []Item `json:"delete_ns_top_3"`
+		DDLMap     []Item `json:"ddl_ns_top_3"`
+		UnknownMap []Item `json:"unknown_ns_top_3"`
+		ErrorMap   []Item `json:"error_ns_top_3"`
 	}
 
 	utils.IncrSyncHttpApi.RegisterAPI("/executor", nimo.HttpGet, func([]byte) interface{} {
 		return &ExecutorInfo{
-			Id:      exec.id,
-			Insert:  exec.metricInsert,
-			Update:  exec.metricUpdate,
-			Delete:  exec.metricDelete,
-			DDL:     exec.metricDDL,
-			Unknown: exec.metricUnknown,
-			Error:   exec.metricError,
+			Id:         exec.id,
+			Insert:     exec.metricInsert,
+			Update:     exec.metricUpdate,
+			Delete:     exec.metricDelete,
+			DDL:        exec.metricDDL,
+			Unknown:    exec.metricUnknown,
+			Error:      exec.metricError,
+			InsertMap:  calculateTop3(exec.metricInsertMap),
+			UpdateMap:  calculateTop3(exec.metricUpdateMap),
+			DeleteMap:  calculateTop3(exec.metricDeleteMap),
+			DDLMap:     calculateTop3(exec.metricDDLMap),
+			UnknownMap: calculateTop3(exec.metricUnknownMap),
+			ErrorMap:   calculateTop3(exec.metricErrorMap),
 		}
 	})
+}
+
+func calculateTop3(inputMap sync.Map) []Item {
+	/*
+	 * TODO, modify to priority queue.
+	 * the contain/heap package is too complicated to used in golang than C++.
+	 */
+
+	var max1, max2, max3 *Item
+	inputMap.Range(func(key, val interface{}) bool {
+		k := key.(string)
+		v := val.(*uint64)
+
+		if max3 != nil && max3.Val > *v {
+			return true
+		}
+
+		if max2 != nil && max2.Val > *v {
+			if max3 == nil {
+				max3 = new(Item)
+			}
+
+			max3.Key = k
+			max3.Val = *v
+			return true
+		}
+
+		if max1 != nil && max1.Val > *v {
+			max3 = max2
+			max2 = &Item{
+				Key: k,
+				Val: *v,
+			}
+			return true
+		}
+
+		max3 = max2
+		max2 = max1
+		max1 = &Item{
+			Key: k,
+			Val: *v,
+		}
+		return true
+	})
+
+	ret := make([]Item, 0, 3)
+	if max1 != nil {
+		ret = append(ret, *max1)
+	}
+	if max2 != nil {
+		ret = append(ret, *max2)
+	}
+	if max3 != nil {
+		ret = append(ret, *max3)
+	}
+	return ret
 }

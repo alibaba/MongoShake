@@ -1492,7 +1492,6 @@ func TestGetBatchWithDelay(t *testing.T) {
 		assert.Equal(t, false, exit, "should be equal")
 	}
 
-	return
 	// 3. delay == 1s
 	{
 		fmt.Printf("TestGetBatchWithDelay case %d.\n", nr)
