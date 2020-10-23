@@ -82,7 +82,7 @@ func GetAndCompareVersion(session *mgo.Session, threshold string) (bool, error) 
 		if compareEle > thresholdEle {
 			return true, nil
 		} else if compareEle < thresholdEle {
-			return false, fmt.Errorf("compareEle[%v] < thresholdEle[%v]", compareEle, thresholdEle)
+			return false, fmt.Errorf("compare[%v] < threshold[%v]", compare, threshold)
 		}
 	}
 	return true, nil

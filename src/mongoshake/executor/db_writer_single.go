@@ -182,8 +182,9 @@ func (sw *SingleWriter) doDelete(database, collection string, metadata bson.M,
 				continue
 			}
 
-			if utils.IsNotFound(err) {
-				return fmt.Errorf("doDelete data[%v] not found", log.original.partialLog.Query)
+			if IgnoreError(err, "d", parseLastTimestamp(oplogs) <= sw.fullFinishTs) {
+				LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]", err, "d", parseLastTimestamp(oplogs) <= sw.fullFinishTs)
+				return nil
 			} else {
 				LOG.Error("delete data[%v] failed[%v]", log.original.partialLog.Query, err)
 				return err
