@@ -64,14 +64,19 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 	}
 	var updates []*pair
 	for _, log := range oplogs {
-		// insert must have _id
-		// if id, exist := log.original.partialLog.Object["_id"]; exist {
-		if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
-			// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-			newObject := log.original.partialLog.Object
-			updates = append(updates, &pair{id: id, data: newObject})
+		newObject := log.original.partialLog.Object
+		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
+			updates = append(updates, &pair{id: log.original.partialLog.DocumentKey, data: newObject})
 		} else {
-			return fmt.Errorf("insert on duplicated update _id look up failed. %v", log.original.partialLog)
+			if upsert {
+				LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
+			}
+			// insert must have _id
+			if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
+				updates = append(updates, &pair{id: id, data: newObject})
+			} else {
+				return fmt.Errorf("insert on duplicated update _id look up failed. %v", log.original.partialLog)
+			}
 		}
 
 		LOG.Debug("writer: updateOnInsert %v", log.original.partialLog)
@@ -80,7 +85,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 	collectionHandle := sw.session.DB(database).C(collection)
 	if upsert {
 		for i, update := range updates {
-			if _, err := collectionHandle.UpsertId(update.id, update.data); err != nil {
+			if _, err := collectionHandle.Upsert(update.id, update.data); err != nil {
 				// error can be ignored
 				if IgnoreError(err, "u", utils.TimestampToInt64(oplogs[i].original.partialLog.Timestamp) <= sw.fullFinishTs) {
 					continue
@@ -118,7 +123,15 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 			//	delete(newObject, versionMark)
 			//}
 			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-			_, err := collectionHandle.Upsert(log.original.partialLog.Query, log.original.partialLog.Object)
+			var err error
+			if upsert && len(log.original.partialLog.DocumentKey) > 0 {
+				_, err = collectionHandle.Upsert(log.original.partialLog.DocumentKey, log.original.partialLog.Object)
+			} else {
+				if upsert {
+					LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
+				}
+				_, err = collectionHandle.Upsert(log.original.partialLog.Query, log.original.partialLog.Object)
+			}
 			if err != nil {
 				// error can be ignored
 				if IgnoreError(err, "u", utils.TimestampToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {

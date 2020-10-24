@@ -1,3 +1,10 @@
+2020-10-xx Alibaba Cloud.
+	* version: 2.4.16
+	* IMPROVE: ignore error when meets namespace not found error in delete
+	operation in single writer. #467
+	* IMPROVE: when "incr_sync.mongo_fetch_method == oplog", support upsert
+	if target is sharding. #380
+
 2020-10-14 Alibaba Cloud.
 	* version: 2.4.15
 	* BUGFIX: in kafka tunnel, solve json marshal failed when meets NaN, Inf,
