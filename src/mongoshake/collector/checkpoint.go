@@ -17,7 +17,8 @@ import (
 
 func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int64) {
 	LOG.Info("Oplog sync[%v] create checkpoint manager with url[%s] table[%s.%s] start-position[%v]",
-		name, conf.Options.CheckpointStorageUrl, conf.Options.CheckpointStorageDb,
+		name, utils.BlockMongoUrlPassword(conf.Options.CheckpointStorageUrl, "***"),
+		conf.Options.CheckpointStorageDb,
 		conf.Options.CheckpointStorageCollection, utils.ExtractTimestampForLog(startPosition))
 	sync.ckptManager = ckpt.NewCheckpointManager(name, startPosition)
 }

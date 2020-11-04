@@ -398,6 +398,10 @@ func checkConflict() error {
 			conf.Options.IncrSyncChangeStreamWatchFullDocument = false
 		}
 	}
+	// set start position to 0 when sync_mode != "incr"
+	if conf.Options.SyncMode != utils.VarSyncModeIncr {
+		conf.Options.CheckpointStartPosition = 1
+	}
 
 	/*****************************4. inner variables******************************/
 	if conf.Options.IncrSyncReaderDebug != utils.VarIncrSyncReaderDebugNone &&

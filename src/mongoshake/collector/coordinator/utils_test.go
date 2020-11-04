@@ -220,7 +220,6 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
 		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
 	}
-	return
 
 	// test replica set with fetch_method = "oplog" and no checkpoint exists
 	{
@@ -275,11 +274,9 @@ func TestSelectSyncMode(t *testing.T) {
 		// run
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeAll)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, map[string]int64{
-			testReplicaName: int64(50) << 32,
-		}, startTsMap, "should be equal")
-		assert.Equal(t, utils.VarSyncModeIncr, mode, "should be equal")
-		assert.Equal(t, int64(0), ts, "should be equal")
+		assert.Equal(t, true, startTsMap == nil, "should be equal")
+		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
 
 		// run sync_mode incr
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeIncr)
@@ -408,13 +405,9 @@ func TestSelectSyncMode(t *testing.T) {
 		conf.Options.CheckpointStartPosition = 45
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeAll)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, map[string]int64{
-			"mockReplicaSet1": int64(45) << 32,
-			"mockReplicaSet2": int64(45) << 32,
-			"mockReplicaSet3": int64(45) << 32,
-		}, startTsMap, "should be equal")
-		assert.Equal(t, utils.VarSyncModeIncr, mode, "should be equal")
-		assert.Equal(t, int64(0), ts, "should be equal")
+		assert.Equal(t, true, startTsMap == nil, "should be equal")
+		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
 
 		// run sync_mode incr
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeIncr)
@@ -540,16 +533,88 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		conn.Session.DB(testDb).C(testCollection).DropCollection()
+		ckptManager5 := ckpt.NewCheckpointManager("mockMongoS", 0)
+		assert.Equal(t, true, ckptManager5 != nil, "should be equal")
+
+		ckptManager5.Get()
 
 		conf.Options.CheckpointStartPosition = 55
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeAll)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, map[string]int64{
-			"mockMongoS":      int64(55) << 32,
-			"mockReplicaSet1": int64(55) << 32,
-			"mockReplicaSet2": int64(55) << 32,
-			"mockReplicaSet3": int64(55) << 32,
-		}, startTsMap, "should be equal")
+		assert.Equal(t, true, startTsMap == nil, "should be equal")
+		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(100 <<32)), ts, "should be equal")
+	}
+
+	// test sharding with fetch_method = "change_stream" with no checkpoint exist and kafka tunnel
+	{
+		fmt.Printf("TestSelectSyncMode case %d.\n", nr)
+		nr++
+
+		conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodChangeStream
+		conf.Options.CheckpointStorageUrl = testUrl
+		conf.Options.CheckpointStorageDb = testDb
+		conf.Options.CheckpointStorageCollection = testCollection
+		conf.Options.CheckpointStorage = utils.VarCheckpointStorageDatabase
+		conf.Options.CheckpointStartPosition = 1
+
+		// mock GetAllTimestampInUT input map
+		utils.GetAllTimestampInUTInput = map[string]utils.Pair{
+			"mockReplicaSet1": {
+				First:  bson.MongoTimestamp(10 << 32),
+				Second: bson.MongoTimestamp(80 << 32),
+			},
+			"mockReplicaSet2": {
+				First:  bson.MongoTimestamp(20 << 32),
+				Second: bson.MongoTimestamp(101 << 32),
+			},
+			"mockReplicaSet3": {
+				First:  bson.MongoTimestamp(30 << 32),
+				Second: bson.MongoTimestamp(102 << 32),
+			},
+		}
+
+		// drop old table
+		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "")
+		assert.Equal(t, nil, err, "should be equal")
+
+		conn.Session.DB(testDb).C(testCollection).DropCollection()
+		// assert.Equal(t, nil, err, "should be equal")
+
+		// no checkpoint pre-exist
+		ckptManager4 := ckpt.NewCheckpointManager("mockMongoS", 0)
+		assert.Equal(t, true, ckptManager4 != nil, "should be equal")
+
+		/*ckptManager4.Get()
+		err = ckptManager4.Update(bson.MongoTimestamp(10 << 32))
+		assert.Equal(t, nil, err, "should be equal")*/
+
+		coordinator := &ReplicationCoordinator{
+			MongoD: []*utils.MongoSource{
+				{
+					URL:         "1.1.1.1",
+					ReplicaName: "mockReplicaSet1",
+				},
+				{
+					URL:         "2.2.2.2",
+					ReplicaName: "mockReplicaSet2",
+				},
+				{
+					URL:         "3.3.3.3",
+					ReplicaName: "mockReplicaSet3",
+				},
+			},
+			MongoS: &utils.MongoSource{
+				URL:         "100.100.100.100",
+				ReplicaName: "mockMongoS",
+			},
+		}
+
+		// run, return all
+		mode, startTsMap, ts, err := coordinator.selectSyncMode(utils.VarSyncModeIncr)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, true, len(startTsMap) >= 1, "should be equal")
+		assert.Equal(t, int64(1) << 32, startTsMap["mockMongoS"], "should be equal")
 		assert.Equal(t, utils.VarSyncModeIncr, mode, "should be equal")
 		assert.Equal(t, int64(0), ts, "should be equal")
 	}
