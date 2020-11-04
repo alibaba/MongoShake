@@ -58,14 +58,21 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 	oplogs []*OplogRecord, upsert bool) error {
 	var update []interface{}
 	for _, log := range oplogs {
-		// insert must have _id
-		// if id, exist := log.original.partialLog.Object["_id"]; exist {
-		if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
-			// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-			newObject := log.original.partialLog.Object
-			update = append(update, bson.M{"_id": id}, newObject)
+		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
+		newObject := log.original.partialLog.Object
+		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
+			update = append(update, log.original.partialLog.DocumentKey, newObject)
 		} else {
-			LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
+			if upsert {
+				LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
+			}
+			// insert must have _id
+			// if id, exist := log.original.partialLog.Object["_id"]; exist {
+			if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
+				update = append(update, bson.M{"_id": id}, newObject)
+			} else {
+				LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
+			}
 		}
 
 		LOG.Debug("writer: updateOnInsert %v", log.original.partialLog)
@@ -115,7 +122,14 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 		//	delete(newObject, versionMark)
 		//}
 		log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-		update = append(update, log.original.partialLog.Query, log.original.partialLog.Object)
+		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
+			update = append(update, log.original.partialLog.DocumentKey, log.original.partialLog.Object)
+		} else {
+			if upsert {
+				LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
+			}
+			update = append(update, log.original.partialLog.Query, log.original.partialLog.Object)
+		}
 
 		LOG.Debug("writer: update %v", log.original.partialLog.Object)
 	}

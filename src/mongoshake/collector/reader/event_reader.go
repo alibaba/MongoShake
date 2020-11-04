@@ -13,6 +13,7 @@ import (
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/go-diskqueue"
 	"fmt"
+	"mongoshake/collector/ckpt"
 )
 
 const (
@@ -70,7 +71,7 @@ func (er *EventReader) Name() string {
 // SetQueryTimestampOnEmpty set internal timestamp if
 // not exist in this or. initial stage most of the time
 func (er *EventReader) SetQueryTimestampOnEmpty(ts bson.MongoTimestamp) {
-	if er.startAtOperationTime == -1 {
+	if er.startAtOperationTime == -1 && ts != ckpt.InitCheckpoint {
 		LOG.Info("set query timestamp: %v", utils.ExtractTimestampForLog(ts))
 		er.startAtOperationTime = utils.TimestampToInt64(ts)
 	}

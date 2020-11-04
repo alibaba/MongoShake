@@ -87,6 +87,10 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 	oplog.TxnNumber = event.TxnNumber
 	// lsid
 	oplog.Lsid = event.Lsid
+	// documentKey
+	if len(event.DocumentKey) > 0 {
+		oplog.DocumentKey = event.DocumentKey
+	}
 
 	ns := event.Ns
 
