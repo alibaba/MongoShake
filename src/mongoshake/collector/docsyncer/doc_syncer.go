@@ -291,7 +291,7 @@ func NewDBSyncer(
 		orphanFilter:   orphanFilter,
 		qos:            qos,
 		metricNsMap:    make(map[utils.NS]*CollectionMetric),
-		replMetric:     utils.NewMetric(fromReplset, utils.TypeFull, utils.METRIC_TPS),
+		replMetric:     utils.NewMetric(fromReplset, utils.TypeFull, utils.METRIC_TPS | utils.METRIC_SUCCESS),
 		FromIsSharding: fromIsSharding,
 	}
 
