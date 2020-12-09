@@ -145,7 +145,7 @@ func (metric *ReplicationMetric) startup() {
 					atomic.LoadUint64(&metric.OplogFail.Value)) // worker send fail
 			}
 			if metric.SUBSCRIBE&METRIC_SUCCESS != 0 {
-				verbose += fmt.Sprintf(", success=%d", success)
+				verbose += fmt.Sprintf(", write_success=%d", success)
 			}
 			if metric.SUBSCRIBE&METRIC_TPS != 0 {
 				verbose += fmt.Sprintf(", tps=%d", tps)
