@@ -4,9 +4,9 @@ import (
 	"testing"
 	"fmt"
 
-	"mongoshake/oplog"
-	"mongoshake/collector/configure"
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/oplog"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"

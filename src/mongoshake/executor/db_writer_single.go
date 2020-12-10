@@ -3,13 +3,13 @@ package executor
 import (
 	"fmt"
 
-	"mongoshake/collector/configure"
-	"mongoshake/oplog"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/oplog"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 )
 
 // use general single writer interface to execute command

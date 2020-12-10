@@ -8,11 +8,11 @@ import (
 	"errors"
 	"io/ioutil"
 
-	"mongoshake/collector/configure"
-	"mongoshake/tunnel"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/tunnel"
 
 	LOG "github.com/vinllen/log4go"
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 )
 
 const (

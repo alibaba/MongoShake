@@ -3,9 +3,9 @@ package coordinator
 import (
 	"errors"
 
-	"mongoshake/common"
-	"mongoshake/collector"
-	"mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"

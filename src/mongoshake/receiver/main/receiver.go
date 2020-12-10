@@ -2,17 +2,17 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
-	"syscall"
-	"errors"
 	"strconv"
+	"syscall"
 
-	"mongoshake/common"
-	"mongoshake/receiver/configure"
-	"mongoshake/tunnel"
-	"mongoshake/receiver"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/receiver"
+	"github.com/alibaba/MongoShake/src/mongoshake/receiver/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/tunnel"
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"

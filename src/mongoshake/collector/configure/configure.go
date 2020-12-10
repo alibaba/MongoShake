@@ -1,7 +1,7 @@
 package conf
 
 import (
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 
 	"github.com/getlantern/deepcopy"
 )

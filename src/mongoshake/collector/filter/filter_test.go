@@ -3,7 +3,7 @@ package filter
 import (
 	"fmt"
 	"testing"
-	"mongoshake/oplog"
+	"github.com/alibaba/MongoShake/src/mongoshake/oplog"
 
 	"github.com/stretchr/testify/assert"
 )

@@ -1,14 +1,14 @@
 package collector
 
 import (
-	"mongoshake/collector/filter"
-	"mongoshake/oplog"
-	"mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/filter"
+	"github.com/alibaba/MongoShake/src/mongoshake/oplog"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/gugemichael/nimo4go"
 	"github.com/vinllen/mgo/bson"
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 	"time"
 )
 

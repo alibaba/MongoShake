@@ -3,7 +3,7 @@ package utils
 import (
 	"bufio"
 	"fmt"
-	"mongoshake/oplog"
+	"github.com/alibaba/MongoShake/src/mongoshake/oplog"
 	"os"
 	"path/filepath"
 )

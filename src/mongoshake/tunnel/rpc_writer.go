@@ -4,7 +4,7 @@ import (
 	"net"
 	"net/rpc"
 
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 
 	LOG "github.com/vinllen/log4go"
 )

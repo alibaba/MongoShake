@@ -3,10 +3,10 @@ package collector
 // persist oplog on disk
 
 import (
-	"mongoshake/oplog"
-	"mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/oplog"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
 	"sync"
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 	"sync/atomic"
 	"time"
 

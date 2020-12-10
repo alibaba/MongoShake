@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"testing"
 
-	"mongoshake/collector/configure"
-	"mongoshake/collector/filter"
-	"mongoshake/oplog"
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/filter"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/oplog"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"

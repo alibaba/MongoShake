@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"mongoshake/tunnel"
-	"mongoshake/oplog"
+	"github.com/alibaba/MongoShake/src/mongoshake/tunnel"
+	"github.com/alibaba/MongoShake/src/mongoshake/oplog"
 
 	"github.com/vinllen/mgo/bson"
 	"github.com/stretchr/testify/assert"

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"mongoshake/unit_test_common"
+	"github.com/alibaba/MongoShake/src/mongoshake/unit_test_common"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"

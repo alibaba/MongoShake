@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"fmt"
 	"os"
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 )
 
 // read the given file and parse the fcv do comparison

@@ -5,7 +5,7 @@ package sourceReader
 import (
 	"fmt"
 
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 
 	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"

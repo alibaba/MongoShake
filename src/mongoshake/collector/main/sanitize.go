@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	"mongoshake/collector/filter"
-	"mongoshake/common"
-	"mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/filter"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
 )
 
 func SanitizeOptions() error {

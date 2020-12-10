@@ -7,9 +7,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"mongoshake/collector/ckpt"
-	"mongoshake/collector/configure"
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/ckpt"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"

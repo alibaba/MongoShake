@@ -7,11 +7,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"mongoshake/collector/ckpt"
-	"mongoshake/collector/configure"
-	"mongoshake/collector/filter"
-	"mongoshake/collector/transform"
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/ckpt"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/filter"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/transform"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"

@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"strings"
 
-	"mongoshake/collector/filter"
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/filter"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-	"mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
 	"math"
 )
 

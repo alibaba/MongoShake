@@ -4,8 +4,8 @@ import (
 	"crypto/md5"
 	"encoding/binary"
 
-	"mongoshake/oplog"
-	"mongoshake/sharding"
+	"github.com/alibaba/MongoShake/src/mongoshake/oplog"
+	"github.com/alibaba/MongoShake/src/mongoshake/sharding"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"

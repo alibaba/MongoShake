@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"mongoshake/oplog"
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/oplog"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"

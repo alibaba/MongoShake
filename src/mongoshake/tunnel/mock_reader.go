@@ -2,7 +2,7 @@ package tunnel
 
 import (
 	"math/rand"
-	"mongoshake/oplog"
+	"github.com/alibaba/MongoShake/src/mongoshake/oplog"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"

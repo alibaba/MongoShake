@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
-	"mongoshake/common"
-	"mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 
-	"github.com/vinllen/mgo/bson"
-	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/go-diskqueue"
+	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -47,7 +47,7 @@ type EventReader struct {
 // NewEventReader creates reader with mongodb url
 func NewEventReader(src string, replset string) *EventReader {
 	var channelSize = int(float64(BatchSize) * PrefetchPercent)
-	return &EventReader {
+	return &EventReader{
 		src:                  src,
 		replset:              replset,
 		startAtOperationTime: -1, // init value

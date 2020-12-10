@@ -1,11 +1,11 @@
 package tunnel
 
 import (
-	"mongoshake/executor"
+	"github.com/alibaba/MongoShake/src/mongoshake/executor"
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 )
 
 type DirectWriter struct {

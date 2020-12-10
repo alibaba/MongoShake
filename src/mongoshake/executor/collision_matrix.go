@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"strings"
 
-	"mongoshake/oplog"
+	"github.com/alibaba/MongoShake/src/mongoshake/oplog"
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"

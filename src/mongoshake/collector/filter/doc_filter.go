@@ -1,8 +1,8 @@
 package filter
 
 import (
-	"mongoshake/collector/configure"
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 	"regexp"
 	"strings"
 	"fmt"

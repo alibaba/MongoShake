@@ -1,11 +1,11 @@
 package collector
 
 import (
-	"mongoshake/collector/configure"
-	"mongoshake/common"
-	"mongoshake/modules"
-	"mongoshake/oplog"
-	"mongoshake/tunnel"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/modules"
+	"github.com/alibaba/MongoShake/src/mongoshake/oplog"
+	"github.com/alibaba/MongoShake/src/mongoshake/tunnel"
 )
 
 type WriteController struct {

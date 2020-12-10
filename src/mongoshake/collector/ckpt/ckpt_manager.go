@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"mongoshake/collector/configure"
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 
 	"github.com/vinllen/mgo/bson"
 	"sync"

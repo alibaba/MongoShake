@@ -7,7 +7,7 @@ import (
 
 	"github.com/Shopify/sarama"
 	"github.com/rcrowley/go-metrics"
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 )
 
 var (

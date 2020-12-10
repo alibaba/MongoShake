@@ -1,10 +1,10 @@
 package replayer
 
 import (
-	"mongoshake/common"
-	"mongoshake/modules"
-	"mongoshake/oplog"
-	"mongoshake/tunnel"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/modules"
+	"github.com/alibaba/MongoShake/src/mongoshake/oplog"
+	"github.com/alibaba/MongoShake/src/mongoshake/tunnel"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"

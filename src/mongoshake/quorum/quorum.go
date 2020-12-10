@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"mongoshake/common"
+	"github.com/alibaba/MongoShake/src/mongoshake/common"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
