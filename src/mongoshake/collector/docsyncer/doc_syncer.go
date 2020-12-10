@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	MAX_BUFFER_BYTE_SIZE = 16 * 1024 * 1024
+	MAX_BUFFER_BYTE_SIZE = 12 * 1024 * 1024
 	SpliterReader        = 4
 )
 

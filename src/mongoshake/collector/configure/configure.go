@@ -79,6 +79,8 @@ type Configuration struct {
 	IncrSyncReaderDebug      string `config:"incr_sync.reader.debug"`
 	IncrSyncCollisionEnable  bool   `config:"incr_sync.collision_detection"`
 	IncrSyncReaderBufferTime uint   `config:"incr_sync.reader.buffer_time"`
+	SourceDBVersion          string
+	TargetDBVersion          string
 
 	/*---------------------------------------------------------*/
 	// generated variables
