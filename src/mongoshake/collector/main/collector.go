@@ -6,13 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"syscall"
 	"strconv"
+	"syscall"
 
 	"github.com/alibaba/MongoShake/src/mongoshake/collector/configure"
+	"github.com/alibaba/MongoShake/src/mongoshake/collector/coordinator"
 	"github.com/alibaba/MongoShake/src/mongoshake/common"
 	"github.com/alibaba/MongoShake/src/mongoshake/quorum"
-	"github.com/alibaba/MongoShake/src/mongoshake/collector/coordinator"
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
