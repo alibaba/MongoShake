@@ -90,6 +90,12 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 		index, errMsg, dup := utils.FindFirstErrorIndexAndMessage(err.Error())
 		LOG.Error("detail error info with index[%v] msg[%v] dup[%v]", index, errMsg, dup)
 
+		if mgo.IsDup(err) {
+			// create single writer to write one by one
+			sw := NewDbWriter(bw.session, bson.M{}, false, bw.fullFinishTs)
+			return sw.doUpdateOnInsert(database, collection, metadata, oplogs[index:], upsert)
+		}
+
 		// error can be ignored
 		if IgnoreError(err, "u", parseLastTimestamp(oplogs) <= bw.fullFinishTs) {
 			var oplogRecord *OplogRecord
@@ -101,11 +107,6 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 			return nil
 		}
 
-		if mgo.IsDup(err) {
-			// create single writer to write one by one
-			sw := NewDbWriter(bw.session, bson.M{}, false, bw.fullFinishTs)
-			return sw.doUpdateOnInsert(database, collection, metadata, oplogs[index:], upsert)
-		}
 		LOG.Error("doUpdateOnInsert run upsert/update[%v] failed[%v]", upsert, err)
 		return err
 	}
@@ -151,7 +152,14 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 			oplogRecord = oplogs[index]
 		}
 		LOG.Warn("detail error info with index[%v] msg[%v] dup[%v], isFullSyncStage[%v], oplog[%v]",
-			index, errMsg, dup, parseLastTimestamp(oplogs) <= bw.fullFinishTs, oplogRecord)
+			index, errMsg, dup, parseLastTimestamp(oplogs) <= bw.fullFinishTs, *oplogRecord.original.partialLog)
+
+		if mgo.IsDup(err) {
+			HandleDuplicated(bw.session.DB(database).C(collection), oplogs, OpUpdate)
+			// create single writer to write one by one
+			sw := NewDbWriter(bw.session, bson.M{}, false, bw.fullFinishTs)
+			return sw.doUpdate(database, collection, metadata, oplogs[index:], upsert)
+		}
 
 		// error can be ignored
 		if IgnoreError(err, "u", parseLastTimestamp(oplogs) <= bw.fullFinishTs) {
@@ -159,13 +167,6 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 			// re-run (index, len(oplogs) - 1]
 			sw := NewDbWriter(bw.session, bson.M{}, false, bw.fullFinishTs)
 			return sw.doUpdate(database, collection, metadata, oplogs[index + 1:], upsert)
-		}
-
-		if mgo.IsDup(err) {
-			HandleDuplicated(bw.session.DB(database).C(collection), oplogs, OpUpdate)
-			// create single writer to write one by one
-			sw := NewDbWriter(bw.session, bson.M{}, false, bw.fullFinishTs)
-			return sw.doUpdate(database, collection, metadata, oplogs[index:], upsert)
 		}
 		LOG.Error("doUpdate run upsert/update[%v] failed[%v]", upsert, err)
 		return err

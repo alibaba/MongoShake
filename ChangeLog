@@ -1,3 +1,13 @@
+2020-12-09 Alibaba Cloud.
+	* version: 2.4.17
+	* IMPROVE: add write_success field in full sync log metric.
+	* IMPROVE: solve dup error in single_writer which is used when target
+	mongodb version is 3.0.
+	* IMPROVE: show source and target db version in configuration.
+	* IMPROVE: enable NoCursorTimeout when source DB version >= 3.6. #451
+	* IMPROVE: filter oplog.gid field when enable "filter.oplog.gids = true".
+	#510
+
 2020-11-04 Alibaba Cloud.
 	* version: 2.4.16
 	* IMPROVE: ignore error when meets namespace not found error in delete

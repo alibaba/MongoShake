@@ -15,6 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"context"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"time"
 )
 
 /**
@@ -309,11 +310,22 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	findOptions.SetSort(map[string]interface{}{
 		"_id": 1,
 	})
-	findOptions.SetBatchSize(8192)
+	findOptions.SetBatchSize(512)
 	findOptions.SetHint(map[string]interface{}{
 		"_id": 1,
 	})
-	// findOptions.SetNoCursorTimeout(true)
+	/*
+	 * default cursor timeout before 3.6: 10 mins
+	 * since 3.6: 30 mins
+	 * cursor timeout usually happens when one of following conditions satisfy:
+	 * 1. MongoShake blocks so the getMore query has not been sent for a long time.
+	 * 2. Source MongoDB is too busy to handle the query.
+	 */
+	if ok, err := utils.GetAndCompareVersion(nil, "3.6", conf.Options.SourceDBVersion); err != nil && ok {
+		// enable noCursorTimeout since v3.6
+		findOptions.SetNoCursorTimeout(true)
+	}
+	findOptions.SetMaxAwaitTime(40 * time.Minute) // > 30 mins
 	findOptions.SetComment(fmt.Sprintf("mongo-shake full sync: ns[%v] query[%v]", reader.ns, reader.query))
 
 	reader.docCursor, err = reader.client.Client.Database(reader.ns.Database).Collection(reader.ns.Collection, nil).
@@ -328,7 +340,9 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 func (reader *DocumentReader) releaseCursor() {
 	if reader.docCursor != nil {
 		err := reader.docCursor.Close(reader.ctx)
-		LOG.Error("release cursor fail: %v", err)
+		if err != nil {
+			LOG.Error("release cursor fail: %v", err)
+		}
 	}
 	reader.docCursor = nil
 }

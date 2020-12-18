@@ -28,7 +28,7 @@ func (exec *Executor) ensureConnection() bool {
 			return false
 		} else {
 			exec.session = conn.Session
-			if exec.bulkInsert, err = utils.GetAndCompareVersion(exec.session, ThresholdVersion); err != nil {
+			if exec.bulkInsert, err = utils.GetAndCompareVersion(exec.session, ThresholdVersion, conf.Options.TargetDBVersion); err != nil {
 				LOG.Info("compare version with return[%v], bulkInsert disable", err)
 			}
 			if conf.Options.IncrSyncExecutorMajorityEnable {
