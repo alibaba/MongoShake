@@ -340,7 +340,9 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 func (reader *DocumentReader) releaseCursor() {
 	if reader.docCursor != nil {
 		err := reader.docCursor.Close(reader.ctx)
-		LOG.Error("release cursor fail: %v", err)
+		if err != nil {
+			LOG.Error("release cursor fail: %v", err)
+		}
 	}
 	reader.docCursor = nil
 }

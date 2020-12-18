@@ -243,6 +243,13 @@ func (sync *OplogSyncer) startBatcher() {
 		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
 		batchedOplog, barrier, allEmpty, exit := batcher.BatchMore()
 
+		// it's better to handle filter in BatchMore function, but I don't want to touch this file anymore
+		if conf.Options.FilterOplogGids {
+			if err := sync.filterOplogGid(batchedOplog); err != nil {
+				LOG.Crash("%v", err)
+			}
+		}
+
 		var newestTs bson.MongoTimestamp
 		if exit {
 			LOG.Info("%s find exit signal", sync)
@@ -595,6 +602,23 @@ func (sync *OplogSyncer) isCrashError(errMsg string) bool {
 		return true
 	}
 	return false
+}
+
+func (sync *OplogSyncer) filterOplogGid(batchedOplog [][]*oplog.GenericOplog) error {
+	var err error
+	for _, batchGroup := range batchedOplog {
+		for _, log := range batchGroup {
+			if len(log.Parsed.Gid) > 0 {
+				log.Parsed.Gid = ""
+				log.Raw, err = bson.Marshal(&log.Parsed.ParsedLog)
+				if err != nil {
+					return fmt.Errorf("marshal gid filtered oplog[%v] failed: %v", log.Parsed, err)
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func (sync *OplogSyncer) Handle(log *oplog.PartialLog) {

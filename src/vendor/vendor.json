@@ -159,10 +159,10 @@
 			"revisionTime": "2019-03-04T09:57:49Z"
 		},
 		{
-			"checksumSHA1": "1ofNXdPex4lD7ctZNsB18gYM9XA=",
+			"checksumSHA1": "QGD4mNY+Jhg6hibc9cc4OL/AWpE=",
 			"path": "github.com/vinllen/go-diskqueue",
-			"revision": "50ba1ec7656e39dd9e60d452d2519b2fa6e2dff2",
-			"revisionTime": "2020-03-02T03:43:01Z"
+			"revision": "88be00f2b53be059685e262b980a019a09a140cf",
+			"revisionTime": "2020-12-10T12:47:37Z"
 		},
 		{
 			"checksumSHA1": "N9tdQG7wlhVMjVlFDMLTbKl/K+s=",
