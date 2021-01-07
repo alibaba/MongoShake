@@ -15,7 +15,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"context"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"time"
 )
 
 /**
@@ -325,7 +324,6 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 		// enable noCursorTimeout since v3.6
 		findOptions.SetNoCursorTimeout(true)
 	}
-	findOptions.SetMaxAwaitTime(40 * time.Minute) // > 30 mins
 	findOptions.SetComment(fmt.Sprintf("mongo-shake full sync: ns[%v] query[%v]", reader.ns, reader.query))
 
 	reader.docCursor, err = reader.client.Client.Database(reader.ns.Database).Collection(reader.ns.Collection, nil).
