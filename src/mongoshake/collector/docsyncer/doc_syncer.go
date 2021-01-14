@@ -311,6 +311,8 @@ func (syncer *DBSyncer) Init() {
 func (syncer *DBSyncer) Close() {
 	LOG.Info("syncer[%v] closed", syncer)
 	syncer.replMetric.Close()
+	//sleep 1 second for metric routine exit gracefully
+	time.Sleep(1 * time.Second)
 }
 
 // @deprecated
