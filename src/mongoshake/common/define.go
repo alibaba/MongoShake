@@ -15,6 +15,8 @@ const (
 	// mongo connect mode
 	VarMongoConnectModePrimary            = "primary"
 	VarMongoConnectModeSecondaryPreferred = "secondaryPreferred"
+	VarMongoConnectModeSecondary          = "secondary"
+	VarMongoConnectModeNearset            = "nearest"
 	VarMongoConnectModeStandalone         = "standalone"
 
 	// full_sync.create_index

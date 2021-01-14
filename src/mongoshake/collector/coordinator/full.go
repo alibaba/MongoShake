@@ -142,11 +142,13 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// create target client
 	toUrl := conf.Options.TunnelAddress[0]
 	var toConn *utils.MongoConn
-	if toConn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, true,
-		utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault); err != nil {
-		return err
+	if !conf.Options.FullSyncExecutorDebug {
+		if toConn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault); err != nil {
+			return err
+		}
+		defer toConn.Close()
 	}
-	defer toConn.Close()
 
 	// create namespace transform
 	trans := transform.NewNamespaceTransform(conf.Options.TransformNamespace)

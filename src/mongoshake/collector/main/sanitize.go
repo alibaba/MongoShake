@@ -97,8 +97,10 @@ func checkDefaultValue() error {
 	} else {
 		if conf.Options.MongoConnectMode != utils.VarMongoConnectModePrimary &&
 			conf.Options.MongoConnectMode != utils.VarMongoConnectModeSecondaryPreferred &&
+			conf.Options.MongoConnectMode != utils.VarMongoConnectModeSecondary &&
+			conf.Options.MongoConnectMode != utils.VarMongoConnectModeNearset &&
 			conf.Options.MongoConnectMode != utils.VarMongoConnectModeStandalone {
-			return fmt.Errorf("mongo_connect_mode should in {primary, secondaryPreferred, standalone}")
+			return fmt.Errorf("mongo_connect_mode should in {primary, secondaryPreferred, secondary, nearest, standalone}")
 		}
 	}
 
@@ -265,7 +267,10 @@ func checkConnection() error {
 	}
 
 	// check tunnel address
-	if conf.Options.Tunnel == utils.VarTunnelDirect {
+	// no need to check target connection when debug flag set.
+	if conf.Options.Tunnel == utils.VarTunnelDirect &&
+			!conf.Options.FullSyncExecutorDebug &&
+			!conf.Options.IncrSyncExecutorDebug {
 		for i, mongo := range conf.Options.TunnelAddress {
 			targetConn, err := utils.NewMongoConn(mongo, conf.Options.MongoConnectMode, true,
 				utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)

@@ -7,10 +7,9 @@ import (
 	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
-
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
 type MongoCommunityConn struct {
@@ -20,10 +19,6 @@ type MongoCommunityConn struct {
 }
 
 func NewMongoCommunityConn(url string, connectMode string, timeout bool, readConcern, writeConcern string) (*MongoCommunityConn, error) {
-	if connectMode == VarMongoConnectModeStandalone {
-		url += "?connect=direct"
-	}
-
 	clientOps := options.Client().ApplyURI(url)
 
 	// read concern
@@ -40,12 +35,16 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 	}
 
 	// read pref
-	if mode, err := readpref.ModeFromString(connectMode); err != nil {
-		return nil, fmt.Errorf("create connectMode[%v] failed: %v", connectMode, err)
-	} else if opts, err := readpref.New(mode); err != nil {
-		return nil, fmt.Errorf("new mode with connectMode[%v] failed: %v", connectMode, err)
+	if connectMode == VarMongoConnectModeStandalone {
+		clientOps.SetDirect(true)
 	} else {
-		clientOps.SetReadPreference(opts)
+		if mode, err := readpref.ModeFromString(connectMode); err != nil {
+			return nil, fmt.Errorf("create connectMode[%v] failed: %v", connectMode, err)
+		} else if opts, err := readpref.New(mode); err != nil {
+			return nil, fmt.Errorf("new mode with connectMode[%v] failed: %v", connectMode, err)
+		} else {
+			clientOps.SetReadPreference(opts)
+		}
 	}
 
 	// set timeout

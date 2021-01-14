@@ -25,6 +25,11 @@ const (
 )
 
 func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
+	if conf.Options.FullSyncExecutorDebug {
+		LOG.Info("full_sync.executor.debug set, no need to check IsShardingToSharding")
+		return false
+	}
+
 	var source, target string
 	if fromIsSharding {
 		source = "sharding"
@@ -49,6 +54,11 @@ func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
 
 func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoConn,
 	nsTrans *transform.NamespaceTransform) error {
+	if conf.Options.FullSyncExecutorDebug {
+		LOG.Info("full_sync.executor.debug set, no need to drop collection")
+		return nil
+	}
+
 	for ns := range nsSet {
 		toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
 		if !conf.Options.FullSyncCollectionDrop {
@@ -164,6 +174,11 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 
 func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 		nsTrans *transform.NamespaceTransform, background bool) (syncError error) {
+	if conf.Options.FullSyncExecutorDebug {
+		LOG.Info("full_sync.executor.debug set, no need to sync index")
+		return nil
+	}
+
 	type IndexNS struct {
 		ns        utils.NS
 		indexList []mgo.Index
@@ -392,7 +407,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 	// writer
 	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS, syncer)
 	if err := colExecutor.Start(); err != nil {
-		return err
+		return fmt.Errorf("start collectionSync failed: %v", err)
 	}
 
 	// splitter reader
@@ -410,7 +425,11 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 	// run in several pieces
 	var wg sync.WaitGroup
 	wg.Add(splitter.pieceNumber)
-	for i := 0; i < SpliterReader; i++ {
+	readerCnt := SpliterReader
+	if readerCnt > splitter.pieceNumber {
+		readerCnt = splitter.pieceNumber
+	}
+	for i := 0; i < readerCnt; i++ {
 		go func() {
 			for {
 				reader, ok := <-splitter.readerChan
@@ -453,20 +472,22 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 
 	for {
 		doc, err := reader.NextDoc()
+		// doc, err := reader.NextDocMgo()
 		if err != nil {
 			return fmt.Errorf("splitter reader[%v] get next document failed: %v", reader, err)
 		} else if doc == nil {
 			atomic.AddUint64(&collectionMetric.FinishCount, uint64(len(buffer)))
 			colExecutor.Sync(buffer)
+			syncer.replMetric.AddSuccess(uint64(len(buffer))) // only used to calculate the tps which is extract from "success"
 			break
 		}
 
 		syncer.replMetric.AddGet(1)
-		syncer.replMetric.AddSuccess(1) // only used to calculate the tps which is extract from "success"
 
 		if bufferByteSize+len(doc.Data) > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
 			atomic.AddUint64(&collectionMetric.FinishCount, uint64(len(buffer)))
 			colExecutor.Sync(buffer)
+			syncer.replMetric.AddSuccess(uint64(len(buffer))) // only used to calculate the tps which is extract from "success"
 			buffer = make([]*bson.Raw, 0, bufferSize)
 			bufferByteSize = 0
 		}
@@ -491,6 +512,7 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 
 	LOG.Info("splitter reader finishes: %v", reader)
 	reader.Close()
+	// reader.CloseMgo()
 	return nil
 }
 

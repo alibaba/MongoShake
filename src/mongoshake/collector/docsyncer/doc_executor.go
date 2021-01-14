@@ -57,12 +57,14 @@ func NewCollectionExecutor(id int, mongoUrl string, ns utils.NS, syncer *DBSynce
 
 func (colExecutor *CollectionExecutor) Start() error {
 	var err error
-	if colExecutor.conn, err = utils.NewMongoConn(colExecutor.mongoUrl, utils.VarMongoConnectModePrimary, true,
+	if !conf.Options.FullSyncExecutorDebug {
+		if colExecutor.conn, err = utils.NewMongoConn(colExecutor.mongoUrl, utils.VarMongoConnectModePrimary, true,
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault); err != nil {
-		return err
-	}
-	if conf.Options.FullSyncExecutorMajorityEnable {
-		colExecutor.conn.Session.EnsureSafe(&mgo.Safe{WMode: utils.MajorityWriteConcern})
+			return err
+		}
+		if conf.Options.FullSyncExecutorMajorityEnable {
+			colExecutor.conn.Session.EnsureSafe(&mgo.Safe{WMode: utils.MajorityWriteConcern})
+		}
 	}
 
 	parallel := conf.Options.FullSyncReaderWriteDocumentParallel
@@ -70,7 +72,11 @@ func (colExecutor *CollectionExecutor) Start() error {
 
 	executors := make([]*DocExecutor, parallel)
 	for i := 0; i != len(executors); i++ {
-		docSession := colExecutor.conn.Session.Clone()
+		var docSession *mgo.Session
+		if !conf.Options.FullSyncExecutorDebug {
+			docSession = colExecutor.conn.Session.Clone()
+		}
+
 		executors[i] = NewDocExecutor(GenerateDocExecutorId(), colExecutor, docSession, colExecutor.syncer)
 		go executors[i].start()
 	}
@@ -101,7 +107,9 @@ func (colExecutor *CollectionExecutor) Wait() error {
 	}*/
 
 	close(colExecutor.docBatch)
-	colExecutor.conn.Close()
+	if !conf.Options.FullSyncExecutorDebug {
+		colExecutor.conn.Close()
+	}
 
 	for _, exec := range colExecutor.executors {
 		if exec.error != nil {
@@ -143,7 +151,10 @@ func (exec *DocExecutor) String() string {
 }
 
 func (exec *DocExecutor) start() {
-	defer exec.session.Close()
+	if !conf.Options.FullSyncExecutorDebug {
+		defer exec.session.Close()
+	}
+
 	for {
 		docs, ok := <-exec.colExecutor.docBatch
 		if !ok {
