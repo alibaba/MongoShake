@@ -241,5 +241,9 @@ func TestGetAndCompareVersion(t *testing.T) {
 		ok, err = GetAndCompareVersion(nil, "3.10.0", "3.1")
 		assert.Equal(t, err != nil, true, "")
 		assert.Equal(t, ok, false, "")
+
+		ok, err = GetAndCompareVersion(nil, "3.6", "4.2.5")
+		assert.Equal(t, err, nil, "")
+		assert.Equal(t, ok, true, "")
 	}
 }

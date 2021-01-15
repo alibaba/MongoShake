@@ -1,3 +1,11 @@
+2021-01-15 Alibaba Cloud.
+	* version: 2.4.19
+	* BUGFIX: fix bug of cursorNotFound error. #451
+	* IMPROVE: polish LOG exit mechanism. #529
+	* IMPORVE: update mongo-go-driver to 1.4.4.
+	* IMPROVE: polish inner debug mechanism with `full_sync.executor.debug`
+	parameter in configuration.
+
 2021-01-07 Alibaba Cloud.
 	* version: 2.4.18
 	* BUGFIX: remove maxWaitTime option in reader. #524
