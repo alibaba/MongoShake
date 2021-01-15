@@ -38,7 +38,7 @@ type MongoSource struct {
 }
 
 func (ms *MongoSource) String() string {
-	return fmt.Sprintf("url[%v], name[%v]", ms.URL, ms.ReplicaName)
+	return fmt.Sprintf("url[%v], name[%v]", BlockMongoUrlPassword(ms.URL, "***"), ms.ReplicaName)
 }
 
 // get db version, return string with format like "3.0.1"
@@ -60,16 +60,23 @@ func GetDBVersion(session *mgo.Session) (string, error) {
 
 // get current db version and compare to threshold. Return whether the result
 // is bigger or equal to the input threshold.
-func GetAndCompareVersion(session *mgo.Session, threshold string) (bool, error) {
-	compare, err := GetDBVersion(session)
-	if err != nil {
-		return false, err
+func GetAndCompareVersion(session *mgo.Session, threshold string, compare string) (bool, error) {
+	var err error
+	if compare == "" {
+		if session == nil {
+			return false, nil
+		}
+
+		compare, err = GetDBVersion(session)
+		if err != nil {
+			return false, err
+		}
 	}
 
 	compareArr := strings.Split(compare, ".")
 	thresholdArr := strings.Split(threshold, ".")
 	if len(compareArr) < 2 || len(thresholdArr) < 2 {
-		return false, err
+		return false, nil
 	}
 
 	for i := 0; i < 2; i++ {
@@ -82,7 +89,7 @@ func GetAndCompareVersion(session *mgo.Session, threshold string) (bool, error) 
 		if compareEle > thresholdEle {
 			return true, nil
 		} else if compareEle < thresholdEle {
-			return false, fmt.Errorf("compareEle[%v] < thresholdEle[%v]", compareEle, thresholdEle)
+			return false, fmt.Errorf("compare[%v] < threshold[%v]", compare, threshold)
 		}
 	}
 	return true, nil

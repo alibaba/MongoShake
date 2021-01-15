@@ -97,8 +97,10 @@ func checkDefaultValue() error {
 	} else {
 		if conf.Options.MongoConnectMode != utils.VarMongoConnectModePrimary &&
 			conf.Options.MongoConnectMode != utils.VarMongoConnectModeSecondaryPreferred &&
+			conf.Options.MongoConnectMode != utils.VarMongoConnectModeSecondary &&
+			conf.Options.MongoConnectMode != utils.VarMongoConnectModeNearset &&
 			conf.Options.MongoConnectMode != utils.VarMongoConnectModeStandalone {
-			return fmt.Errorf("mongo_connect_mode should in {primary, secondaryPreferred, standalone}")
+			return fmt.Errorf("mongo_connect_mode should in {primary, secondaryPreferred, secondary, nearest, standalone}")
 		}
 	}
 
@@ -265,14 +267,39 @@ func checkConnection() error {
 	}
 
 	// check tunnel address
-	if conf.Options.Tunnel == utils.VarTunnelDirect {
-		for _, mongo := range conf.Options.TunnelAddress {
-			_, err := utils.NewMongoConn(mongo, conf.Options.MongoConnectMode, true,
+	// no need to check target connection when debug flag set.
+	if conf.Options.Tunnel == utils.VarTunnelDirect &&
+			!conf.Options.FullSyncExecutorDebug &&
+			!conf.Options.IncrSyncExecutorDebug {
+		for i, mongo := range conf.Options.TunnelAddress {
+			targetConn, err := utils.NewMongoConn(mongo, conf.Options.MongoConnectMode, true,
 				utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 			if err != nil {
 				return fmt.Errorf("connect target tunnel mongodb[%v] failed[%v]", mongo, err)
 			}
+
+			// set target version
+			if i == 0 {
+				conf.Options.TargetDBVersion, _ = utils.GetDBVersion(targetConn.Session)
+			}
 		}
+	}
+
+	// set source version
+	var source string
+	if len(conf.Options.MongoUrls) > 1 {
+		source = conf.Options.MongoSUrl
+	} else {
+		source = conf.Options.MongoUrls[0]
+	}
+	sourceConn, _ := utils.NewMongoConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
+	// ignore error
+	conf.Options.SourceDBVersion, _ = utils.GetDBVersion(sourceConn.Session)
+	if ok, err := utils.GetAndCompareVersion(sourceConn.Session, "2.6.0", conf.Options.SourceDBVersion); err != nil {
+		return err
+	} else if !ok {
+		return fmt.Errorf("source MongoDB version[%v] should >= 3.0", conf.Options.SourceDBVersion)
 	}
 
 	return nil
@@ -370,8 +397,8 @@ func checkConflict() error {
 		if err != nil {
 			return fmt.Errorf("connect source[%v] failed[%v]", source, err)
 		}
-		if isOk, err := utils.GetAndCompareVersion(conn.Session, "4.0.1"); err != nil {
-			return fmt.Errorf("compare source[%v] to v4.0.0 failed[%v]", source, err)
+		if isOk, err := utils.GetAndCompareVersion(conn.Session, "4.0.1", conf.Options.SourceDBVersion); err != nil {
+			return fmt.Errorf("compare source[%v] to v4.0.1 failed[%v]", source, err)
 		} else if !isOk {
 			return fmt.Errorf("source[%v] version should >= 4.0.1 when incr_sync.mongo_fetch_method == %v",
 				conf.Options.MongoUrls[0], utils.VarIncrSyncMongoFetchMethodChangeStream)
@@ -397,6 +424,10 @@ func checkConflict() error {
 		if conf.Options.Tunnel == utils.VarTunnelDirect {
 			conf.Options.IncrSyncChangeStreamWatchFullDocument = false
 		}
+	}
+	// set start position to 0 when sync_mode != "incr"
+	if conf.Options.SyncMode != utils.VarSyncModeIncr {
+		conf.Options.CheckpointStartPosition = 1
 	}
 
 	/*****************************4. inner variables******************************/

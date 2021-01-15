@@ -4,8 +4,14 @@ import (
 	"fmt"
 	"testing"
 
+	"mongoshake/unit_test_common"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
+)
+
+const (
+	testMongoAddress = unit_test_common.TestUrl
 )
 
 // deprecated
@@ -198,5 +204,46 @@ func TestAdjustDBRef(t *testing.T) {
 		assert.Equal(t, "$id", output["user"].(bson.D)[1].Name, "should be equal")
 		assert.Equal(t, "40b6d79e507b2c613615f15d", output["user"].(bson.D)[1].Value, "should be equal")
 
+	}
+}
+
+func TestGetAndCompareVersion(t *testing.T) {
+	var nr int
+	{
+		fmt.Printf("TestGetAndCompareVersion case %d.\n", nr)
+		nr++
+
+		conn, err := NewMongoConn(testMongoAddress, VarMongoConnectModeSecondaryPreferred, true,
+			ReadWriteConcernDefault, ReadWriteConcernDefault)
+		assert.Equal(t, err, nil, "")
+
+		ok, err := GetAndCompareVersion(conn.Session, "3.4.0", "")
+		assert.Equal(t, err, nil, "")
+		assert.Equal(t, ok, true, "")
+	}
+
+	{
+		fmt.Printf("TestGetAndCompareVersion case %d.\n", nr)
+		nr++
+
+		ok, err := GetAndCompareVersion(nil, "3.4.0", "4.0.1")
+		assert.Equal(t, err, nil, "")
+		assert.Equal(t, ok, true, "")
+
+		ok, err = GetAndCompareVersion(nil, "3.4.0", "3.4")
+		assert.Equal(t, err, nil, "")
+		assert.Equal(t, ok, true, "")
+
+		ok, err = GetAndCompareVersion(nil, "3.4.0", "3.2")
+		assert.Equal(t, err != nil, true, "")
+		assert.Equal(t, ok, false, "")
+
+		ok, err = GetAndCompareVersion(nil, "3.10.0", "3.1")
+		assert.Equal(t, err != nil, true, "")
+		assert.Equal(t, ok, false, "")
+
+		ok, err = GetAndCompareVersion(nil, "3.6", "4.2.5")
+		assert.Equal(t, err, nil, "")
+		assert.Equal(t, ok, true, "")
 	}
 }

@@ -32,6 +32,7 @@ type Configuration struct {
 	FilterNamespaceWhite        []string `config:"filter.namespace.white"`
 	FilterPassSpecialDb         []string `config:"filter.pass.special.db"`
 	FilterDDLEnable             bool     `config:"filter.ddl_enable"`
+	FilterOplogGids             bool     `config:"filter.oplog.gids"` // add v2.4.17
 	CheckpointStorageUrl        string   `config:"checkpoint.storage.url"`
 	CheckpointStorageDb         string   `config:"checkpoint.storage.db"`
 	CheckpointStorageCollection string   `config:"checkpoint.storage.collection"`
@@ -79,6 +80,8 @@ type Configuration struct {
 	IncrSyncReaderDebug      string `config:"incr_sync.reader.debug"`
 	IncrSyncCollisionEnable  bool   `config:"incr_sync.collision_detection"`
 	IncrSyncReaderBufferTime uint   `config:"incr_sync.reader.buffer_time"`
+	SourceDBVersion          string
+	TargetDBVersion          string
 
 	/*---------------------------------------------------------*/
 	// generated variables

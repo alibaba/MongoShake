@@ -52,6 +52,10 @@ func NewMongoConn(url string, connectMode string, timeout bool, readConcern, wri
 		session.SetMode(mgo.Primary, true)
 	case VarMongoConnectModeSecondaryPreferred:
 		session.SetMode(mgo.SecondaryPreferred, true)
+	case VarMongoConnectModeSecondary:
+		session.SetMode(mgo.Secondary, true)
+	case VarMongoConnectModeNearset:
+		session.SetMode(mgo.Nearest, true)
 	case VarMongoConnectModeStandalone:
 		session.SetMode(mgo.Monotonic, true)
 	default:

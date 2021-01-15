@@ -15,6 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"context"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"sync/atomic"
 )
 
 /**
@@ -230,9 +231,15 @@ type DocumentReader struct {
 	ns  utils.NS
 
 	// mongo document reader
-	client    *utils.MongoCommunityConn
-	docCursor *mongo.Cursor
-	ctx       context.Context
+	client      *utils.MongoCommunityConn
+	docCursor   *mongo.Cursor
+	ctx         context.Context
+	rebuild     int   // rebuild times
+	concurrency int32 // for test only
+
+	// deprecate, used for mgo
+	conn        *utils.MongoConn
+	docIterator *mgo.Iter
 
 	// query statement and current max cursor
 	query bson.M
@@ -263,8 +270,12 @@ func NewDocumentReader(src string, ns utils.NS, start, end interface{}) *Documen
 }
 
 func (reader *DocumentReader) String() string {
-	return fmt.Sprintf("DocumentReader src[%v] ns[%s] query[%v]",
+	ret := fmt.Sprintf("DocumentReader src[%v] ns[%s] query[%v]",
 		utils.BlockMongoUrlPassword(reader.src, "***"), reader.ns, reader.query)
+	if reader.docCursor != nil {
+		ret = fmt.Sprintf("%s docCursorId[%v]", ret, reader.docCursor.ID())
+	}
+	return ret
 }
 
 // NextDoc returns an document by raw bytes which is []byte
@@ -273,21 +284,56 @@ func (reader *DocumentReader) NextDoc() (doc *bson.Raw, err error) {
 		return nil, err
 	}
 
-	doc = new(bson.Raw)
+	atomic.AddInt32(&reader.concurrency, 1)
+	defer atomic.AddInt32(&reader.concurrency, -1)
 
 	if !reader.docCursor.Next(reader.ctx) {
 		if err := reader.docCursor.Err(); err != nil {
-			// some internal error. need rebuild the oplogsIterator
 			reader.releaseCursor()
+			return nil, err
+		} else {
+			LOG.Info("reader[%s] finish", reader.String())
+			return nil, nil
+		}
+	}
+
+	doc = new(bson.Raw)
+	err = bson.Unmarshal(reader.docCursor.Current, doc)
+	if err != nil {
+		return nil, err
+	}
+
+	/*if conf.Options.LogLevel == utils.VarLogLevelDebug {
+		var docParsed bson.M
+		bson.Unmarshal(doc.Data, &docParsed)
+		LOG.Debug("reader[%v] read doc[%v] concurrency[%d] ts[%v]", reader.ns, docParsed["_id"],
+			atomic.LoadInt32(&reader.concurrency), time.Now().Unix())
+	}*/
+	// err = reader.docCursor.Decode(doc)
+	return doc, err
+}
+
+// deprecate, used for mgo
+func (reader *DocumentReader) NextDocMgo() (doc *bson.Raw, err error) {
+	if err := reader.ensureNetworkMgo(); err != nil {
+		return nil, err
+	}
+
+	atomic.AddInt32(&reader.concurrency, 1)
+	defer atomic.AddInt32(&reader.concurrency, -1)
+
+	doc = new(bson.Raw)
+
+	if !reader.docIterator.Next(doc) {
+		if err := reader.docIterator.Err(); err != nil {
+			// some internal error. need rebuild the oplogsIterator
+			reader.releaseIteratorMgo()
 			return nil, err
 		} else {
 			return nil, nil
 		}
 	}
-
-	err = bson.Unmarshal(reader.docCursor.Current, doc)
-	// err = reader.docCursor.Decode(doc)
-	return doc, err
+	return doc, nil
 }
 
 // ensureNetwork establish the mongodb connection at first
@@ -298,6 +344,7 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	}
 
 	if reader.client == nil {
+		LOG.Info("reader[%s] client is empty, create one", reader.String())
 		reader.client, err = utils.NewMongoCommunityConn(reader.src, conf.Options.MongoConnectMode, true,
 				utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
 		if err != nil {
@@ -305,16 +352,23 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 		}
 	}
 
+	reader.rebuild += 1
+	if reader.rebuild > 1 {
+		return fmt.Errorf("reader[%s] rebuild illegal", reader.String())
+	}
+
 	findOptions := new(options.FindOptions)
 	findOptions.SetSort(map[string]interface{}{
 		"_id": 1,
 	})
-	findOptions.SetBatchSize(8192)
+	findOptions.SetBatchSize(8192) // set big for test
 	findOptions.SetHint(map[string]interface{}{
 		"_id": 1,
 	})
-	// findOptions.SetNoCursorTimeout(true)
-	findOptions.SetComment(fmt.Sprintf("mongo-shake full sync: ns[%v] query[%v]", reader.ns, reader.query))
+	// enable noCursorTimeout anyway! #451
+	findOptions.SetNoCursorTimeout(true)
+	findOptions.SetComment(fmt.Sprintf("mongo-shake full sync: ns[%v] query[%v] rebuid-times[%v]",
+		reader.ns, reader.query, reader.rebuild))
 
 	reader.docCursor, err = reader.client.Client.Database(reader.ns.Database).Collection(reader.ns.Collection, nil).
 		Find(nil, reader.query, findOptions)
@@ -322,18 +376,62 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 		return fmt.Errorf("run find failed: %v", err)
 	}
 
+	LOG.Info("reader[%s] generates new cursor", reader.String())
+
+	return nil
+}
+
+// deprecate, used for mgo
+func (reader *DocumentReader) ensureNetworkMgo() (err error) {
+	if reader.docIterator != nil {
+		return nil
+	}
+	if reader.conn == nil || (reader.conn != nil && !reader.conn.IsGood()) {
+		if reader.conn != nil {
+			reader.conn.Close()
+		}
+		// reconnect
+		if reader.conn, err = utils.NewMongoConn(reader.src, conf.Options.MongoConnectMode, true,
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault); reader.conn == nil || err != nil {
+			return err
+		}
+	}
+
+	reader.rebuild += 1
+	if reader.rebuild > 1 {
+		return fmt.Errorf("reader[%s] rebuild illegal", reader.String())
+	}
+
+	// rebuild syncerGroup condition statement with current checkpoint timestamp
+	reader.conn.Session.SetBatch(8192)
+	reader.conn.Session.SetPrefetch(0.2)
+	reader.conn.Session.SetCursorTimeout(0)
+	reader.docIterator = reader.conn.Session.DB(reader.ns.Database).C(reader.ns.Collection).
+		Find(reader.query).Iter()
 	return nil
 }
 
 func (reader *DocumentReader) releaseCursor() {
 	if reader.docCursor != nil {
+		LOG.Info("reader[%s] closes cursor[%v]", reader, reader.docCursor.ID())
 		err := reader.docCursor.Close(reader.ctx)
-		LOG.Error("release cursor fail: %v", err)
+		if err != nil {
+			LOG.Error("release cursor fail: %v", err)
+		}
 	}
 	reader.docCursor = nil
 }
 
+// deprecate, used for mgo
+func (reader *DocumentReader) releaseIteratorMgo() {
+	if reader.docIterator != nil {
+		_ = reader.docIterator.Close()
+	}
+	reader.docIterator = nil
+}
+
 func (reader *DocumentReader) Close() {
+	LOG.Info("reader[%s] close", reader)
 	if reader.docCursor != nil {
 		reader.docCursor.Close(reader.ctx)
 	}
@@ -341,5 +439,13 @@ func (reader *DocumentReader) Close() {
 	if reader.client != nil {
 		reader.client.Client.Disconnect(reader.ctx)
 		reader.client = nil
+	}
+}
+
+// deprecate, used for mgo
+func (reader *DocumentReader) CloseMgo() {
+	if reader.conn != nil {
+		reader.conn.Close()
+		reader.conn = nil
 	}
 }

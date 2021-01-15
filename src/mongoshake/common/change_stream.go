@@ -64,12 +64,15 @@ func NewChangeStreamConn(src string, mode string, fulldoc bool, watchStartTime i
 
 	waitTime := time.Duration(changeStreamTimeout * time.Hour) // hours
 	ops := &options.ChangeStreamOptions{
-		StartAtOperationTime: &primitive.Timestamp{
-			T: uint32(watchStartTime >> 32),
-			I: uint32(watchStartTime & Int32max),
-		},
 		MaxAwaitTime: &waitTime,
 		BatchSize:    &batchSize,
+	}
+	if (watchStartTime >> 32) > 1 {
+		startTime := &primitive.Timestamp{
+			T: uint32(watchStartTime >> 32),
+			I: uint32(watchStartTime & Int32max),
+		}
+		ops.SetStartAtOperationTime(startTime)
 	}
 
 	if fulldoc {

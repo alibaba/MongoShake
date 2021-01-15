@@ -1,3 +1,35 @@
+2021-01-15 Alibaba Cloud.
+	* version: 2.4.19
+	* BUGFIX: fix bug of cursorNotFound error. #451
+	* IMPROVE: polish LOG exit mechanism. #529
+	* IMPORVE: update mongo-go-driver to 1.4.4.
+	* IMPROVE: polish inner debug mechanism with `full_sync.executor.debug`
+	parameter in configuration.
+
+2021-01-07 Alibaba Cloud.
+	* version: 2.4.18
+	* BUGFIX: remove maxWaitTime option in reader. #524
+
+2020-12-09 Alibaba Cloud.
+	* version: 2.4.17
+	* IMPROVE: add write_success field in full sync log metric.
+	* IMPROVE: solve dup error in single_writer which is used when target
+	mongodb version is 3.0.
+	* IMPROVE: show source and target db version in configuration.
+	* IMPROVE: enable NoCursorTimeout when source DB version >= 3.6. #451
+	* IMPROVE: filter oplog.gid field when enable "filter.oplog.gids = true".
+	#510
+
+2020-11-04 Alibaba Cloud.
+	* version: 2.4.16
+	* IMPROVE: ignore error when meets namespace not found error in delete
+	operation in single writer. #467
+	* IMPROVE: when "incr_sync.mongo_fetch_method == oplog", support upsert
+	if target is sharding. #380
+	* BUGFIX: fix bug that using change_stream mode can't fetch any data in
+	kafka tunnel with "checkpoint.start_position = 1970-01-01T00:00:00Z".
+	#475.
+
 2020-10-14 Alibaba Cloud.
 	* version: 2.4.15
 	* BUGFIX: in kafka tunnel, solve json marshal failed when meets NaN, Inf,

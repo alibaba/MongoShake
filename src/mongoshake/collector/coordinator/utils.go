@@ -53,12 +53,15 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 		if err != nil {
 			return 0, nil, false, fmt.Errorf("get mongos[%v] checkpoint failed: %v",
 				coordinator.MongoS.ReplicaName, err)
+		} else if ckptVar == nil {
+			return 0, nil, false, fmt.Errorf("get mongos[%v] checkpoint empty", coordinator.MongoS.ReplicaName)
 		} else if !exist || ckptVar.Timestamp <= 1 { // empty
 			mongosCkpt = nil
-			startTsMap[coordinator.MongoS.ReplicaName] = int64(confTsMongoTs) // using configuration
+			// mongosCkpt = ckptVar // still use checkpoint
+			startTsMap[coordinator.MongoS.ReplicaName] = int64(confTsMongoTs) // use configuration
 		} else {
 			mongosCkpt = ckptVar
-			startTsMap[coordinator.MongoS.ReplicaName] = int64(ckptVar.Timestamp)
+			startTsMap[coordinator.MongoS.ReplicaName] = int64(ckptVar.Timestamp) // use old checkpoint
 		}
 	}
 
