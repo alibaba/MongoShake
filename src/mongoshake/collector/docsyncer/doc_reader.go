@@ -12,9 +12,9 @@ import (
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-	"go.mongodb.org/mongo-driver/mongo"
+	"github.com/vinllen/mongo-go-driver/mongo"
 	"context"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/vinllen/mongo-go-driver/mongo/options"
 	"sync/atomic"
 )
 

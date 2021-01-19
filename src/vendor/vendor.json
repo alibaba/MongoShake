@@ -309,6 +309,270 @@
 			"revisionTime": "2020-06-03T09:46:26Z"
 		},
 		{
+			"checksumSHA1": "zrXMFbP4gSvauj9coTX3k4gxRlA=",
+			"path": "github.com/vinllen/mongo-go-driver",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "Pl0PATD5lowV3G3vKGSpTIHr6Y8=",
+			"path": "github.com/vinllen/mongo-go-driver/bson",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "+VtXLJD7k09w01oVIrFKn0Cj4TI=",
+			"path": "github.com/vinllen/mongo-go-driver/bson/bsoncodec",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "+is25MWZqhtbCeX+oV9mLwZCODA=",
+			"path": "github.com/vinllen/mongo-go-driver/bson/bsonoptions",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "BkTR7oTg26kkFkLUPZuPUXt6+IA=",
+			"path": "github.com/vinllen/mongo-go-driver/bson/bsonrw",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "Nup2TJbvEpCyN4tsAlCn4SyrAdI=",
+			"path": "github.com/vinllen/mongo-go-driver/bson/bsontype",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "wM/WMTlCOX5XBlNMbAulzl1aQx8=",
+			"path": "github.com/vinllen/mongo-go-driver/bson/primitive",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "V2Me2gRYTOYvC5qEUdnLtcloEME=",
+			"path": "github.com/vinllen/mongo-go-driver/event",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "T53vO8NYvQh/NwYtnYab5qOeno0=",
+			"path": "github.com/vinllen/mongo-go-driver/internal",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "dm1SZsYtK/6uruLqfYtJHSRV/GU=",
+			"path": "github.com/vinllen/mongo-go-driver/mongo",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "OIEUWFyfnfd4Q3TLBkZr5JTz6e4=",
+			"path": "github.com/vinllen/mongo-go-driver/mongo/options",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "1GJUW4q7FZdxMx1bxZw3ozJsUwk=",
+			"path": "github.com/vinllen/mongo-go-driver/mongo/readconcern",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "gyeGywTS9POKDsF4hV2rqR+G+xE=",
+			"path": "github.com/vinllen/mongo-go-driver/mongo/readpref",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "9pN6dEQ4RcvqoyTNIfn+miSZ99k=",
+			"path": "github.com/vinllen/mongo-go-driver/mongo/writeconcern",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "oms6c/vWVh4WxBtqe+mus3ITk8w=",
+			"path": "github.com/vinllen/mongo-go-driver/tag",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "TBwFC+1shujWR87wr5EEArn5Vf4=",
+			"path": "github.com/vinllen/mongo-go-driver/version",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "880oytgtwAiA6L1o2wrQXfI1CBw=",
+			"path": "github.com/vinllen/mongo-go-driver/x/bsonx",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "k00rkn8Wd19c1QwT1Bya+nwPJYQ=",
+			"path": "github.com/vinllen/mongo-go-driver/x/bsonx/bsoncore",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "vdxpmm3yTTgp+HpvRQepvf99C1Y=",
+			"path": "github.com/vinllen/mongo-go-driver/x/mongo/driver",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "hZtlJY96JiMGLuAjPaOTAxR2qQg=",
+			"path": "github.com/vinllen/mongo-go-driver/x/mongo/driver/address",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "hFID1ca+u5D4uyGpVDhSCwVhjrs=",
+			"path": "github.com/vinllen/mongo-go-driver/x/mongo/driver/auth",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "7aiGIIFP7cx7me7kMvpi9eIoI6o=",
+			"path": "github.com/vinllen/mongo-go-driver/x/mongo/driver/auth/internal/gssapi",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "9zWhFSpRF+MdGY6/lrm9OosPLPw=",
+			"path": "github.com/vinllen/mongo-go-driver/x/mongo/driver/connstring",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "Ke11oxYQFL0aYCwCMW6xJAJFR9c=",
+			"path": "github.com/vinllen/mongo-go-driver/x/mongo/driver/description",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "J/iNFMxL2WyPOqtZEEoQeEkPWK0=",
+			"path": "github.com/vinllen/mongo-go-driver/x/mongo/driver/dns",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "3dPyV4GCWabLrkrzV21/LzIB2dU=",
+			"path": "github.com/vinllen/mongo-go-driver/x/mongo/driver/mongocrypt",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "W/QcrC5J7FmGIZieJaG0jIbQJsM=",
+			"path": "github.com/vinllen/mongo-go-driver/x/mongo/driver/mongocrypt/options",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "s9RZGzILtbFTLFBRW+eDMYfsiKo=",
+			"path": "github.com/vinllen/mongo-go-driver/x/mongo/driver/ocsp",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "ghFWepDCbVGSoubZ9YuPMar2S6A=",
+			"path": "github.com/vinllen/mongo-go-driver/x/mongo/driver/operation",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "mn6Te1SXQ97xLNWDXnFutgVVg2c=",
+			"path": "github.com/vinllen/mongo-go-driver/x/mongo/driver/session",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "tyS2D/9/V/qSTSHeHRTNYZWFmzQ=",
+			"path": "github.com/vinllen/mongo-go-driver/x/mongo/driver/topology",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "I368NHvkxkn48VBoQvb0bpBzYbI=",
+			"path": "github.com/vinllen/mongo-go-driver/x/mongo/driver/uuid",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"checksumSHA1": "xGg1Zwviy03Iq1aszo1f6UnSz1g=",
+			"path": "github.com/vinllen/mongo-go-driver/x/mongo/driver/wiremessage",
+			"revision": "c9abaaeeda55d6af27fd1904e33dca2fab99bd0c",
+			"revisionTime": "2020-12-31T06:36:35Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
 			"checksumSHA1": "uE78U34xjlJ815TX/bhLROkjmeI=",
 			"path": "github.com/xdg/scram",
 			"revision": "7eeb5667e42c09cb51bf7b7c28aea8c56767da90",
@@ -567,16 +831,34 @@
 			"revisionTime": "2020-12-07T22:48:14Z"
 		},
 		{
+			"checksumSHA1": "DZPJrTwSFeoDn6/KdZBrOHDDlVw=",
 			"path": "golang.org/x/sync/semaphore",
-			"revision": ""
+			"revision": "09787c993a3ab68e3d1f5c9b2394ab9433f391be",
+			"revisionTime": "2020-12-07T22:48:14Z"
 		},
 		{
+			"checksumSHA1": "BARlqsZBSancZtOx1+FD9kR5d5Y=",
+			"path": "golang.org/x/text",
+			"revision": "75a595aef632b07c6eeaaa805adb6f0f66e4130e",
+			"revisionTime": "2020-12-07T21:52:09Z"
+		},
+		{
+			"checksumSHA1": "cyTndUcU5NwdZciSFzbtKQsRLQA=",
 			"path": "golang.org/x/text/transform",
-			"revision": ""
+			"revision": "75a595aef632b07c6eeaaa805adb6f0f66e4130e",
+			"revisionTime": "2020-12-07T21:52:09Z"
 		},
 		{
+			"checksumSHA1": "ITDpsKZBrUCrwSkOp+epZMYlekg=",
+			"path": "golang.org/x/text/unicode",
+			"revision": "75a595aef632b07c6eeaaa805adb6f0f66e4130e",
+			"revisionTime": "2020-12-07T21:52:09Z"
+		},
+		{
+			"checksumSHA1": "A97RZL5e0gVBFJIv/jP9/hh+YKA=",
 			"path": "golang.org/x/text/unicode/norm",
-			"revision": ""
+			"revision": "75a595aef632b07c6eeaaa805adb6f0f66e4130e",
+			"revisionTime": "2020-12-07T21:52:09Z"
 		},
 		{
 			"checksumSHA1": "F+Irnk0yiBmKAsGWR2J2yvBFOZ8=",

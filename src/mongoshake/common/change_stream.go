@@ -5,12 +5,12 @@ import (
 	"time"
 	"fmt"
 
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo"
+	"github.com/vinllen/mongo-go-driver/mongo/options"
+	"github.com/vinllen/mongo-go-driver/mongo"
 	LOG "github.com/vinllen/log4go"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
-	"go.mongodb.org/mongo-driver/mongo/readconcern"
+	"github.com/vinllen/mongo-go-driver/bson/primitive"
+	"github.com/vinllen/mongo-go-driver/mongo/readpref"
+	"github.com/vinllen/mongo-go-driver/mongo/readconcern"
 )
 
 const (
