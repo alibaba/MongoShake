@@ -14,6 +14,7 @@ import (
 	"github.com/vinllen/go-diskqueue"
 	"fmt"
 	"mongoshake/collector/ckpt"
+	"mongoshake/collector/filter"
 )
 
 const (
@@ -149,8 +150,14 @@ func (er *EventReader) EnsureNetwork() error {
 		er.client.Close() // close old client
 	}
 
+	filterList := filter.NewDocFilterList()
 	var err error
-	if er.client, err = utils.NewChangeStreamConn(er.src, conf.Options.MongoConnectMode, conf.Options.IncrSyncChangeStreamWatchFullDocument, er.startAtOperationTime,
+	if er.client, err = utils.NewChangeStreamConn(er.src,
+		conf.Options.MongoConnectMode,
+		conf.Options.IncrSyncChangeStreamWatchFullDocument,
+		conf.Options.SpecialSourceDBFlag,
+		filterList.IterateFilter,
+		er.startAtOperationTime,
 		int32(BatchSize)); err != nil {
 		return err
 	}

@@ -339,8 +339,10 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	syncer.startTime = time.Now()
 	var wg sync.WaitGroup
 
+	filterList := filter.NewDocFilterList()
+
 	// get all namespace
-	nsList, _, err := GetDbNamespace(syncer.FromMongoUrl)
+	nsList, _, err := utils.GetDbNamespace(syncer.FromMongoUrl, filterList.IterateFilter)
 	if err != nil {
 		return err
 	}

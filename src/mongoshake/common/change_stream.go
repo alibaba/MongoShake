@@ -11,6 +11,7 @@ import (
 	"github.com/vinllen/mongo-go-driver/bson/primitive"
 	"github.com/vinllen/mongo-go-driver/mongo/readpref"
 	"github.com/vinllen/mongo-go-driver/mongo/readconcern"
+	"strings"
 )
 
 const (
@@ -24,7 +25,13 @@ type ChangeStreamConn struct {
 	ctx       context.Context
 }
 
-func NewChangeStreamConn(src string, mode string, fulldoc bool, watchStartTime int64, batchSize int32) (*ChangeStreamConn, error) {
+func NewChangeStreamConn(src string,
+	mode string,
+	fullDoc bool,
+	specialDb string,
+	filterFunc func(name string) bool,
+	watchStartTime int64,
+	batchSize int32) (*ChangeStreamConn, error) {
 	// init client ops
 	clientOps := options.Client().ApplyURI(src)
 
@@ -75,8 +82,20 @@ func NewChangeStreamConn(src string, mode string, fulldoc bool, watchStartTime i
 		ops.SetStartAtOperationTime(startTime)
 	}
 
-	if fulldoc {
+	if fullDoc {
 		ops.SetFullDocument(options.UpdateLookup)
+	}
+
+	if specialDb == VarSpecialSourceDBFlagAliyunServerless {
+		_, dbs, err := GetDbNamespace(src, filterFunc)
+		if err != nil {
+			return nil, fmt.Errorf("GetDbNamespace failed: %v", err)
+		}
+		dbList := make([]string, 0, len(dbs))
+		for name := range dbs {
+			dbList = append(dbList, name)
+		}
+		ops.SetMultiDbSelections("(" + strings.Join(dbList, "|") + ")")
 	}
 
 	csHandler, err := client.Watch(ctx, mongo.Pipeline{}, ops)

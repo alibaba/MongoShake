@@ -350,6 +350,11 @@ func checkConflict() error {
 		// init ns
 		filter.InitNs(conf.Options.FilterPassSpecialDb)
 	}
+	// special variable
+	if conf.Options.SpecialSourceDBFlag != "" &&
+		conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless {
+		return fmt.Errorf("special.source.db.flag should be empty or 'aliyun_serverless'")
+	}
 
 	/*****************************2. full sync******************************/
 

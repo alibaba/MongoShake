@@ -130,6 +130,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		// a conventional ReplicaSet should have local.oplog.rs collection
 		if conf.Options.SyncMode != utils.VarSyncModeFull &&
 			// conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog &&
+			conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog &&
 			!conn.HasOplogNs() {
 			LOG.Critical("There has no oplog collection in mongo db server")
 			conn.Close()

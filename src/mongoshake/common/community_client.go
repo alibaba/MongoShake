@@ -75,3 +75,8 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 		URL:    url,
 	}, nil
 }
+
+func (conn *MongoCommunityConn) Close() {
+	LOG.Info("Close client with %s", BlockMongoUrlPassword(conn.URL, "***"))
+	conn.Client.Disconnect(conn.ctx)
+}

@@ -2,10 +2,8 @@ package docsyncer
 
 import (
 	"fmt"
-	"strings"
 	"math"
 
-	"mongoshake/collector/filter"
 	"mongoshake/common"
 	"mongoshake/collector/configure"
 
@@ -17,91 +15,6 @@ import (
 	"github.com/vinllen/mongo-go-driver/mongo/options"
 	"sync/atomic"
 )
-
-/**
- * return all namespace. return:
- *     @map[utils.NS]struct{}: namespace set where key is the namespace while value is useless, e.g., "a.b"->nil, "a.c"->nil
- *     @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}
- *     @error: error info
- */
-func GetAllNamespace(sources []*utils.MongoSource) (map[utils.NS]struct{}, map[string][]string, error) {
-	nsSet := make(map[utils.NS]struct{})
-	for _, src := range sources {
-		nsList, _, err := GetDbNamespace(src.URL)
-		if err != nil {
-			return nil, nil, err
-		}
-		for _, ns := range nsList {
-			nsSet[ns] = struct{}{}
-		}
-	}
-
-	// copy
-	nsMap := make(map[string][]string, len(sources))
-	for ns := range nsSet {
-		if _, ok := nsMap[ns.Database]; !ok {
-			nsMap[ns.Database] = make([]string, 0)
-		}
-		nsMap[ns.Database] = append(nsMap[ns.Database], ns.Collection)
-	}
-
-	return nsSet, nsMap, nil
-}
-
-/**
- * return db namespace. return:
- *     @[]utils.NS: namespace list, e.g., []{"a.b", "a.c"}
- *     @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}
- *     @error: error info
- */
-func GetDbNamespace(url string) ([]utils.NS, map[string][]string, error) {
-	var err error
-	var conn *utils.MongoConn
-	if conn, err = utils.NewMongoConn(url, utils.VarMongoConnectModeSecondaryPreferred, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault); conn == nil || err != nil {
-		return nil, nil, err
-	}
-	defer conn.Close()
-
-	var dbNames []string
-	if dbNames, err = conn.Session.DatabaseNames(); err != nil {
-		err = fmt.Errorf("get database names of mongodb url=%s error. %v", url, err)
-		return nil, nil, err
-	}
-
-	filterList := filter.NewDocFilterList()
-
-	nsList := make([]utils.NS, 0, 128)
-	for _, db := range dbNames {
-		colNames, err := conn.Session.DB(db).CollectionNames()
-		if err != nil {
-			err = fmt.Errorf("get collection names of mongodb url=%s error. %v", url, err)
-			return nil, nil, err
-		}
-		for _, col := range colNames {
-			ns := utils.NS{Database: db, Collection: col}
-			if strings.HasPrefix(col, "system.") {
-				continue
-			}
-			if filterList.IterateFilter(ns.Str()) {
-				LOG.Debug("Namespace is filtered. %v", ns.Str())
-				continue
-			}
-			nsList = append(nsList, ns)
-		}
-	}
-
-	// copy, convert nsList to map
-	nsMap := make(map[string][]string, 0)
-	for _, ns := range nsList {
-		if _, ok := nsMap[ns.Database]; !ok {
-			nsMap[ns.Database] = make([]string, 0)
-		}
-		nsMap[ns.Database] = append(nsMap[ns.Database], ns.Collection)
-	}
-
-	return nsList, nsMap, nil
-}
 
 /*************************************************/
 // splitter: pre-split the collection into several pieces

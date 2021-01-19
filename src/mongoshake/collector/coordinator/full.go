@@ -63,13 +63,13 @@ func getTimestampMap(sources []*utils.MongoSource) (map[string]utils.TimestampNo
  * fetch all indexes.
  * the cost is low so that no need to run in parallel.
  */
-func fetchIndexes(sourceList []*utils.MongoSource) (map[utils.NS][]mgo.Index, error) {
+func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) bool) (map[utils.NS][]mgo.Index, error) {
 	var mutex sync.Mutex
 	indexMap := make(map[utils.NS][]mgo.Index)
 	for _, src := range sourceList {
 		LOG.Info("source[%v %v] start fetching index", src.ReplicaName, src.URL)
 		// 1. fetch namespace
-		nsList, _, err := docsyncer.GetDbNamespace(src.URL)
+		nsList, _, err := utils.GetDbNamespace(src.URL, filterFunc)
 		if err != nil {
 			return nil, fmt.Errorf("source[%v %v] get namespace failed: %v", src.ReplicaName, src.URL, err)
 		}
@@ -126,8 +126,9 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		LOG.Info("source is replica or mongos, no need to fetching chunk map")
 	}
 
+	filterList := filter.NewDocFilterList()
 	// get all namespace need to sync
-	nsSet, _, err := docsyncer.GetAllNamespace(coordinator.RealSourceFullSync)
+	nsSet, _, err := utils.GetAllNamespace(coordinator.RealSourceFullSync, filterList.IterateFilter)
 	if err != nil {
 		return err
 	}
@@ -169,7 +170,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// fetch all indexes
 	var indexMap map[utils.NS][]mgo.Index
 	if conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexNone {
-		if indexMap, err = fetchIndexes(coordinator.RealSourceFullSync); err != nil {
+		if indexMap, err = fetchIndexes(coordinator.RealSourceFullSync, filterList.IterateFilter); err != nil {
 			return fmt.Errorf("fetch index failed[%v]", err)
 		}
 
