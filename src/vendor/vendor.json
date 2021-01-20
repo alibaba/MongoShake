@@ -381,10 +381,16 @@
 			"versionExact": "feature-v1.4.4-vinllen"
 		},
 		{
-			"checksumSHA1": "dm1SZsYtK/6uruLqfYtJHSRV/GU=",
+			"checksumSHA1": "1LV8Vf+S499u/8flS2yRe2ijwA0=",
 			"path": "github.com/vinllen/mongo-go-driver/mongo",
-			"revision": "0ea3ed6246338685560b19c44401592461fd4b73",
-			"revisionTime": "2021-01-19T07:45:45Z",
+			"revision": "4ced3b066aaea0aea4b061404e490cb241682a21",
+			"revisionTime": "2021-01-20T10:42:59Z",
+			"version": "feature-v1.4.4-vinllen",
+			"versionExact": "feature-v1.4.4-vinllen"
+		},
+		{
+			"path": "github.com/vinllen/mongo-go-driver/mongo/mongo",
+			"revision": "feature-v1.4.4-vinllen",
 			"version": "feature-v1.4.4-vinllen",
 			"versionExact": "feature-v1.4.4-vinllen"
 		},
