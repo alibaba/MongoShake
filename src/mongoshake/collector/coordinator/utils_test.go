@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
+	bson2 "github.com/vinllen/mongo-go-driver/bson"
 )
 
 const (
@@ -617,5 +618,99 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, int64(1) << 32, startTsMap["mockMongoS"], "should be equal")
 		assert.Equal(t, utils.VarSyncModeIncr, mode, "should be equal")
 		assert.Equal(t, int64(0), ts, "should be equal")
+	}
+
+	// aliyun_serverless, no-checkpoint
+	{
+		fmt.Printf("TestSelectSyncMode case %d.\n", nr)
+		nr++
+
+		conf.Options.Tunnel = utils.VarTunnelKafka
+
+		conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodChangeStream
+		conf.Options.CheckpointStorageUrl = testUrl
+		conf.Options.CheckpointStorageDb = testDb
+		conf.Options.CheckpointStorageCollection = testCollection
+		conf.Options.CheckpointStorage = utils.VarCheckpointStorageDatabase
+		conf.Options.SpecialSourceDBFlag = utils.VarSpecialSourceDBFlagAliyunServerless
+
+		testReplicaName := "mockReplicaSet"
+
+		// drop old table
+		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "")
+		assert.Equal(t, nil, err, "should be equal")
+
+		conn.Session.DB(testDb).C(testCollection).DropCollection()
+		// assert.Equal(t, nil, err, "should be equal")
+
+		coordinator := &ReplicationCoordinator{
+			RealSourceFullSync: []*utils.MongoSource{
+				{
+					URL:         testUrl,
+					ReplicaName: testReplicaName,
+				},
+			},
+		}
+
+		// run
+		syncMode, _, fullBeginTs, err := coordinator.selectSyncMode(utils.VarSyncModeAll)
+		fmt.Println(syncMode, fullBeginTs)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, utils.VarSyncModeAll, syncMode, "should be equal")
+		assert.Equal(t, true, len(fullBeginTs.(bson2.Raw)) > 0, "should be equal")
+	}
+
+	{
+		fmt.Printf("TestSelectSyncMode case %d.\n", nr)
+		nr++
+
+		conf.Options.Tunnel = utils.VarTunnelKafka
+
+		conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodChangeStream
+		conf.Options.CheckpointStorageUrl = testUrl
+		conf.Options.CheckpointStorageDb = testDb
+		conf.Options.CheckpointStorageCollection = testCollection
+		conf.Options.CheckpointStorage = utils.VarCheckpointStorageDatabase
+		conf.Options.SpecialSourceDBFlag = utils.VarSpecialSourceDBFlagAliyunServerless
+
+		testReplicaName := "mockReplicaSet"
+
+		// drop old table
+		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "")
+		assert.Equal(t, nil, err, "should be equal")
+
+		conn.Session.DB(testDb).C(testCollection).DropCollection()
+		// assert.Equal(t, nil, err, "should be equal")
+
+		// insert
+		ckptManager := ckpt.NewCheckpointManager(testReplicaName, 0)
+		assert.Equal(t, true, ckptManager != nil, "should be equal")
+
+		ckptManager.Get()
+
+		err = ckptManager.Update(bson.MongoTimestamp(5 << 32))
+		assert.Equal(t, nil, err, "should be equal")
+
+		coordinator := &ReplicationCoordinator{
+			RealSourceIncrSync: []*utils.MongoSource{
+				{
+					URL:         testUrl,
+					ReplicaName: testReplicaName,
+				},
+			},
+			RealSourceFullSync: []*utils.MongoSource{
+				{
+					URL:         testUrl,
+					ReplicaName: testReplicaName,
+				},
+			},
+		}
+
+		// run
+		syncMode, _, fullBeginTs, err := coordinator.selectSyncMode(utils.VarSyncModeAll)
+		fmt.Println(syncMode, fullBeginTs)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, utils.VarSyncModeIncr, syncMode, "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(5 << 32)), fullBeginTs, "should be equal")
 	}
 }

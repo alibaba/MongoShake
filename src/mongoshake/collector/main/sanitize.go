@@ -355,6 +355,11 @@ func checkConflict() error {
 		conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless {
 		return fmt.Errorf("special.source.db.flag should be empty or 'aliyun_serverless'")
 	}
+	if conf.Options.SpecialSourceDBFlag == utils.VarSpecialSourceDBFlagAliyunServerless {
+		if conf.Options.IncrSyncMongoFetchMethod != utils.VarIncrSyncMongoFetchMethodChangeStream {
+			return fmt.Errorf("incr_sync.mongo_fetch_method must be 'change_stream' when special.source.db.flag is set")
+		}
+	}
 
 	/*****************************2. full sync******************************/
 

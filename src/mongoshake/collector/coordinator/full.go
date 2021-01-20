@@ -245,7 +245,8 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 
 	// update checkpoint after full sync
-	if conf.Options.SyncMode != utils.VarSyncModeFull {
+	// do not update checkpoint when source is "aliyun_serverless"
+	if conf.Options.SyncMode != utils.VarSyncModeFull && conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless{
 		// need merge to one when from mongos and fetch_mothod=="change_stream"
 		if coordinator.MongoS != nil && conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
 			var smallestNew bson.MongoTimestamp = math.MaxInt64

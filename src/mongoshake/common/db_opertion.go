@@ -8,6 +8,7 @@ import (
 
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
+	bson2 "github.com/vinllen/mongo-go-driver/bson"
 )
 
 var (
@@ -410,16 +411,16 @@ func GetDbNamespace(url string, filterFunc func(name string) bool) ([]NS, map[st
 	defer conn.Close()
 
 	var dbNames []string
-	if dbNames, err = conn.Client.ListDatabaseNames(nil, nil); err != nil {
-		err = fmt.Errorf("get database names of mongodb url=%s error. %v", url, err)
+	if dbNames, err = conn.Client.ListDatabaseNames(nil, bson2.M{}); err != nil {
+		err = fmt.Errorf("get database names of mongodb[%s] error: %v", url, err)
 		return nil, nil, err
 	}
 
 	nsList := make([]NS, 0, 128)
 	for _, db := range dbNames {
-		colNames, err := conn.Client.Database(db).ListCollectionNames(nil, nil)
+		colNames, err := conn.Client.Database(db).ListCollectionNames(nil, bson2.M{})
 		if err != nil {
-			err = fmt.Errorf("get collection names of mongodb url=%s error. %v", url, err)
+			err = fmt.Errorf("get collection names of mongodb[%s] error: %v", url, err)
 			return nil, nil, err
 		}
 		for _, col := range colNames {
@@ -427,7 +428,7 @@ func GetDbNamespace(url string, filterFunc func(name string) bool) ([]NS, map[st
 			if strings.HasPrefix(col, "system.") {
 				continue
 			}
-			if filterFunc(ns.Str()) {
+			if filterFunc != nil && filterFunc(ns.Str()) {
 				// LOG.Debug("Namespace is filtered. %v", ns.Str())
 				continue
 			}

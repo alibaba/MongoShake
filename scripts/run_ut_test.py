@@ -33,6 +33,9 @@ def run_ut(cur_path):
     for dir in only_dirs:
         print("cd dir[%s]" % dir)
 
+        if dir == 'logs' or dir == 'diagnostic':
+            continue
+
         # dfs
         os.chdir(dir)
         run_ut(dir)
