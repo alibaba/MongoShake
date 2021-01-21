@@ -85,7 +85,7 @@ func main() {
 	utils.Welcome()
 
 	// get exclusive process lock and write pid
-	if utils.WritePidById(conf.Options.LogDirectory, conf.Options.Id) {
+	if *docker || utils.WritePidById(conf.Options.LogDirectory, conf.Options.Id) {
 		startup()
 	}
 }
