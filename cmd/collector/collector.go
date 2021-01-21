@@ -31,6 +31,7 @@ func main() {
 	configuration := flag.String("conf", "", "configure file absolute path")
 	verbose := flag.Bool("verbose", false, "show logs on console")
 	version := flag.Bool("version", false, "show version")
+	docker := flag.Bool("docker", false, "docker mode, log only goes to stdout")
 	flag.Parse()
 
 	if *configuration == "" || *version == true {
@@ -60,9 +61,13 @@ func main() {
 		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
 	}
 
-	if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogFlush, *verbose); err != nil {
-		crash(fmt.Sprintf("initial log.dir[%v] log.name[%v] failed[%v].", conf.Options.LogDirectory,
-			conf.Options.LogFileName, err), -2)
+	if *docker {
+		utils.InitialStdoutLogger(conf.Options.LogLevel)
+	} else {
+		if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogFlush, *verbose); err != nil {
+			crash(fmt.Sprintf("initial log.dir[%v] log.name[%v] failed[%v].", conf.Options.LogDirectory,
+				conf.Options.LogFileName, err), -2)
+		}
 	}
 
 	conf.Options.Version = utils.BRANCH

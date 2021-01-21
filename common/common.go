@@ -64,6 +64,14 @@ func RunStatusMessage(status uint64) string {
 		return "unknown"
 	}
 }
+
+func InitialStdoutLogger(level string) {
+	logLevel := parseLogLevel(level)
+	writer := LOG.NewConsoleLogWriter()
+	writer.SetFormat("[%D %T] [%L] %M")
+	LOG.AddFilter("console", logLevel, writer)
+}
+
 func InitialLogger(logDir, logFile, level string, logFlush bool, verbose bool) error {
 	logLevel := parseLogLevel(level)
 	if verbose {
