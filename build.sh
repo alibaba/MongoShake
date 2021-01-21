@@ -53,9 +53,14 @@ fi
 t=$(date "+%Y-%m-%d_%H:%M:%S")
 info=$info","$t
 
-run_builder='go build -v'
+run_builder='go build'
 
 goos=(linux darwin windows)
+
+if [ "$1" = linux ] ; then
+	goos=(linux)
+fi
+
 for g in "${goos[@]}"; do
     export GOOS=$g
     echo "try build goos=$g"
@@ -72,11 +77,16 @@ for g in "${goos[@]}"; do
         cd "$SCRIPT_DIR"
         cd "cmd/$i"
 
+        bin_name=$i.$g
+        if [ "$1" = linux ] ; then
+	        bin_name=$i
+        fi
+
         # build
         if [ $DEBUG -eq 1 ]; then
-            $run_builder ${compile_line} -ldflags "-X $build_info" -gcflags='-N -l' -o "$output/$i.$g" -tags "debug" .
+            $run_builder ${compile_line} -ldflags "-X $build_info" -gcflags='-N -l' -o "$output/$bin_name" -tags "debug" .
         else
-            $run_builder ${compile_line} -ldflags "-X $build_info" -o "$output/$i.$g" .
+            $run_builder ${compile_line} -ldflags "-X $build_info" -o "$output/$bin_name" .
         fi
 
         # execute and show compile messages
@@ -87,6 +97,9 @@ for g in "${goos[@]}"; do
     echo "build $g successfully!"
 done
 
+if [ "$1" = linux ] ; then
+	exit 0
+fi
 
 cd "$SCRIPT_DIR"
 # *.sh

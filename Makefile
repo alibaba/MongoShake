@@ -1,5 +1,8 @@
 all: 
-	./build.sh
+	bash build.sh
+
+linux: clean
+	bash build.sh linux
 
 clean:
 	rm -rf bin
