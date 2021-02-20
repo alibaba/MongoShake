@@ -9,6 +9,7 @@ import (
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
 	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	"sort"
 )
 
 var (
@@ -137,7 +138,7 @@ func GetNewestTimestampByUrl(url string, fromMongoS bool) (bson.MongoTimestamp, 
 	var conn *MongoConn
 	var err error
 	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true,
-			ReadWriteConcernDefault, ReadWriteConcernDefault); conn == nil || err != nil {
+		ReadWriteConcernDefault, ReadWriteConcernDefault); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()
@@ -158,7 +159,7 @@ func GetOldestTimestampByUrl(url string, fromMongoS bool) (bson.MongoTimestamp, 
 	var conn *MongoConn
 	var err error
 	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true,
-			ReadWriteConcernDefault, ReadWriteConcernDefault); conn == nil || err != nil {
+		ReadWriteConcernDefault, ReadWriteConcernDefault); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()
@@ -170,7 +171,7 @@ func IsFromMongos(url string) (bool, error) {
 	var conn *MongoConn
 	var err error
 	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true,
-			ReadWriteConcernDefault, ReadWriteConcernDefault); conn == nil || err != nil {
+		ReadWriteConcernDefault, ReadWriteConcernDefault); conn == nil || err != nil {
 		return false, err
 	}
 	return conn.IsMongos(), nil
@@ -191,7 +192,7 @@ type TimestampNode struct {
  *     error: error
  */
 func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.MongoTimestamp,
-		bson.MongoTimestamp, bson.MongoTimestamp, bson.MongoTimestamp, error) {
+	bson.MongoTimestamp, bson.MongoTimestamp, bson.MongoTimestamp, error) {
 	smallestNew := bson.MongoTimestamp(math.MaxInt64)
 	biggestNew := bson.MongoTimestamp(0)
 	smallestOld := bson.MongoTimestamp(math.MaxInt64)
@@ -233,7 +234,7 @@ func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.Mon
 
 // only used in unit test
 func GetAllTimestampInUT() (map[string]TimestampNode, bson.MongoTimestamp,
-		bson.MongoTimestamp, bson.MongoTimestamp, bson.MongoTimestamp, error) {
+	bson.MongoTimestamp, bson.MongoTimestamp, bson.MongoTimestamp, error) {
 	smallestNew := bson.MongoTimestamp(math.MaxInt64)
 	biggestNew := bson.MongoTimestamp(0)
 	smallestOld := bson.MongoTimestamp(math.MaxInt64)
@@ -352,7 +353,7 @@ func FindFirstErrorIndexAndMessage(error string) (int, string, bool) {
 	indexVal := 0
 	for i := index + len(subIndex); i < len(error) && error[i] != ']'; i++ {
 		// fmt.Printf("%c %d\n", rune(error[i]), int(error[i] - '0'))
-		indexVal = indexVal * 10 + int(error[i] - '0')
+		indexVal = indexVal*10 + int(error[i]-'0')
 	}
 
 	index = strings.Index(error, subMsg)
@@ -373,15 +374,16 @@ func FindFirstErrorIndexAndMessage(error string) (int, string, bool) {
 			stack += 1
 		}
 	}
-	msg := error[index + len(subMsg): i]
+	msg := error[index+len(subMsg) : i]
 
 	index = strings.Index(error, subDup)
 	if index == -1 {
 		return indexVal, msg, false
 	}
 	i = index + len(subMsg)
-	for ; i < len(error) && error[i] != ']'; i++ {}
-	dupVal := error[index + len(subMsg):i]
+	for ; i < len(error) && error[i] != ']'; i++ {
+	}
+	dupVal := error[index+len(subMsg) : i]
 
 	return indexVal, msg, dupVal == "true"
 }
@@ -404,7 +406,7 @@ func HasUniqueIndex(index []mgo.Index) bool {
 func GetDbNamespace(url string, filterFunc func(name string) bool) ([]NS, map[string][]string, error) {
 	var err error
 	var conn *MongoCommunityConn
-	if conn, err = NewMongoCommunityConn(url, VarMongoConnectModeSecondaryPreferred, true,
+	if conn, err = NewMongoCommunityConn(url, VarMongoConnectModePrimary, true,
 		ReadWriteConcernLocal, ReadWriteConcernDefault); conn == nil || err != nil {
 		return nil, nil, err
 	}
@@ -415,14 +417,18 @@ func GetDbNamespace(url string, filterFunc func(name string) bool) ([]NS, map[st
 		err = fmt.Errorf("get database names of mongodb[%s] error: %v", url, err)
 		return nil, nil, err
 	}
+	// sort by db names
+	sort.Strings(dbNames)
 
 	nsList := make([]NS, 0, 128)
 	for _, db := range dbNames {
 		colNames, err := conn.Client.Database(db).ListCollectionNames(nil, bson2.M{})
 		if err != nil {
-			err = fmt.Errorf("get collection names of mongodb[%s] error: %v", url, err)
+			err = fmt.Errorf("get collection names of mongodb[%s] db[%v] error: %v", url, db, err)
 			return nil, nil, err
 		}
+
+		// LOG.Info("db[%v] colNames: %v", db, colNames)
 		for _, col := range colNames {
 			ns := NS{Database: db, Collection: col}
 			if strings.HasPrefix(col, "system.") {

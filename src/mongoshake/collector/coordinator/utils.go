@@ -1,14 +1,17 @@
 package coordinator
 
 import (
+	"fmt"
+	"sync"
+
 	"mongoshake/common"
 	"mongoshake/collector/configure"
 	"mongoshake/collector/ckpt"
+	"mongoshake/collector/reader"
 
 	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
-	"fmt"
-	"mongoshake/collector/reader"
+	bson2 "github.com/vinllen/mongo-go-driver/bson"
 )
 
 /*
@@ -179,4 +182,51 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	} else {
 		return utils.VarSyncModeAll, nil, utils.TimestampToInt64(smallestNewTs), nil
 	}
+}
+
+/*
+ * fetch all indexes.
+ * the cost is low so that no need to run in parallel.
+ */
+func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) bool) (map[utils.NS][]bson2.M, error) {
+	var mutex sync.Mutex
+	indexMap := make(map[utils.NS][]bson2.M)
+	for _, src := range sourceList {
+		LOG.Info("source[%v %v] start fetching index", src.ReplicaName, src.URL)
+		// 1. fetch namespace
+		nsList, _, err := utils.GetDbNamespace(src.URL, filterFunc)
+		if err != nil {
+			return nil, fmt.Errorf("source[%v %v] get namespace failed: %v", src.ReplicaName, src.URL, err)
+		}
+
+		LOG.Info("index namespace list: %v", nsList)
+		// 2. build connection
+		conn, err := utils.NewMongoCommunityConn(src.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
+		if err != nil {
+			return nil, fmt.Errorf("source[%v %v] build connection failed: %v", src.ReplicaName, src.URL, err)
+		}
+		defer conn.Close() // it's acceptable to call defer here
+
+		// 3. fetch all indexes
+		for _, ns := range nsList {
+			// indexes, err := conn.Session.DB(ns.Database).C(ns.Collection).Indexes()
+			cursor, err := conn.Client.Database(ns.Database).Collection(ns.Collection).Indexes().List(nil)
+			if err != nil {
+				return nil, fmt.Errorf("source[%v %v] fetch index failed: %v", src.ReplicaName, src.URL, err)
+			}
+
+			indexes := make([]bson2.M, 0)
+			if err = cursor.All(nil, &indexes); err != nil {
+				return nil, fmt.Errorf("index cursor fetch all indexes fail: %v", err)
+			}
+
+			mutex.Lock()
+			indexMap[ns] = indexes
+			mutex.Unlock()
+		}
+
+		LOG.Info("source[%v %v] finish fetching index", src.ReplicaName, src.URL)
+	}
+	return indexMap, nil
 }

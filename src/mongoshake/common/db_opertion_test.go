@@ -3,16 +3,22 @@ package utils
 import (
 	"fmt"
 	"testing"
+	"strings"
+	"context"
 
 	"mongoshake/unit_test_common"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
-	"strings"
+	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	"github.com/vinllen/mongo-go-driver/mongo"
+	"github.com/vinllen/mongo-go-driver/mongo/options"
 )
 
 const (
-	testMongoAddress = unit_test_common.TestUrl
+	testMongoAddress  = unit_test_common.TestUrl
+	testUrlServerless = unit_test_common.TestUrlServerlessTenant
+	testDb            = "test_db"
 )
 
 // deprecated
@@ -289,5 +295,55 @@ func TestGetDbNamespace(t *testing.T) {
 		assert.Equal(t, 2, len(nsMap), "should be equal")
 		assert.Equal(t, 3, len(nsMap["db1"]), "should be equal")
 		assert.Equal(t, 2, len(nsMap["db2"]), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestGetDbNamespace case %d.\n", nr)
+		nr++
+
+		// drop all old table
+		conn, err := NewMongoCommunityConn(testUrlServerless, "primary", true, "", "")
+		assert.Equal(t, nil, err, "should be equal")
+		conn.Client.Database(testDb).Drop(nil)
+
+		// create index
+		index1, err := conn.Client.Database(testDb).Collection("c1").Indexes().CreateOne(context.Background(), mongo.IndexModel{
+			Keys:    bson2.D{{"x", 1}, {"y", 1}},
+			Options: &options.IndexOptions{},
+		})
+		assert.Equal(t, nil, err, "should be equal")
+
+		// create index
+		index2, err := conn.Client.Database(testDb).Collection("c1").Indexes().CreateOne(context.Background(), mongo.IndexModel{
+			Keys:    bson2.D{{"wwwww", 1}},
+			Options: &options.IndexOptions{},
+		})
+		assert.Equal(t, nil, err, "should be equal")
+
+		// create index
+		index3, err := conn.Client.Database(testDb).Collection("c2").Indexes().CreateOne(context.Background(), mongo.IndexModel{
+			Keys:    bson2.D{{"hello", "hashed"}},
+			Options: &options.IndexOptions{},
+		})
+		assert.Equal(t, nil, err, "should be equal")
+
+		_, err = conn.Client.Database(testDb).Collection("c3").InsertOne(context.Background(), map[string]interface{}{"x": 1})
+		assert.Equal(t, nil, err, "should be equal")
+
+		fmt.Println(index1, index2, index3)
+
+		filterFunc := func(name string) bool {
+			list := strings.Split(name, ".")
+			if len(list) > 0 && list[0] == testDb {
+				return false
+			}
+			return true
+		}
+		nsList, nsMap, err := GetDbNamespace(testUrlServerless, filterFunc)
+		fmt.Println(nsList, nsMap)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 3, len(nsList), "should be equal")
+		assert.Equal(t, 1, len(nsMap), "should be equal")
+		assert.Equal(t, 3, len(nsMap[testDb]), "should be equal")
 	}
 }

@@ -41,13 +41,17 @@ func NewChangeStreamConn(src string,
 	// read preference
 	readPreference := readpref.Primary()
 	switch mode {
+	case VarMongoConnectModePrimary:
+		readPreference = readpref.Primary()
 	case VarMongoConnectModeSecondaryPreferred:
 		readPreference = readpref.SecondaryPreferred()
 	case VarMongoConnectModeStandalone:
-		// TODO, no standalone, choose nearest here
+		// TODO, no standalone, choose nearest
 		fallthrough
-	default:
+	case VarMongoConnectModeNearset:
 		readPreference = readpref.Nearest()
+	default:
+		readPreference = readpref.Primary()
 	}
 	clientOps.SetReadPreference(readPreference)
 	clientOps.ReadConcern = readconcern.Majority() // mandatory set read concern to majority for change stream
@@ -112,7 +116,8 @@ func NewChangeStreamConn(src string,
 		ops.SetMultiDbSelections("(" + strings.Join(dbList, "|") + ")")
 
 		LOG.Info("change stream options with aliyun_serverless: %v", printCsOption(ops))
-		csHandler, err = client.Database("non-exist-database-shake").Watch(ctx, mongo.Pipeline{}, ops)
+		// csHandler, err = client.Database("non-exist-database-shake").Watch(ctx, mongo.Pipeline{}, ops)
+		csHandler, err = client.Database("serverless-shake-fake-db").Collection("serverless-shake-fake-collection").Watch(ctx, mongo.Pipeline{}, ops)
 		if err != nil {
 			return nil, fmt.Errorf("client[%v] create change stream handler failed[%v]", src, err)
 		}

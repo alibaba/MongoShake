@@ -12,12 +12,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
 	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	"github.com/vinllen/mongo-go-driver/mongo"
+	"github.com/vinllen/mongo-go-driver/mongo/options"
+	"context"
+	"strings"
 )
 
 const (
-	testUrl        = unit_test_common.TestUrl
-	testDb         = "test_db"
-	testCollection = "test_ut"
+	testUrl           = unit_test_common.TestUrl
+	testUrlServerless = unit_test_common.TestUrlServerlessTenant
+	testDb            = "test_db3"
+	testCollection    = "test_ut"
 )
 
 func TestSelectSyncMode(t *testing.T) {
@@ -98,7 +103,7 @@ func TestSelectSyncMode(t *testing.T) {
 		mode, startTsMap, ts, err := coordinator.selectSyncMode(utils.VarSyncModeAll)
 		fmt.Printf("startTsMap: %v\n", startTsMap)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, int64(bson.MongoTimestamp(15 << 32)), startTsMap[testReplicaName], "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(15<<32)), startTsMap[testReplicaName], "should be equal")
 		assert.Equal(t, utils.VarSyncModeIncr, mode, "should be equal")
 		assert.Equal(t, int64(0), ts, "should be equal")
 	}
@@ -544,7 +549,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(bson.MongoTimestamp(100 <<32)), ts, "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(100<<32)), ts, "should be equal")
 	}
 
 	// test sharding with fetch_method = "change_stream" with no checkpoint exist and kafka tunnel
@@ -615,7 +620,7 @@ func TestSelectSyncMode(t *testing.T) {
 		mode, startTsMap, ts, err := coordinator.selectSyncMode(utils.VarSyncModeIncr)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, len(startTsMap) >= 1, "should be equal")
-		assert.Equal(t, int64(1) << 32, startTsMap["mockMongoS"], "should be equal")
+		assert.Equal(t, int64(1)<<32, startTsMap["mockMongoS"], "should be equal")
 		assert.Equal(t, utils.VarSyncModeIncr, mode, "should be equal")
 		assert.Equal(t, int64(0), ts, "should be equal")
 	}
@@ -628,7 +633,7 @@ func TestSelectSyncMode(t *testing.T) {
 		conf.Options.Tunnel = utils.VarTunnelKafka
 
 		conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodChangeStream
-		conf.Options.CheckpointStorageUrl = testUrl
+		conf.Options.CheckpointStorageUrl = testUrlServerless
 		conf.Options.CheckpointStorageDb = testDb
 		conf.Options.CheckpointStorageCollection = testCollection
 		conf.Options.CheckpointStorage = utils.VarCheckpointStorageDatabase
@@ -637,7 +642,7 @@ func TestSelectSyncMode(t *testing.T) {
 		testReplicaName := "mockReplicaSet"
 
 		// drop old table
-		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "")
+		conn, err := utils.NewMongoConn(testUrlServerless, "primary", true, "", "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		conn.Session.DB(testDb).C(testCollection).DropCollection()
@@ -646,7 +651,7 @@ func TestSelectSyncMode(t *testing.T) {
 		coordinator := &ReplicationCoordinator{
 			RealSourceFullSync: []*utils.MongoSource{
 				{
-					URL:         testUrl,
+					URL:         testUrlServerless,
 					ReplicaName: testReplicaName,
 				},
 			},
@@ -667,7 +672,7 @@ func TestSelectSyncMode(t *testing.T) {
 		conf.Options.Tunnel = utils.VarTunnelKafka
 
 		conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodChangeStream
-		conf.Options.CheckpointStorageUrl = testUrl
+		conf.Options.CheckpointStorageUrl = testUrlServerless
 		conf.Options.CheckpointStorageDb = testDb
 		conf.Options.CheckpointStorageCollection = testCollection
 		conf.Options.CheckpointStorage = utils.VarCheckpointStorageDatabase
@@ -676,7 +681,7 @@ func TestSelectSyncMode(t *testing.T) {
 		testReplicaName := "mockReplicaSet"
 
 		// drop old table
-		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "")
+		conn, err := utils.NewMongoConn(testUrlServerless, "primary", true, "", "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		conn.Session.DB(testDb).C(testCollection).DropCollection()
@@ -694,13 +699,13 @@ func TestSelectSyncMode(t *testing.T) {
 		coordinator := &ReplicationCoordinator{
 			RealSourceIncrSync: []*utils.MongoSource{
 				{
-					URL:         testUrl,
+					URL:         testUrlServerless,
 					ReplicaName: testReplicaName,
 				},
 			},
 			RealSourceFullSync: []*utils.MongoSource{
 				{
-					URL:         testUrl,
+					URL:         testUrlServerless,
 					ReplicaName: testReplicaName,
 				},
 			},
@@ -711,6 +716,72 @@ func TestSelectSyncMode(t *testing.T) {
 		fmt.Println(syncMode, fullBeginTs)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, utils.VarSyncModeIncr, syncMode, "should be equal")
-		assert.Equal(t, int64(bson.MongoTimestamp(5 << 32)), fullBeginTs, "should be equal")
+		assert.Equal(t, int64(bson.MongoTimestamp(5<<32)), fullBeginTs, "should be equal")
+	}
+}
+
+func TestFetchIndexes(t *testing.T) {
+	utils.InitialLogger("", "", "info", true, true)
+
+	var nr int
+
+	{
+		fmt.Printf("TestFetchIndexes case %d.\n", nr)
+		nr++
+
+		url := testUrlServerless
+		sourceList := []*utils.MongoSource{
+			{
+				ReplicaName: "test",
+				URL:         url,
+			},
+		}
+
+		// drop all old table
+		conn, err := utils.NewMongoCommunityConn(url, "primary", true, "", "")
+		assert.Equal(t, nil, err, "should be equal")
+		conn.Client.Database(testDb).Drop(nil)
+
+		// create index
+		index1, err := conn.Client.Database(testDb).Collection("c1").Indexes().CreateOne(context.Background(), mongo.IndexModel{
+			Keys:    bson2.D{{"x", 1}, {"y", 1}},
+			Options: &options.IndexOptions{},
+		})
+		assert.Equal(t, nil, err, "should be equal")
+
+		// create index
+		index2, err := conn.Client.Database(testDb).Collection("c1").Indexes().CreateOne(context.Background(), mongo.IndexModel{
+			Keys:    bson2.D{{"wwwww", 1}},
+			Options: &options.IndexOptions{},
+		})
+		assert.Equal(t, nil, err, "should be equal")
+
+		// create index
+		index3, err := conn.Client.Database(testDb).Collection("c2").Indexes().CreateOne(context.Background(), mongo.IndexModel{
+			Keys:    bson2.D{{"hello", "hashed"}},
+			Options: &options.IndexOptions{},
+		})
+		assert.Equal(t, nil, err, "should be equal")
+
+		_, err = conn.Client.Database(testDb).Collection("c3").InsertOne(context.Background(), map[string]interface{}{"x": 1})
+		assert.Equal(t, nil, err, "should be equal")
+
+		fmt.Println(index1, index2, index3)
+
+		filterFunc := func(name string) bool {
+			list := strings.Split(name, ".")
+			if len(list) > 0 && list[0] == testDb {
+				return false
+			}
+			return true
+		}
+
+		out, err := fetchIndexes(sourceList, filterFunc)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 3, len(out), "should be equal")
+		assert.Equal(t, 3, len(out[utils.NS{Database: testDb, Collection: "c1"}]), "should be equal")
+		assert.Equal(t, 2, len(out[utils.NS{Database: testDb, Collection: "c2"}]), "should be equal")
+		assert.Equal(t, 1, len(out[utils.NS{Database: testDb, Collection: "c3"}]), "should be equal")
+		fmt.Println(out)
 	}
 }

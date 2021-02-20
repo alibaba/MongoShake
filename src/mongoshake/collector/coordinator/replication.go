@@ -13,6 +13,7 @@ import (
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/mgo/bson"
 )
 
 var (
@@ -185,14 +186,20 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 
 // run incr-sync after full-sync
 func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs interface{}) error {
-	if err := coordinator.startDocumentReplication(); err != nil {
+	var err error
+	if err = coordinator.startDocumentReplication(); err != nil {
 		return fmt.Errorf("start document replication failed: %v", err)
 	}
 
 	// get current newest timestamp
-	_, fullFinishTs, _, oldestTs, _, err := utils.GetAllTimestamp(coordinator.MongoD)
-	if err != nil {
-		return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
+	var fullFinishTs, oldestTs bson.MongoTimestamp
+	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless {
+		_, fullFinishTs, _, oldestTs, _, err = utils.GetAllTimestamp(coordinator.MongoD)
+		if err != nil {
+			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
+		}
+	} else {
+		fullFinishTs = bson.MongoTimestamp(bson.MaxKey)
 	}
 
 	LOG.Info("------------------------full sync done!------------------------")
@@ -209,10 +216,10 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 			LOG.Error(err)
 			return err
 		}
-	}
 
-	LOG.Info("oldestTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractTimestampForLog(oldestTs),
-		fullBegin, utils.ExtractTimestampForLog(fullFinishTs))
+		LOG.Info("oldestTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractTimestampForLog(oldestTs),
+			fullBegin, utils.ExtractTimestampForLog(fullFinishTs))
+	}
 
 	LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
 		fullBegin, utils.ExtractTimestampForLog(fullFinishTs))

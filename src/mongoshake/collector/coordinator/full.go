@@ -13,9 +13,9 @@ import (
 	"mongoshake/collector/transform"
 
 	"github.com/gugemichael/nimo4go"
-	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
+	bson2 "github.com/vinllen/mongo-go-driver/bson"
 )
 
 func fetchChunkMap(isSharding bool) (sharding.ShardingChunkMap, error) {
@@ -59,46 +59,6 @@ func getTimestampMap(sources []*utils.MongoSource) (map[string]utils.TimestampNo
 	return ckptMap, nil
 }
 
-/*
- * fetch all indexes.
- * the cost is low so that no need to run in parallel.
- */
-func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) bool) (map[utils.NS][]mgo.Index, error) {
-	var mutex sync.Mutex
-	indexMap := make(map[utils.NS][]mgo.Index)
-	for _, src := range sourceList {
-		LOG.Info("source[%v %v] start fetching index", src.ReplicaName, src.URL)
-		// 1. fetch namespace
-		nsList, _, err := utils.GetDbNamespace(src.URL, filterFunc)
-		if err != nil {
-			return nil, fmt.Errorf("source[%v %v] get namespace failed: %v", src.ReplicaName, src.URL, err)
-		}
-
-		// 2. build connection
-		conn, err := utils.NewMongoConn(src.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
-		if err != nil {
-			return nil, fmt.Errorf("source[%v %v] build connection failed: %v", src.ReplicaName, src.URL, err)
-		}
-		defer conn.Close() // it's acceptable to call defer here
-
-		// 3. fetch all indexes
-		for _, ns := range nsList {
-			indexes, err := conn.Session.DB(ns.Database).C(ns.Collection).Indexes()
-			if err != nil {
-				return nil, fmt.Errorf("source[%v %v] fetch index failed: %v", src.ReplicaName, src.URL, err)
-			}
-
-			mutex.Lock()
-			indexMap[ns] = indexes
-			mutex.Unlock()
-		}
-
-		LOG.Info("source[%v %v] finish fetching index", src.ReplicaName, src.URL)
-	}
-	return indexMap, nil
-}
-
 func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// for change stream, we need to fetch current timestamp
 	/*fromConn0, err := utils.NewMongoConn(coordinator.Sources[0].URL, utils.VarMongoConnectModePrimary, true)
@@ -134,10 +94,13 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 	LOG.Info("all namespace: %v", nsSet)
 
-	// get current newest timestamp
-	ckptMap, err := getTimestampMap(coordinator.MongoD)
-	if err != nil {
-		return err
+	var ckptMap map[string]utils.TimestampNode
+	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless {
+		// get current newest timestamp
+		ckptMap, err = getTimestampMap(coordinator.MongoD)
+		if err != nil {
+			return err
+		}
 	}
 
 	// create target client
@@ -168,7 +131,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 
 	// fetch all indexes
-	var indexMap map[utils.NS][]mgo.Index
+	var indexMap map[utils.NS][]bson2.M
 	if conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexNone {
 		if indexMap, err = fetchIndexes(coordinator.RealSourceFullSync, filterList.IterateFilter); err != nil {
 			return fmt.Errorf("fetch index failed[%v]", err)
@@ -177,7 +140,8 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		// print
 		LOG.Info("index list below: ----------")
 		for ns, index := range indexMap {
-			LOG.Info("collection[%v] -> %s", ns, utils.MarshalStruct(index))
+			// LOG.Info("collection[%v] -> %s", ns, utils.MarshalStruct(index))
+			LOG.Info("collection[%v] -> %v", ns, index)
 		}
 		LOG.Info("index list above: ----------")
 
@@ -246,7 +210,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 
 	// update checkpoint after full sync
 	// do not update checkpoint when source is "aliyun_serverless"
-	if conf.Options.SyncMode != utils.VarSyncModeFull && conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless{
+	if conf.Options.SyncMode != utils.VarSyncModeFull && conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless {
 		// need merge to one when from mongos and fetch_mothod=="change_stream"
 		if coordinator.MongoS != nil && conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
 			var smallestNew bson.MongoTimestamp = math.MaxInt64

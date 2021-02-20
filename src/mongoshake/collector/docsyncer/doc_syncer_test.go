@@ -15,18 +15,20 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
+	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	"reflect"
 )
 
 const (
-	testMongoAddress = unit_test_common.TestUrl
-	testDb           = "a"
-	testCollection   = "b"
+	testMongoAddress           = unit_test_common.TestUrl
+	testMongoAddressServerless = unit_test_common.TestUrlServerlessTenant
+	testDb                     = "test_db"
+	testCollection             = "test_coll"
 )
 
 var (
 	testNs = strings.Join([]string{testDb, testCollection}, ".")
 )
-
 
 func marshalData(input []bson.D) []*bson.Raw {
 	output := make([]*bson.Raw, 0, len(input))
@@ -85,24 +87,24 @@ func TestDbSync(t *testing.T) {
 		err := conn.Session.DB(testDb).DropDatabase()
 		assert.Equal(t, nil, err, "should be equal")
 
-		input := []bson.D {
+		input := []bson.D{
 			{
 				{
-					Name: "_id",
+					Name:  "_id",
 					Value: 1,
 				},
 				{
-					Name: "x",
+					Name:  "x",
 					Value: 1,
 				},
 			},
 			{
 				{
-					Name: "_id",
+					Name:  "_id",
 					Value: 2,
 				},
 				{
-					Name: "x",
+					Name:  "x",
 					Value: 2,
 				},
 			},
@@ -133,34 +135,34 @@ func TestDbSync(t *testing.T) {
 		/*------------------------------------------------------------*/
 
 		// insert duplicate document
-		input = []bson.D {
+		input = []bson.D{
 			{
 				{
-					Name: "_id",
+					Name:  "_id",
 					Value: 3,
 				},
 				{
-					Name: "x",
+					Name:  "x",
 					Value: 3,
 				},
 			},
 			{ // duplicate key with different value
 				{
-					Name: "_id",
+					Name:  "_id",
 					Value: 2,
 				},
 				{
-					Name: "x",
+					Name:  "x",
 					Value: 20,
 				},
 			},
 			{
 				{
-					Name: "_id",
+					Name:  "_id",
 					Value: 4,
 				},
 				{
-					Name: "x",
+					Name:  "x",
 					Value: 4,
 				},
 			},
@@ -205,7 +207,7 @@ func TestDbSync(t *testing.T) {
 
 		// set orphan filter
 		of := filter.NewOrphanFilter("test-replica", sharding.DBChunkMap{
-			"a.b": &sharding.ShardCollection{
+			fmt.Sprintf("%s.%s", testDb, testCollection): &sharding.ShardCollection{
 				Chunks: []*sharding.ChunkRange{
 					{
 						Mins: []interface{}{
@@ -238,34 +240,34 @@ func TestDbSync(t *testing.T) {
 		err := conn.Session.DB(testDb).DropDatabase()
 		assert.Equal(t, nil, err, "should be equal")
 
-		input := []bson.D {
+		input := []bson.D{
 			{
 				{
-					Name: "_id",
+					Name:  "_id",
 					Value: 1,
 				},
 				{
-					Name: "x",
+					Name:  "x",
 					Value: 1,
 				},
 			},
 			{ // not in current chunks,
 				{
-					Name: "_id",
+					Name:  "_id",
 					Value: 11,
 				},
 				{
-					Name: "x",
+					Name:  "x",
 					Value: 11,
 				},
 			},
 			{
 				{
-					Name: "_id",
+					Name:  "_id",
 					Value: 4,
 				},
 				{
-					Name: "x",
+					Name:  "x",
 					Value: 4,
 				},
 			},
@@ -298,34 +300,34 @@ func TestDbSync(t *testing.T) {
 		conf.Options.FullSyncExecutorInsertOnDupUpdate = false
 		conf.Options.FullSyncExecutorFilterOrphanDocument = true
 		conf.Options.MongoUrls = []string{"xx0", "xx1"} // meaningless but only for judge
-		input = []bson.D {
+		input = []bson.D{
 			{
 				{
-					Name: "_id",
+					Name:  "_id",
 					Value: 7,
 				},
 				{
-					Name: "x",
+					Name:  "x",
 					Value: 7,
 				},
 			},
 			{ // not in current chunks,
 				{
-					Name: "_id",
+					Name:  "_id",
 					Value: 11,
 				},
 				{
-					Name: "x",
+					Name:  "x",
 					Value: 12,
 				},
 			},
 			{
 				{
-					Name: "_id",
+					Name:  "_id",
 					Value: 6,
 				},
 				{
-					Name: "x",
+					Name:  "x",
 					Value: 6,
 				},
 			},
@@ -374,21 +376,21 @@ func TestStartDropDestCollection(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		// create test.c1
-		err = conn.Session.DB("test").C("c1").Insert(bson.M{"c":1})
+		err = conn.Session.DB("test").C("c1").Insert(bson.M{"c": 1})
 		assert.Equal(t, nil, err, "should be equal")
 
 		// create test.c2
-		err = conn.Session.DB("test").C("c2").Insert(bson.M{"c":1})
+		err = conn.Session.DB("test").C("c2").Insert(bson.M{"c": 1})
 		assert.Equal(t, nil, err, "should be equal")
 
 		// create test2.c3
-		err = conn.Session.DB("test").C("c3").Insert(bson.M{"c":1})
+		err = conn.Session.DB("test").C("c3").Insert(bson.M{"c": 1})
 		assert.Equal(t, nil, err, "should be equal")
 
 		nsSet := map[utils.NS]struct{}{}
-		nsSet[utils.NS{Database: "test", Collection:"c1"}] = struct{}{}
-		nsSet[utils.NS{Database: "test", Collection:"c4"}] = struct{}{}
-		nsSet[utils.NS{Database: "test", Collection:"c5"}] = struct{}{}
+		nsSet[utils.NS{Database: "test", Collection: "c1"}] = struct{}{}
+		nsSet[utils.NS{Database: "test", Collection: "c4"}] = struct{}{}
+		nsSet[utils.NS{Database: "test", Collection: "c5"}] = struct{}{}
 
 		conf.Options.FullSyncCollectionDrop = true
 		nsTrans := transform.NewNamespaceTransform([]string{"test.c4:test.c3"})
@@ -418,21 +420,21 @@ func TestStartDropDestCollection(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		// create test.c1
-		err = conn.Session.DB("test").C("c1").Insert(bson.M{"c":1})
+		err = conn.Session.DB("test").C("c1").Insert(bson.M{"c": 1})
 		assert.Equal(t, nil, err, "should be equal")
 
 		// create test.c2
-		err = conn.Session.DB("test").C("c2").Insert(bson.M{"c":1})
+		err = conn.Session.DB("test").C("c2").Insert(bson.M{"c": 1})
 		assert.Equal(t, nil, err, "should be equal")
 
 		// create test2.c3
-		err = conn.Session.DB("test").C("c3").Insert(bson.M{"c":1})
+		err = conn.Session.DB("test").C("c3").Insert(bson.M{"c": 1})
 		assert.Equal(t, nil, err, "should be equal")
 
-		nsSet := map[utils.NS]struct{} {}
-		nsSet[utils.NS{Database: "test", Collection:"c1"}] = struct{}{}
-		nsSet[utils.NS{Database: "test", Collection:"c4"}] = struct{}{}
-		nsSet[utils.NS{Database: "test", Collection:"c5"}] = struct{}{}
+		nsSet := map[utils.NS]struct{}{}
+		nsSet[utils.NS{Database: "test", Collection: "c1"}] = struct{}{}
+		nsSet[utils.NS{Database: "test", Collection: "c4"}] = struct{}{}
+		nsSet[utils.NS{Database: "test", Collection: "c5"}] = struct{}{}
 
 		conf.Options.FullSyncCollectionDrop = false
 		nsTrans := transform.NewNamespaceTransform([]string{"test.c4:test.c3"})
@@ -447,5 +449,174 @@ func TestStartDropDestCollection(t *testing.T) {
 		assert.Equal(t, "c1", list[0], "should be equal")
 		assert.Equal(t, "c2", list[1], "should be equal")
 		assert.Equal(t, "c3", list[2], "should be equal")
+	}
+}
+
+func TestStartIndexSync(t *testing.T) {
+	// test StartIndexSync
+
+	var nr int
+
+	utils.InitialLogger("", "", "info", true, true)
+
+	// test drop
+	{
+		fmt.Printf("TestStartIndexSync case %d.\n", nr)
+		nr++
+
+		conf.Options.FullSyncReaderCollectionParallel = 4
+
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, utils.VarMongoConnectModeSecondaryPreferred, true,
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
+		assert.Equal(t, nil, err, "should be equal")
+
+		// drop old db
+		err = conn.Client.Database("test_db").Drop(nil)
+		assert.Equal(t, nil, err, "should be equal")
+
+		indexInput := []bson2.M{
+			{
+				"key": bson2.M{
+					"_id": int32(1),
+				},
+				"name": "_id_",
+				"ns":   "test_db.test_coll",
+			},
+			{
+				"key": bson2.M{
+					"hello": "hashed",
+				},
+				"name": "hello_hashed",
+				"ns":   "test_db.test_coll",
+			},
+			{
+				"key": bson2.M{
+					"x": int32(1),
+					"y": int32(1),
+				},
+				"name": "x_1_y_1",
+				"ns":   "test_db.test_coll",
+			},
+			{
+				"key": bson2.M{
+					"z": int32(1),
+				},
+				"name": "z_1",
+				"ns":   "test_db.test_coll",
+			},
+		}
+		indexMap := map[utils.NS][]bson2.M{
+			utils.NS{"test_db", "test_coll"}: indexInput,
+		}
+		err = StartIndexSync(indexMap, testMongoAddress, nil, true)
+		assert.Equal(t, nil, err, "should be equal")
+
+		cursor, err := conn.Client.Database("test_db").Collection("test_coll").Indexes().List(nil)
+		assert.Equal(t, nil, err, "should be equal")
+
+		indexes := make([]bson2.M, 0)
+
+		cursor.All(nil, &indexes)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, len(indexes), len(indexInput), "should be equal")
+		assert.Equal(t, isEqual(indexInput, indexes), true, "should be equal")
+	}
+
+	// serverless
+	{
+		fmt.Printf("TestStartIndexSync case %d.\n", nr)
+		nr++
+
+		conf.Options.FullSyncReaderCollectionParallel = 4
+
+		conn, err := utils.NewMongoCommunityConn(testMongoAddressServerless, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
+		assert.Equal(t, nil, err, "should be equal")
+
+		// drop old db
+		err = conn.Client.Database("test_db").Drop(nil)
+		assert.Equal(t, nil, err, "should be equal")
+
+		indexInput := []bson2.M{
+			{
+				"key": bson2.M{
+					"_id": int32(1),
+				},
+				"name": "_id_",
+				//"ns":   "test_db.test_coll",
+			},
+			{
+				"key": bson2.M{
+					"hello": "hashed",
+				},
+				"name": "hello_hashed",
+				//"ns":   "test_db.test_coll",
+			},
+			{
+				"key": bson2.M{
+					"x": int32(1),
+					"y": int32(1),
+				},
+				"name": "x_1_y_1",
+				//"ns":   "test_db.test_coll",
+			},
+			{
+				"key": bson2.M{
+					"z": int32(1),
+				},
+				"name": "z_1",
+				//"ns":   "test_db.test_coll",
+			},
+		}
+		indexMap := map[utils.NS][]bson2.M{
+			utils.NS{"test_db", "test_coll"}: indexInput,
+		}
+		err = StartIndexSync(indexMap, testMongoAddressServerless, nil, true)
+		assert.Equal(t, nil, err, "should be equal")
+
+		cursor, err := conn.Client.Database("test_db").Collection("test_coll").Indexes().List(nil)
+		assert.Equal(t, nil, err, "should be equal")
+
+		indexes := make([]bson2.M, 0)
+
+		cursor.All(nil, &indexes)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, len(indexes), len(indexInput), "should be equal")
+		assert.Equal(t, isEqual(indexInput, indexes), true, "should be equal")
+	}
+}
+
+func isEqual(x, y []bson2.M) bool {
+	sort.Slice(x, func(i, j int) bool {
+		if x[i]["name"].(string) < x[j]["name"].(string) {
+			return true
+		}
+		return false
+	})
+	sort.Slice(y, func(i, j int) bool {
+		if y[i]["name"].(string) < y[j]["name"].(string) {
+			return true
+		}
+		return false
+	})
+
+	removeField(x)
+	removeField(y)
+
+	fmt.Println(x)
+	fmt.Println(y)
+
+	for i := range x {
+		if !reflect.DeepEqual(x[i], y[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func removeField(x []bson2.M) {
+	for _, ele := range x {
+		delete(ele, "v")
+		delete(ele, "ns")
 	}
 }

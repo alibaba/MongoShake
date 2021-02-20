@@ -21,7 +21,7 @@ func TestChangeStreamConn(t *testing.T) {
 
 	var nr int
 	// normal
-/*	{
+	{
 		fmt.Printf("TestChangeStreamConn case %d.\n", nr)
 		nr++
 
@@ -100,7 +100,7 @@ func TestChangeStreamConn(t *testing.T) {
 		optionStr2 := printCsOption(cs2.Ops)
 		expect2 := fmt.Sprintf(" BatchSize[1024] MaxAwaitTime[24h0m0s] StartAfter[%s]", token)
 		assert.Equal(t, expect2, optionStr2, "should be equal")
-	}*/
+	}
 
 	{
 		fmt.Printf("TestChangeStreamConn case %d.\n", nr)
@@ -145,7 +145,6 @@ func TestChangeStreamConn(t *testing.T) {
 		optionStr := printCsOption(cs.Ops)
 		expect := fmt.Sprintf(" BatchSize[1024] MaxAwaitTime[24h0m0s] StartAtOperationTime[%s] MultiDbSelections[(db1|db2)]", tsStr)
 		assert.Equal(t, expect, optionStr, "should be equal")
-
 		cs.Close()
 	}
 }

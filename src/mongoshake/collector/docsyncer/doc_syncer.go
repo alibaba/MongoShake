@@ -17,6 +17,7 @@ import (
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
+	bson2 "github.com/vinllen/mongo-go-driver/bson"
 )
 
 const (
@@ -172,7 +173,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 	return nil
 }
 
-func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
+func StartIndexSync(indexMap map[utils.NS][]bson2.M, toUrl string,
 		nsTrans *transform.NamespaceTransform, background bool) (syncError error) {
 	if conf.Options.FullSyncExecutorDebug {
 		LOG.Info("full_sync.executor.debug set, no need to sync index")
@@ -181,7 +182,7 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 
 	type IndexNS struct {
 		ns        utils.NS
-		indexList []mgo.Index
+		indexList []bson2.M
 	}
 
 	LOG.Info("start writing index with background[%v], indexMap length[%v]", background, len(indexMap))
@@ -199,20 +200,18 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 		close(namespaces)
 	})
 
-	var conn *utils.MongoConn
-	var err error
-	if conn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, false,
-			utils.ReadWriteConcernDefault, utils.ReadWriteConcernMajority); err != nil {
-		return err
-	}
-	defer conn.Close()
-
 	var wg sync.WaitGroup
 	wg.Add(collExecutorParallel)
 	for i := 0; i < collExecutorParallel; i++ {
 		nimo.GoRoutine(func() {
-			session := conn.Session.Clone()
-			defer session.Close()
+			var conn *utils.MongoCommunityConn
+			var err error
+			if conn, err = utils.NewMongoCommunityConn(toUrl, utils.VarMongoConnectModePrimary, false,
+					utils.ReadWriteConcernDefault, utils.ReadWriteConcernMajority); err != nil {
+				LOG.Error("write index but create client fail: %v", err)
+				return
+			}
+			defer conn.Close()
 			defer wg.Done()
 
 			for {
@@ -221,17 +220,26 @@ func StartIndexSync(indexMap map[utils.NS][]mgo.Index, toUrl string,
 					break
 				}
 				ns := indexNs.ns
-				toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
+				toNS := ns
+				if nsTrans != nil {
+					toNS = utils.NewNS(nsTrans.Transform(ns.Str()))
+				}
 
 				for _, index := range indexNs.indexList {
 					// ignore _id
-					if len(index.Key) == 1 && index.Key[0] == "_id" {
+					if _, ok := index["key"].(bson2.M)["_id"]; ok {
 						continue
 					}
 
-					index.Background = background
-					if err = session.DB(toNS.Database).C(toNS.Collection).EnsureIndex(index); err != nil {
-						LOG.Warn("Create indexes for ns %v of dest mongodb failed. %v", ns, err)
+					// aliyun_serverless
+					// delete(index, "ns")
+
+					index["background"] = background
+					if out := conn.Client.Database(toNS.Database).RunCommand(nil, bson2.D{
+						{"createIndexes", toNS.Collection},
+						{"indexes", []bson2.M{index}},
+					}); out.Err() != nil {
+						LOG.Warn("Create indexes for ns %v of dest mongodb failed. %v", ns, out.Err())
 					}
 				}
 				LOG.Info("Create indexes for ns %v of dest mongodb finish", toNS)
