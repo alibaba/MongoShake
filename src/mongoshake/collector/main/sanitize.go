@@ -181,7 +181,9 @@ func checkDefaultValue() error {
 			return fmt.Errorf("incr_sync.shard_by_object_id_whitelist should only be set when 'incr_sync.shard_key == collection'")
 		}
 	}
-	if conf.Options.IncrSyncWorker <= 0 || conf.Options.IncrSyncWorker > 256 {
+	if conf.Options.IncrSyncWorker == 0 {
+		conf.Options.IncrSyncWorker = 8
+	} else if conf.Options.IncrSyncWorker <= 0 || conf.Options.IncrSyncWorker > 256 {
 		return fmt.Errorf("incr_sync.worker should in range [1, 256]")
 	}
 	if conf.Options.IncrSyncWorkerOplogCompressor == "" {

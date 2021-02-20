@@ -11,6 +11,7 @@ logs
 tags
 *.bak
 *.tar.gz
+run_sys_test_dir
 
 dump.data
 runtime.trace
