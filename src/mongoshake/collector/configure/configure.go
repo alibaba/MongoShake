@@ -38,7 +38,7 @@ type Configuration struct {
 	CheckpointStorageCollection string   `config:"checkpoint.storage.collection"`
 	CheckpointStartPosition     int64    `config:"checkpoint.start_position" type:"date"`
 	TransformNamespace          []string `config:"transform.namespace"`
-	SpecialSourceDBFlag         string   `config:"special.source.db.flag" type:"string"` // add v2.4.18
+	SpecialSourceDBFlag         string   `config:"special.source.db.flag" type:"string"` // add v2.4.20
 
 	// 2. full sync
 	FullSyncReaderCollectionParallel     int    `config:"full_sync.reader.collection_parallel"`
