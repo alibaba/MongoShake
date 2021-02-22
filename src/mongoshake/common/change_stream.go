@@ -12,6 +12,7 @@ import (
 	"github.com/vinllen/mongo-go-driver/mongo/readpref"
 	"github.com/vinllen/mongo-go-driver/mongo/readconcern"
 	"github.com/vinllen/mongo-go-driver/bson/primitive"
+	"sort"
 )
 
 const (
@@ -108,6 +109,7 @@ func NewChangeStreamConn(src string,
 		for name := range dbs {
 			dbList = append(dbList, name)
 		}
+		sort.Strings(dbList)
 
 		if len(dbList) == 0 {
 			return nil, fmt.Errorf("db list is empty")

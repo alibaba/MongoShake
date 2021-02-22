@@ -17,17 +17,17 @@ test_dir = os.path.join(cur_dir, "run_sys_test_dir")
 test_db = "shake_sys_test_db"
 test_coll = "shake_sys_test_coll"
 test_checkpoint_db = "shake_sys_test_checkpoint"
-test_inject_doc_nr = 200
+test_inject_doc_nr = 500
 src_oplog_test_url = [
-    'mongodb://100.81.164.186:31771,100.81.164.186:31772,100.81.164.186:31773',  # 4.2 replica
+    #'mongodb://100.81.164.186:31771,100.81.164.186:31772,100.81.164.186:31773',  # 4.2 replica
 ]
 src_changestream_test_url = [
     # 4.2 replica
-    'mongodb://100.81.164.186:31771,100.81.164.186:31772,100.81.164.186:31773',
+    #'mongodb://100.81.164.186:31771,100.81.164.186:31772,100.81.164.186:31773',
     # 4.4 sharding: mongos#shards#cs
-    'mongodb://100.81.164.181:35309#mongodb://100.81.164.181:35301;mongodb://100.81.164.181:35302#mongodb://100.81.164.181:35306',
+    #'mongodb://100.81.164.181:35309#mongodb://100.81.164.181:35301;mongodb://100.81.164.181:35302#mongodb://100.81.164.181:35306',
     # 4.4 sharding serverless
-    # 'mongodb://100.81.164.181:36106',
+    'serverless^mongodb://100.81.164.181:36106',
 ]
 dst_test_url = 'mongodb://100.81.164.186:31881,100.81.164.186:31882,100.81.164.186:31883'
 
@@ -56,6 +56,11 @@ def generate_conf(tp, id, src_url, dst_url, dir_name):
         content["mongo_urls"] = role_lists[1]
         content["mongo_cs_url"] = role_lists[2]
         content["mongo_s_url"] = role_lists[0]
+    elif "^" in src_url:
+        content["special.source.db.flag"] = "aliyun_serverless"
+        addr = src_url.split("^")
+        print(addr)
+        content["mongo_urls"] = addr[1]
     else:
         content["mongo_urls"] = src_url
 
@@ -74,6 +79,8 @@ def _get_mongodb_addr(addr):
         # sharding
         role_lists = src_url.split("#")
         return role_lists[0]
+    elif "^" in src_url:
+        return src_url.split("^")[1]
     return src_url
 
 
@@ -147,7 +154,7 @@ def _run_shake(conf_name):
 
 
 def exit_process(code):
-    if proc != None:
+    if proc:
         proc.terminate()
     exit(code)
 

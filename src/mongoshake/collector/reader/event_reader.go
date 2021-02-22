@@ -132,7 +132,6 @@ func (er *EventReader) fetcher() {
 			continue
 		}
 
-		LOG.Debug("xxxxxxx")
 		ok, data := er.client.GetNext()
 		if !ok {
 			err := er.client.CsHandler.Err()
@@ -142,7 +141,6 @@ func (er *EventReader) fetcher() {
 			time.Sleep(1 * time.Second)
 			continue
 		}
-		LOG.Debug("xxxxxxx2")
 
 		er.eventChan <- &retOplog{data, nil}
 	}
