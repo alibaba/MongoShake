@@ -120,6 +120,7 @@ func NewChangeStreamConn(src string,
 		LOG.Info("change stream options with aliyun_serverless: %v", printCsOption(ops))
 		// csHandler, err = client.Database("non-exist-database-shake").Watch(ctx, mongo.Pipeline{}, ops)
 		csHandler, err = client.Database("serverless-shake-fake-db").Collection("serverless-shake-fake-collection").Watch(ctx, mongo.Pipeline{}, ops)
+		// csHandler, err = client.Database(dbList[0]).Collection("serverless-shake-fake-collection").Watch(ctx, mongo.Pipeline{}, ops)
 		if err != nil {
 			return nil, fmt.Errorf("client[%v] create change stream handler failed[%v]", src, err)
 		}
