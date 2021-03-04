@@ -192,7 +192,7 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 	var mutex sync.Mutex
 	indexMap := make(map[utils.NS][]bson2.M)
 	for _, src := range sourceList {
-		LOG.Info("source[%v %v] start fetching index", src.ReplicaName, src.URL)
+		LOG.Info("source[%v %v] start fetching index", src.ReplicaName, utils.BlockMongoUrlPassword(src.URL, "***"))
 		// 1. fetch namespace
 		nsList, _, err := utils.GetDbNamespace(src.URL, filterFunc)
 		if err != nil {
@@ -226,7 +226,7 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 			mutex.Unlock()
 		}
 
-		LOG.Info("source[%v %v] finish fetching index", src.ReplicaName, src.URL)
+		LOG.Info("source[%v %v] finish fetching index", src.ReplicaName, utils.BlockMongoUrlPassword(src.URL, "***"))
 	}
 	return indexMap, nil
 }

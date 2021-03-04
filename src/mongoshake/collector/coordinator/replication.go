@@ -147,7 +147,8 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		// rsName will be set to default if empty
 		if rsName == "" {
 			rsName = fmt.Sprintf("default-%d", i)
-			LOG.Warn("Source mongodb have empty replica set name, url[%s], change to default[%s]", src.URL, rsName)
+			LOG.Warn("Source mongodb have empty replica set name, url[%s], change to default[%s]",
+				utils.BlockMongoUrlPassword(src.URL, "***"), rsName)
 		}
 
 		if _, exist := rs[rsName]; exist {
