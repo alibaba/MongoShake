@@ -3,21 +3,23 @@ package sourceReader
 import (
 	"testing"
 	"fmt"
+	"time"
+	"sync"
 
+	"mongoshake/unit_test_common"
 	"mongoshake/common"
 	"mongoshake/collector/configure"
+	"mongoshake/oplog"
 
 	"github.com/vinllen/mongo-go-driver/bson"
 	bsonMgo "github.com/vinllen/mgo/bson"
 	"github.com/stretchr/testify/assert"
-	"time"
-	"mongoshake/oplog"
-	"sync"
+
 )
 
 const (
-	//testMongoAddressCs = unit_test_common.TestUrlServerlessTenant
-	testMongoAddressCs = "mongodb://tenant1:password@100.81.164.181:25230/admin"
+	testMongoAddressCs = unit_test_common.TestUrlServerlessTenant
+	//testMongoAddressCs = "mongodb://tenant1:password@100.81.164.181:25230/admin"
 	//testMongoAddressCs = "mongodb://100.81.164.181:36203"
 )
 

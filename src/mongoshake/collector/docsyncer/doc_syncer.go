@@ -231,9 +231,6 @@ func StartIndexSync(indexMap map[utils.NS][]bson2.M, toUrl string,
 						continue
 					}
 
-					// aliyun_serverless
-					// delete(index, "ns")
-
 					index["background"] = background
 					if out := conn.Client.Database(toNS.Database).RunCommand(nil, bson2.D{
 						{"createIndexes", toNS.Collection},

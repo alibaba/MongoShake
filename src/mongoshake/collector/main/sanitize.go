@@ -184,7 +184,7 @@ func checkDefaultValue() error {
 	if conf.Options.IncrSyncWorker == 0 {
 		conf.Options.IncrSyncWorker = 8
 	} else if conf.Options.IncrSyncWorker <= 0 || conf.Options.IncrSyncWorker > 256 {
-		return fmt.Errorf("incr_sync.worker should in range [1, 256]")
+		return fmt.Errorf("incr_sync.worker[%v] should in range [1, 256]", conf.Options.IncrSyncWorker)
 	}
 	if conf.Options.IncrSyncWorkerOplogCompressor == "" {
 		conf.Options.IncrSyncWorkerOplogCompressor = utils.VarIncrSyncWorkerOplogCompressorNone
