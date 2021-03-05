@@ -47,7 +47,7 @@ type OplogSyncer struct {
 	// source mongodb replica set name
 	Replset string
 	// oplog start position of source mongodb
-	startPosition int64
+	startPosition interface{}
 	// full sync finish position, used to check DDL between full sync and incr sync
 	fullSyncFinishPosition bson.MongoTimestamp
 	// pass from coordinator
@@ -100,7 +100,7 @@ type OplogSyncer struct {
  */
 func NewOplogSyncer(
 	replset string,
-	startPosition int64,
+	startPosition interface{},
 	fullSyncFinishPosition int64,
 	mongoUrl string,
 	gids []string,
@@ -197,12 +197,17 @@ func (sync *OplogSyncer) Start() {
 	// start persister
 	sync.persister.Start()
 
+	// TODO, need handle PBRT
 	// process about the checkpoint :
-	//
 	// 1. create checkpoint manager
 	// 2. load existing ckpt from remote storage
 	// 3. start checkpoint persist routine
 	sync.newCheckpointManager(sync.Replset, sync.startPosition)
+	if _, ok := sync.startPosition.(int64); !ok {
+		// set resumeToken for aliyun_serverless
+		sync.reader.SetQueryTimestampOnEmpty(sync.startPosition)
+	}
+
 	// load checkpoint and set stage
 	if err := sync.loadCheckpoint(); err != nil {
 		LOG.Crash(err)

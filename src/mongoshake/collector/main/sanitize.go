@@ -181,8 +181,10 @@ func checkDefaultValue() error {
 			return fmt.Errorf("incr_sync.shard_by_object_id_whitelist should only be set when 'incr_sync.shard_key == collection'")
 		}
 	}
-	if conf.Options.IncrSyncWorker <= 0 || conf.Options.IncrSyncWorker > 256 {
-		return fmt.Errorf("incr_sync.worker should in range [1, 256]")
+	if conf.Options.IncrSyncWorker == 0 {
+		conf.Options.IncrSyncWorker = 8
+	} else if conf.Options.IncrSyncWorker <= 0 || conf.Options.IncrSyncWorker > 256 {
+		return fmt.Errorf("incr_sync.worker[%v] should in range [1, 256]", conf.Options.IncrSyncWorker)
 	}
 	if conf.Options.IncrSyncWorkerOplogCompressor == "" {
 		conf.Options.IncrSyncWorkerOplogCompressor = utils.VarIncrSyncWorkerOplogCompressorNone
@@ -349,6 +351,16 @@ func checkConflict() error {
 	if len(conf.Options.FilterPassSpecialDb) != 0 {
 		// init ns
 		filter.InitNs(conf.Options.FilterPassSpecialDb)
+	}
+	// special variable
+	if conf.Options.SpecialSourceDBFlag != "" &&
+		conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless {
+		return fmt.Errorf("special.source.db.flag should be empty or 'aliyun_serverless'")
+	}
+	if conf.Options.SpecialSourceDBFlag == utils.VarSpecialSourceDBFlagAliyunServerless {
+		if conf.Options.IncrSyncMongoFetchMethod != utils.VarIncrSyncMongoFetchMethodChangeStream {
+			return fmt.Errorf("incr_sync.mongo_fetch_method must be 'change_stream' when special.source.db.flag is set")
+		}
 	}
 
 	/*****************************2. full sync******************************/

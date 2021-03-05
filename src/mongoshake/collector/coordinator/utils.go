@@ -1,13 +1,17 @@
 package coordinator
 
 import (
+	"fmt"
+	"sync"
+
 	"mongoshake/common"
 	"mongoshake/collector/configure"
 	"mongoshake/collector/ckpt"
+	"mongoshake/collector/reader"
 
 	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
-	"fmt"
+	bson2 "github.com/vinllen/mongo-go-driver/bson"
 )
 
 /*
@@ -110,25 +114,119 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 	return smallestNew, startTsMap, true, nil
 }
 
+func (coordinator *ReplicationCoordinator) isCheckpointExist() (bool, interface{}, error) {
+	ckptManager := ckpt.NewCheckpointManager(coordinator.RealSourceFullSync[0].ReplicaName, 0)
+	ckptVar, exist, err := ckptManager.Get()
+	LOG.Info("isCheckpointExist? %v %v %v", ckptVar, exist, err)
+	if err != nil {
+		return false, 0, fmt.Errorf("get mongod[%v] checkpoint failed: %v", coordinator.RealSourceFullSync[0].ReplicaName, err)
+	} else if !exist {
+		// send changestream
+		reader, err := sourceReader.CreateReader(utils.VarIncrSyncMongoFetchMethodChangeStream,
+			coordinator.RealSourceFullSync[0].URL,
+			coordinator.RealSourceFullSync[0].ReplicaName)
+		if err != nil {
+			return false, 0, fmt.Errorf("create reader failed: %v", err)
+		}
+
+		resumeToken, err := reader.FetchNewestTimestamp()
+		if err != nil {
+			return false, 0, fmt.Errorf("fetch PBRT fail: %v", err)
+		}
+
+		LOG.Info("isCheckpointExist change stream resumeToken: %v", resumeToken)
+		return false, resumeToken, nil
+	}
+	return true, utils.TimestampToInt64(ckptVar.Timestamp), nil
+}
+
 // if the oplog of checkpoint timestamp exist in all source db, then only do oplog replication instead of document replication
-func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, map[string]int64, int64, error) {
+func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, map[string]int64, interface{}, error) {
 	if syncMode != utils.VarSyncModeAll && syncMode != utils.VarSyncModeIncr {
-		return syncMode, nil, 0, nil
+		return syncMode, nil, int64(0), nil
+	}
+
+	// special case, I hate it.
+	// TODO, checkpoint support ResumeToken
+	if conf.Options.SpecialSourceDBFlag == utils.VarSpecialSourceDBFlagAliyunServerless {
+		if syncMode == utils.VarSyncModeIncr {
+			return syncMode, nil, int64(0), nil
+		}
+
+		ok, token, err := coordinator.isCheckpointExist()
+		if err != nil {
+			return "", nil, int64(0), fmt.Errorf("check isCheckpointExist failed: %v", err)
+		}
+		if !ok {
+			return utils.VarSyncModeAll, nil, token, nil
+		}
+
+		startTsMap := map[string]int64{
+			coordinator.RealSourceIncrSync[0].ReplicaName: token.(int64),
+		}
+		return utils.VarSyncModeIncr, startTsMap, token, nil
 	}
 
 	smallestNewTs, startTsMap, canIncrSync, err := coordinator.compareCheckpointAndDbTs(syncMode == utils.VarSyncModeAll)
 	if err != nil {
-		return "", nil, 0, err
+		return "", nil, int64(0), err
 	}
 
 	if canIncrSync {
 		LOG.Info("sync mode run %v", utils.VarSyncModeIncr)
-		return utils.VarSyncModeIncr, startTsMap, 0, nil
+		return utils.VarSyncModeIncr, startTsMap, int64(0), nil
 	} else if syncMode == utils.VarSyncModeIncr || conf.Options.Tunnel != utils.VarTunnelDirect {
 		// bugfix v2.4.11: if can not run incr sync directly, return error when sync_mode == "incr"
 		// bugfix v2.4.12: return error when tunnel != "direct"
-		return "", nil, 0, fmt.Errorf("start time illegal, can't run incr sync")
+		return "", nil, int64(0), fmt.Errorf("start time illegal, can't run incr sync")
 	} else {
 		return utils.VarSyncModeAll, nil, utils.TimestampToInt64(smallestNewTs), nil
 	}
+}
+
+/*
+ * fetch all indexes.
+ * the cost is low so that no need to run in parallel.
+ */
+func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) bool) (map[utils.NS][]bson2.M, error) {
+	var mutex sync.Mutex
+	indexMap := make(map[utils.NS][]bson2.M)
+	for _, src := range sourceList {
+		LOG.Info("source[%v %v] start fetching index", src.ReplicaName, utils.BlockMongoUrlPassword(src.URL, "***"))
+		// 1. fetch namespace
+		nsList, _, err := utils.GetDbNamespace(src.URL, filterFunc)
+		if err != nil {
+			return nil, fmt.Errorf("source[%v %v] get namespace failed: %v", src.ReplicaName, src.URL, err)
+		}
+
+		LOG.Info("index namespace list: %v", nsList)
+		// 2. build connection
+		conn, err := utils.NewMongoCommunityConn(src.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
+		if err != nil {
+			return nil, fmt.Errorf("source[%v %v] build connection failed: %v", src.ReplicaName, src.URL, err)
+		}
+		defer conn.Close() // it's acceptable to call defer here
+
+		// 3. fetch all indexes
+		for _, ns := range nsList {
+			// indexes, err := conn.Session.DB(ns.Database).C(ns.Collection).Indexes()
+			cursor, err := conn.Client.Database(ns.Database).Collection(ns.Collection).Indexes().List(nil)
+			if err != nil {
+				return nil, fmt.Errorf("source[%v %v] fetch index failed: %v", src.ReplicaName, src.URL, err)
+			}
+
+			indexes := make([]bson2.M, 0)
+			if err = cursor.All(nil, &indexes); err != nil {
+				return nil, fmt.Errorf("index cursor fetch all indexes fail: %v", err)
+			}
+
+			mutex.Lock()
+			indexMap[ns] = indexes
+			mutex.Unlock()
+		}
+
+		LOG.Info("source[%v %v] finish fetching index", src.ReplicaName, utils.BlockMongoUrlPassword(src.URL, "***"))
+	}
+	return indexMap, nil
 }
