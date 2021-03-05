@@ -13,7 +13,6 @@ import (
 	"reflect"
 )
 
-
 const (
 	noopInterval = 10 // s
 )

@@ -71,6 +71,9 @@ const (
 	VarIncrSyncReaderDebugNone    = ""
 	VarIncrSyncReaderDebugDiscard = "discard" // throw all
 	VarIncrSyncReaderDebugPrint   = "print"   // print
+
+	// special
+	VarSpecialSourceDBFlagAliyunServerless = "aliyun_serverless"
 )
 
 type Pair struct {

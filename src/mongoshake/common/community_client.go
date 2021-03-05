@@ -5,11 +5,11 @@ import (
 	"context"
 
 	LOG "github.com/vinllen/log4go"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/mongo/readconcern"
-	"go.mongodb.org/mongo-driver/mongo/writeconcern"
-	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"github.com/vinllen/mongo-go-driver/mongo"
+	"github.com/vinllen/mongo-go-driver/mongo/options"
+	"github.com/vinllen/mongo-go-driver/mongo/readconcern"
+	"github.com/vinllen/mongo-go-driver/mongo/writeconcern"
+	"github.com/vinllen/mongo-go-driver/mongo/readpref"
 )
 
 type MongoCommunityConn struct {
@@ -74,4 +74,9 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 		Client: client,
 		URL:    url,
 	}, nil
+}
+
+func (conn *MongoCommunityConn) Close() {
+	LOG.Info("Close client with %s", BlockMongoUrlPassword(conn.URL, "***"))
+	conn.Client.Disconnect(conn.ctx)
 }
