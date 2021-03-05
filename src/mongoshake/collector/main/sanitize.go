@@ -186,6 +186,12 @@ func checkDefaultValue() error {
 	} else if conf.Options.IncrSyncWorker <= 0 || conf.Options.IncrSyncWorker > 256 {
 		return fmt.Errorf("incr_sync.worker[%v] should in range [1, 256]", conf.Options.IncrSyncWorker)
 	}
+	if conf.Options.IncrSyncTunnelWriteThread == 0 {
+		conf.Options.IncrSyncTunnelWriteThread = conf.Options.IncrSyncWorker
+	} else if conf.Options.IncrSyncTunnelWriteThread % conf.Options.IncrSyncWorker != 0 {
+		return fmt.Errorf("incr_sync.tunnel.write_thread[%v] must be an interge multiple of incr_sync.worker[%v]",
+			conf.Options.IncrSyncTunnelWriteThread, conf.Options.IncrSyncWorker)
+	}
 	if conf.Options.IncrSyncWorkerOplogCompressor == "" {
 		conf.Options.IncrSyncWorkerOplogCompressor = utils.VarIncrSyncWorkerOplogCompressorNone
 	} else if conf.Options.IncrSyncWorkerOplogCompressor != utils.VarIncrSyncWorkerOplogCompressorNone &&
@@ -385,6 +391,12 @@ func checkConflict() error {
 	if len(conf.Options.TunnelAddress) == 0 &&
 		conf.Options.Tunnel != utils.VarTunnelMock {
 		return fmt.Errorf("incr_sync.tunnel.address shouldn't be empty when incr_sync.tunnel != 'mock'")
+	}
+	if conf.Options.TunnelKafkaPartitionNumber <= 0 {
+		conf.Options.TunnelKafkaPartitionNumber = 1
+	} else if conf.Options.TunnelKafkaPartitionNumber > conf.Options.IncrSyncWorker {
+		return fmt.Errorf("tunnel.kafka.partition[%v] number should <= incr_sync.worker number[%v]",
+			conf.Options.TunnelKafkaPartitionNumber, conf.Options.IncrSyncWorker)
 	}
 	conf.Options.IncrSyncCollisionEnable = conf.Options.IncrSyncExecutor != 1
 	if conf.Options.Tunnel != utils.VarTunnelDirect &&
