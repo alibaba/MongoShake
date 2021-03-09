@@ -83,6 +83,7 @@ type Configuration struct {
 	IncrSyncCollisionEnable       bool   `config:"incr_sync.collision_detection"`
 	IncrSyncReaderBufferTime      uint   `config:"incr_sync.reader.buffer_time"`
 	IncrSyncWorkerOplogCompressor string `config:"incr_sync.worker.oplog_compressor"` // not open to user since v2.4.21
+	IncrSyncTunnelKafkaDebug      string `config:"incr_sync.tunnel.kafka.debug"`      // add v2.4.21, point to file name
 
 	/*---------------------------------------------------------*/
 	// generated variables

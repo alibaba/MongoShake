@@ -13,6 +13,7 @@ import (
 
 	LOG "github.com/vinllen/log4go"
 	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	"os"
 )
 
 const (
@@ -49,7 +50,7 @@ func (tunnel *KafkaWriter) Name() string {
 func (tunnel *KafkaWriter) Prepare() bool {
 	var writer *kafka.SyncWriter
 	var err error
-	if !unitTestWriteKafkaFlag {
+	if !unitTestWriteKafkaFlag && conf.Options.IncrSyncTunnelKafkaDebug == "" {
 		writer, err = kafka.NewSyncWriter(tunnel.RemoteAddr, tunnel.PartitionId)
 		if err != nil {
 			LOG.Critical("KafkaWriter prepare[%v] create writer error[%v]", tunnel.RemoteAddr, err)
@@ -180,7 +181,23 @@ func (tunnel *KafkaWriter) encode(id int) {
 }
 
 func (tunnel *KafkaWriter) writeKafka() {
+	// debug
+	var debugF *os.File
 	var err error
+	if conf.Options.IncrSyncTunnelKafkaDebug != "" {
+		fileName := fmt.Sprintf("%s-%d", conf.Options.IncrSyncTunnelKafkaDebug, tunnel.PartitionId)
+		if _, err := os.Stat(fileName); os.IsNotExist(err) {
+			if debugF, err = os.Create(fileName); err != nil {
+				LOG.Crashf("%s create kafka debug file[%v] failed: %v", tunnel, fileName, err)
+			}
+		} else {
+			if debugF, err = os.OpenFile(fileName, os.O_RDWR, 0666); err != nil {
+				LOG.Crashf("%s open kafka debug file[%v] failed: %v", tunnel, fileName, err)
+			}
+		}
+		defer debugF.Close()
+	}
+
 	for {
 		tunnel.popIdx = (tunnel.popIdx + 1) % tunnel.encoderNr
 		// read chan
@@ -188,6 +205,11 @@ func (tunnel *KafkaWriter) writeKafka() {
 			if unitTestWriteKafkaFlag {
 				// unit test only
 				unitTestWriteKafkaChan <- data.log
+			} else if conf.Options.IncrSyncTunnelKafkaDebug != "" {
+				if _, err = debugF.Write(data.log); err != nil {
+					LOG.Crashf("%s write to kafka debug file failed: %v, input data: %s", tunnel, err, data.log)
+				}
+				debugF.Write([]byte{10})
 			} else {
 				if err = tunnel.writer.SimpleWrite(data.log); err != nil {
 					LOG.Error("%s send [%v] with type[%v] error[%v]", tunnel, tunnel.RemoteAddr,
