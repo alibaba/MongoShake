@@ -28,6 +28,7 @@ type Configuration struct {
 	Tunnel                      string   `config:"tunnel"`
 	TunnelAddress               []string `config:"tunnel.address"`
 	TunnelMessage               string   `config:"tunnel.message"`
+	TunnelKafkaPartitionNumber  int      `config:"tunnel.kafka.partition_number"` // add v2.4.21
 	FilterNamespaceBlack        []string `config:"filter.namespace.black"`
 	FilterNamespaceWhite        []string `config:"filter.namespace.white"`
 	FilterPassSpecialDb         []string `config:"filter.pass.special.db"`
@@ -60,33 +61,35 @@ type Configuration struct {
 	IncrSyncShardKey                      string   `config:"incr_sync.shard_key"`
 	IncrSyncShardByObjectIdWhiteList      []string `config:"incr_sync.shard_by_object_id_whitelist"`
 	IncrSyncWorker                        int      `config:"incr_sync.worker"`
+	IncrSyncTunnelWriteThread             int      `config:"incr_sync.tunnel.write_thread"` // add v2.4.21
 	IncrSyncTargetDelay                   int64    `config:"incr_sync.target_delay"`
-	IncrSyncWorkerOplogCompressor         string   `config:"incr_sync.worker.oplog_compressor"`
 	IncrSyncWorkerBatchQueueSize          uint64   `config:"incr_sync.worker.batch_queue_size"`
 	IncrSyncAdaptiveBatchingMaxSize       int      `config:"incr_sync.adaptive.batching_max_size"`
 	IncrSyncFetcherBufferCapacity         int      `config:"incr_sync.fetcher.buffer_capacity"`
 	IncrSyncExecutorUpsert                bool     `config:"incr_sync.executor.upsert"`
 	IncrSyncExecutorInsertOnDupUpdate     bool     `config:"incr_sync.executor.insert_on_dup_update"`
-	IncrSyncConflictWriteTo               string   `config:"incr_sync.conflict_write_to"`
+	IncrSyncConflictWriteTo               string   `config:"incr_sync.conflict_write_to"` // remove "sdk" option since v2.4.21
 	IncrSyncExecutorMajorityEnable        bool     `config:"incr_sync.executor.majority_enable"`
 
 	/*---------------------------------------------------------*/
 	// inner variables, not open to user
-	CheckpointStorage        string `config:"checkpoint.storage"`
-	CheckpointInterval       int64  `config:"checkpoint.interval"`
-	FullSyncExecutorDebug    bool   `config:"full_sync.executor.debug"`
-	IncrSyncDBRef            bool   `config:"incr_sync.dbref"`
-	IncrSyncExecutor         int    `config:"incr_sync.executor"`
-	IncrSyncExecutorDebug    bool   `config:"incr_sync.executor.debug"` // !ReplayerDurable
-	IncrSyncReaderDebug      string `config:"incr_sync.reader.debug"`
-	IncrSyncCollisionEnable  bool   `config:"incr_sync.collision_detection"`
-	IncrSyncReaderBufferTime uint   `config:"incr_sync.reader.buffer_time"`
-	SourceDBVersion          string
-	TargetDBVersion          string
+	CheckpointStorage             string `config:"checkpoint.storage"`
+	CheckpointInterval            int64  `config:"checkpoint.interval"`
+	FullSyncExecutorDebug         bool   `config:"full_sync.executor.debug"`
+	IncrSyncDBRef                 bool   `config:"incr_sync.dbref"`
+	IncrSyncExecutor              int    `config:"incr_sync.executor"`
+	IncrSyncExecutorDebug         bool   `config:"incr_sync.executor.debug"` // !ReplayerDurable
+	IncrSyncReaderDebug           string `config:"incr_sync.reader.debug"`
+	IncrSyncCollisionEnable       bool   `config:"incr_sync.collision_detection"`
+	IncrSyncReaderBufferTime      uint   `config:"incr_sync.reader.buffer_time"`
+	IncrSyncWorkerOplogCompressor string `config:"incr_sync.worker.oplog_compressor"` // not open to user since v2.4.21
+	IncrSyncTunnelKafkaDebug      string `config:"incr_sync.tunnel.kafka.debug"`      // add v2.4.21, point to file name
 
 	/*---------------------------------------------------------*/
 	// generated variables
-	Version string // version
+	Version         string // version
+	SourceDBVersion string
+	TargetDBVersion string
 
 	/*---------------------------------------------------------*/
 	// deprecate variables

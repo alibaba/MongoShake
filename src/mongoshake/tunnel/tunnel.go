@@ -11,6 +11,7 @@ import (
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"mongoshake/common"
+	"mongoshake/collector/configure"
 )
 
 const InitialStageChecking = false
@@ -25,7 +26,7 @@ const (
 )
 
 const (
-	ReplyOK                           = 0
+	ReplyOK                     int64 = 0
 	ReplyError                  int64 = -1
 	ReplyNetworkOpFail          int64 = -2
 	ReplyNetworkTimeout         int64 = -3
@@ -158,7 +159,10 @@ type WriterFactory struct {
 func (factory *WriterFactory) Create(address []string, workerId uint32) Writer {
 	switch factory.Name {
 	case utils.VarTunnelKafka:
-		return &KafkaWriter{RemoteAddr: address[0]}
+		return &KafkaWriter{
+			RemoteAddr:  address[0],
+			PartitionId: int(workerId) % conf.Options.TunnelKafkaPartitionNumber,
+		}
 	case utils.VarTunnelTcp:
 		return &TCPWriter{RemoteAddr: address[0]}
 	case utils.VarTunnelRpc:

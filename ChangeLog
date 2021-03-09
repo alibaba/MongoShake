@@ -1,3 +1,10 @@
+2021-03-09 Alibaba Cloud.
+	* version: 2.4.21
+	* IMPROVE: remove `incr_sync.worker.oplog_compressor` option in conf.
+	* IMPROVE: improve the performance of writing kafka, add
+	`incr_sync.tunnel.write_thread` and `tunnel.kafka.partition_number`. #553.
+	* IMPROVE: support format canonical extented JSON format. #542.
+
 2021-03-05 Alibaba Cloud.
 	* version: 2.4.20
 	* IMPROVE: support aliyun_serverless of MongoDB.
