@@ -16,7 +16,7 @@ type SyncWriter struct {
 	config *Config
 }
 
-func NewSyncWriter(address string) (*SyncWriter, error) {
+func NewSyncWriter(address string, partitionId int) (*SyncWriter, error) {
 	c := NewConfig()
 
 	topic, brokers, err := parse(address)
@@ -27,7 +27,7 @@ func NewSyncWriter(address string) (*SyncWriter, error) {
 	s := &SyncWriter{
 		brokers:   brokers,
 		topic:     topic,
-		partition: defaultPartition,
+		partition: int32(partitionId),
 		config:    c,
 	}
 
