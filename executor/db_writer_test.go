@@ -185,7 +185,7 @@ func TestSingleWriter(t *testing.T) {
 		fmt.Printf("TestSingleWriter case %d.\n", nr)
 		nr++
 
-		utils.InitialLogger("", "", "info", true, true)
+		utils.InitialLogger("", "", "info", true, 1)
 
 		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		assert.Equal(t, nil, err, "should be equal")
@@ -599,7 +599,7 @@ func TestBulkWriter(t *testing.T) {
 		fmt.Printf("TestBulkWriter case %d.\n", nr)
 		nr++
 
-		utils.InitialLogger("", "", "info", true, true)
+		utils.InitialLogger("", "", "info", true, 1)
 
 		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
 		assert.Equal(t, nil, err, "should be equal")

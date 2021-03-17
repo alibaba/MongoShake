@@ -1444,7 +1444,7 @@ func TestGetBatchWithDelay(t *testing.T) {
 
 	var nr int
 
-	utils.InitialLogger("", "", "info", true, true)
+	utils.InitialLogger("", "", "info", true, 1)
 
 	// reset to default
 	utils.IncrSentinelOptions.TargetDelay = -1

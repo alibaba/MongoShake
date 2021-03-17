@@ -65,19 +65,18 @@ func RunStatusMessage(status uint64) string {
 	}
 }
 
-func InitialStdoutLogger(level string) {
+// InitialLogger initialize logger
+//
+// verbose: where log goes to: 0 - file，1 - file+stdout，2 - stdout
+func InitialLogger(logDir, logFile, level string, logFlush bool, verbose int) error {
 	logLevel := parseLogLevel(level)
-	writer := LOG.NewConsoleLogWriter()
-	writer.SetFormat("[%D %T] [%L] %M")
-	LOG.AddFilter("console", logLevel, writer)
-}
-
-func InitialLogger(logDir, logFile, level string, logFlush bool, verbose bool) error {
-	logLevel := parseLogLevel(level)
-	if verbose {
+	if verbose > 0 {
 		writer := LOG.NewConsoleLogWriter()
 		writer.SetFormat("[%D %T] [%L] %M")
 		LOG.AddFilter("console", logLevel, writer)
+	}
+	if verbose == 2 {
+		return nil
 	}
 
 	if len(logDir) == 0 {

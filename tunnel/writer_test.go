@@ -23,7 +23,7 @@ func TestKafkaWriter(t *testing.T) {
 		fmt.Printf("TestKafkaWriter case %d.\n", nr)
 		nr++
 
-		utils.InitialLogger("", "", "info", true, true)
+		utils.InitialLogger("", "", "info", true, 1)
 
 		msg := &WMessage{
 			TMessage: &TMessage{

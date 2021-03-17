@@ -131,7 +131,7 @@ func TestDeserializer(t *testing.T) {
 func TestFilterOplogGid(t *testing.T) {
 	// test filterOplogGid
 
-	utils.InitialLogger("", "", "info", true, true)
+	utils.InitialLogger("", "", "info", true, 1)
 
 	var nr int
 	{
