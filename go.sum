@@ -81,8 +81,6 @@ github.com/kr/text v0.2.0/go.mod h1:eLer722TekiGuMkidMxC/pM04lWEeraHUUmBw8l2grE=
 github.com/markbates/oncer v0.0.0-20181203154359-bf2de49a0be2/go.mod h1:Ld9puTsIW75CHf65OeIOkyKbteujpZVXDpWK6YGZbxE=
 github.com/markbates/safe v1.0.1/go.mod h1:nAqgmRi7cY2nqMc92/bSEeQA+R4OheNU2T1kNSCBdG0=
 github.com/montanaflynn/stats v0.0.0-20171201202039-1bf9dbcd8cbe/go.mod h1:wL8QJuTMNUDYhXwkmfOly8iTdp5TEcJFWZD2D7SIkUc=
-github.com/nanmu42/go-diskqueue v1.0.2-0.20210121041308-a95eac02055a h1:eimhfMShgbnN24cNcOghh3CFtK3mJ9yzYGNxtUxRuws=
-github.com/nanmu42/go-diskqueue v1.0.2-0.20210121041308-a95eac02055a/go.mod h1:dLR4WxLyLcDUkuW+xj5Y460RLjSNDRMkwpDShHSy8HQ=
 github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e h1:fD57ERR4JtEqsWbfPhv4DMiApHyliiK5xCTNVSPiaAs=
 github.com/niemeyer/pretty v0.0.0-20200227124842-a10e7caefd8e/go.mod h1:zD1mROLANZcx1PVRCS0qkT7pwLkGfwJo4zjcN/Tysno=
 github.com/nightlyone/lockfile v1.0.0 h1:RHep2cFKK4PonZJDdEl4GmkabuhbsRMgk/k3uAmxBiA=
@@ -116,6 +114,8 @@ github.com/stretchr/testify v1.7.0 h1:nwc3DEeHmmLAfoZucVR881uASk0Mfjw8xYJ99tb5Cc
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/tidwall/pretty v1.0.0 h1:HsD+QiTn7sK6flMKIvNmpqz1qrpP3Ps6jOKIKMooyg4=
 github.com/tidwall/pretty v1.0.0/go.mod h1:XNkn88O1ChpSDQmQeStsy+sBenx6DDtFZJxhVysOjyk=
+github.com/vinllen/go-diskqueue v1.0.2-0.20210318091137-9e570abf8db4 h1:uPw8mh+Rxour4OeAfdStA1oHRsosyzv2olTmV5uQYJk=
+github.com/vinllen/go-diskqueue v1.0.2-0.20210318091137-9e570abf8db4/go.mod h1:dLR4WxLyLcDUkuW+xj5Y460RLjSNDRMkwpDShHSy8HQ=
 github.com/vinllen/log4go v0.0.0-20180514124125-3848a366df9d h1:V+5NxRH9I8rVJyazHI25yXaszF4JA64Isr4ilU+nnck=
 github.com/vinllen/log4go v0.0.0-20180514124125-3848a366df9d/go.mod h1:F8d+yTmuUlynKo7Wn26s+Q8bCZBfcymR5bYSydymIlc=
 github.com/vinllen/mgo v0.0.0-20200603094852-6e8a76964ea9 h1:SlDU/ze8vJemJPiACBRn3EGNxgqIufk/RMBCwLC/spg=
