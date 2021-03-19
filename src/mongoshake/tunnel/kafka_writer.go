@@ -3,6 +3,7 @@ package tunnel
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 	LOG "github.com/vinllen/log4go"
 	bson2 "github.com/vinllen/mongo-go-driver/bson"
 	"os"
+	"strings"
 )
 
 const (
@@ -125,24 +127,30 @@ func (tunnel *KafkaWriter) encode(id int) {
 		case utils.VarTunnelMessageJson:
 			for i, log := range message.ParsedLogs {
 				// json marshal
-				/*encode, err := json.Marshal(log.ParsedLog)
-				if err != nil {
-					if strings.Contains(err.Error(), "unsupported value:") {
-						LOG.Error("%s json marshal data[%v] meets unsupported value[%v], skip current oplog",
-							tunnel, log.ParsedLog, err)
-						continue
-					} else {
+				var encode []byte
+				var err error
+				if conf.Options.TunnelJsonFormat == "" {
+					encode, err = json.Marshal(log.ParsedLog)
+					if err != nil {
+						if strings.Contains(err.Error(), "unsupported value:") {
+							LOG.Error("%s json marshal data[%v] meets unsupported value[%v], skip current oplog",
+								tunnel, log.ParsedLog, err)
+							continue
+						} else {
+							// should panic
+							LOG.Crashf("%s json marshal data[%v] error[%v]", tunnel, log.ParsedLog, err)
+							tunnel.state = ReplyServerFault
+						}
+					}
+				} else if conf.Options.TunnelJsonFormat == "canonical_extended_json" {
+					encode, err = bson2.MarshalExtJSON(log.ParsedLog, true, true)
+					if err != nil {
 						// should panic
 						LOG.Crashf("%s json marshal data[%v] error[%v]", tunnel, log.ParsedLog, err)
 						tunnel.state = ReplyServerFault
 					}
-				}*/
-
-				encode, err := bson2.MarshalExtJSON(log.ParsedLog, true, true)
-				if err != nil {
-					// should panic
-					LOG.Crashf("%s json marshal data[%v] error[%v]", tunnel, log.ParsedLog, err)
-					tunnel.state = ReplyServerFault
+				} else {
+					LOG.Crashf("unknown tunnel.json.format[%v]", conf.Options.TunnelJsonFormat)
 				}
 
 				tunnel.outputChan[id] <- outputLog{

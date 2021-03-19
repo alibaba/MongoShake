@@ -29,6 +29,7 @@ type Configuration struct {
 	TunnelAddress               []string `config:"tunnel.address"`
 	TunnelMessage               string   `config:"tunnel.message"`
 	TunnelKafkaPartitionNumber  int      `config:"tunnel.kafka.partition_number"` // add v2.4.21
+	TunnelJsonFormat            string   `config:"tunnel.json.format"`
 	FilterNamespaceBlack        []string `config:"filter.namespace.black"`
 	FilterNamespaceWhite        []string `config:"filter.namespace.white"`
 	FilterPassSpecialDb         []string `config:"filter.pass.special.db"`
