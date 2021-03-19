@@ -21,6 +21,7 @@ func generateWMessage(val, nr int) *WMessage {
 			ParsedLog: oplog.ParsedLog {
 				Operation: "i",
 				Object: bson.D{
+					// bson.DocElem{"_id", bson.ObjectId("123456789109")},
 					bson.DocElem{"val", i},
 				},
 			},
@@ -50,6 +51,7 @@ func TestKafkaWriter(t *testing.T) {
 	// test KafkaWriter
 
 	var nr int
+	conf.Options.TunnelJsonFormat = "canonical_extended_json"
 
 	// test flag
 	unitTestWriteKafkaFlag = true
