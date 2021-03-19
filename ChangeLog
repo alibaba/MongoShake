@@ -1,3 +1,8 @@
+2021-03-19 Alibaba Cloud.
+	* version: 2.4.22
+	* IMPROVE: add 'tunnel.json.format' option to let user chose json format.
+	#542, #559, #558
+
 2021-03-09 Alibaba Cloud.
 	* version: 2.4.21
 	* IMPROVE: remove `incr_sync.worker.oplog_compressor` option in conf.
