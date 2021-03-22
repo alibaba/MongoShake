@@ -155,7 +155,7 @@ func (opsCounter *OpsCounter) Map() map[string]uint64 {
 	toMap := make(map[string]uint64)
 	for index, v := range opsCounter.counter {
 		if v != 0 {
-			toMap[string('A'+index)] = v
+			toMap[fmt.Sprint('A'+index)] = v
 		}
 	}
 	return toMap
