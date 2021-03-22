@@ -1,3 +1,7 @@
+2021-03-22 Alibaba Cloud.
+	* version: 2.6
+	* replace govendor with go.mod.
+
 2021-03-19 Alibaba Cloud.
 	* version: 2.4.22
 	* IMPROVE: add 'tunnel.json.format' option to let user chose json format.
