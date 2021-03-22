@@ -77,10 +77,11 @@ func (or *OplogReader) Name() string {
 
 // SetQueryTimestampOnEmpty set internal timestamp if
 // not exist in this or. initial stage most of the time
-func (or *OplogReader) SetQueryTimestampOnEmpty(ts bson.MongoTimestamp) {
+func (or *OplogReader) SetQueryTimestampOnEmpty(ts interface{}) {
+	tsB := ts.(bson.MongoTimestamp)
 	if _, exist := or.query[QueryTs]; !exist {
-		LOG.Info("set query timestamp: %v", utils.ExtractTimestampForLog(ts))
-		or.UpdateQueryTimestamp(ts)
+		LOG.Info("set query timestamp: %v", utils.ExtractTimestampForLog(tsB))
+		or.UpdateQueryTimestamp(tsB)
 	}
 }
 
@@ -245,6 +246,10 @@ func (or *OplogReader) releaseIterator() {
 		or.oplogsIterator.Close()
 	}
 	or.oplogsIterator = nil
+}
+
+func (or *OplogReader) FetchNewestTimestamp() (interface{}, error) {
+	return nil, fmt.Errorf("interface not implement")
 }
 
 // GidOplogReader. query along with gid

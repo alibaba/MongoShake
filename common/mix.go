@@ -80,6 +80,8 @@ func ExtractMongoTimestamp(ts interface{}) int64 {
 		return int64(src) >> 32
 	case int64:
 		return src >> 32
+	default:
+		return -1
 	}
 
 	return 0
@@ -91,6 +93,8 @@ func ExtractMongoTimestampCounter(ts interface{}) int64 {
 		return int64(src) & Int32max
 	case int64:
 		return src & Int32max
+	default:
+		return -1
 	}
 
 	return 0

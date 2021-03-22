@@ -180,7 +180,7 @@ func BlockMongoUrlPassword(url, replace string) string {
 	return string(newUrl)
 }
 
-// marshal given strcut by json
+// marshal given struct by json
 func MarshalStruct(input interface{}) string {
 	ret, err := json.Marshal(input)
 	if err != nil {

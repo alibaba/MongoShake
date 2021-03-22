@@ -6,7 +6,7 @@ var (
 		FeatureCompatibleVersion: 1,
 	}
 	FcvConfiguration = Configuration{
-		CurrentVersion:           7,
+		CurrentVersion:           9,
 		FeatureCompatibleVersion: 3,
 	}
 
@@ -24,6 +24,8 @@ var (
 		5: "2.4.7",  // add full_sync.reader.read_document_count
 		6: "2.4.12", // add incr_sync.shard_by_object_id_whitelist
 		7: "2.4.17", // add filter.oplog.gids
+		8: "2.4.20", // add special.source.db.flag
+		9: "2.4.21", // remove incr_sync.worker.oplog_compressor; add incr_sync.tunnel.write_thread, tunnel.kafka.partition_number
 	}
 )
 

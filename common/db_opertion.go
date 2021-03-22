@@ -8,6 +8,8 @@ import (
 
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
+	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	"sort"
 )
 
 var (
@@ -393,4 +395,91 @@ func HasUniqueIndex(index []mgo.Index) bool {
 		}
 	}
 	return false
+}
+
+/**
+ * return db namespace. return:
+ *     @[]NS: namespace list, e.g., []{"a.b", "a.c"}
+ *     @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}
+ *     @error: error info
+ */
+func GetDbNamespace(url string, filterFunc func(name string) bool) ([]NS, map[string][]string, error) {
+	var err error
+	var conn *MongoCommunityConn
+	if conn, err = NewMongoCommunityConn(url, VarMongoConnectModePrimary, true,
+		ReadWriteConcernLocal, ReadWriteConcernDefault); conn == nil || err != nil {
+		return nil, nil, err
+	}
+	defer conn.Close()
+
+	var dbNames []string
+	if dbNames, err = conn.Client.ListDatabaseNames(nil, bson2.M{}); err != nil {
+		err = fmt.Errorf("get database names of mongodb[%s] error: %v", url, err)
+		return nil, nil, err
+	}
+	// sort by db names
+	sort.Strings(dbNames)
+
+	nsList := make([]NS, 0, 128)
+	for _, db := range dbNames {
+		colNames, err := conn.Client.Database(db).ListCollectionNames(nil, bson2.M{})
+		if err != nil {
+			err = fmt.Errorf("get collection names of mongodb[%s] db[%v] error: %v", url, db, err)
+			return nil, nil, err
+		}
+
+		// LOG.Info("db[%v] colNames: %v", db, colNames)
+		for _, col := range colNames {
+			ns := NS{Database: db, Collection: col}
+			if strings.HasPrefix(col, "system.") {
+				continue
+			}
+			if filterFunc != nil && filterFunc(ns.Str()) {
+				// LOG.Debug("Namespace is filtered. %v", ns.Str())
+				continue
+			}
+			nsList = append(nsList, ns)
+		}
+	}
+
+	// copy, convert nsList to map
+	nsMap := make(map[string][]string, 0)
+	for _, ns := range nsList {
+		if _, ok := nsMap[ns.Database]; !ok {
+			nsMap[ns.Database] = make([]string, 0)
+		}
+		nsMap[ns.Database] = append(nsMap[ns.Database], ns.Collection)
+	}
+
+	return nsList, nsMap, nil
+}
+
+/**
+ * return all namespace. return:
+ *     @map[NS]struct{}: namespace set where key is the namespace while value is useless, e.g., "a.b"->nil, "a.c"->nil
+ *     @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}
+ *     @error: error info
+ */
+func GetAllNamespace(sources []*MongoSource, filterFunc func(name string) bool) (map[NS]struct{}, map[string][]string, error) {
+	nsSet := make(map[NS]struct{})
+	for _, src := range sources {
+		nsList, _, err := GetDbNamespace(src.URL, filterFunc)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, ns := range nsList {
+			nsSet[ns] = struct{}{}
+		}
+	}
+
+	// copy
+	nsMap := make(map[string][]string, len(sources))
+	for ns := range nsSet {
+		if _, ok := nsMap[ns.Database]; !ok {
+			nsMap[ns.Database] = make([]string, 0)
+		}
+		nsMap[ns.Database] = append(nsMap[ns.Database], ns.Collection)
+	}
+
+	return nsSet, nsMap, nil
 }

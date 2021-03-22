@@ -19,10 +19,10 @@ CheckList = {"objects": 1, "numExtents": 1, "ok": 1}
 configure = {}
 
 def log_info(message):
-    print "INFO  [%s] %s " % (time.strftime('%Y-%m-%d %H:%M:%S'), message)
+    print("INFO  [%s] %s " % (time.strftime('%Y-%m-%d %H:%M:%S'), message))
 
 def log_error(message):
-    print "ERROR [%s] %s " % (time.strftime('%Y-%m-%d %H:%M:%S'), message)
+    print("ERROR [%s] %s " % (time.strftime('%Y-%m-%d %H:%M:%S'), message))
 
 class MongoCluster:
 
@@ -97,8 +97,8 @@ def check(src, dst):
         # for collections in db
         srcColls = srcDb.collection_names()
         dstColls = dstDb.collection_names()
-        srcColls = [coll for coll in srcColls if coll not in configure[EXCLUDE_COLLS]]
-        dstColls = [coll for coll in dstColls if coll not in configure[EXCLUDE_COLLS]]
+        srcColls = [coll for coll in srcColls if coll not in configure[EXCLUDE_COLLS] and srcColls.count(coll) > 0]
+        dstColls = [coll for coll in dstColls if coll not in configure[EXCLUDE_COLLS] and dstColls.count(coll) > 0]
         if len(srcColls) != len(dstColls):
             log_error("DIFF => database [%s] collections count not equals, src[%s], dst[%s]" % (db, srcColls, dstColls))
             return False
@@ -184,11 +184,11 @@ def data_comparison(srcColl, dstColl, mode):
 
 
 def usage():
-    print '|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|'
-    print "| Usage: ./comparison.py --src=localhost:27017/db? --dest=localhost:27018/db? --count=10000 (the sample number) --excludeDbs=admin,local --excludeCollections=system.profile --comparisonMode=sample/all/no (sample: comparison sample number, default; all: comparison all data; no: only comparison outline without data)  |"
-    print '|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|'
-    print '| Like : ./comparison.py --src="localhost:3001" --dest=localhost:3100  --count=1000  --excludeDbs=admin,local,mongoshake --excludeCollections=system.profile --comparisonMode=sample  |'
-    print '|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|'
+    print('|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|')
+    print("| Usage: ./comparison.py --src=localhost:27017/db? --dest=localhost:27018/db? --count=10000 (the sample number) --excludeDbs=admin,local --excludeCollections=system.profile --comparisonMode=sample/all/no (sample: comparison sample number, default; all: comparison all data; no: only comparison outline without data)  |")
+    print('|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|')
+    print('| Like : ./comparison.py --src="localhost:3001" --dest=localhost:3100  --count=1000  --excludeDbs=admin,local,mongoshake --excludeCollections=system.profile --comparisonMode=sample  |')
+    print('|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|')
     exit(0)
 
 if __name__ == "__main__":
@@ -213,7 +213,7 @@ if __name__ == "__main__":
         if key in ("-x", "--excludeCollections"):
             configure[EXCLUDE_COLLS] = value.split(",")
         if key in ("--comparisonMode"):
-            print value
+            print(value)
             if value != "all" and value != "no" and value != "sample":
                 log_info("comparisonMode[%r] illegal" % (value))
                 exit(1)
@@ -238,20 +238,20 @@ if __name__ == "__main__":
 
     try :
         src, dst = MongoCluster(srcUrl), MongoCluster(dstUrl)
-        print "[src = %s]" % srcUrl
-        print "[dst = %s]" % dstUrl
+        print("[src = %s]" % srcUrl)
+        print("[dst = %s]" % dstUrl)
         src.connect()
         dst.connect()
-    except Exception, e:
-        print e
+    except (Exception, e):
+        print(e)
         log_error("create mongo connection failed %s|%s" % (srcUrl, dstUrl))
         exit()
 
     if check(src, dst):
-        print "SUCCESS"
+        print("SUCCESS")
         exit(0)
     else:
-        print "FAIL"
+        print("FAIL")
         exit(-1)
 
     src.close()

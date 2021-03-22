@@ -13,7 +13,8 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
-func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition, fullSyncFinishPosition int64,
+func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition interface{},
+	fullSyncFinishPosition int64,
 	startTsMap map[string]int64) error {
 	// replicate speed limit on all syncer
 	coordinator.rateController = nimo.NewSimpleRateController()
@@ -22,8 +23,8 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	// otherwise one syncer connects to one shard
 	LOG.Info("start incr replication")
 	for i, src := range coordinator.RealSourceIncrSync {
-		var syncerTs int64
-		if oplogStartPosition == 0 {
+		var syncerTs interface{}
+		if val, ok := oplogStartPosition.(int64); ok && val == 0 {
 			if v, ok := startTsMap[src.ReplicaName]; !ok {
 				return fmt.Errorf("replia[%v] not exists on startTsMap[%v]", src.ReplicaName, startTsMap)
 			} else {
