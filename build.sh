@@ -5,8 +5,6 @@ set -o errexit
 # compile specified module
 modules=(collector receiver)
 
-tags=""
-
 # older version Git don't support --short !
 if [ -d ".git" ];then
     #branch=`git symbolic-ref --short -q HEAD`
@@ -18,16 +16,13 @@ else
 fi
 branch=$branch","$cid
 
-output=./bin/
-
 # make sure we're in the directory where the script lives
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-rm -rf ${output}
+output="$SCRIPT_DIR/bin/"
 
-GOPATH=$(pwd)
-export GOPATH
+rm -rf "$output"
 
 #compile_line='-race'
 compile_line=''
@@ -58,9 +53,14 @@ fi
 t=$(date "+%Y-%m-%d_%H:%M:%S")
 info=$info","$t
 
-run_builder='go build -v'
+run_builder='go build'
 
 goos=(linux darwin windows)
+
+if [ "$1" = linux ] ; then
+	goos=(linux)
+fi
+
 for g in "${goos[@]}"; do
     export GOOS=$g
     echo "try build goos=$g"
@@ -74,17 +74,19 @@ for g in "${goos[@]}"; do
         echo "Build ""$i"
         
         # fetch all files in the main directory
-        build_dir="src/mongoshake/$i/main"
-        all_files=""
-        for j in $(ls $build_dir); do
-            all_files="$all_files $build_dir/$j "
-        done
+        cd "$SCRIPT_DIR"
+        cd "cmd/$i"
+
+        bin_name=$i.$g
+        if [ "$1" = linux ] ; then
+	        bin_name=$i
+        fi
 
         # build
         if [ $DEBUG -eq 1 ]; then
-            $run_builder ${compile_line} -ldflags "-X $build_info" -gcflags='-N -l' -o "bin/$i.$g" -tags "debug" $all_files
+            $run_builder ${compile_line} -ldflags "-X $build_info" -gcflags='-N -l' -o "$output/$bin_name" -tags "debug" .
         else
-            $run_builder ${compile_line} -ldflags "-X $build_info" -o "bin/$i.$g" $all_files
+            $run_builder ${compile_line} -ldflags "-X $build_info" -o "$output/$bin_name" .
         fi
 
         # execute and show compile messages
@@ -94,11 +96,17 @@ for g in "${goos[@]}"; do
     done
     echo "build $g successfully!"
 done
+
+if [ "$1" = linux ] ; then
+	exit 0
+fi
+
+cd "$SCRIPT_DIR"
 # *.sh
-cp scripts/start.sh ${output}/
-cp scripts/stop.sh ${output}/
-cp scripts/mongoshake-stat ${output}/
-cp scripts/comparison.py ${output}/
+cp scripts/start.sh "$output"
+cp scripts/stop.sh "$output"
+cp scripts/mongoshake-stat "$output"
+cp scripts/comparison.py "$output"
 
 
 if [ "Linux" == "$(uname -s)" ];then
