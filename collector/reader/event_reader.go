@@ -12,6 +12,7 @@ import (
 	"fmt"
 
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
+	"github.com/alibaba/MongoShake/v2/collector/filter"
 	diskQueue "github.com/vinllen/go-diskqueue"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
@@ -36,7 +37,7 @@ type EventReader struct {
 	disQueueMutex sync.Mutex // disk queue mutex
 
 	// start at operation time
-	startAtOperationTime int64
+	startAtOperationTime interface{}
 
 	// event channel
 	eventChan    chan *retOplog
@@ -51,12 +52,11 @@ type EventReader struct {
 func NewEventReader(src string, replset string) *EventReader {
 	var channelSize = int(float64(BatchSize) * PrefetchPercent)
 	return &EventReader{
-		src:                  src,
-		replset:              replset,
-		startAtOperationTime: -1, // init value
-		eventChan:            make(chan *retOplog, channelSize),
-		firstRead:            true,
-		diskQueueLastTs:      -1,
+		src:             src,
+		replset:         replset,
+		eventChan:       make(chan *retOplog, channelSize),
+		firstRead:       true,
+		diskQueueLastTs: -1,
 	}
 }
 
@@ -71,10 +71,17 @@ func (er *EventReader) Name() string {
 
 // SetQueryTimestampOnEmpty set internal timestamp if
 // not exist in this or. initial stage most of the time
-func (er *EventReader) SetQueryTimestampOnEmpty(ts bson.MongoTimestamp) {
-	if er.startAtOperationTime == -1 && ts != ckpt.InitCheckpoint {
+func (er *EventReader) SetQueryTimestampOnEmpty(ts interface{}) {
+	if er.startAtOperationTime == nil && ts != ckpt.InitCheckpoint {
 		LOG.Info("set query timestamp: %v", utils.ExtractTimestampForLog(ts))
-		er.startAtOperationTime = utils.TimestampToInt64(ts)
+		if val, ok := ts.(bson.MongoTimestamp); ok {
+			er.startAtOperationTime = utils.TimestampToInt64(val)
+		} else if val2, ok := ts.(int64); ok {
+			er.startAtOperationTime = val2
+		} else {
+			// ResumeToken
+			er.startAtOperationTime = ts
+		}
 	}
 }
 
@@ -83,7 +90,7 @@ func (er *EventReader) UpdateQueryTimestamp(ts bson.MongoTimestamp) {
 }
 
 func (er *EventReader) getQueryTimestamp() bson.MongoTimestamp {
-	return bson.MongoTimestamp(er.startAtOperationTime)
+	return bson.MongoTimestamp(er.startAtOperationTime.(int64))
 }
 
 // Next returns an oplog by raw bytes which is []byte
@@ -133,6 +140,7 @@ func (er *EventReader) fetcher() {
 			er.client.Close()
 			LOG.Error("change stream reader hit the end: %v", err)
 			time.Sleep(1 * time.Second)
+			continue
 		}
 
 		er.eventChan <- &retOplog{data, nil}
@@ -150,11 +158,28 @@ func (er *EventReader) EnsureNetwork() error {
 		er.client.Close() // close old client
 	}
 
+	filterList := filter.NewDocFilterList()
 	var err error
-	if er.client, err = utils.NewChangeStreamConn(er.src, conf.Options.MongoConnectMode, conf.Options.IncrSyncChangeStreamWatchFullDocument, er.startAtOperationTime,
+	if er.client, err = utils.NewChangeStreamConn(er.src,
+		conf.Options.MongoConnectMode,
+		conf.Options.IncrSyncChangeStreamWatchFullDocument,
+		conf.Options.SpecialSourceDBFlag,
+		filterList.IterateFilter,
+		er.startAtOperationTime,
 		int32(BatchSize)); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (er *EventReader) FetchNewestTimestamp() (interface{}, error) {
+	if err := er.EnsureNetwork(); err != nil {
+		return "", err
+	}
+
+	// non-blocking, and return is useless
+	er.client.TryNext()
+
+	return er.client.ResumeToken(), nil
 }

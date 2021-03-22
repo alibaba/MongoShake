@@ -15,12 +15,16 @@ import (
 	"github.com/vinllen/mgo/bson"
 )
 
-func (sync *OplogSyncer) newCheckpointManager(name string, startPosition int64) {
+func (sync *OplogSyncer) newCheckpointManager(name string, startPosition interface{}) {
 	LOG.Info("Oplog sync[%v] create checkpoint manager with url[%s] table[%s.%s] start-position[%v]",
 		name, utils.BlockMongoUrlPassword(conf.Options.CheckpointStorageUrl, "***"),
 		conf.Options.CheckpointStorageDb,
 		conf.Options.CheckpointStorageCollection, utils.ExtractTimestampForLog(startPosition))
-	sync.ckptManager = ckpt.NewCheckpointManager(name, startPosition)
+	if val, ok := startPosition.(int64); ok {
+		sync.ckptManager = ckpt.NewCheckpointManager(name, val)
+	} else {
+		sync.ckptManager = ckpt.NewCheckpointManager(name, 0)
+	}
 }
 
 /*
