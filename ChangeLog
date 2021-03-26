@@ -1,4 +1,8 @@
 2021-03-22 Alibaba Cloud.
+	* version: 2.6.1
+	* BUGFIX: singleWriter with wrong type 'objectId' error. #570
+
+2021-03-22 Alibaba Cloud.
 	* version: 2.6
 	* replace govendor with go.mod.
 
