@@ -11,36 +11,40 @@ type Configuration struct {
 	ConfVersion uint `config:"conf.version"` // do not modify the tag name
 
 	// 1. global
-	Id                          string   `config:"id"`
-	MasterQuorum                bool     `config:"master_quorum"`
-	FullSyncHTTPListenPort      int      `config:"full_sync.http_port"`
-	IncrSyncHTTPListenPort      int      `config:"incr_sync.http_port"`
-	SystemProfilePort           int      `config:"system_profile_port"`
-	LogLevel                    string   `config:"log.level"`
-	LogDirectory                string   `config:"log.dir"`
-	LogFileName                 string   `config:"log.file"`
-	LogFlush                    bool     `config:"log.flush"`
-	SyncMode                    string   `config:"sync_mode"`
-	MongoUrls                   []string `config:"mongo_urls"`
-	MongoCsUrl                  string   `config:"mongo_cs_url"`
-	MongoSUrl                   string   `config:"mongo_s_url"`
-	MongoConnectMode            string   `config:"mongo_connect_mode"`
-	Tunnel                      string   `config:"tunnel"`
-	TunnelAddress               []string `config:"tunnel.address"`
-	TunnelMessage               string   `config:"tunnel.message"`
-	TunnelKafkaPartitionNumber  int      `config:"tunnel.kafka.partition_number"` // add v2.4.21
-	TunnelJsonFormat            string   `config:"tunnel.json.format"`
-	FilterNamespaceBlack        []string `config:"filter.namespace.black"`
-	FilterNamespaceWhite        []string `config:"filter.namespace.white"`
-	FilterPassSpecialDb         []string `config:"filter.pass.special.db"`
-	FilterDDLEnable             bool     `config:"filter.ddl_enable"`
-	FilterOplogGids             bool     `config:"filter.oplog.gids"` // add v2.4.17
-	CheckpointStorageUrl        string   `config:"checkpoint.storage.url"`
-	CheckpointStorageDb         string   `config:"checkpoint.storage.db"`
-	CheckpointStorageCollection string   `config:"checkpoint.storage.collection"`
-	CheckpointStartPosition     int64    `config:"checkpoint.start_position" type:"date"`
-	TransformNamespace          []string `config:"transform.namespace"`
-	SpecialSourceDBFlag         string   `config:"special.source.db.flag" type:"string"` // add v2.4.20
+	Id                                     string   `config:"id"`
+	MasterQuorum                           bool     `config:"master_quorum"`
+	FullSyncHTTPListenPort                 int      `config:"full_sync.http_port"`
+	IncrSyncHTTPListenPort                 int      `config:"incr_sync.http_port"`
+	SystemProfilePort                      int      `config:"system_profile_port"`
+	LogLevel                               string   `config:"log.level"`
+	LogDirectory                           string   `config:"log.dir"`
+	LogFileName                            string   `config:"log.file"`
+	LogFlush                               bool     `config:"log.flush"`
+	SyncMode                               string   `config:"sync_mode"`
+	MongoUrls                              []string `config:"mongo_urls"`
+	MongoCsUrl                             string   `config:"mongo_cs_url"`
+	MongoSUrl                              string   `config:"mongo_s_url"`
+	MongoSslRootCaFile                     string   `config:"mongo_ssl_root_ca_file"` // add v2.6.2
+	MongoSslClientCaFile                   string   `config:"mongo_ssl_root_ca_file"`
+	MongoConnectMode                       string   `config:"mongo_connect_mode"`
+	Tunnel                                 string   `config:"tunnel"`
+	TunnelAddress                          []string `config:"tunnel.address"`
+	TunnelMessage                          string   `config:"tunnel.message"`
+	TunnelKafkaPartitionNumber             int      `config:"tunnel.kafka.partition_number"` // add v2.4.21
+	TunnelJsonFormat                       string   `config:"tunnel.json.format"`
+	TunnelMongoSslRootCaFile               string   `config:"tunnel.mongo_ssl_root_ca_file"` // add v2.6.2
+	FilterNamespaceBlack                   []string `config:"filter.namespace.black"`
+	FilterNamespaceWhite                   []string `config:"filter.namespace.white"`
+	FilterPassSpecialDb                    []string `config:"filter.pass.special.db"`
+	FilterDDLEnable                        bool     `config:"filter.ddl_enable"`
+	FilterOplogGids                        bool     `config:"filter.oplog.gids"` // add v2.4.17
+	CheckpointStorageUrl                   string   `config:"checkpoint.storage.url"`
+	CheckpointStorageDb                    string   `config:"checkpoint.storage.db"`
+	CheckpointStorageCollection            string   `config:"checkpoint.storage.collection"`
+	CheckpointStorageUrlMongoSslRootCaFile string   `config:"checkpoint.storage.url.mongo_ssl_root_ca_file"` // add v2.6.2
+	CheckpointStartPosition                int64    `config:"checkpoint.start_position" type:"date"`
+	TransformNamespace                     []string `config:"transform.namespace"`
+	SpecialSourceDBFlag                    string   `config:"special.source.db.flag" type:"string"` // add v2.4.20
 
 	// 2. full sync
 	FullSyncReaderCollectionParallel     int    `config:"full_sync.reader.collection_parallel"`

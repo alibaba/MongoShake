@@ -134,11 +134,11 @@ func GetOldestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, err
 	return retMap[QueryTs].(bson.MongoTimestamp), nil
 }
 
-func GetNewestTimestampByUrl(url string, fromMongoS bool) (bson.MongoTimestamp, error) {
+func GetNewestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (bson.MongoTimestamp, error) {
 	var conn *MongoConn
 	var err error
 	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true,
-		ReadWriteConcernDefault, ReadWriteConcernDefault); conn == nil || err != nil {
+		ReadWriteConcernDefault, ReadWriteConcernDefault, sslRootFile); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()
@@ -151,7 +151,7 @@ func GetNewestTimestampByUrl(url string, fromMongoS bool) (bson.MongoTimestamp, 
 	return GetNewestTimestampBySession(conn.Session)
 }
 
-func GetOldestTimestampByUrl(url string, fromMongoS bool) (bson.MongoTimestamp, error) {
+func GetOldestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (bson.MongoTimestamp, error) {
 	if fromMongoS {
 		return 0, nil
 	}
@@ -159,7 +159,7 @@ func GetOldestTimestampByUrl(url string, fromMongoS bool) (bson.MongoTimestamp, 
 	var conn *MongoConn
 	var err error
 	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true,
-		ReadWriteConcernDefault, ReadWriteConcernDefault); conn == nil || err != nil {
+		ReadWriteConcernDefault, ReadWriteConcernDefault, sslRootFile); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()
@@ -167,11 +167,12 @@ func GetOldestTimestampByUrl(url string, fromMongoS bool) (bson.MongoTimestamp, 
 	return GetOldestTimestampBySession(conn.Session)
 }
 
+// deprecated
 func IsFromMongos(url string) (bool, error) {
 	var conn *MongoConn
 	var err error
 	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true,
-		ReadWriteConcernDefault, ReadWriteConcernDefault); conn == nil || err != nil {
+		ReadWriteConcernDefault, ReadWriteConcernDefault, ""); conn == nil || err != nil {
 		return false, err
 	}
 	return conn.IsMongos(), nil
@@ -191,7 +192,7 @@ type TimestampNode struct {
  *     bson.MongoTimestamp: the smallest of the newest timestamp
  *     error: error
  */
-func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.MongoTimestamp,
+func GetAllTimestamp(sources []*MongoSource, sslRootFile string) (map[string]TimestampNode, bson.MongoTimestamp,
 	bson.MongoTimestamp, bson.MongoTimestamp, bson.MongoTimestamp, error) {
 	smallestNew := bson.MongoTimestamp(math.MaxInt64)
 	biggestNew := bson.MongoTimestamp(0)
@@ -200,14 +201,14 @@ func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.Mon
 	tsMap := make(map[string]TimestampNode)
 
 	for _, src := range sources {
-		newest, err := GetNewestTimestampByUrl(src.URL, false)
+		newest, err := GetNewestTimestampByUrl(src.URL, false, sslRootFile)
 		if err != nil {
 			return nil, 0, 0, 0, 0, err
 		} else if newest == 0 {
 			return nil, 0, 0, 0, 0, fmt.Errorf("illegal newest timestamp == 0")
 		}
 
-		oldest, err := GetOldestTimestampByUrl(src.URL, false)
+		oldest, err := GetOldestTimestampByUrl(src.URL, false, sslRootFile)
 		if err != nil {
 			return nil, 0, 0, 0, 0, err
 		}

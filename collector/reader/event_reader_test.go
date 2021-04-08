@@ -52,7 +52,7 @@ func TestEventReader(t *testing.T) {
 		er := NewEventReader(testMongoAddressCs, "ut_event_reader")
 		conf.Options.SpecialSourceDBFlag = utils.VarSpecialSourceDBFlagAliyunServerless
 		er.StartFetcher()
-		time.Sleep(3 * time.Second) // wait fetcher start
+		time.Sleep(5 * time.Second) // wait fetcher start
 
 		flag := false
 		startIndex := 0
@@ -64,7 +64,12 @@ func TestEventReader(t *testing.T) {
 				in, err := er.Next()
 				if err == TimeoutError {
 					time.Sleep(2 * time.Second)
-					fmt.Printf("timeout, resumeToken: %v\n", er.client.ResumeToken())
+					if er.client != nil {
+						fmt.Printf("timeout, resumeToken: %v\n", er.client.ResumeToken())
+					} else {
+						fmt.Printf("timeout, er.client == nil\n")
+					}
+					
 					continue
 				}
 				assert.Equal(t, nil, err, "should be equal")

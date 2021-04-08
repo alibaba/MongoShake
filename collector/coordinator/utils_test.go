@@ -70,7 +70,7 @@ func TestSelectSyncMode(t *testing.T) {
 		}
 
 		// drop old table
-		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "")
+		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "", "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		conn.Session.DB(testDb).C(testCollection).DropCollection()
@@ -144,7 +144,7 @@ func TestSelectSyncMode(t *testing.T) {
 		}
 
 		// drop old table
-		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "")
+		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "", "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		conn.Session.DB(testDb).C(testCollection).DropCollection()
@@ -249,7 +249,7 @@ func TestSelectSyncMode(t *testing.T) {
 		}
 
 		// drop old table
-		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "")
+		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "", "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		conn.Session.DB(testDb).C(testCollection).DropCollection()
@@ -328,7 +328,7 @@ func TestSelectSyncMode(t *testing.T) {
 		}
 
 		// drop old table
-		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "")
+		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "", "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		conn.Session.DB(testDb).C(testCollection).DropCollection()
@@ -403,7 +403,7 @@ func TestSelectSyncMode(t *testing.T) {
 		// test on checkpoint set
 
 		// drop old table
-		conn, err = utils.NewMongoConn(testUrl, "primary", true, "", "")
+		conn, err = utils.NewMongoConn(testUrl, "primary", true, "", "", "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		conn.Session.DB(testDb).C(testCollection).DropCollection()
@@ -455,7 +455,7 @@ func TestSelectSyncMode(t *testing.T) {
 		}
 
 		// drop old table
-		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "")
+		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "", "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		conn.Session.DB(testDb).C(testCollection).DropCollection()
@@ -535,7 +535,7 @@ func TestSelectSyncMode(t *testing.T) {
 		// test on checkpoint set
 
 		// drop old table
-		conn, err = utils.NewMongoConn(testUrl, "primary", true, "", "")
+		conn, err = utils.NewMongoConn(testUrl, "primary", true, "", "", "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		conn.Session.DB(testDb).C(testCollection).DropCollection()
@@ -581,7 +581,7 @@ func TestSelectSyncMode(t *testing.T) {
 		}
 
 		// drop old table
-		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "")
+		conn, err := utils.NewMongoConn(testUrl, "primary", true, "", "", "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		conn.Session.DB(testDb).C(testCollection).DropCollection()
@@ -643,7 +643,7 @@ func TestSelectSyncMode(t *testing.T) {
 		testReplicaName := "mockReplicaSet"
 
 		// drop old table
-		conn, err := utils.NewMongoConn(testUrlServerless, "primary", true, "", "")
+		conn, err := utils.NewMongoConn(testUrlServerless, "primary", true, "", "", "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		conn.Session.DB(testDb).C(testCollection).DropCollection()
@@ -682,7 +682,7 @@ func TestSelectSyncMode(t *testing.T) {
 		testReplicaName := "mockReplicaSet"
 
 		// drop old table
-		conn, err := utils.NewMongoConn(testUrlServerless, "primary", true, "", "")
+		conn, err := utils.NewMongoConn(testUrlServerless, "primary", true, "", "", "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		conn.Session.DB(testDb).C(testCollection).DropCollection()

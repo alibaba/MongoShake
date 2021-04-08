@@ -1,3 +1,7 @@
+2021-04-08 Alibaba Cloud.
+	* version: 2.6.2
+	* IMPROVE: support ssl.
+
 2021-03-22 Alibaba Cloud.
 	* version: 2.6.1
 	* BUGFIX: singleWriter with wrong type 'objectId' error. #570
