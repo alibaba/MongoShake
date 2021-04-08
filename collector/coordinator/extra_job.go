@@ -74,7 +74,7 @@ func (cui *CheckUniqueIndexExistsJob) Run() {
 	conns := make([]*utils.MongoConn, len(cui.urls))
 	for i, source := range cui.urls {
 		conns[i], err = utils.NewMongoConn(source.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
-			utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault)
+			utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			LOG.Error("extra job[%s] connect source[%v] failed: %v", cui.Name(), source.URL, err)
 			return

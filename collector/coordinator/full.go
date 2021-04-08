@@ -42,7 +42,7 @@ func fetchChunkMap(isSharding bool) (sharding.ShardingChunkMap, error) {
 	return nil, nil
 }
 
-func getTimestampMap(sources []*utils.MongoSource) (map[string]utils.TimestampNode, error) {
+func getTimestampMap(sources []*utils.MongoSource, sslRootFile string) (map[string]utils.TimestampNode, error) {
 	// no need to fetch if sync mode is full only
 	if conf.Options.SyncMode == utils.VarSyncModeFull {
 		return nil, nil
@@ -51,7 +51,7 @@ func getTimestampMap(sources []*utils.MongoSource) (map[string]utils.TimestampNo
 	var ckptMap map[string]utils.TimestampNode
 	var err error
 
-	ckptMap, _, _, _, _, err = utils.GetAllTimestamp(sources)
+	ckptMap, _, _, _, _, err = utils.GetAllTimestamp(sources, sslRootFile)
 	if err != nil {
 		return nil, fmt.Errorf("fetch source all timestamp failed: %v", err)
 	}
@@ -97,7 +97,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	var ckptMap map[string]utils.TimestampNode
 	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless {
 		// get current newest timestamp
-		ckptMap, err = getTimestampMap(coordinator.MongoD)
+		ckptMap, err = getTimestampMap(coordinator.MongoD, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return err
 		}
@@ -108,7 +108,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	var toConn *utils.MongoConn
 	if !conf.Options.FullSyncExecutorDebug {
 		if toConn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault); err != nil {
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, conf.Options.TunnelMongoSslRootCaFile); err != nil {
 			return err
 		}
 		defer toConn.Close()

@@ -221,7 +221,7 @@ func TestGetAndCompareVersion(t *testing.T) {
 		nr++
 
 		conn, err := NewMongoConn(testMongoAddress, VarMongoConnectModeSecondaryPreferred, true,
-			ReadWriteConcernDefault, ReadWriteConcernDefault)
+			ReadWriteConcernDefault, ReadWriteConcernDefault, "")
 		assert.Equal(t, err, nil, "")
 
 		ok, err := GetAndCompareVersion(conn.Session, "3.4.0", "")
@@ -252,6 +252,10 @@ func TestGetAndCompareVersion(t *testing.T) {
 		ok, err = GetAndCompareVersion(nil, "3.6", "4.2.5")
 		assert.Equal(t, err, nil, "")
 		assert.Equal(t, ok, true, "")
+
+		ok, err = GetAndCompareVersion(nil, "3.2.0", "4.2.7")
+		assert.Equal(t, err, nil, "")
+		assert.Equal(t, ok, true, "")
 	}
 }
 
@@ -266,7 +270,7 @@ func TestGetDbNamespace(t *testing.T) {
 		nr++
 
 		conn, err := NewMongoConn(testMongoAddress, VarMongoConnectModePrimary, true,
-			ReadWriteConcernLocal, ReadWriteConcernDefault)
+			ReadWriteConcernLocal, ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		err = conn.Session.DB("db1").DropDatabase()

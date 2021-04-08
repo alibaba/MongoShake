@@ -1,7 +1,11 @@
 package utils
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"io/ioutil"
+	"net"
 	"time"
 
 	LOG "github.com/vinllen/log4go"
@@ -14,12 +18,33 @@ type MongoConn struct {
 	URL     string
 }
 
-func NewMongoConn(url string, connectMode string, timeout bool, readConcern, writeConcern string) (*MongoConn, error) {
+func NewMongoConn(url string, connectMode string, timeout bool, readConcern, writeConcern string, rootCaFile string) (*MongoConn, error) {
 	if connectMode == VarMongoConnectModeStandalone {
 		url += "?connect=direct"
 	}
 
-	session, err := mgo.Dial(url)
+	dialInfo, err := mgo.ParseURL(url)
+	if rootCaFile != "" {
+		rootPEM, err := ioutil.ReadFile(rootCaFile)
+		if err != nil {
+			return nil, fmt.Errorf("read url[%v] root ca file failed[%v]", url, err)
+		}
+		roots := x509.NewCertPool()
+		if ok := roots.AppendCertsFromPEM([]byte(rootPEM)); !ok {
+			return nil, fmt.Errorf("read url[%v] append root ca file failed", url)
+		}
+
+		tlsConfig := &tls.Config{
+			RootCAs:            roots,
+			InsecureSkipVerify: true,
+		}
+
+		dialInfo.DialServer = func(addr *mgo.ServerAddr) (net.Conn, error) {
+			return tls.Dial("tcp", addr.String(), tlsConfig)
+		}
+	}
+
+	session, err := mgo.DialWithInfo(dialInfo)
 	if err != nil {
 		LOG.Critical("Connect to %s failed. %v", BlockMongoUrlPassword(url, "***"), err)
 		return nil, err

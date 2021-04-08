@@ -79,6 +79,7 @@ func main() {
 
 	utils.Welcome()
 
+	utils.Mkdirs(conf.Options.LogDirectory)
 	// get exclusive process lock and write pid
 	if utils.WritePidById(conf.Options.LogDirectory, conf.Options.Id) {
 		startup()

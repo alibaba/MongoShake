@@ -2,9 +2,9 @@ package docsyncer
 
 import (
 	"fmt"
-	"math"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
+	"math"
 
 	"context"
 	"sync/atomic"
@@ -19,35 +19,39 @@ import (
 /*************************************************/
 // splitter: pre-split the collection into several pieces
 type DocumentSplitter struct {
-	src         string               // source mongo address url
-	ns          utils.NS             // namespace
-	conn        *utils.MongoConn     // connection
-	readerChan  chan *DocumentReader // reader chan
-	pieceSize   uint64               // each piece max size
-	count       uint64               // total document number
-	pieceNumber int                  // how many piece
+	src           string               // source mongo address url
+	sslRootCaFile string               // source root ca ssl
+	ns            utils.NS             // namespace
+	conn          *utils.MongoConn     // connection
+	readerChan    chan *DocumentReader // reader chan
+	pieceSize     uint64               // each piece max size
+	count         uint64               // total document number
+	pieceNumber   int                  // how many piece
 }
 
-func NewDocumentSplitter(src string, ns utils.NS) *DocumentSplitter {
+func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitter {
 	ds := &DocumentSplitter{
-		src:       src,
-		ns:        ns,
-		pieceSize: conf.Options.FullSyncReaderReadDocumentCount,
+		src:           src,
+		sslRootCaFile: sslRootCaFile,
+		ns:            ns,
+		pieceSize:     conf.Options.FullSyncReaderReadDocumentCount,
 	}
 
 	// create connection
 	var err error
 	ds.conn, err = utils.NewMongoConn(ds.src, conf.Options.MongoConnectMode, true,
-		utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
+		utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, sslRootCaFile)
 	if err != nil {
-		LOG.Error("splitter[%s] connection mongo[%v] failed[%v]", ds, ds.src, err)
+		LOG.Error("splitter[%s] connection mongo[%v] failed[%v]", ds,
+			utils.BlockMongoUrlPassword(ds.src, "***"), err)
 		return nil
 	}
 
 	// get total count
 	count, err := ds.conn.Session.DB(ds.ns.Database).C(ds.ns.Collection).Count()
 	if err != nil {
-		LOG.Error("splitter[%s] connection mongo[%v] failed[%v]", ds, ds.src, err)
+		LOG.Error("splitter[%s] connection mongo[%v] failed[%v]", ds,
+			utils.BlockMongoUrlPassword(ds.src, "***"), err)
 		return nil
 	}
 	ds.count = uint64(count)
@@ -85,7 +89,7 @@ func (ds *DocumentSplitter) Run() error {
 	// disable split
 	if ds.pieceNumber == 1 {
 		LOG.Info("splitter[%s] disable split or no need", ds)
-		ds.readerChan <- NewDocumentReader(ds.src, ds.ns, nil, nil)
+		ds.readerChan <- NewDocumentReader(ds.src, ds.ns, nil, nil, ds.sslRootCaFile)
 		LOG.Info("splitter[%s] exits", ds)
 		return nil
 	}
@@ -120,7 +124,7 @@ func (ds *DocumentSplitter) Run() error {
 
 		LOG.Info("splitter[%s] piece[%d] create reader with boundary(%v, %v]", ds, i, start, end)
 		// inject new DocumentReader into channel
-		ds.readerChan <- NewDocumentReader(ds.src, ds.ns, start, end)
+		ds.readerChan <- NewDocumentReader(ds.src, ds.ns, start, end, ds.sslRootCaFile)
 
 		// new start
 		start = end
@@ -140,8 +144,9 @@ func (ds *DocumentSplitter) GetIndexes() ([]mgo.Index, error) {
 // DocumentReader: the reader of single piece
 type DocumentReader struct {
 	// source mongo address url
-	src string
-	ns  utils.NS
+	src           string
+	ns            utils.NS
+	sslRootCaFile string // source root ca ssl
 
 	// mongo document reader
 	client      *utils.MongoCommunityConn
@@ -159,7 +164,7 @@ type DocumentReader struct {
 }
 
 // NewDocumentReader creates reader with mongodb url
-func NewDocumentReader(src string, ns utils.NS, start, end interface{}) *DocumentReader {
+func NewDocumentReader(src string, ns utils.NS, start, end interface{}, sslRootCaFile string) *DocumentReader {
 	q := make(bson.M)
 	if start != nil || end != nil {
 		innerQ := make(bson.M)
@@ -175,10 +180,11 @@ func NewDocumentReader(src string, ns utils.NS, start, end interface{}) *Documen
 	ctx := context.Background()
 
 	return &DocumentReader{
-		src:   src,
-		ns:    ns,
-		query: q,
-		ctx:   ctx,
+		src:           src,
+		ns:            ns,
+		sslRootCaFile: sslRootCaFile,
+		query:         q,
+		ctx:           ctx,
 	}
 }
 
@@ -305,7 +311,7 @@ func (reader *DocumentReader) ensureNetworkMgo() (err error) {
 		}
 		// reconnect
 		if reader.conn, err = utils.NewMongoConn(reader.src, conf.Options.MongoConnectMode, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault); reader.conn == nil || err != nil {
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, reader.sslRootCaFile); reader.conn == nil || err != nil {
 			return err
 		}
 	}

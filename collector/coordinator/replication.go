@@ -118,7 +118,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	// try to connect CheckpointStorage
 	checkpointStorageUrl := conf.Options.CheckpointStorageUrl
 	if conn, err = utils.NewMongoConn(checkpointStorageUrl, utils.VarMongoConnectModePrimary, true,
-		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault); conn == nil || !conn.IsGood() || err != nil {
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.CheckpointStorageUrlMongoSslRootCaFile); conn == nil || !conn.IsGood() || err != nil {
 		LOG.Critical("Connect checkpointStorageUrl[%v] error[%v]. Please add primary node into 'mongo_urls' "+
 			"if 'context.storage.url' is empty", checkpointStorageUrl, err)
 		return err
@@ -127,7 +127,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 
 	for i, src := range coordinator.MongoD {
 		if conn, err = utils.NewMongoConn(src.URL, conf.Options.MongoConnectMode, true,
-			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault); conn == nil || !conn.IsGood() || err != nil {
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile); conn == nil || !conn.IsGood() || err != nil {
 			LOG.Critical("Connect mongo server error. %v, url : %s. See https://github.com/alibaba/MongoShake/wiki/FAQ#q-how-to-solve-the-oplog-tailer-initialize-failed-no-reachable-servers-error", err, src.URL)
 			return err
 		}
@@ -195,7 +195,7 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 	// get current newest timestamp
 	var fullFinishTs, oldestTs bson.MongoTimestamp
 	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless {
-		_, fullFinishTs, _, oldestTs, _, err = utils.GetAllTimestamp(coordinator.MongoD)
+		_, fullFinishTs, _, oldestTs, _, err = utils.GetAllTimestamp(coordinator.MongoD, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
 		}
