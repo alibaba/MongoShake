@@ -54,6 +54,8 @@ func mockOplogRecord(oId, oX interface{}, o2Id int) *OplogRecord {
 func TestSingleWriter(t *testing.T) {
 	// test single writer
 
+	utils.InitialLogger("", "", "debug", true, 1)
+
 	var nr int
 
 	// simple test
@@ -139,6 +141,57 @@ func TestSingleWriter(t *testing.T) {
 		assert.Equal(t, 10000, result[0].(bson.M)["x"], "should be equal")
 	}
 
+	// upsert with duplicate key error
+	{
+		fmt.Printf("TestSingleWriter case %d.\n", nr)
+		nr++
+
+		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		assert.Equal(t, nil, err, "should be equal")
+
+		writer := NewDbWriter(conn.Session, bson.M{}, false, 0)
+
+		// drop database
+		err = conn.Session.DB(testDb).DropDatabase()
+		assert.Equal(t, nil, err, "should be equal")
+
+		// build index on filed 'x'
+		err = conn.Session.DB(testDb).C(testCollection).EnsureIndex(mgo.Index{
+			Key: []string{"x"},
+			Unique: true,
+		})
+		assert.Equal(t, nil, err, "should be equal")
+
+		inserts := []*OplogRecord{
+			mockOplogRecord(bson.ObjectId("123456789011"), 1, -1),
+			mockOplogRecord(bson.ObjectId("123456789012"), 10, -1),
+		}
+		// write 1
+		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		assert.Equal(t, nil, err, "should be equal")
+
+		// write 1 again
+		inserts = []*OplogRecord{
+			mockOplogRecord(bson.ObjectId("123456789011"), 10, -1),
+		}
+		// write 1
+		err = writer.doUpdateOnInsert(testDb, testCollection, bson.M{}, inserts, true)
+		assert.Equal(t, nil, err, "should be equal")
+
+		// query
+		result := make([]interface{}, 0)
+		err = conn.Session.DB(testDb).C(testCollection).Find(bson.M{}).Sort("_id").All(&result)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 2, len(result), "should be equal")
+		if result[0].(bson.M)["_id"] == bson.ObjectId("123456789011") {
+			assert.Equal(t, true, result[0].(bson.M)["x"] == 1, "should be equal")
+		}
+		if result[0].(bson.M)["_id"] == bson.ObjectId("123456789012") {
+			assert.Equal(t, true, result[0].(bson.M)["x"] == 10, "should be equal")
+		}
+	}
+	return
+
 	// test upsert, dupInsert
 	{
 		fmt.Printf("TestSingleWriter case %d.\n", nr)
@@ -221,8 +274,6 @@ func TestSingleWriter(t *testing.T) {
 	{
 		fmt.Printf("TestSingleWriter case %d.\n", nr)
 		nr++
-
-		utils.InitialLogger("", "", "info", true, 1)
 
 		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
