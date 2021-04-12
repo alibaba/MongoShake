@@ -1,3 +1,7 @@
+2021-04-12 Alibaba Cloud.
+	* version: 2.6.3
+	* BUGFIX: ignore duplicate key error when in full sync stage. #579
+
 2021-04-08 Alibaba Cloud.
 	* version: 2.6.2
 	* IMPROVE: support ssl.
