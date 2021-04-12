@@ -149,7 +149,7 @@ func TestSingleWriter(t *testing.T) {
 		conn, err := utils.NewMongoConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn.Session, bson.M{}, false, 0)
+		writer := NewDbWriter(conn.Session, bson.M{}, false, 1)
 
 		// drop database
 		err = conn.Session.DB(testDb).DropDatabase()
@@ -190,7 +190,6 @@ func TestSingleWriter(t *testing.T) {
 			assert.Equal(t, true, result[0].(bson.M)["x"] == 10, "should be equal")
 		}
 	}
-	return
 
 	// test upsert, dupInsert
 	{
