@@ -89,7 +89,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 				LOG.Warn("upsert _id[%v] with data[%v] meets err[%v], try to solve", update.id, update.data, err)
 
 				// error can be ignored
-				if IgnoreError(err, "i", utils.TimestampToInt64(oplogs[i].original.partialLog.Timestamp) <= sw.fullFinishTs) {
+				if IgnoreError(err, "ui", utils.TimestampToInt64(oplogs[i].original.partialLog.Timestamp) <= sw.fullFinishTs) {
 					continue
 				}
 
