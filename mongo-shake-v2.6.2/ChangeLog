@@ -1,0 +1,357 @@
+2021-04-08 Alibaba Cloud.
+	* version: 2.6.2
+	* IMPROVE: support ssl.
+
+2021-03-22 Alibaba Cloud.
+	* version: 2.6.1
+	* BUGFIX: singleWriter with wrong type 'objectId' error. #570
+
+2021-03-22 Alibaba Cloud.
+	* version: 2.6
+	* replace govendor with go.mod.
+
+2021-03-19 Alibaba Cloud.
+	* version: 2.4.22
+	* IMPROVE: add 'tunnel.json.format' option to let user chose json format.
+	#542, #559, #558
+
+2021-03-09 Alibaba Cloud.
+	* version: 2.4.21
+	* IMPROVE: remove `incr_sync.worker.oplog_compressor` option in conf.
+	* IMPROVE: improve the performance of writing kafka, add
+	`incr_sync.tunnel.write_thread` and `tunnel.kafka.partition_number`. #553.
+	* IMPROVE: support format canonical extented JSON format. #542.
+
+2021-03-05 Alibaba Cloud.
+	* version: 2.4.20
+	* IMPROVE: support aliyun_serverless of MongoDB.
+	* IMPROVE: add simple python script sys test.
+	* IMPROVE: update driver for some usage of mgo -> mongo.go.driver.
+	* IMPROVE: comparison python script version upgrades to 3.x.
+
+2021-01-15 Alibaba Cloud.
+	* version: 2.4.19
+	* BUGFIX: fix bug of cursorNotFound error. #451
+	* IMPROVE: polish LOG exit mechanism. #529
+	* IMPORVE: update mongo-go-driver to 1.4.4.
+	* IMPROVE: polish inner debug mechanism with `full_sync.executor.debug`
+	parameter in configuration.
+
+2021-01-07 Alibaba Cloud.
+	* version: 2.4.18
+	* BUGFIX: remove maxWaitTime option in reader. #524
+
+2020-12-09 Alibaba Cloud.
+	* version: 2.4.17
+	* IMPROVE: add write_success field in full sync log metric.
+	* IMPROVE: solve dup error in single_writer which is used when target
+	mongodb version is 3.0.
+	* IMPROVE: show source and target db version in configuration.
+	* IMPROVE: enable NoCursorTimeout when source DB version >= 3.6. #451
+	* IMPROVE: filter oplog.gid field when enable "filter.oplog.gids = true".
+	#510
+
+2020-11-04 Alibaba Cloud.
+	* version: 2.4.16
+	* IMPROVE: ignore error when meets namespace not found error in delete
+	operation in single writer. #467
+	* IMPROVE: when "incr_sync.mongo_fetch_method == oplog", support upsert
+	if target is sharding. #380
+	* BUGFIX: fix bug that using change_stream mode can't fetch any data in
+	kafka tunnel with "checkpoint.start_position = 1970-01-01T00:00:00Z".
+	#475.
+
+2020-10-14 Alibaba Cloud.
+	* version: 2.4.15
+	* BUGFIX: in kafka tunnel, solve json marshal failed when meets NaN, Inf,
+	-Inf field. #430
+
+2020-09-30 Alibaba Cloud.
+	* version: 2.4.14
+	* BUGFIX: 'o' field is empty when set
+	"incr_sync.change_stream.watch_full_document = true". #454
+
+2020-09-22 Alibaba Cloud.
+	* version: 2.4.13
+	* BUGFIX: do not filter ns=admin.$cmd so that transaction works. #439
+	* IMPROVE: enable NoCursorTimeout in full-sync reader. #443, #451
+	* IMPROVE: set "omitempty" flag for oplog and change stream event parser.
+	* IMPROVE: polish Mock tunnel log for debugging.
+
+2020-09-01 Alibaba Cloud.
+	* version: 2.4.12
+	* IMPROVE: add sort and hint by _id in full sync stage.
+	* IMPROVE: add executor namespace writing count metric.
+	* IMPROVE: add WhiteListObjectIdHasher to solve the jumbo table without
+	unique index.
+	* BUGFIX: solve error: "db[xx] not exists on startTsMap". #434
+
+2020-08-27 Alibaba Cloud.
+	* version: 2.4.11
+	* IMPROVE: add ut_test script.
+	* IMPORVE: in full sync stage: replace mgo driver with mongo-go-driver in
+	reading.
+	* BUGFIX: if can not run incr sync directly, return error when sync_mode
+	== incr.
+	* IMPROVE: docSync crash directly when meest error in full sync.
+	* BUGFIX: do not change sync_mode whn tunnel != direct. #424
+	* IMPROVE: sort data before return in full sync stage.
+
+2020-08-14 Alibaba Cloud.
+	* version: 2.4.10
+	* IMPROVE: modify the logic of transaction merging in change stream mode
+	to improve synchronization performance. #370
+	* BUGFIX: fix bug of "panic with session already closed" in StartIndexSync
+	function.
+	* BUGFIX: remove autoIndexId when autoIndexId and idIndex co-exists in
+	create collection oplog. #400
+	* IMPROVE: when meets DDL in sharding, do not crash when fetch_method is
+	change_stream.
+	* IMPROVE: when fetch_method is change_stream, do not set worker thread
+	to MongoD number when source side is sharding. 
+
+2020-08-06 Alibaba Cloud.
+	* version: 2.4.9
+	* BUGFIX: checkpoint doesn't work after restart. #403
+	* IMPROVE: mandatory set read concern to majority for change stream. #406
+	* BUGFIX: filter checkpoint.storage.db, not only mongoshake.
+
+2020-07-29 Alibaba Cloud.
+	* version: 2.4.8
+	* BUGFIX: fix bug that checkpoint.storage.db does not work since v2.4.6.
+	* BUGFIX: fix bug of orphan document filter core. #389.
+	* IMPROVE: remove listDatabase request when incr_sync.shard_key != auto.
+	#385.
+	* IMPROVE: add oplog_max_size and oplog_avg_size metric in restful: "repl/".
+	* BUGFIX: fix bug of checkpoint duplicate updating when HA switch.
+	* IMPROVE: increase syncer thread when fetching method is change stream.
+	* IMPROVE: add readConcern and writeConcern in client to solve the
+	orphan document problem reading from MongoS. #392
+	* IMPROVE: fix wrong name usage in mongoshake-stat script, thanks @Neal
+	Gosalia. #393.
+
+2020-06-30 Alibaba Cloud.
+	* version: 2.4.7
+	* IMPROVE: add exit-point and safe shutdown mechanism. #375, #162
+	* IMPROVE: add UpdateLookup options in change stream. #350. thanks for
+	the PR by Raydy.
+	* IMPROVE: open full_sync.reader.read_document_count parameter to improve
+	full sync performance when meeting jumbo table.
+	* IMPROVE: polish log: remove function information in log.
+
+2020-06-17 Alibaba Cloud.
+	* version: 2.4.6
+	* IMPROVE: when running full sync, change sync source from mongod to
+	mongos. #360
+	* IMPROVE: when source type is sharding, change checkpoint position from
+	config-server to mongos.
+	* BUGFIX: fix bug of whether the starting time oplog is legal: the oldest
+	oplog timestamp > checkpoint.start_position
+	* IMPROVE: convert kafka producer MaxMessageBytes configuration from 1MB
+	to 16MB. #369.
+	* IMPROVE: add target delay parameter just like MongoDB primary-secondary
+	SlaveDelay. #371.
+
+2020-06-08 Alibaba Cloud.
+	* version: 2.4.5
+	* BUGFIX: fix bug of ignore error wrong when parsed error list is nil.
+
+2020-06-05 Alibaba Cloud.
+	* version: 2.4.4
+	* BUGFIX: fix bug of "two $set" in update query. see #345.
+	* BUGFIX: fix bug of source mongodb judgement error. see #343.
+	* IMPROVE: solve the idempotency problem of oplog synchronization
+	during the initial sync period. see #345.
+
+2020-05-14 Alibaba Cloud.
+	* version: 2.4.3
+	* BUGFIX: rename `full_sync.collection_exist_no_drop` to
+	`full_sync.collection_exist_drop`.
+
+2020-04-22 Alibaba Cloud.
+	* version: 2.4.2
+	* BUGFIX: fix bug of applyOps run failed. #329
+
+2020-04-09 Alibaba Cloud.
+	* version: 2.4.1
+	* IMPROVE: add speed limit policy in full sync stage.
+	* IMPROVE: modify speed limit policy to token bucket algorithm in
+	incremental sync.
+	* IMPROVE: add background index build policy, see full_sync.create_index. #316
+	* IMPROVE: add monitor in full sync stage.
+	* BUGFIX: fix bug of parsing oplog empty from kafka. #317
+	* BUGFIX: fix bug of checkpoint flush block. #323
+
+2020-03-25 Alibaba Cloud.
+	* version: 2.4.0
+	* IMPROVE: support change stream to solve move chunk problem.
+	* IMRPOVE: add feature compatiable version(fcv) for configuration and
+	checkpoint.
+	* IMPROVE: optimize orphan document filter.
+	* IMPROVE: block password in conf and log.
+	* IMPROVE: retry to insert document when duplicate error happen in full
+	sync stage.
+	* IMRPOVE: add 'full_sync.create_index' in configuration.
+	* DISABLE: temporarily disable oplog stored to disk during document
+	replication released on v2.2.1.
+
+2020-01-22 Alibaba Cloud.
+	* version: 2.2.1
+	* IMPROVE: support oplog stored to disk during document replication.
+	* IMPROVE: support reading from kafka in by different tunnel message type.
+
+2019-11-20 Alibaba Cloud.
+	* version: 2.2.0
+	* this is a experimental version for sharding replication
+	* IMRPOVE: support filter orphan document in full synchronization for mongodb sharding
+	* IMPROVE: support move chunk in incremental synchronization for mongodb sharding
+	* IMPROVE: support ddl in incremental synchronization for mongodb sharding
+	* IMPROVE: support different sharding key or index at destination mongodb
+	* IMPROVE: support global consistence checkpoint
+
+2019-09-30 Alibaba Cloud.
+	* version: 2.0.8
+	* BUGFIX: fetch data from kafka failed. update "sarama" driver, see #212.
+	* IMPROVE: support for the compilation of windows environment. see #233.
+	* IMPROVE: remove some parameters in configuration.
+	* IMRPOVE: add TPS in restful metric.
+
+2019-08-17 Alibaba Cloud.
+	* version: 2.0.7
+	* BUGFIX: exit when the oldest ts bigger than full-sync-begin
+	timestamp so that data may lost between full sync and increase sync.
+	see #218.
+	* BUGFIX: bugfix: set white namespace filter for sharding replication
+	cause db filtered. see #222.
+	* IMPROVE: add switch in configuration to support syncing some special
+	database like 'admin', 'local', default is disbale. see #223.
+	* IMPROVE: set `adaptive.batching_max_size = 1024` by default to reduce
+	memory usage. see
+	https://github.com/alibaba/MongoShake/wiki/FAQ#q-mongoshake-crashed-because-of-oomout-of-memory-how-can-i-estimate-memory-usage
+
+2019-08-08 Alibaba Cloud.
+	* version: 2.0.6
+	* IMPROVE: filter views in syncing, see #206.
+	* IMPROVE: when the synchronization mode is full synchronization,
+	support for the case where oplog does not exist. see #215.
+	* IMPROVE: let mongoshake exits when finish full syncing. see #210.
+	* IMPROVE: add `log.dir` to write log and pid file in absolute path.
+	see #211.
+
+2019-07-29 Alibaba Cloud.
+	* version: 2.0.5
+	* IMPROVE: comparison.py support sharding comparison. see #197.
+	* BUGFIX: comparison.py fix bug of negative count. see #199.
+	* IMPROVE: set worker number to shards number. see #198.
+	* IMPROVE: support sharding active-active architecture. This is	only
+	used in Alibaba-Cloud.
+
+2019-07-15 Alibaba Cloud.
+	* version: 2.0.4
+	* BUG FIX: fix bug of batched oplog size exceeding 16MB, This bug was
+	not completely resolved in version v1.4.6. see #122 and #187.
+	* IMPROVE: add chinese comment in configuration.
+	* IMPROVE: print warning log when the oldest oplog is bigger than the
+	checkpoint timestamp, see #189.
+	* IMPROVE: flush heartbeat checkpoint with interval 180s. see #189.
+	* BUG FIX: use runCommand instead of applyOps to support sharding. see
+	#192.
+	* BUG FIX: partial log dump with parameter `all` equal to false.
+
+2019-07-10 Alibaba Cloud.
+	* version: 2.0.3
+	* BUG FIX: update sentence incurs some fields lost.
+	* BUG FIX: modify start.sh
+
+2019-07-09 Alibaba Cloud.
+	* version: 2.0.2
+	* BUG FIX: DDL createIndexes fail. Using `applyOps` in DDL replay. see
+	issue #176.
+	* BUG FIX: DDL filter applyOps command panic.
+	* IMPROVE: improve comparision script.
+	* IMRPOVE: update vinllen/mgo library to solve the problem that using too
+	many mgo connections.
+
+2019-06-24 Alibaba Cloud.
+	* version: 2.0.1
+	* IMPROVE: add `mongo_connect_mode` in conf.
+	* IMPROVE: support writing into different mongodb when source mongo is
+	replica set.
+	* BUG FIX: optimize namespace filter for DDL.
+
+2019-06-19 Alibaba Cloud.
+	* version: 2.0.0
+	* Feature: support full synchronization.
+	* Feature: support DDL synchronization including index and transaction.
+	* Feature: support namespace rename.
+	* BUG FIX: fix bug of dbref order.
+
+2019-04-20 Alibaba Cloud.
+	* version: 1.5.0-unstable
+	* Feature: support full synchronization.
+	* Feature: support DDL synchronization including index and transaction.
+
+2019-04-12 Alibaba Cloud.
+	* version: 1.4.6
+	* BUG FIX: fix bug of batched oplog size exceeding 16MB.
+
+2018-12-20 Alibaba Cloud.
+	* version: 1.4.5
+	* IMPROVE: modify `build.sh` to solve the problem of building error when
+	download zip from github instead of `git clone`.
+	* IMPROVE: modify error log level of `_id` type unknown.
+
+2018-11-27 Alibaba Cloud.
+	* version: 1.4.4
+	* BUG FIX: enable bulk.Unordered when using bulk writer, so all the
+	operations will be executed even some of them have failed. At the
+	mean time, disable `replayer.executor.upsert` and
+	`replayer.executor.insert_on_dup_update` by default.
+	* IMPROVE: filter config database.
+	* IMPROVE: print `_id` type and value when can't be hashed.
+	* IMPROVE: disbale print version in command.
+	* IMPROVE: add `adaptive.batching_max_size` and `fetcher.buffer_capacity`
+	in configuration so users can control the memory usage.
+	* BUG FIX: do not use bulk writer to operate index.
+
+2018-09-25 Alibaba Cloud.
+	* version: 1.4.3
+	* IMPROVE: stop syncing data when collection capped error happen in source
+	database.
+
+2018-09-19 Alibaba Cloud.
+	* version: 1.4.2
+	* BUG FIX: fix bug of `start.sh` script commited by `ManleyLiu`.
+	* BUG FIX: fix bug of error judge sentence in bulk writer commited by
+	`chensi01`.
+	* IMPROVE: add timeout configuration and flush strategy for the oplog
+	reader .
+	* IMPROVE: remove "send [0] logs" hint in log.
+
+2018-09-04 Alibaba Cloud.
+	* version: 1.4.1
+	* BUG FIX: fix bug of the time zone converter.
+
+2018-09-03 Alibaba Cloud.
+	* version: 1.4.0
+	* Feature: Add receiver which is used to connect to different tunnels
+	like rpc, tcp, file, mock and kafka.
+
+2018-08-08 Alibaba Cloud.
+	* version: 1.2.1
+	* BUG FIX: remove `$v` field in oplog to fix the bug in MongoDB 3.6.
+
+2018-07-29 Alibaba Cloud.
+	* version: 1.2.0
+	* Feature: Use general write instead of op_command. When the version is
+	greater than or equal to 3.2, the bulk writer is used for batch writing,
+	otherwise the single writer is used for single writing.	
+
+2018-07-18 Alibaba Cloud.
+	* version: 1.0.0
+	* BUG FIX: upsert/remove error when old value isn't exist.
+	* BUG FIX: connect to Alibaba Cloud MongoDB instance without permission.
+	* BUG FIX: some logs can't be print out when crash.
+	
+2018-06-28 Alibaba Cloud.
+	* mongo-shake: initial release.

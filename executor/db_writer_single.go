@@ -87,7 +87,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 		for i, update := range updates {
 			if _, err := collectionHandle.Upsert(bson.M{"_id": update.id}, update.data); err != nil {
 				// error can be ignored
-				if IgnoreError(err, "u", utils.TimestampToInt64(oplogs[i].original.partialLog.Timestamp) <= sw.fullFinishTs) {
+				if IgnoreError(err, "i", utils.TimestampToInt64(oplogs[i].original.partialLog.Timestamp) <= sw.fullFinishTs) {
 					continue
 				}
 

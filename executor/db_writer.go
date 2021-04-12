@@ -195,6 +195,11 @@ func IgnoreError(err error, op string, isFullSyncStage bool) bool {
 	for _, err := range errorCode {
 		switch op {
 		case "i":
+			if isFullSyncStage {
+				if err == 11000 { // duplicate key
+					continue
+				}
+			}
 		case "u":
 			if isFullSyncStage {
 				if err == 28 { // PathNotViable
