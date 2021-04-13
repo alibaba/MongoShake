@@ -1,3 +1,7 @@
+2021-04-13 Alibaba Cloud.
+	* version: 2.6.4
+	* IMPROVE: parse configuration failed because of column length is bigger
+	than 4096. #582
 2021-04-12 Alibaba Cloud.
 	* version: 2.6.3
 	* BUGFIX: ignore duplicate key error when in full sync stage. #579
