@@ -22,7 +22,6 @@ import (
 
 const (
 	MAX_BUFFER_BYTE_SIZE = 12 * 1024 * 1024
-	SpliterReader        = 4
 )
 
 func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
@@ -433,28 +432,24 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 
 	// run in several pieces
 	var wg sync.WaitGroup
-	wg.Add(splitter.pieceNumber)
-	readerCnt := SpliterReader
-	if readerCnt > splitter.pieceNumber {
-		readerCnt = splitter.pieceNumber
-	}
-	for i := 0; i < readerCnt; i++ {
+	wg.Add(conf.Options.FullSyncReaderParallelThread)
+	for i := 0; i < conf.Options.FullSyncReaderParallelThread; i++ {
 		go func() {
+			defer wg.Done()
 			for {
 				reader, ok := <-splitter.readerChan
-				if !ok {
+				if !ok || reader == nil {
 					break
 				}
 
 				if err := syncer.splitSync(reader, colExecutor, collectionMetric); err != nil {
 					LOG.Crashf("%v", err)
 				}
-
-				wg.Done()
 			}
 		}()
 	}
 	wg.Wait()
+	LOG.Info("%s all readers finish, wait all writers finish", syncer)
 
 	// close writer
 	if err := colExecutor.Wait(); err != nil {
