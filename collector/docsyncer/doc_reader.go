@@ -36,7 +36,8 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 
 	// create connection
 	var err error
-	ds.conn, err = utils.NewMongoConn(ds.src, conf.Options.MongoConnectMode, true,
+	// disable timeout
+	ds.conn, err = utils.NewMongoConn(ds.src, conf.Options.MongoConnectMode, false,
 		utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, sslRootCaFile)
 	if err != nil {
 		LOG.Error("splitter[%s] connection mongo[%v] failed[%v]", ds,

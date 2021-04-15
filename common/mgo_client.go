@@ -53,7 +53,7 @@ func NewMongoConn(url string, connectMode string, timeout bool, readConcern, wri
 	// should be lower than this value(will block otherwise)
 	session.SetPoolLimit(256)
 	if timeout {
-		session.SetSocketTimeout(10 * time.Minute)
+		session.SetSocketTimeout(20 * time.Minute)
 	} else {
 		session.SetSocketTimeout(0)
 	}
