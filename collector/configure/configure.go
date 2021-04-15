@@ -49,8 +49,9 @@ type Configuration struct {
 	// 2. full sync
 	FullSyncReaderCollectionParallel     int    `config:"full_sync.reader.collection_parallel"`
 	FullSyncReaderWriteDocumentParallel  int    `config:"full_sync.reader.write_document_parallel"`
-	FullSyncReaderReadDocumentCount      uint64 `config:"full_sync.reader.read_document_count"`
 	FullSyncReaderDocumentBatchSize      int    `config:"full_sync.reader.document_batch_size"`
+	FullSyncReaderParallelThread         int    `config:"full_sync.reader.parallel_thread"` // add v2.6.4
+	FullSyncReaderParallelIndex          string `config:"full_sync.reader.parallel_index"`  // add v2.6.4
 	FullSyncCollectionDrop               bool   `config:"full_sync.collection_exist_drop"`
 	FullSyncCreateIndex                  string `config:"full_sync.create_index"`
 	FullSyncReaderOplogStoreDisk         bool   `config:"full_sync.reader.oplog_store_disk"`
@@ -103,6 +104,10 @@ type Configuration struct {
 	IncrSyncTunnelMessage string   `config:"incr_sync.tunnel.message"` // deprecate since v2.4.1
 	HTTPListenPort        int      `config:"http_profile"`             // deprecate since v2.4.1
 	SystemProfile         int      `config:"system_profile"`           // deprecate since v2.4.1
+
+	/*---------------------------------------------------------*/
+	// removed variables
+	// FullSyncReaderReadDocumentCount      uint64 `config:"full_sync.reader.read_document_count"` // remove since v2.6.4
 }
 
 func (configuration *Configuration) IsShardCluster() bool {

@@ -141,10 +141,13 @@ func checkDefaultValue() error {
 	if conf.Options.FullSyncReaderWriteDocumentParallel <= 0 {
 		conf.Options.FullSyncReaderWriteDocumentParallel = 8
 	}
-	if conf.Options.FullSyncReaderReadDocumentCount < 0 {
-		conf.Options.FullSyncReaderReadDocumentCount = 0
-	} else if conf.Options.FullSyncReaderReadDocumentCount > 0 && conf.Options.FullSyncReaderReadDocumentCount < 10000 {
-		return fmt.Errorf("full_sync.reader.read_document_count should == 0 or >= 10000")
+	if conf.Options.FullSyncReaderParallelThread <= 0 {
+		conf.Options.FullSyncReaderParallelThread = 1
+	} else if conf.Options.FullSyncReaderParallelThread > 128 {
+		return fmt.Errorf("full_sync.reader.parallel_thread should <= 128")
+	}
+	if conf.Options.FullSyncReaderParallelIndex == "" {
+		conf.Options.FullSyncReaderParallelIndex = "_id"
 	}
 	if conf.Options.FullSyncReaderDocumentBatchSize <= 0 {
 		conf.Options.FullSyncReaderDocumentBatchSize = 128
