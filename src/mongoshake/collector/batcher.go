@@ -40,14 +40,6 @@ func getTargetDelay() int64 {
 	}
 }
 
-func getExitPoint() bson.MongoTimestamp {
-	if utils.IncrSentinelOptions.ExitPoint <= 0 {
-		return 0
-	}
-	// change to timestamp
-	return bson.MongoTimestamp(utils.IncrSentinelOptions.ExitPoint << 32)
-}
-
 /*
  * as we mentioned in syncer.go, Batcher is used to batch oplog before sending in order to
  * improve performance.
@@ -104,6 +96,19 @@ func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
 		lastFilterOplog: fakeOplog.Parsed,
 		previousFlush:   false,
 	}
+}
+
+func (batcher *Batcher) getExitPoint() bson.MongoTimestamp {
+	if batcher.syncer.oplogLte > 0 {
+		utils.IncrSentinelOptions.ExitPoint = batcher.syncer.oplogLte
+		return bson.MongoTimestamp(batcher.syncer.oplogLte)
+	}
+
+	if utils.IncrSentinelOptions.ExitPoint <= 0 {
+		return 0
+	}
+	// change to timestamp
+	return bson.MongoTimestamp(utils.IncrSentinelOptions.ExitPoint << 32)
 }
 
 /*
@@ -226,8 +231,10 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 	}
 
 	// judge should exit
-	exitPoint := getExitPoint()
+	exitPoint := batcher.getExitPoint()
 	lastOplog := mergeBatch[len(mergeBatch) - 1].Parsed
+	LOG.Debug("%s exitPoint[%v], lastOplog.Timestamp[%v], batcher.syncer.fullSyncFinishPosition[%v]",
+		batcher.syncer, exitPoint, lastOplog.Timestamp, batcher.syncer.fullSyncFinishPosition)
 	if exitPoint > 0 && lastOplog.Timestamp > batcher.syncer.fullSyncFinishPosition && exitPoint < lastOplog.Timestamp {
 		// only run detail judgement when exit point is bigger than the last one
 		LOG.Info("%s exitPoint[%v] < lastOplog.Timestamp[%v]", batcher.syncer,
@@ -319,6 +326,7 @@ func (batcher *Batcher) BatchMore() ([][]*oplog.GenericOplog, bool, bool, bool) 
 		return batcher.batchGroup, barrier, batcher.setLastOplog(), exit
 	}
 
+	LOG.Info("~~~~~~~~~ %v %v", mergeBatch[0].Parsed, mergeBatch[len(mergeBatch) - 1].Parsed)
 	// we have data
 	for i, genericLog := range mergeBatch {
 		// filter oplog such like Noop or Gid-filtered
@@ -406,6 +414,11 @@ func (batcher *Batcher) BatchMore() ([][]*oplog.GenericOplog, bool, bool, bool) 
 		batcher.previousOplog = genericLog
 	}
 
+	// when exit, add the last oplog
+	if exit {
+		batcher.addIntoBatchGroup(batcher.previousOplog)
+	}
+
 	batcher.previousFlush = barrier
 	return batcher.batchGroup, barrier, batcher.setLastOplog(), exit
 }
@@ -448,7 +461,7 @@ func (batcher *Batcher) gatherTransaction() *oplog.GenericOplog {
 
 func (batcher *Batcher) needMergeTransaction(x, y *oplog.PartialLog) bool {
 	// only run in change stream mode.
-	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
+	if conf.Options.IncrSyncMongoFetchMethod != utils.VarIncrSyncMongoFetchMethodChangeStream {
 		return false
 	}
 

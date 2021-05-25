@@ -15,6 +15,7 @@ run_sys_test_dir
 
 dump.data
 runtime.trace
+mongo-shake-*
 
 .DS_Store
 

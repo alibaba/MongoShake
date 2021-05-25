@@ -72,6 +72,9 @@ type Configuration struct {
 	IncrSyncConflictWriteTo               string   `config:"incr_sync.conflict_write_to"` // remove "sdk" option since v2.4.21
 	IncrSyncExecutorMajorityEnable        bool     `config:"incr_sync.executor.majority_enable"`
 
+	// 4. mongo_oplog_replay
+	SkipFailure bool
+
 	/*---------------------------------------------------------*/
 	// inner variables, not open to user
 	CheckpointStorage             string `config:"checkpoint.storage"`

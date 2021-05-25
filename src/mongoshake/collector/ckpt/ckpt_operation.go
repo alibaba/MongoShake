@@ -12,6 +12,8 @@ import (
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
+	"os"
+	"sync"
 )
 
 const (
@@ -174,5 +176,68 @@ func (ckpt *HttpApiCheckpoint) Insert(insert *CheckpointContext) error {
 	}
 
 	LOG.Info("%s Record new checkpoint success [%d]", ckpt.Name, int64(utils.ExtractMongoTimestamp(insert.Timestamp)))
+	return nil
+}
+
+// file
+type FileCheckpoint struct {
+	CheckpointContext
+
+	Filename string
+	fLock sync.Mutex
+}
+
+func (ckpt *FileCheckpoint) Get() (*CheckpointContext, bool) {
+	ckpt.fLock.Lock()
+	defer ckpt.fLock.Unlock()
+
+	// file not exists
+	if _, err := os.Stat(ckpt.Filename); os.IsNotExist(err) {
+		value := new(CheckpointContext)
+		value.Name = ckpt.Name
+		value.Timestamp = ckpt.Timestamp
+		value.Version = ckpt.Version
+		value.OplogDiskQueue = ckpt.OplogDiskQueue
+		value.OplogDiskQueueFinishTs = ckpt.OplogDiskQueueFinishTs
+		LOG.Info("%s Regenerate checkpoint but won't persist. content: %s", ckpt.Name, value)
+		// insert current ckpt snapshot in memory
+		// ckpt.QueryHandle.Insert(value)
+		return value, false
+	}
+
+	if f, err := os.Open(ckpt.Filename); err != nil {
+		LOG.Error("%s open checkpoint file failed: %v", ckpt.Name, err)
+		return nil, false
+	} else {
+		byteValue, err := ioutil.ReadAll(f)
+		if err != nil {
+			LOG.Error("%s read checkpoint file failed: %v", ckpt.Name, err)
+			return nil, false
+		}
+
+		var ele CheckpointContext
+		if err := json.Unmarshal(byteValue, &ele); err != nil {
+			LOG.Error("%s unmarshal checkpoint file failed: %v", ckpt.Name, err)
+			return nil, false
+		}
+
+		return &ele, true
+	}
+}
+
+func (ckpt *FileCheckpoint) Insert(insert *CheckpointContext) error {
+	ckpt.fLock.Lock()
+	defer ckpt.fLock.Unlock()
+
+	if f, err := os.OpenFile(ckpt.Filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666); err != nil {
+		return fmt.Errorf("%s insert operation opens checkpoint file failed: %v", ckpt.Name, err)
+	} else {
+		body, _ := json.Marshal(insert)
+
+		if _, err := f.Write(body); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }

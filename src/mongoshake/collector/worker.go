@@ -62,7 +62,10 @@ func (worker *Worker) String() string {
 }
 
 func (worker *Worker) Init() bool {
-	worker.RestAPI()
+	if conf.Options.IncrSyncMongoFetchMethod != utils.VarCheckpointStorageFile {
+		worker.RestAPI()
+	}
+
 	worker.writeController = NewWriteController(worker)
 	if worker.writeController == nil {
 		return false

@@ -67,7 +67,9 @@ func (batchExecutor *BatchGroupExecutor) Start() {
 	executors := make([]*Executor, parallel)
 	for i := 0; i != len(executors); i++ {
 		executors[i] = NewExecutor(GenerateExecutorId(), batchExecutor, batchExecutor.MongoUrl)
-		executors[i].RestAPI()
+		if conf.Options.IncrSyncMongoFetchMethod != utils.VarCheckpointStorageFile {
+			executors[i].RestAPI()
+		}
 		go executors[i].start()
 	}
 	batchExecutor.executors = executors

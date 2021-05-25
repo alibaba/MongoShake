@@ -3,6 +3,10 @@
 	"ignore": "test",
 	"package": [
 		{
+			"path": "b",
+			"revision": ""
+		},
+		{
 			"checksumSHA1": "eruIVA8JnsB23rVKjETHvqJ0sj8=",
 			"path": "github.com/DataDog/zstd",
 			"revision": "2bf71ec4836011b92dc78df3b9ace6b40e65f7df",
@@ -183,6 +187,12 @@
 			"revisionTime": "2019-03-28T16:16:33Z"
 		},
 		{
+			"checksumSHA1": "61UicDqEEgEKgJg7qTnJgsmpTjc=",
+			"path": "github.com/jessevdk/go-flags",
+			"revision": "4d0b7bb1d39fcd621395190edfc330865bbeabba",
+			"revisionTime": "2021-03-21T11:03:54Z"
+		},
+		{
 			"checksumSHA1": "e+1CFg/UrAbOy7aN8Ww0iWBk8Vo=",
 			"path": "github.com/jinzhu/copier",
 			"revision": "b57f9002281ac48ed8cbc489b1e91121e1a0824c",
@@ -223,6 +233,82 @@
 			"path": "github.com/klauspost/compress/zstd/internal/xxhash",
 			"revision": "59173b57be0cfc705da1f4f227f4049d193a5fa2",
 			"revisionTime": "2020-02-16T17:46:41Z"
+		},
+		{
+			"checksumSHA1": "yIrLrfwg86pLBtlAoYrxXDbvO1A=",
+			"path": "github.com/mongodb/mongo-tools-common",
+			"revision": "f3e93534baab98a69e959b1a5b89f842a7517cc9",
+			"revisionTime": "2021-03-22T17:58:09Z"
+		},
+		{
+			"checksumSHA1": "/5/9EWY6x0MqBUZwTRlQD3hNsvs=",
+			"path": "github.com/mongodb/mongo-tools-common/bsonutil",
+			"revision": "f3e93534baab98a69e959b1a5b89f842a7517cc9",
+			"revisionTime": "2021-03-22T17:58:09Z"
+		},
+		{
+			"path": "github.com/mongodb/mongo-tools-common/d",
+			"revision": ""
+		},
+		{
+			"checksumSHA1": "B1bJcZR0J3blOfU4DOTFp3lEZ3A=",
+			"path": "github.com/mongodb/mongo-tools-common/db",
+			"revision": "f3e93534baab98a69e959b1a5b89f842a7517cc9",
+			"revisionTime": "2021-03-22T17:58:09Z"
+		},
+		{
+			"checksumSHA1": "htSXrcYajTX7Vc4FLe9Pxrya0Vk=",
+			"path": "github.com/mongodb/mongo-tools-common/failpoint",
+			"revision": "f3e93534baab98a69e959b1a5b89f842a7517cc9",
+			"revisionTime": "2021-03-22T17:58:09Z"
+		},
+		{
+			"checksumSHA1": "xIcjfp/eHSgCYWM4PCz775XVm38=",
+			"path": "github.com/mongodb/mongo-tools-common/intents",
+			"revision": "f3e93534baab98a69e959b1a5b89f842a7517cc9",
+			"revisionTime": "2021-03-22T17:58:09Z"
+		},
+		{
+			"checksumSHA1": "IFoR1+0IdCqA0//lyj+x2Y/zjnU=",
+			"path": "github.com/mongodb/mongo-tools-common/json",
+			"revision": "f3e93534baab98a69e959b1a5b89f842a7517cc9",
+			"revisionTime": "2021-03-22T17:58:09Z"
+		},
+		{
+			"checksumSHA1": "5ZHSVtqjQ7XZRdX8nxDI52QOW2Y=",
+			"path": "github.com/mongodb/mongo-tools-common/log",
+			"revision": "f3e93534baab98a69e959b1a5b89f842a7517cc9",
+			"revisionTime": "2021-03-22T17:58:09Z"
+		},
+		{
+			"checksumSHA1": "NFZQFjT9HoesLakxZdnI3QRz88Q=",
+			"path": "github.com/mongodb/mongo-tools-common/options",
+			"revision": "f3e93534baab98a69e959b1a5b89f842a7517cc9",
+			"revisionTime": "2021-03-22T17:58:09Z"
+		},
+		{
+			"checksumSHA1": "kNWauEC30hJsu/ofRltfIUCMipQ=",
+			"path": "github.com/mongodb/mongo-tools-common/password",
+			"revision": "f3e93534baab98a69e959b1a5b89f842a7517cc9",
+			"revisionTime": "2021-03-22T17:58:09Z"
+		},
+		{
+			"checksumSHA1": "gKaGtvrhZsA+DEcT7uz/2kz5AY8=",
+			"path": "github.com/mongodb/mongo-tools-common/signals",
+			"revision": "f3e93534baab98a69e959b1a5b89f842a7517cc9",
+			"revisionTime": "2021-03-22T17:58:09Z"
+		},
+		{
+			"checksumSHA1": "OgjgA46XbSeu6mDXP87EY015aJw=",
+			"path": "github.com/mongodb/mongo-tools-common/txn",
+			"revision": "f3e93534baab98a69e959b1a5b89f842a7517cc9",
+			"revisionTime": "2021-03-22T17:58:09Z"
+		},
+		{
+			"checksumSHA1": "ghZa7wnbHp/0wyDOONd1RNZ4oxU=",
+			"path": "github.com/mongodb/mongo-tools-common/util",
+			"revision": "f3e93534baab98a69e959b1a5b89f842a7517cc9",
+			"revisionTime": "2021-03-22T17:58:09Z"
 		},
 		{
 			"checksumSHA1": "Zw2mCFVLS4o1miFcZ7MrT0vGD0Y=",
@@ -591,6 +677,12 @@
 			"revisionTime": "2018-07-14T16:05:09Z"
 		},
 		{
+			"checksumSHA1": "Sn/jEg2GleM/FvgOfu27uyKW5bY=",
+			"path": "github.com/youmark/pkcs8",
+			"revision": "1326539a0a0a223131f98c711974304269f27bbd",
+			"revisionTime": "2020-10-27T04:15:43Z"
+		},
+		{
 			"checksumSHA1": "M5aR+nV3GB3xep+Bw4tqB9wUmGY=",
 			"path": "go.mongodb.org/mongo-driver",
 			"revision": "60f76f5b1810553090503950fce37c876253217b",
@@ -819,6 +911,18 @@
 			"revisionTime": "2019-08-28T23:00:48Z"
 		},
 		{
+			"checksumSHA1": "fnDLsxqM8CoifxEPvbynvbfJxC8=",
+			"path": "golang.org/x/crypto/scrypt",
+			"revision": "c07d793c2f9aacf728fe68cbd7acd73adbd04159",
+			"revisionTime": "2021-05-13T15:05:28Z"
+		},
+		{
+			"checksumSHA1": "duEcJaULRzejc7AXv+Etpn/Q/BU=",
+			"path": "golang.org/x/crypto/ssh/terminal",
+			"revision": "c07d793c2f9aacf728fe68cbd7acd73adbd04159",
+			"revisionTime": "2021-05-13T15:05:28Z"
+		},
+		{
 			"checksumSHA1": "f3Y7JIZH61oMmp8nphqe8Mg+XoU=",
 			"path": "golang.org/x/net/internal/socks",
 			"revision": "ba9fcec4b297b415637633c5a6e8fa592e4a16c3",
@@ -841,6 +945,36 @@
 			"path": "golang.org/x/sync/semaphore",
 			"revision": "09787c993a3ab68e3d1f5c9b2394ab9433f391be",
 			"revisionTime": "2020-12-07T22:48:14Z"
+		},
+		{
+			"checksumSHA1": "Ld0iviZSRGAKK6WSoti+3++1RmY=",
+			"path": "golang.org/x/sys/internal/unsafeheader",
+			"revision": "0cec03c779c1270924b29437a17b8a99ae590592",
+			"revisionTime": "2021-05-09T11:44:58Z"
+		},
+		{
+			"checksumSHA1": "h7GXb0bh/HGKf58hABBUvaLwvQs=",
+			"path": "golang.org/x/sys/plan9",
+			"revision": "0cec03c779c1270924b29437a17b8a99ae590592",
+			"revisionTime": "2021-05-09T11:44:58Z"
+		},
+		{
+			"checksumSHA1": "vtqujajujCXeb3u16CProBY9fO4=",
+			"path": "golang.org/x/sys/unix",
+			"revision": "0cec03c779c1270924b29437a17b8a99ae590592",
+			"revisionTime": "2021-05-09T11:44:58Z"
+		},
+		{
+			"checksumSHA1": "mQukbMyS4xWoHkJs57YvWIAkQ2o=",
+			"path": "golang.org/x/sys/windows",
+			"revision": "0cec03c779c1270924b29437a17b8a99ae590592",
+			"revisionTime": "2021-05-09T11:44:58Z"
+		},
+		{
+			"checksumSHA1": "o4m+DaNPG/jcniM1OzKGhu09v9M=",
+			"path": "golang.org/x/term",
+			"revision": "a79de5458b56c188f4fc267a58014ac25fec956a",
+			"revisionTime": "2021-05-02T13:15:18Z"
 		},
 		{
 			"checksumSHA1": "BARlqsZBSancZtOx1+FD9kR5d5Y=",
@@ -1069,6 +1203,17 @@
 			"path": "gopkg.in/jcmturner/rpc.v1/ndr",
 			"revision": "99a8ce2fbf8b8087b6ed12a37c61b10f04070043",
 			"revisionTime": "2018-08-26T21:10:00Z"
+		},
+		{
+			"checksumSHA1": "RqcbcMbbS5iVjpckNxDc30/WYSE=",
+			"path": "gopkg.in/yaml.v2",
+			"revision": "7649d4548cb53a614db133b2a8ac1f31859dda8c",
+			"revisionTime": "2020-11-17T15:46:20Z"
+		},
+		{
+			"path": "vendor/golang.org/x/sys/unix",
+			"revision": ""
 		}
-	]
+	],
+	"rootPath": "/Users/vinllen-ali/code/mongo-shake-github/MongoShake/src"
 }

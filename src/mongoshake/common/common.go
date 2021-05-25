@@ -15,6 +15,7 @@ import (
 var BRANCH = "$"
 var SIGNALPROFILE = "$"
 var SIGNALSTACK = "$"
+var Exit = false
 
 const (
 	// APPNAME = "mongoshake"
@@ -44,7 +45,7 @@ var (
 
 func init() {
 	// prepare global folders
-	Mkdirs(GlobalDiagnosticPath /*, GlobalStoragePath*/)
+	// Mkdirs(GlobalDiagnosticPath /*, GlobalStoragePath*/)
 }
 
 func RunStatusMessage(status uint64) string {
@@ -71,6 +72,7 @@ func InitialLogger(logDir, logFile, level string, logFlush bool, verbose bool) e
 		writer := LOG.NewConsoleLogWriter()
 		writer.SetFormat("[%D %T] [%L] %M")
 		LOG.AddFilter("console", logLevel, writer)
+		return nil
 	}
 
 	if len(logDir) == 0 {

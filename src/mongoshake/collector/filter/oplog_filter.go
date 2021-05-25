@@ -236,3 +236,17 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 func (filter *NamespaceFilter) filter(log *oplog.PartialLog) bool {
 	return filter.FilterNs(log.Namespace)
 }
+
+type TsFilter struct {
+	gte bson.MongoTimestamp
+}
+
+func NewTsFilter(gte int64) *TsFilter {
+	return &TsFilter{
+		gte: bson.MongoTimestamp(gte),
+	}
+}
+
+func (filter *TsFilter) Filter(log *oplog.PartialLog) bool {
+	return log.Timestamp < filter.gte
+}

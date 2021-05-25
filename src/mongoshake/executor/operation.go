@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"reflect"
 	"strings"
 
 	"mongoshake/collector/configure"
@@ -13,6 +12,7 @@ import (
 	"github.com/vinllen/mgo/bson"
 	"fmt"
 	"sync/atomic"
+	"reflect"
 )
 
 var ErrorsShouldSkip = map[int]string{
@@ -115,15 +115,22 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 		}
 
 		if err != nil {
-			LOG.Critical("Replayer-%d, executor-%d, oplog for namespace[%s] op[%s] failed. error type[%v]"+
-				" error[%v], logs number[%d], firstLog: %s",
-				exec.batchExecutor.ReplayerId, exec.id, group.ns, group.op, reflect.TypeOf(err), err.Error(), count,
-				group.oplogRecords[0].original.partialLog)
-			exec.dropConnection()
-			atomic.AddUint64(&exec.metricError, uint64(len(group.oplogRecords)))
-			exec.addNsMapMetric(group.ns, "e", len(group.oplogRecords))
+			if conf.Options.SkipFailure {
+				LOG.Warn("Replayer-%d, executor-%d, oplog for namespace[%s] op[%s] failed. error type[%v]"+
+					" error[%v], logs number[%d], firstLog: %s",
+					exec.batchExecutor.ReplayerId, exec.id, group.ns, group.op, reflect.TypeOf(err), err.Error(), count,
+					group.oplogRecords[0].original.partialLog)
+			} else {
+				LOG.Critical("Replayer-%d, executor-%d, oplog for namespace[%s] op[%s] failed. error type[%v]"+
+					" error[%v], logs number[%d], firstLog: %s",
+					exec.batchExecutor.ReplayerId, exec.id, group.ns, group.op, reflect.TypeOf(err), err.Error(), count,
+					group.oplogRecords[0].original.partialLog)
+				exec.dropConnection()
+				atomic.AddUint64(&exec.metricError, uint64(len(group.oplogRecords)))
+				exec.addNsMapMetric(group.ns, "e", len(group.oplogRecords))
 
-			return err
+				return err
+			}
 		}
 	}
 	// exec.batchExecutor.ReplMetric.ReplStatus.Clear(utils.ReplicaExecBad)

@@ -52,6 +52,17 @@ func NewCheckpointManager(name string, startPosition int64) *CheckpointManager {
 			URL:   conf.Options.CheckpointStorageUrl,
 			Table: conf.Options.CheckpointStorageCollection,
 		}
+	case utils.VarCheckpointStorageFile:
+		newManager.delegate = &FileCheckpoint{
+			CheckpointContext: CheckpointContext{
+				Name:                   name,
+				Timestamp:              bson.MongoTimestamp(startPosition),
+				Version:                utils.FcvCheckpoint.CurrentVersion,
+				OplogDiskQueue:         "",
+				OplogDiskQueueFinishTs: InitCheckpoint,
+			},
+			Filename: conf.Options.CheckpointStorageUrl,
+		}
 	default:
 		return nil
 	}

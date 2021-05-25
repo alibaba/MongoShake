@@ -124,7 +124,8 @@ func (coordinator *ReplicationCoordinator) isCheckpointExist() (bool, interface{
 		// send changestream
 		reader, err := sourceReader.CreateReader(utils.VarIncrSyncMongoFetchMethodChangeStream,
 			coordinator.RealSourceFullSync[0].URL,
-			coordinator.RealSourceFullSync[0].ReplicaName)
+			coordinator.RealSourceFullSync[0].ReplicaName,
+			nil, "")
 		if err != nil {
 			return false, 0, fmt.Errorf("create reader failed: %v", err)
 		}

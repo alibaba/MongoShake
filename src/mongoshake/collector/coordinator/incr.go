@@ -35,7 +35,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 
 		LOG.Info("RealSourceIncrSync[%d]: %s, startTimestamp[%v]", i, src, syncerTs)
 		syncer := collector.NewOplogSyncer(src.ReplicaName, syncerTs, fullSyncFinishPosition, src.URL,
-			src.Gids, coordinator.rateController)
+			src.Gids, coordinator.rateController, -1, -1, nil, "")
 		// syncerGroup http api registry
 		syncer.Init()
 		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)
@@ -71,6 +71,34 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 				err)
 		}
 	})
+
+	return nil
+}
+
+// mongo-oplog-replay
+func (coordinator *ReplicationCoordinator) StartOplogReplay(oplogGte, oplogLte int64, parserNum, workerNum int,
+		files []string, dir string) error {
+	syncer := collector.NewOplogSyncer("recover-default-name", nil, 0, "",
+		nil, nil, oplogGte, oplogLte, files, dir)
+	// syncerGroup http api registry
+	syncer.Init()
+	coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)
+	// set to group 0 as a leader
+	coordinator.syncerGroup[0].SyncGroup = coordinator.syncerGroup
+
+	for i := 0; i < workerNum; i++ {
+		w := collector.NewWorker(syncer, uint32(i))
+		if !w.Init() {
+			return errors.New("worker initialize error")
+		}
+
+		syncer.Bind(w)
+		go w.StartWorker()
+	}
+
+	for _, syncer := range coordinator.syncerGroup {
+		go syncer.Start()
+	}
 
 	return nil
 }

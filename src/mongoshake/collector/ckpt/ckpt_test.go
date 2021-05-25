@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
+	"os"
 )
 
 var (
@@ -299,5 +300,82 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, updateTime, ctx.Timestamp, "should be equal")
 		assert.Equal(t, "ut_test_disk_queue_name_2", ctx.OplogDiskQueue, "should be equal")
 		assert.Equal(t, diskFinishTs, ctx.OplogDiskQueueFinishTs, "should be equal")
+	}
+}
+
+func TestFileCheckpoint(t *testing.T) {
+	// only test FileCheckpoint
+
+	var nr int
+
+	// test GetInMemory only
+	{
+		fmt.Printf("TestFileCheckpoint case %d.\n", nr)
+		nr++
+
+		conf.Options.CheckpointStorageUrl = "test-file-checkpoint.txt"
+		conf.Options.CheckpointStorage = utils.VarCheckpointStorageFile
+
+		// remove old file
+		os.Remove(conf.Options.CheckpointStorageUrl)
+
+		ckptManager := NewCheckpointManager("test", 100)
+		assert.NotEqual(t, nil, ckptManager, "should be equal")
+
+		ctx := ckptManager.GetInMemory()
+		assert.Equal(t, true, ctx == nil, "should be equal")
+	}
+
+	// test get & update & get
+	{
+		fmt.Printf("TestMongoCheckpoint case %d.\n", nr)
+		nr++
+
+		conf.Options.CheckpointStorageUrl = "test-file-checkpoint.txt"
+		conf.Options.CheckpointStorage = utils.VarCheckpointStorageFile
+
+		// remove old file
+		os.Remove(conf.Options.CheckpointStorageUrl)
+
+		ckptManager := NewCheckpointManager("test", 100)
+		assert.NotEqual(t, nil, ckptManager, "should be equal")
+
+		// get remote
+		ctx, exist, err := ckptManager.Get()
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, false, exist, "should be equal")
+		assert.Equal(t, "test", ctx.Name, "should be equal")
+		assert.Equal(t, utils.FcvCheckpoint.CurrentVersion, ctx.Version, "should be equal")
+		assert.Equal(t, bson.MongoTimestamp(100), ctx.Timestamp, "should be equal")
+		assert.Equal(t, "", ctx.OplogDiskQueue, "should be equal")
+		assert.Equal(t, InitCheckpoint, ctx.OplogDiskQueueFinishTs, "should be equal")
+
+		// update
+		newTime := bson.MongoTimestamp(200)
+		err = ckptManager.Update(newTime)
+
+		// get again
+		ctx, exist, err = ckptManager.Get()
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, true, exist, "should be equal")
+		assert.Equal(t, "test", ctx.Name, "should be equal")
+		assert.Equal(t, utils.FcvCheckpoint.CurrentVersion, ctx.Version, "should be equal")
+		assert.Equal(t, newTime, ctx.Timestamp, "should be equal")
+		assert.Equal(t, "", ctx.OplogDiskQueue, "should be equal")
+		assert.Equal(t, InitCheckpoint, ctx.OplogDiskQueueFinishTs, "should be equal")
+
+		// update
+		newTime = bson.MongoTimestamp(300)
+		err = ckptManager.Update(newTime)
+
+		// get again
+		ctx, exist, err = ckptManager.Get()
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, true, exist, "should be equal")
+		assert.Equal(t, "test", ctx.Name, "should be equal")
+		assert.Equal(t, utils.FcvCheckpoint.CurrentVersion, ctx.Version, "should be equal")
+		assert.Equal(t, newTime, ctx.Timestamp, "should be equal")
+		assert.Equal(t, "", ctx.OplogDiskQueue, "should be equal")
+		assert.Equal(t, InitCheckpoint, ctx.OplogDiskQueueFinishTs, "should be equal")
 	}
 }

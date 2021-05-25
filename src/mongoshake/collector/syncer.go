@@ -89,6 +89,8 @@ type OplogSyncer struct {
 	CanClose        bool
 	SyncGroup       []*OplogSyncer
 	shutdownWorking bool // shutdown routine starts?
+
+	oplogGte, oplogLte int64
 }
 
 /*
@@ -104,9 +106,10 @@ func NewOplogSyncer(
 	fullSyncFinishPosition int64,
 	mongoUrl string,
 	gids []string,
-	rateController *nimo.SimpleRateController) *OplogSyncer {
+	rateController *nimo.SimpleRateController,
+	oplogGte, oplogLte int64, files []string, dir string) *OplogSyncer {
 
-	reader, err := sourceReader.CreateReader(conf.Options.IncrSyncMongoFetchMethod, mongoUrl, replset)
+	reader, err := sourceReader.CreateReader(conf.Options.IncrSyncMongoFetchMethod, mongoUrl, replset, files, dir)
 	if err != nil {
 		LOG.Critical("create reader with url[%v] replset[%v] failed[%v]", mongoUrl, replset, err)
 		return nil
@@ -121,6 +124,8 @@ func NewOplogSyncer(
 			fmt.Sprintf("%s.%s", conf.Options.Id, replset))),
 		reader: reader,
 		qos:    utils.StartQoS(0, 1, &utils.IncrSentinelOptions.TPS), // default is 0 which means do not limit
+		oplogGte: oplogGte,
+		oplogLte: oplogLte,
 	}
 
 	// concurrent level hasher
@@ -146,6 +151,10 @@ func NewOplogSyncer(
 			conf.Options.FilterNamespaceBlack)
 		filterList = append(filterList, namespaceFilter)
 	}
+	// ts gte filter
+	if conf.Options.IncrSyncMongoFetchMethod == utils.VarCheckpointStorageFile {
+		filterList = append(filterList, filter.NewTsFilter(oplogGte))
+	}
 
 	// oplog filters. drop the oplog if any of the filter
 	// list returns true. The order of all filters is not significant.
@@ -159,19 +168,27 @@ func NewOplogSyncer(
 }
 
 func (sync *OplogSyncer) Init() {
-	var options uint64 = utils.METRIC_CKPT_TIMES | utils.METRIC_LSN | utils.METRIC_SUCCESS |
-		utils.METRIC_TPS | utils.METRIC_FILTER
-	if conf.Options.Tunnel != utils.VarTunnelDirect {
-		options |= utils.METRIC_RETRANSIMISSION
-		options |= utils.METRIC_TUNNEL_TRAFFIC
-		options |= utils.METRIC_WORKER
+	var options uint64
+	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodFile {
+		options = utils.METRIC_LSN | utils.METRIC_SUCCESS | utils.METRIC_TPS | utils.METRIC_FILTER
+
+		sync.replMetric = utils.NewMetric(sync.Replset, utils.TypeIncr, options)
+		sync.replMetric.ReplStatus.Update(utils.WorkGood)
+	} else {
+		options = utils.METRIC_CKPT_TIMES | utils.METRIC_LSN | utils.METRIC_SUCCESS |
+			utils.METRIC_TPS | utils.METRIC_FILTER
+		if conf.Options.Tunnel != utils.VarTunnelDirect {
+			options |= utils.METRIC_RETRANSIMISSION
+			options |= utils.METRIC_TUNNEL_TRAFFIC
+			options |= utils.METRIC_WORKER
+		}
+
+		sync.replMetric = utils.NewMetric(sync.Replset, utils.TypeIncr, options)
+		sync.replMetric.ReplStatus.Update(utils.WorkGood)
+
+		sync.RestAPI()
+		sync.persister.RestAPI()
 	}
-
-	sync.replMetric = utils.NewMetric(sync.Replset, utils.TypeIncr, options)
-	sync.replMetric.ReplStatus.Update(utils.WorkGood)
-
-	sync.RestAPI()
-	sync.persister.RestAPI()
 }
 
 func (sync *OplogSyncer) String() string {
@@ -257,9 +274,9 @@ func (sync *OplogSyncer) startBatcher() {
 
 		var newestTs bson.MongoTimestamp
 		if exit {
-			LOG.Info("%s find exit signal", sync)
 			// should exit now, make sure the checkpoint is updated before that
 			lastLog, lastFilterLog := batcher.getLastOplog()
+			LOG.Info("%s find exit signal, lastLog[%v], lastFilterLog[%v]", sync, lastLog, lastFilterLog)
 			var newestTs bson.MongoTimestamp = 1 // default is 1
 			if lastLog != nil && lastLog.Timestamp > newestTs {
 				newestTs = lastLog.Timestamp
@@ -484,6 +501,7 @@ func (sync *OplogSyncer) deserializer(index int) {
 			if err != nil {
 				LOG.Crashf("%s deserializer parse data failed[%v]", sync, err)
 			}
+			LOG.Debug("%s deserializer: %v", sync, log.ParsedLog)
 			log.RawSize = len(rawLog)
 			deserializeLogs = append(deserializeLogs, combiner(rawLog, log))
 		}
@@ -572,6 +590,8 @@ func (sync *OplogSyncer) checkShutdown() {
 		return
 	}
 
+	LOG.Info("%s check shutdown", sync)
+
 	sync.shutdownWorking = true
 
 	nimo.GoRoutine(func() {
@@ -597,7 +617,9 @@ func (sync *OplogSyncer) checkShutdown() {
 			}
 		}
 
-		LOG.Crashf("%s all syncer shutdown, try exit, don't be panic", sync)
+		time.Sleep(5 * time.Second)
+		utils.Exit = true
+		LOG.Info("%s all syncer shutdown, try exit", sync)
 	})
 }
 

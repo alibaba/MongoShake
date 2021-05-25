@@ -27,6 +27,7 @@ const (
 	// incr_sync.mongo_fetch_method
 	VarIncrSyncMongoFetchMethodOplog        = "oplog"
 	VarIncrSyncMongoFetchMethodChangeStream = "change_stream"
+	VarIncrSyncMongoFetchMethodFile         = "file"
 
 	// incr_sync.shard_key
 	VarIncrSyncShardKeyAuto       = "auto"
@@ -66,6 +67,7 @@ const (
 	// inner variable: checkpoint.storage
 	VarCheckpointStorageApi      = "api"
 	VarCheckpointStorageDatabase = "database"
+	VarCheckpointStorageFile     = "file"
 
 	// innder variable: incr_sync.reader_debug
 	VarIncrSyncReaderDebugNone    = ""

@@ -32,12 +32,14 @@ type retOplog struct {
 	err error  // error detail message
 }
 
-func CreateReader(fetchMethod string, src string, replset string) (Reader, error) {
+func CreateReader(fetchMethod string, src string, replset string, files []string, dir string) (Reader, error) {
 	switch fetchMethod {
 	case utils.VarIncrSyncMongoFetchMethodOplog:
 		return NewOplogReader(src, replset), nil
 	case utils.VarIncrSyncMongoFetchMethodChangeStream:
 		return NewEventReader(src, replset), nil
+	case utils.VarIncrSyncMongoFetchMethodFile:
+		return NewFileReader(src, replset, files, dir), nil
 	default:
 		return nil, fmt.Errorf("unknown reader type[%v]", fetchMethod)
 	}
