@@ -31,6 +31,8 @@ type FileReader struct {
 	oplogDir string
 	filesPos int
 
+	isClose bool
+
 	oplogIntent *intents.Intent
 	bsonSource  *db.DecodedBSONSource
 }
@@ -48,6 +50,7 @@ func NewFileReader(src string, replset string, files []string, dir string) *File
 		files:        files,
 		oplogDir:     oplogDir,
 		filesPos:     0,
+		isClose: false,
 	}
 }
 
@@ -58,6 +61,10 @@ func (fr *FileReader) String() string {
 
 func (fr *FileReader) Name() string {
 	return utils.VarIncrSyncMongoFetchMethodFile
+}
+
+func (fr *FileReader) IsClose() bool {
+	return fr.isClose
 }
 
 // do nothing for file
@@ -171,6 +178,7 @@ func (fr *FileReader) fetcher() {
 	}
 
 	LOG.Info("fetcher exit")
+	fr.isClose = true
 }
 
 /**************************************/

@@ -74,6 +74,10 @@ func (or *OplogReader) Name() string {
 	return utils.VarIncrSyncMongoFetchMethodOplog
 }
 
+func (or *OplogReader) IsClose() bool {
+	return false
+}
+
 // SetQueryTimestampOnEmpty set internal timestamp if
 // not exist in this or. initial stage most of the time
 func (or *OplogReader) SetQueryTimestampOnEmpty(ts interface{}) {

@@ -7,7 +7,6 @@ import (
 	"github.com/mongodb/mongo-tools-common/db"
 	"github.com/mongodb/mongo-tools-common/options"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"github.com/mongodb/mongo-tools-common/json"
 	"github.com/mongodb/mongo-tools-common/util"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
@@ -132,9 +131,13 @@ func (oplogreplay *MongoOplogReplay) ParseAndValidateOptions() error {
 		}
 	}
 	if oplogreplay.NSOptions.DBS != "" {
-		json.Unmarshal([]byte(oplogreplay.NSOptions.DBS), &oplogreplay.dbNames)
+		/* json.Unmarshal([]byte(oplogreplay.NSOptions.DBS), &oplogreplay.dbNames)
 		if err != nil {
 			return fmt.Errorf("error parsing namesoace options to --dbs: %v", err)
+		}*/
+		oplogreplay.dbNames = strings.Split(oplogreplay.NSOptions.DBS, ",")
+		if len(oplogreplay.dbNames) > 0 && oplogreplay.dbNames[len(oplogreplay.dbNames) - 1] == "" {
+			oplogreplay.dbNames = oplogreplay.dbNames[: len(oplogreplay.dbNames) - 1]
 		}
 		LOG.Info("replay oplog for databases: %v", oplogreplay.dbNames)
 		for _, dbName := range oplogreplay.dbNames {
@@ -194,7 +197,8 @@ func (oplogreplay *MongoOplogReplay) Replay() error {
 	// start mongodb replication
 	gte := (int64(oplogreplay.oplogGte.T) << 32) | int64(oplogreplay.oplogGte.I)
 	lt := (int64(oplogreplay.oplogLt.T) << 32) | int64(oplogreplay.oplogLt.I)
-	LOG.Info("start %v with InputOptions: %v", conf.Options.Id, *oplogreplay.InputOptions)
+	LOG.Info("start %v with InputOptions: %v, NSOptions: %v", conf.Options.Id, *oplogreplay.InputOptions,
+		*oplogreplay.NSOptions)
 
 	// enableRelaxConstraints
 	if err := changeRelaxConstraints(conf.Options.TunnelAddress[0], true); err != nil {
@@ -210,8 +214,39 @@ func (oplogreplay *MongoOplogReplay) Replay() error {
 		return err
 	}
 
+
 	for range time.NewTicker(3 * time.Second).C {
 		if utils.Exit {
+			break
+		}
+
+		// judge all syncer exit and queue empty
+		needBreak := true
+		for _, syncer := range coordinator.SyncerGroup {
+			if !syncer.Reader.IsClose() || !syncer.IsQueueEmpty() {
+				needBreak = false
+				break
+			}
+		}
+
+		if !needBreak {
+			continue
+		}
+
+		LOG.Info("all syncers queue empty, checking workers")
+
+		// check worker
+		for _, worker := range coordinator.SyncerGroup[0].WorkerGroup() {
+			if !worker.IsQueueEmpty() || worker.HasUnack() {
+				LOG.Info("worker[%v] is queue empty[%v], has unack[%v]", worker, worker.IsQueueEmpty(), worker.HasUnack())
+				needBreak = false
+				break
+			}
+		}
+
+		if needBreak {
+			LOG.Info("all syncer and worker empty, break now")
+			time.Sleep(10 * time.Second)
 			break
 		}
 	}

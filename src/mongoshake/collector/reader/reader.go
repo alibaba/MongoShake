@@ -24,6 +24,7 @@ type Reader interface {
 	Next() ([]byte, error)                      // fetch next oplog/event
 	EnsureNetwork() error                       // ensure network
 	FetchNewestTimestamp() (interface{}, error) // only used in EventReader that fetch PBRT
+	IsClose() bool
 }
 
 // used in internal channel, include oplog or event

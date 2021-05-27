@@ -74,12 +74,20 @@ func (worker *Worker) Init() bool {
 	return true
 }
 
+func (worker *Worker) IsQueueEmpty() bool {
+	return len(worker.queue) == 0
+}
+
 func (worker *Worker) SetInitSyncFinishTs(fullSyncFinishPosition int64) {
 	worker.writeController.SetInitSyncFinishTs(fullSyncFinishPosition)
 }
 
 func (worker *Worker) IsAllAcked() bool {
 	return worker.allAcked
+}
+
+func (worker *Worker) HasUnack() bool {
+	return worker.unack > worker.ack
 }
 
 func (worker *Worker) AllAcked(allAcked bool) {

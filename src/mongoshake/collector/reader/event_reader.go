@@ -68,6 +68,10 @@ func (er *EventReader) Name() string {
 	return utils.VarIncrSyncMongoFetchMethodChangeStream
 }
 
+func (er *EventReader) IsClose() bool {
+	return false
+}
+
 // SetQueryTimestampOnEmpty set internal timestamp if
 // not exist in this or. initial stage most of the time
 func (er *EventReader) SetQueryTimestampOnEmpty(ts interface{}) {

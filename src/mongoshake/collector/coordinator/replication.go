@@ -21,7 +21,7 @@ var (
 )
 
 // ReplicationCoordinator global coordinator instance. consist of
-// one syncerGroup and a number of workers
+// one SyncerGroup and a number of workers
 type ReplicationCoordinator struct {
 	MongoD             []*utils.MongoSource // the source mongod
 	MongoS             *utils.MongoSource   // the source mongos
@@ -33,9 +33,9 @@ type ReplicationCoordinator struct {
 	fullSentinel *utils.Sentinel
 	incrSentinel *utils.Sentinel
 
-	// syncerGroup and workerGroup number is 1:N in ReplicaSet.
+	// SyncerGroup and workerGroup number is 1:N in ReplicaSet.
 	// 1:1 while replicated in shard cluster
-	syncerGroup []*collector.OplogSyncer
+	SyncerGroup []*collector.OplogSyncer
 
 	// control the qps, TODO, need modify to bucket
 	rateController *nimo.SimpleRateController
@@ -269,7 +269,7 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs int
 	}
 	LOG.Info("finish document replication, change oplog replication to %v",
 		utils.LogFetchStage(utils.FetchStageStoreDiskApply))
-	for _, syncer := range coordinator.syncerGroup {
+	for _, syncer := range coordinator.SyncerGroup {
 		syncer.StartDiskApply()
 	}
 

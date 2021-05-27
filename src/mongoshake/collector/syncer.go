@@ -200,6 +200,26 @@ func (sync *OplogSyncer) Bind(w *Worker) {
 	sync.batcher.workerGroup = append(sync.batcher.workerGroup, w)
 }
 
+func (sync *OplogSyncer) WorkerGroup() []*Worker {
+	return sync.batcher.workerGroup
+}
+
+func (sync *OplogSyncer) IsQueueEmpty() bool {
+	for _, pq := range sync.PendingQueue {
+		if len(pq) != 0 {
+			return false
+		}
+	}
+
+	for _, cq := range sync.logsQueue {
+		if len(cq) != 0 {
+			return false
+		}
+	}
+
+	return len(sync.batcher.remainLogs) == 0
+}
+
 func (sync *OplogSyncer) StartDiskApply() {
 	sync.persister.SetFetchStage(utils.FetchStageStoreDiskApply)
 }

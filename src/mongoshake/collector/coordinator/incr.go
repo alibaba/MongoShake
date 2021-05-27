@@ -36,16 +36,16 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		LOG.Info("RealSourceIncrSync[%d]: %s, startTimestamp[%v]", i, src, syncerTs)
 		syncer := collector.NewOplogSyncer(src.ReplicaName, syncerTs, fullSyncFinishPosition, src.URL,
 			src.Gids, coordinator.rateController, -1, -1, nil, "")
-		// syncerGroup http api registry
+		// SyncerGroup http api registry
 		syncer.Init()
-		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)
+		coordinator.SyncerGroup = append(coordinator.SyncerGroup, syncer)
 	}
 	// set to group 0 as a leader
-	coordinator.syncerGroup[0].SyncGroup = coordinator.syncerGroup
+	coordinator.SyncerGroup[0].SyncGroup = coordinator.SyncerGroup
 
 	// prepare worker routine and bind it to syncer
 	for i := 0; i < conf.Options.IncrSyncWorker; i++ {
-		syncer := coordinator.syncerGroup[i%len(coordinator.syncerGroup)]
+		syncer := coordinator.SyncerGroup[i%len(coordinator.SyncerGroup)]
 		w := collector.NewWorker(syncer, uint32(i))
 		if !w.Init() {
 			return errors.New("worker initialize error")
@@ -60,7 +60,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		go w.StartWorker()
 	}
 
-	for _, syncer := range coordinator.syncerGroup {
+	for _, syncer := range coordinator.SyncerGroup {
 		go syncer.Start()
 	}
 
@@ -80,11 +80,11 @@ func (coordinator *ReplicationCoordinator) StartOplogReplay(oplogGte, oplogLte i
 		files []string, dir string) error {
 	syncer := collector.NewOplogSyncer("recover-default-name", nil, 0, "",
 		nil, nil, oplogGte, oplogLte, files, dir)
-	// syncerGroup http api registry
+	// SyncerGroup http api registry
 	syncer.Init()
-	coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)
+	coordinator.SyncerGroup = append(coordinator.SyncerGroup, syncer)
 	// set to group 0 as a leader
-	coordinator.syncerGroup[0].SyncGroup = coordinator.syncerGroup
+	coordinator.SyncerGroup[0].SyncGroup = coordinator.SyncerGroup
 
 	for i := 0; i < workerNum; i++ {
 		w := collector.NewWorker(syncer, uint32(i))
@@ -96,7 +96,7 @@ func (coordinator *ReplicationCoordinator) StartOplogReplay(oplogGte, oplogLte i
 		go w.StartWorker()
 	}
 
-	for _, syncer := range coordinator.syncerGroup {
+	for _, syncer := range coordinator.SyncerGroup {
 		go syncer.Start()
 	}
 
