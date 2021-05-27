@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"time"
 	"mongoshake/collector/configure"
+	"mongoshake/oplog"
 )
 
 type FileReader struct {
@@ -137,10 +138,20 @@ func (fr *FileReader) fetcher() {
 	}
 	fr.filesPos++
 
+	// store the last oplog
+	var prev []byte
 	for {
 		rawOplogEntry := fr.bsonSource.LoadNext()
 		if rawOplogEntry == nil {
 			if fr.filesPos >= len(fr.files) {
+				// unmarshal the last oplog and parse the timestamp
+				log := oplog.ParsedLog{}
+				if err := bson.Unmarshal(prev, &log); err == nil {
+					utils.IncrSentinelOptions.ExitPoint = int64(log.Timestamp)
+					LOG.Info("fetcher meets the end file with ts: %v", utils.IncrSentinelOptions.ExitPoint)
+				} else {
+					LOG.Info("fetcher parse last log[%v] failed: %v", log, err)
+				}
 				break
 			} else {
 				if err = fr.EnsureNetwork(); err != nil {
@@ -152,11 +163,14 @@ func (fr *FileReader) fetcher() {
 		}
 
 		fr.oplogChan <- &retOplog{rawOplogEntry, nil}
+		prev = rawOplogEntry
 	}
 
 	if err := fr.bsonSource.Err(); err != nil {
 		LOG.Critical("error reading oplog bson input: %v", err)
 	}
+
+	LOG.Info("fetcher exit")
 }
 
 /**************************************/

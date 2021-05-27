@@ -10,6 +10,7 @@ import (
 	"github.com/mongodb/mongo-tools-common/json"
 	"github.com/mongodb/mongo-tools-common/util"
 	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/mgo/bson"
 	"os"
 	"strings"
 	"strconv"
@@ -19,11 +20,6 @@ import (
 	"mongoshake/quorum"
 	"time"
 	"mongoshake/oplog"
-)
-
-const (
-	ParserNum = 8
-	WorkerNum = 16
 )
 
 type MongoOplogReplay struct {
@@ -169,10 +165,10 @@ func (oplogreplay *MongoOplogReplay) Replay() error {
 	conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodFile
 	conf.Options.FilterNamespaceWhite = oplogreplay.dbNames
 	conf.Options.FilterDDLEnable = true
-	conf.Options.IncrSyncWorker = WorkerNum
+	conf.Options.IncrSyncWorker = 8
 	conf.Options.Tunnel = "direct"
 	conf.Options.TunnelAddress = []string{oplogreplay.ToolOptions.ConnectionString}
-	conf.Options.CheckpointStorageUrl = "/tmp/mongo-oplog-replay-checkpoint.txt"
+	conf.Options.CheckpointStorageUrl = fmt.Sprintf("/tmp/mongo-oplog-replay-checkpoint-%v.txt", oplogreplay.ToolOptions.Port)
 	conf.Options.CheckpointStorage = utils.VarCheckpointStorageFile
 	conf.Options.IncrSyncReaderBufferTime = 1
 	conf.Options.SkipFailure = oplogreplay.OutputOptions.SkipFailure
@@ -190,14 +186,25 @@ func (oplogreplay *MongoOplogReplay) Replay() error {
 	conf.Options.Id = "mongoshake-mongooplogreplay"
 	conf.Options.IncrSyncShardKey = oplog.ShardByID
 
+	// remove old checkpoint file
+	os.Remove(conf.Options.CheckpointStorageUrl)
+
 	quorum.AlwaysMaster()
 
 	// start mongodb replication
 	gte := (int64(oplogreplay.oplogGte.T) << 32) | int64(oplogreplay.oplogGte.I)
 	lt := (int64(oplogreplay.oplogLt.T) << 32) | int64(oplogreplay.oplogLt.I)
-	LOG.Info("start %v with InputOptions", conf.Options.Id, *oplogreplay.InputOptions)
+	LOG.Info("start %v with InputOptions: %v", conf.Options.Id, *oplogreplay.InputOptions)
 
-	if err := coordinator.StartOplogReplay(gte, lt, ParserNum, WorkerNum,
+	// enableRelaxConstraints
+	if err := changeRelaxConstraints(conf.Options.TunnelAddress[0], true); err != nil {
+		LOG.Error("enableRelaxConstraints failed: %v", err)
+		conf.Options.IncrSyncShardKey = oplog.ShardByNamespace
+	} else {
+		LOG.Info("enableRelaxConstraints")
+	}
+
+	if err := coordinator.StartOplogReplay(gte, lt, 4, conf.Options.IncrSyncWorker,
 			strings.Split(oplogreplay.TargetFiles, ","), oplogreplay.InputOptions.Directory); err != nil {
 		// initial or connection established failed
 		return err
@@ -209,6 +216,22 @@ func (oplogreplay *MongoOplogReplay) Replay() error {
 		}
 	}
 
+	// disableRelaxConstraints
+	changeRelaxConstraints(conf.Options.TunnelAddress[0], false)
+
 	LOG.Info("bye")
 	return nil
+}
+
+func changeRelaxConstraints(addr string, option bool) error {
+	conn, err := utils.NewMongoConn(addr, utils.VarMongoConnectModePrimary, true, "", "")
+	if err != nil {
+		return fmt.Errorf("create client failed: %v", err)
+	}
+
+	return conn.Session.DB("admin").Run(
+		bson.D{
+			{"setParameter", 1},
+			{"alwaysRelaxConstraintsForGetKeys", option},
+		}, nil)
 }

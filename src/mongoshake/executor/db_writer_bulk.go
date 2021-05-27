@@ -127,7 +127,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 			update = append(update, log.original.partialLog.DocumentKey, log.original.partialLog.Object)
 		} else {
 			if upsert {
-				LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
+				// LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
 			}
 			update = append(update, log.original.partialLog.Query, log.original.partialLog.Object)
 		}

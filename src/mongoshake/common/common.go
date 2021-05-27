@@ -93,8 +93,8 @@ func InitialLogger(logDir, logFile, level string, logFlush bool, verbose bool) e
 		}
 		fileLogger := LOG.NewFileLogWriter(fmt.Sprintf("%s/%s", logDir, logFile), true)
 		fileLogger.SetRotateDaily(true)
-		// fileLogger.SetFormat("[%D %T] [%L] [%s] %M") // print function
-		fileLogger.SetFormat("[%D %T] [%L] %M")
+		fileLogger.SetFormat("[%D %T] [%L] [%s] %M") // print function
+		// fileLogger.SetFormat("[%D %T] [%L] %M")
 		fileLogger.SetRotateMaxBackup(7)
 		LOG.AddFilter("file", logLevel, fileLogger)
 	} else {

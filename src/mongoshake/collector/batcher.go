@@ -108,7 +108,7 @@ func (batcher *Batcher) getExitPoint() bson.MongoTimestamp {
 		return 0
 	}
 	// change to timestamp
-	return bson.MongoTimestamp(utils.IncrSentinelOptions.ExitPoint << 32)
+	return bson.MongoTimestamp(utils.IncrSentinelOptions.ExitPoint)
 }
 
 /*
@@ -227,6 +227,14 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 		mergeBatch = batcher.utBatchesDelay.injectBatch
 	}
 	if mergeBatch == nil {
+		if exitPoint := batcher.getExitPoint(); exitPoint > 0 {
+			oplog, filterOplog := batcher.getLastOplog()
+			if oplog.Timestamp >= exitPoint || filterOplog.Timestamp >= exitPoint {
+				LOG.Info("exit in getBatchWithDelay when mergeBatch == nil")
+				return mergeBatch, true
+			}
+		}
+
 		return mergeBatch, false
 	}
 
@@ -243,7 +251,7 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 		for i = range mergeBatch {
 			// fmt.Println(exitPoint, mergeBatch[i].Parsed.Timestamp)
 			if exitPoint < mergeBatch[i].Parsed.Timestamp {
-				LOG.Info("%s exitPoint[%v] < current.Timestamp[%v]", batcher.syncer,
+				LOG.Info("%s element[%v] exitPoint[%v] < current.Timestamp[%v]", batcher.syncer, i,
 					utils.ExtractTimestampForLog(exitPoint), utils.ExtractTimestampForLog(mergeBatch[i].Parsed.Timestamp))
 				break
 			}
@@ -314,6 +322,7 @@ func (batcher *Batcher) BatchMore() ([][]*oplog.GenericOplog, bool, bool, bool) 
 				batcher.lastFilterOplog = batcher.lastOplog.Parsed
 			}
 			batcher.previousFlush = false
+
 			return batcher.batchGroup, false, batcher.setLastOplog(), exit
 		}
 
@@ -326,9 +335,10 @@ func (batcher *Batcher) BatchMore() ([][]*oplog.GenericOplog, bool, bool, bool) 
 		return batcher.batchGroup, barrier, batcher.setLastOplog(), exit
 	}
 
-	LOG.Info("~~~~~~~~~ %v %v", mergeBatch[0].Parsed, mergeBatch[len(mergeBatch) - 1].Parsed)
+	// LOG.Info("^^^^^^^^ %v %v", mergeBatch[0].Parsed, mergeBatch[len(mergeBatch) - 1].Parsed)
 	// we have data
 	for i, genericLog := range mergeBatch {
+		// LOG.Info("~~~~~~~~~ %v %v", i, genericLog.Parsed)
 		// filter oplog such like Noop or Gid-filtered
 		// PAY ATTENTION: we can't handle the oplog in transaction that has been filtered
 		if batcher.filter(genericLog.Parsed) {

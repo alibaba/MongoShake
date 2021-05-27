@@ -23,7 +23,7 @@ const (
 	// AdaptiveBatchingMaxSize = 16384 // 16k
 
 	// bson deserialize workload is CPU-intensive task
-	PipelineQueueMaxNr    = 6
+	PipelineQueueMaxNr    = 4
 	PipelineQueueMiddleNr = 4
 	PipelineQueueMinNr    = 1
 	PipelineQueueLen      = 64
@@ -68,7 +68,7 @@ type OplogSyncer struct {
 	// nextQueuePosition uint64 // move to persister
 
 	// source mongo oplog/event reader
-	reader sourceReader.Reader
+	Reader sourceReader.Reader
 	// journal log that records all oplogs
 	journal *utils.Journal
 	// oplogs dispatcher
@@ -122,7 +122,7 @@ func NewOplogSyncer(
 		rateController:         rateController,
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.Id, replset))),
-		reader: reader,
+		Reader: reader,
 		qos:    utils.StartQoS(0, 1, &utils.IncrSentinelOptions.TPS), // default is 0 which means do not limit
 		oplogGte: oplogGte,
 		oplogLte: oplogLte,
@@ -222,7 +222,7 @@ func (sync *OplogSyncer) Start() {
 	sync.newCheckpointManager(sync.Replset, sync.startPosition)
 	if _, ok := sync.startPosition.(int64); !ok {
 		// set resumeToken for aliyun_serverless
-		sync.reader.SetQueryTimestampOnEmpty(sync.startPosition)
+		sync.Reader.SetQueryTimestampOnEmpty(sync.startPosition)
 	}
 
 	// load checkpoint and set stage
@@ -273,7 +273,7 @@ func (sync *OplogSyncer) startBatcher() {
 		}
 
 		var newestTs bson.MongoTimestamp
-		if exit {
+		if exit && len(batcher.remainLogs) == 0 {
 			// should exit now, make sure the checkpoint is updated before that
 			lastLog, lastFilterLog := batcher.getLastOplog()
 			LOG.Info("%s find exit signal, lastLog[%v], lastFilterLog[%v]", sync, lastLog, lastFilterLog)
@@ -290,7 +290,7 @@ func (sync *OplogSyncer) startBatcher() {
 				if worked := batcher.dispatchBatches(batchedOplog); worked {
 					sync.replMetric.SetLSN(utils.TimestampToInt64(newestTs))
 					// update latest fetched timestamp in memory
-					sync.reader.UpdateQueryTimestamp(newestTs)
+					sync.Reader.UpdateQueryTimestamp(newestTs)
 				}
 			}
 
@@ -308,7 +308,7 @@ func (sync *OplogSyncer) startBatcher() {
 			if worked := batcher.dispatchBatches(batchedOplog); worked {
 				sync.replMetric.SetLSN(utils.TimestampToInt64(newestTs))
 				// update latest fetched timestamp in memory
-				sync.reader.UpdateQueryTimestamp(newestTs)
+				sync.Reader.UpdateQueryTimestamp(newestTs)
 			}
 
 			filterFlag = false
@@ -372,7 +372,7 @@ func (sync *OplogSyncer) startBatcher() {
 			}
 
 			// update latest fetched timestamp in memory
-			sync.reader.UpdateQueryTimestamp(newestTs)
+			sync.Reader.UpdateQueryTimestamp(newestTs)
 			// flush checkpoint by the newest filter oplog value
 			sync.checkpoint(false, newestTs)
 			return
@@ -501,7 +501,7 @@ func (sync *OplogSyncer) deserializer(index int) {
 			if err != nil {
 				LOG.Crashf("%s deserializer parse data failed[%v]", sync, err)
 			}
-			LOG.Debug("%s deserializer: %v", sync, log.ParsedLog)
+			// LOG.Debug("%s deserializer: %v", sync, log.ParsedLog)
 			log.RawSize = len(rawLog)
 			deserializeLogs = append(deserializeLogs, combiner(rawLog, log))
 		}
@@ -530,8 +530,8 @@ func (sync *OplogSyncer) poll() {
 			conf.Options.CheckpointStorageCollection)
 		return
 	}
-	sync.reader.SetQueryTimestampOnEmpty(checkpoint.Timestamp)
-	sync.reader.StartFetcher() // start reader fetcher if not exist
+	sync.Reader.SetQueryTimestampOnEmpty(checkpoint.Timestamp)
+	sync.Reader.StartFetcher() // start reader fetcher if not exist
 
 	for quorum.IsMaster() {
 		// limit the qps if enabled
@@ -551,7 +551,7 @@ func (sync *OplogSyncer) poll() {
 func (sync *OplogSyncer) next() bool {
 	var log []byte
 	var err error
-	if log, err = sync.reader.Next(); log != nil {
+	if log, err = sync.Reader.Next(); log != nil {
 		payload := int64(len(log))
 		sync.replMetric.AddGet(1)
 		sync.replMetric.SetOplogMax(payload)
@@ -562,7 +562,7 @@ func (sync *OplogSyncer) next() bool {
 		utils.YieldInMs(DurationTime)
 		return false
 	} else if err != nil && err != sourceReader.TimeoutError {
-		LOG.Error("%s %s internal error: %v", sync, sync.reader.Name(), err)
+		LOG.Error("%s %s internal error: %v", sync, sync.Reader.Name(), err)
 		// error is nil indicate that only timeout incur syncer.next()
 		// return false. so we regardless that
 		if sync.isCrashError(err.Error()) {
@@ -596,18 +596,19 @@ func (sync *OplogSyncer) checkShutdown() {
 
 	nimo.GoRoutine(func() {
 		if utils.IncrSentinelOptions.Shutdown {
-			utils.IncrSentinelOptions.ExitPoint = utils.ExtractMongoTimestamp(sync.LastFetchTs)
+			// utils.IncrSentinelOptions.ExitPoint = utils.ExtractMongoTimestamp(sync.LastFetchTs)
+			utils.IncrSentinelOptions.ExitPoint = int64(sync.LastFetchTs)
 		}
 
 		LOG.Info("%s check shutdown, set exit-point[%v]", sync, utils.IncrSentinelOptions.ExitPoint)
-		for range time.NewTicker(500 * time.Millisecond).C {
+		for range time.NewTicker(3 * time.Second).C {
 			exitCount := 0
 			for _, syncer := range sync.SyncGroup {
 				if syncer.CanClose {
 					exitCount++
 				} else {
 					LOG.Info("%s syncer[%v] wait close, last fetch oplog timestamp[%v], exit-point[%v]",
-						sync, syncer.Replset, utils.ExtractMongoTimestamp(syncer.LastFetchTs),
+						sync, syncer.Replset, syncer.LastFetchTs,
 						utils.IncrSentinelOptions.ExitPoint)
 				}
 			}
@@ -617,7 +618,7 @@ func (sync *OplogSyncer) checkShutdown() {
 			}
 		}
 
-		time.Sleep(5 * time.Second)
+		time.Sleep(10 * time.Second)
 		utils.Exit = true
 		LOG.Info("%s all syncer shutdown, try exit", sync)
 	})
