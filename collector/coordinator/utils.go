@@ -148,7 +148,9 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 
 	// special case, I hate it.
 	// TODO, checkpoint support ResumeToken
-	if conf.Options.SpecialSourceDBFlag == utils.VarSpecialSourceDBFlagAliyunServerless {
+	if conf.Options.SpecialSourceDBFlag == utils.VarSpecialSourceDBFlagAliyunServerless ||
+		(len(conf.Options.MongoSUrl) > 0 && len(conf.Options.MongoCsUrl) == 0 && len(conf.Options.MongoUrls) == 0) {
+		// for only mongo_s_url address exists
 		if syncMode == utils.VarSyncModeIncr {
 			return syncMode, nil, int64(0), nil
 		}

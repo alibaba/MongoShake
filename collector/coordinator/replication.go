@@ -194,7 +194,7 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 
 	// get current newest timestamp
 	var fullFinishTs, oldestTs bson.MongoTimestamp
-	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless {
+	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless && len(coordinator.MongoD) > 0 {
 		_, fullFinishTs, _, oldestTs, _, err = utils.GetAllTimestamp(coordinator.MongoD, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)

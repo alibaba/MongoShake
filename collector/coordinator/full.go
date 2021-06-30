@@ -95,7 +95,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	LOG.Info("all namespace: %v", nsSet)
 
 	var ckptMap map[string]utils.TimestampNode
-	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless {
+	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless && len(coordinator.MongoD) > 0 {
 		// get current newest timestamp
 		ckptMap, err = getTimestampMap(coordinator.MongoD, conf.Options.MongoSslRootCaFile)
 		if err != nil {
@@ -125,7 +125,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// enable shard if sharding -> sharding
 	shardingSync := docsyncer.IsShardingToSharding(fromIsSharding, toConn)
 	if shardingSync {
-		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.MongoCsUrl, toConn, trans); err != nil {
+		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.MongoSUrl, toConn, trans); err != nil {
 			return err
 		}
 	}

@@ -8,6 +8,23 @@ import (
 	utils "github.com/alibaba/MongoShake/v2/common"
 )
 
+// priority use mongo_s_url
+func getSourceDbUrl() (string, error) {
+	var source string
+
+	if len(conf.Options.MongoSUrl) != 0 {
+		source = conf.Options.MongoSUrl
+	} else {
+		if len(conf.Options.MongoUrls) > 0 {
+			source = conf.Options.MongoUrls[0]
+		} else {
+			return source, fmt.Errorf("mongo_urls && mongo_s_url should not all be empty")
+		}
+	}
+
+	return source, nil
+}
+
 func SanitizeOptions() error {
 	// compatible with old version
 	if err := handleDeprecateConf(); err != nil {
@@ -86,11 +103,9 @@ func checkDefaultValue() error {
 		conf.Options.SyncMode != utils.VarSyncModeIncr {
 		return fmt.Errorf("sync_mode should in {all, full, incr}")
 	}
-	if len(conf.Options.MongoUrls) == 0 {
-		return fmt.Errorf("mongo_urls shouldn't be empty")
-	} else if len(conf.Options.MongoUrls) > 1 {
-		if len(conf.Options.MongoSUrl) == 0 {
-			return fmt.Errorf("mongo_s_urls shouldn't be empty when source is sharding")
+	if len(conf.Options.MongoSUrl) == 0 {
+		if len(conf.Options.MongoUrls) == 0 {
+			return fmt.Errorf("mongo_s_url and mongo_urls cannot be empty at the same time")
 		}
 	}
 	if conf.Options.MongoConnectMode == "" {
@@ -298,12 +313,11 @@ func checkConnection() error {
 	}
 
 	// set source version
-	var source string
-	if len(conf.Options.MongoUrls) > 1 {
-		source = conf.Options.MongoSUrl
-	} else {
-		source = conf.Options.MongoUrls[0]
+	source, err := getSourceDbUrl()
+	if err != nil {
+		return err
 	}
+
 	sourceConn, _ := utils.NewMongoConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 	// ignore error
@@ -413,11 +427,9 @@ func checkConflict() error {
 			return fmt.Errorf("mongo_s_url should be given when source is sharding and fetch method is change stream")
 		}
 
-		var source string
-		if len(conf.Options.MongoUrls) > 1 {
-			source = conf.Options.MongoSUrl
-		} else {
-			source = conf.Options.MongoUrls[0]
+		source, err := getSourceDbUrl()
+		if err != nil {
+			return err
 		}
 
 		conn, err := utils.NewMongoConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
