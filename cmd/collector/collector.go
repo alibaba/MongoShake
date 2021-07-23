@@ -66,6 +66,7 @@ func main() {
 	} else {
 		LOG.Info("log init succ. log.dir[%v] log.name[%v] log.level[%v]", conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel)
 	}
+	LOG.Info("MongoDB Version Source[%v] Target[%v]", conf.Options.SourceDBVersion, conf.Options.TargetDBVersion)
 
 	conf.Options.Version = utils.BRANCH
 

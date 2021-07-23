@@ -256,6 +256,14 @@ func TestGetAndCompareVersion(t *testing.T) {
 		ok, err = GetAndCompareVersion(nil, "3.2.0", "4.2.7")
 		assert.Equal(t, err, nil, "")
 		assert.Equal(t, ok, true, "")
+
+		ok, err = GetAndCompareVersion(nil, "4.2.0", "4.2.0")
+		assert.Equal(t, err, nil, "")
+		assert.Equal(t, ok, true, "")
+
+		ok, err = GetAndCompareVersion(nil, "4.2.0", "4.2")
+		assert.Equal(t, err, nil, "")
+		assert.Equal(t, ok, true, "")
 	}
 }
 

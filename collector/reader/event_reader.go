@@ -166,7 +166,8 @@ func (er *EventReader) EnsureNetwork() error {
 		conf.Options.SpecialSourceDBFlag,
 		filterList.IterateFilter,
 		er.startAtOperationTime,
-		int32(BatchSize)); err != nil {
+		int32(BatchSize),
+		conf.Options.SourceDBVersion); err != nil {
 		return err
 	}
 

@@ -33,7 +33,8 @@ func NewChangeStreamConn(src string,
 	specialDb string,
 	filterFunc func(name string) bool,
 	watchStartTime interface{},
-	batchSize int32) (*ChangeStreamConn, error) {
+	batchSize int32,
+	sourceDbversion string) (*ChangeStreamConn, error) {
 	// init client ops
 	clientOps := options.Client().ApplyURI(src)
 
@@ -90,8 +91,16 @@ func NewChangeStreamConn(src string,
 				ops.SetStartAtOperationTime(startTime)
 			}
 		} else {
-			// ResumeToken
-			ops.SetStartAfter(watchStartTime)
+			// ResumeToken，sourceDbversion >= 4.2 use StartAfter, < 4.2 use ResumeAfter
+			if val, err := GetAndCompareVersion(nil, "4.2.0", sourceDbversion); err == nil {
+				if (val) {
+					ops.SetStartAfter(watchStartTime)
+				} else {
+					ops.SetResumeAfter(watchStartTime)
+				}
+			} else {
+				return nil, fmt.Errorf("client[%v] set ResumeToken failed[%v]", src, err)
+			}
 		}
 	}
 
