@@ -92,14 +92,10 @@ func NewChangeStreamConn(src string,
 			}
 		} else {
 			// ResumeToken，sourceDbversion >= 4.2 use StartAfter, < 4.2 use ResumeAfter
-			if val, err := GetAndCompareVersion(nil, "4.2.0", sourceDbversion); err == nil {
-				if (val) {
-					ops.SetStartAfter(watchStartTime)
-				} else {
-					ops.SetResumeAfter(watchStartTime)
-				}
+			if val_ver, _ := GetAndCompareVersion(nil, "4.2.0", sourceDbversion); val_ver {
+				ops.SetStartAfter(watchStartTime)
 			} else {
-				return nil, fmt.Errorf("client[%v] set ResumeToken failed[%v]", src, err)
+				ops.SetResumeAfter(watchStartTime)
 			}
 		}
 	}
