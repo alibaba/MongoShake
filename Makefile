@@ -1,4 +1,6 @@
-all: 
+export GOPROXY=goproxy.cn
+
+all:
 	bash build.sh
 
 linux: clean
