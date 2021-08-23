@@ -28,9 +28,18 @@ func main() {
 	defer utils.Goodbye()
 
 	// argument options
-	configuration := flag.String("conf", "", "configure file absolute path")
-	verbose := flag.Int("verbose", 0, "where log goes to: 0 - file，1 - file+stdout，2 - stdout")
+	configuration := flag.String("conf", "conf/collector.conf", "configure file absolute path")
+	verbose := flag.Int("verbose", 2, "where log goes to: 0 - file，1 - file+stdout，2 - stdout")
 	version := flag.Bool("version", false, "show version")
+	mongo_urls := flag.String("mongo_urls", "", "mongo_urls")
+	mongo_cs_url := flag.String("mongo_cs_url", "", "mongo_cs_url")
+	mongo_s_url := flag.String("mongo_s_url", "", "mongo_s_url")
+	tunnel_address := flag.String("tunnel_address", "", "tunnel_address")
+	tunnel := flag.String("tunnel", "", "tunnel")
+	sync_mode := flag.String("sync_mode", "", "sync_mode")
+	filter_namespace_white := flag.String("filter_namespace_white", "", "filter_namespace_white")
+	filter_namespace_black := flag.String("filter_namespace_black", "", "filter_namespace_black")
+
 	flag.Parse()
 
 	if *configuration == "" || *version == true {
@@ -55,10 +64,43 @@ func main() {
 		crash(fmt.Sprintf("Configure file %s parse failed. %v", *configuration, err), -2)
 	}
 
+	if *mongo_urls != "" {
+		conf.Options.MongoUrls = []string{
+			*mongo_urls,
+		}
+	}
+	if *mongo_cs_url != "" {
+		conf.Options.MongoCsUrl = *mongo_cs_url
+	}
+	if *mongo_s_url != "" {
+		conf.Options.MongoSUrl = *mongo_s_url
+	}
+	if *tunnel != "" {
+		conf.Options.Tunnel = *tunnel
+	}
+	if *tunnel_address != "" {
+		conf.Options.TunnelAddress = []string{
+			*tunnel_address,
+		}
+	}
+	if *sync_mode != "" {
+		conf.Options.SyncMode = *sync_mode
+	}
+	if *filter_namespace_white != "" {
+		conf.Options.FilterNamespaceWhite = []string{
+			*filter_namespace_white,
+		}
+	}
+	if *filter_namespace_black != "" {
+		conf.Options.FilterNamespaceBlack = []string{
+			*filter_namespace_black,
+		}
+	}
 	// verify collector options and revise
 	if err = SanitizeOptions(); err != nil {
 		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
 	}
+	//fmt.Printf("%+v",conf.Options)
 
 	if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogFlush, *verbose); err != nil {
 		crash(fmt.Sprintf("initial log.dir[%v] log.name[%v] failed[%v].", conf.Options.LogDirectory,
