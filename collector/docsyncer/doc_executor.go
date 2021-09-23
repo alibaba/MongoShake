@@ -27,8 +27,9 @@ type CollectionExecutor struct {
 	// worker id
 	id int
 	// mongo url
-	mongoUrl    string
-	sslRootFile string
+	mongoUrl      string
+	sslRootFile   string
+	sslPEMKeyFile string
 
 	ns utils.NS
 
@@ -47,13 +48,14 @@ func GenerateCollExecutorId() int {
 	return int(atomic.AddInt32(&GlobalCollExecutorId, 1))
 }
 
-func NewCollectionExecutor(id int, mongoUrl string, ns utils.NS, syncer *DBSyncer, sslRootFile string) *CollectionExecutor {
+func NewCollectionExecutor(id int, mongoUrl string, ns utils.NS, syncer *DBSyncer, sslRootFile, sslPEMKeyFile string) *CollectionExecutor {
 	return &CollectionExecutor{
-		id:          id,
-		mongoUrl:    mongoUrl,
-		sslRootFile: sslRootFile,
-		ns:          ns,
-		syncer:      syncer,
+		id:            id,
+		mongoUrl:      mongoUrl,
+		sslRootFile:   sslRootFile,
+		sslPEMKeyFile: sslPEMKeyFile,
+		ns:            ns,
+		syncer:        syncer,
 		// batchCount: 0,
 	}
 }
@@ -62,7 +64,7 @@ func (colExecutor *CollectionExecutor) Start() error {
 	var err error
 	if !conf.Options.FullSyncExecutorDebug {
 		if colExecutor.conn, err = utils.NewMongoConn(colExecutor.mongoUrl, utils.VarMongoConnectModePrimary, true,
-			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, colExecutor.sslRootFile); err != nil {
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, colExecutor.sslRootFile, colExecutor.sslPEMKeyFile); err != nil {
 			return err
 		}
 		if conf.Options.FullSyncExecutorMajorityEnable {

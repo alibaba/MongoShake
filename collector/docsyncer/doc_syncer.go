@@ -95,7 +95,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 	var fromConn *utils.MongoConn
 	var err error
 	if fromConn, err = utils.NewMongoConn(csUrl, utils.VarMongoConnectModePrimary, true,
-		utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile); err != nil {
+		utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile, conf.Options.MongoSslPEMKeyFile); err != nil {
 		return err
 	}
 	defer fromConn.Close()
@@ -413,13 +413,13 @@ func (syncer *DBSyncer) Start() (syncError error) {
 // start sync single collection
 func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS utils.NS) error {
 	// writer
-	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS, syncer, conf.Options.TunnelMongoSslRootCaFile)
+	colExecutor := NewCollectionExecutor(collExecutorId, syncer.ToMongoUrl, toNS, syncer, conf.Options.TunnelMongoSslRootCaFile, conf.Options.TunnelMongoSslPEMKeyFile)
 	if err := colExecutor.Start(); err != nil {
 		return fmt.Errorf("start collectionSync failed: %v", err)
 	}
 
 	// splitter reader
-	splitter := NewDocumentSplitter(syncer.FromMongoUrl, conf.Options.MongoSslRootCaFile, ns)
+	splitter := NewDocumentSplitter(syncer.FromMongoUrl, conf.Options.MongoSslRootCaFile, conf.Options.MongoSslPEMKeyFile, ns)
 	if splitter == nil {
 		return fmt.Errorf("create splitter failed")
 	}

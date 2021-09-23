@@ -24,7 +24,7 @@ func (writer *DirectWriter) Prepare() bool {
 
 	first := writer.RemoteAddrs[0]
 	if _, err := utils.NewMongoConn(first, utils.VarMongoConnectModeSecondaryPreferred, true,
-		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.TunnelMongoSslRootCaFile); err != nil {
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.TunnelMongoSslRootCaFile, conf.Options.TunnelMongoSslPEMKeyFile); err != nil {
 		LOG.Critical("target mongo server[%s] connect failed: %s", first, err.Error())
 		return false
 	}

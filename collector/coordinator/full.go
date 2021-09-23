@@ -11,8 +11,8 @@ import (
 	"github.com/alibaba/MongoShake/v2/collector/transform"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/sharding"
+	nimo "github.com/gugemichael/nimo4go"
 
-	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
 	bson2 "github.com/vinllen/mongo-go-driver/bson"
@@ -42,7 +42,7 @@ func fetchChunkMap(isSharding bool) (sharding.ShardingChunkMap, error) {
 	return nil, nil
 }
 
-func getTimestampMap(sources []*utils.MongoSource, sslRootFile string) (map[string]utils.TimestampNode, error) {
+func getTimestampMap(sources []*utils.MongoSource, sslRootFile, sslPEMKeyFile string) (map[string]utils.TimestampNode, error) {
 	// no need to fetch if sync mode is full only
 	if conf.Options.SyncMode == utils.VarSyncModeFull {
 		return nil, nil
@@ -51,7 +51,7 @@ func getTimestampMap(sources []*utils.MongoSource, sslRootFile string) (map[stri
 	var ckptMap map[string]utils.TimestampNode
 	var err error
 
-	ckptMap, _, _, _, _, err = utils.GetAllTimestamp(sources, sslRootFile)
+	ckptMap, _, _, _, _, err = utils.GetAllTimestamp(sources, sslRootFile, sslPEMKeyFile)
 	if err != nil {
 		return nil, fmt.Errorf("fetch source all timestamp failed: %v", err)
 	}
@@ -97,7 +97,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	var ckptMap map[string]utils.TimestampNode
 	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless && len(coordinator.MongoD) > 0 {
 		// get current newest timestamp
-		ckptMap, err = getTimestampMap(coordinator.MongoD, conf.Options.MongoSslRootCaFile)
+		ckptMap, err = getTimestampMap(coordinator.MongoD, conf.Options.MongoSslRootCaFile, conf.Options.MongoSslPEMKeyFile)
 		if err != nil {
 			return err
 		}
@@ -108,7 +108,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	var toConn *utils.MongoConn
 	if !conf.Options.FullSyncExecutorDebug {
 		if toConn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, conf.Options.TunnelMongoSslRootCaFile); err != nil {
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, conf.Options.TunnelMongoSslRootCaFile, conf.Options.TunnelMongoSslPEMKeyFile); err != nil {
 			return err
 		}
 		defer toConn.Close()

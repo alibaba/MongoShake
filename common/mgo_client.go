@@ -18,7 +18,7 @@ type MongoConn struct {
 	URL     string
 }
 
-func NewMongoConn(url string, connectMode string, timeout bool, readConcern, writeConcern string, rootCaFile string) (*MongoConn, error) {
+func NewMongoConn(url string, connectMode string, timeout bool, readConcern, writeConcern string, rootCaFile, sslPEMKeyFile string) (*MongoConn, error) {
 	if connectMode == VarMongoConnectModeStandalone {
 		url += "?connect=direct"
 	}
@@ -37,6 +37,17 @@ func NewMongoConn(url string, connectMode string, timeout bool, readConcern, wri
 		tlsConfig := &tls.Config{
 			RootCAs:            roots,
 			InsecureSkipVerify: true,
+		}
+
+		if sslPEMKeyFile != "" {
+			clientCerts := []tls.Certificate{}
+			cert, err := tls.LoadX509KeyPair(sslPEMKeyFile, sslPEMKeyFile)
+			if err != nil {
+				return nil, err
+			}
+			clientCerts = append(clientCerts, cert)
+			tlsConfig.Certificates = clientCerts
+			tlsConfig.InsecureSkipVerify = false
 		}
 
 		dialInfo.DialServer = func(addr *mgo.ServerAddr) (net.Conn, error) {

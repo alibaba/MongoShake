@@ -2,8 +2,9 @@ package sharding
 
 import (
 	"fmt"
-	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"strings"
+
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
@@ -34,7 +35,7 @@ func GetBalancerStatusByUrl(csUrl string) (bool, error) {
 	var conn *utils.MongoConn
 	var err error
 	if conn, err = utils.NewMongoConn(csUrl, utils.VarMongoConnectModePrimary, true,
-		utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile); conn == nil || err != nil {
+		utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile, conf.Options.MongoSslPEMKeyFile); conn == nil || err != nil {
 		return true, err
 	}
 	defer conn.Close()
@@ -73,7 +74,7 @@ func GetChunkMapByUrl(csUrl string) (ShardingChunkMap, error) {
 	var conn *utils.MongoConn
 	var err error
 	if conn, err = utils.NewMongoConn(csUrl, utils.VarMongoConnectModePrimary, true,
-		utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile); conn == nil || err != nil {
+		utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile, conf.Options.MongoSslPEMKeyFile); conn == nil || err != nil {
 		return nil, err
 	}
 	defer conn.Close()

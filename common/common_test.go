@@ -2,14 +2,15 @@ package utils
 
 import (
 	"fmt"
-	"github.com/alibaba/MongoShake/v2/unit_test_common"
 	"testing"
+
+	"github.com/alibaba/MongoShake/v2/unit_test_common"
 
 	"github.com/stretchr/testify/assert"
 )
 
 var (
-	testUrl = unit_test_common.TestUrl
+	testUrl    = unit_test_common.TestUrl
 	testUrlSsl = unit_test_common.TestUrlSsl
 )
 
@@ -62,7 +63,7 @@ func TestMongoConn(t *testing.T) {
 		fmt.Printf("TestMongoConn case %d.\n", nr)
 		nr++
 
-		conn, err := NewMongoConn(testUrl, VarMongoConnectModePrimary, true, "", "", "")
+		conn, err := NewMongoConn(testUrl, VarMongoConnectModePrimary, true, "", "", "", "")
 		assert.Equal(t, err, nil, "should be equal")
 		assert.Equal(t, conn != nil, true, "should be equal")
 	}
@@ -71,7 +72,7 @@ func TestMongoConn(t *testing.T) {
 		fmt.Printf("TestMongoConn case %d.\n", nr)
 		nr++
 
-		conn, err := NewMongoConn(testUrlSsl, VarMongoConnectModePrimary, true, "", "", "/Users/vinllen-ali/code/mongo-shake-github/MongoShake/ApsaraDB-CA-Chain.pem")
+		conn, err := NewMongoConn(testUrlSsl, VarMongoConnectModePrimary, true, "", "", "/Users/vinllen-ali/code/mongo-shake-github/MongoShake/ApsaraDB-CA-Chain.pem", "")
 		assert.Equal(t, err, nil, "should be equal")
 		assert.Equal(t, conn != nil, true, "should be equal")
 	}

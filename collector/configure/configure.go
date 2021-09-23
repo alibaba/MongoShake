@@ -25,6 +25,7 @@ type Configuration struct {
 	MongoCsUrl                             string   `config:"mongo_cs_url"`
 	MongoSUrl                              string   `config:"mongo_s_url"`
 	MongoSslRootCaFile                     string   `config:"mongo_ssl_root_ca_file"` // add v2.6.2
+	MongoSslPEMKeyFile                     string   `config:"mongo_ssl_pem_key_file"`
 	MongoSslClientCaFile                   string   `config:"mongo_ssl_root_ca_file"`
 	MongoConnectMode                       string   `config:"mongo_connect_mode"`
 	Tunnel                                 string   `config:"tunnel"`
@@ -33,6 +34,7 @@ type Configuration struct {
 	TunnelKafkaPartitionNumber             int      `config:"tunnel.kafka.partition_number"` // add v2.4.21
 	TunnelJsonFormat                       string   `config:"tunnel.json.format"`
 	TunnelMongoSslRootCaFile               string   `config:"tunnel.mongo_ssl_root_ca_file"` // add v2.6.2
+	TunnelMongoSslPEMKeyFile               string   `config:"tunnel.mongo_ssl_pem_key_file"`
 	FilterNamespaceBlack                   []string `config:"filter.namespace.black"`
 	FilterNamespaceWhite                   []string `config:"filter.namespace.white"`
 	FilterPassSpecialDb                    []string `config:"filter.pass.special.db"`
@@ -42,6 +44,7 @@ type Configuration struct {
 	CheckpointStorageDb                    string   `config:"checkpoint.storage.db"`
 	CheckpointStorageCollection            string   `config:"checkpoint.storage.collection"`
 	CheckpointStorageUrlMongoSslRootCaFile string   `config:"checkpoint.storage.url.mongo_ssl_root_ca_file"` // add v2.6.2
+	CheckpointStorageUrlMongoSslPEMKeyFile string   `config:"checkpoint.storage.url.mongo_ssl_pem_key_file"`
 	CheckpointStartPosition                int64    `config:"checkpoint.start_position" type:"date"`
 	TransformNamespace                     []string `config:"transform.namespace"`
 	SpecialSourceDBFlag                    string   `config:"special.source.db.flag" type:"string"` // add v2.4.20

@@ -2,21 +2,22 @@ package docsyncer
 
 import (
 	"fmt"
-	"testing"
-	"strings"
 	"sort"
+	"strings"
+	"testing"
 
-	"github.com/alibaba/MongoShake/v2/common"
-	"github.com/alibaba/MongoShake/v2/collector/configure"
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
-	"github.com/alibaba/MongoShake/v2/sharding"
 	"github.com/alibaba/MongoShake/v2/collector/transform"
+	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/sharding"
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
+
+	"reflect"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
 	bson2 "github.com/vinllen/mongo-go-driver/bson"
-	"reflect"
 )
 
 const (
@@ -63,7 +64,7 @@ func TestDbSync(t *testing.T) {
 	// test doSync
 
 	conn, err := utils.NewMongoConn(testMongoAddress, utils.VarMongoConnectModePrimary, false,
-		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "", "")
 	assert.Equal(t, nil, err, "should be equal")
 
 	// init DocExecutor, ignore DBSyncer here
@@ -368,7 +369,7 @@ func TestStartDropDestCollection(t *testing.T) {
 		nr++
 
 		conn, err := utils.NewMongoConn(testMongoAddress, utils.VarMongoConnectModePrimary, true,
-			utils.ReadWriteConcernDefault, utils.ReadWriteConcernMajority, "")
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernMajority, "", "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop old db
@@ -412,7 +413,7 @@ func TestStartDropDestCollection(t *testing.T) {
 		nr++
 
 		conn, err := utils.NewMongoConn(testMongoAddress, utils.VarMongoConnectModePrimary, true,
-			utils.ReadWriteConcernDefault, utils.ReadWriteConcernMajority, "")
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernMajority, "", "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop old db

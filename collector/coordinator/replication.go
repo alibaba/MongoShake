@@ -118,7 +118,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	// try to connect CheckpointStorage
 	checkpointStorageUrl := conf.Options.CheckpointStorageUrl
 	if conn, err = utils.NewMongoConn(checkpointStorageUrl, utils.VarMongoConnectModePrimary, true,
-		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.CheckpointStorageUrlMongoSslRootCaFile); conn == nil || !conn.IsGood() || err != nil {
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.CheckpointStorageUrlMongoSslRootCaFile, conf.Options.CheckpointStorageUrlMongoSslPEMKeyFile); conn == nil || !conn.IsGood() || err != nil {
 		LOG.Critical("Connect checkpointStorageUrl[%v] error[%v]. Please add primary node into 'mongo_urls' "+
 			"if 'context.storage.url' is empty", checkpointStorageUrl, err)
 		return err
@@ -127,7 +127,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 
 	for i, src := range coordinator.MongoD {
 		if conn, err = utils.NewMongoConn(src.URL, conf.Options.MongoConnectMode, true,
-			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile); conn == nil || !conn.IsGood() || err != nil {
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile, conf.Options.MongoSslPEMKeyFile); conn == nil || !conn.IsGood() || err != nil {
 			LOG.Critical("Connect mongo server error. %v, url : %s. See https://github.com/alibaba/MongoShake/wiki/FAQ#q-how-to-solve-the-oplog-tailer-initialize-failed-no-reachable-servers-error", err, src.URL)
 			return err
 		}
@@ -195,7 +195,7 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 	// get current newest timestamp
 	var fullFinishTs, oldestTs bson.MongoTimestamp
 	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless && len(coordinator.MongoD) > 0 {
-		_, fullFinishTs, _, oldestTs, _, err = utils.GetAllTimestamp(coordinator.MongoD, conf.Options.MongoSslRootCaFile)
+		_, fullFinishTs, _, oldestTs, _, err = utils.GetAllTimestamp(coordinator.MongoD, conf.Options.MongoSslRootCaFile, conf.Options.MongoSslPEMKeyFile)
 		if err != nil {
 			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
 		}
@@ -211,7 +211,7 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 
 		// the oldest oplog is lost
 		if utils.TimestampToInt64(oldestTs) >= val {
-			err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's " +
+			err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's "+
 				"oplog collection size is too small or full sync continues too long",
 				fullBegin, utils.ExtractTimestampForLog(oldestTs))
 			LOG.Error(err)
@@ -242,18 +242,18 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs int
 		}
 		LOG.Info("------------------------full sync done!------------------------")
 		/*
-		// get current newest timestamp
-		endAllTsMap, _, _, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
-		if err != nil {
-			docError = LOG.Critical("document replication get end timestamp failed[%v]", err)
-			return
-		}
-		for replset, endTs := range endAllTsMap {
-			beginTs := beginTsMap[replset]
-			LOG.Info("document replication replset %v beginTs[%v] endTs[%v]",
-				replset, utils.ExtractTs32(beginTs), utils.ExtractTs32(endTs.Newest))
-			docEndTsMap[replset] = endTs.Newest
-		}*/
+			// get current newest timestamp
+			endAllTsMap, _, _, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
+			if err != nil {
+				docError = LOG.Critical("document replication get end timestamp failed[%v]", err)
+				return
+			}
+			for replset, endTs := range endAllTsMap {
+				beginTs := beginTsMap[replset]
+				LOG.Info("document replication replset %v beginTs[%v] endTs[%v]",
+					replset, utils.ExtractTs32(beginTs), utils.ExtractTs32(endTs.Newest))
+				docEndTsMap[replset] = endTs.Newest
+			}*/
 	})
 	// during document replication, oplog syncer fetch oplog and store on disk, in order to avoid oplog roll up
 	// fullSyncFinishPosition means no need to check the end time to disable DDL

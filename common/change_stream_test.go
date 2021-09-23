@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"testing"
 
+	"strings"
+
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
-	"strings"
 )
 
 const (
@@ -44,7 +45,7 @@ func TestChangeStreamConn(t *testing.T) {
 		fmt.Printf("TestChangeStreamConn case %d.\n", nr)
 		nr++
 
-		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false, "")
+		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false, "", "")
 		tsStr := fmt.Sprintf("{%v %v}", ExtractMongoTimestamp(newest), ExtractMongoTimestampCounter(newest))
 
 		cs, err := NewChangeStreamConn(testMongoAddressCs, VarMongoConnectModePrimary,
@@ -68,7 +69,7 @@ func TestChangeStreamConn(t *testing.T) {
 		fmt.Printf("TestChangeStreamConn case %d.\n", nr)
 		nr++
 
-		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false, "")
+		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false, "", "")
 		tsStr := fmt.Sprintf("{%v %v}", ExtractMongoTimestamp(newest), ExtractMongoTimestampCounter(newest))
 
 		cs, err := NewChangeStreamConn(testMongoAddressCs, VarMongoConnectModePrimary,
@@ -111,7 +112,7 @@ func TestChangeStreamConn(t *testing.T) {
 		nr++
 
 		conn, err := NewMongoConn(testMongoAddressCs, VarMongoConnectModePrimary, true,
-			ReadWriteConcernLocal, ReadWriteConcernDefault, "")
+			ReadWriteConcernLocal, ReadWriteConcernDefault, "", "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop all databases
@@ -129,7 +130,7 @@ func TestChangeStreamConn(t *testing.T) {
 		conn.Session.DB("db1").C("c2").Insert(bson.M{"x": 1})
 		conn.Session.DB("db2").C("c3").Insert(bson.M{"x": 1})
 
-		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false, "")
+		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false, "", "")
 		tsStr := fmt.Sprintf("{%v %v}", ExtractMongoTimestamp(newest), ExtractMongoTimestampCounter(newest))
 
 		cs, err := NewChangeStreamConn(testMongoAddressCs, VarMongoConnectModePrimary,

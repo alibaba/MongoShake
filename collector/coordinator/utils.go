@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/alibaba/MongoShake/v2/common"
-	"github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
-	"github.com/alibaba/MongoShake/v2/collector/reader"
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	sourceReader "github.com/alibaba/MongoShake/v2/collector/reader"
+	utils "github.com/alibaba/MongoShake/v2/common"
 
-	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/mgo/bson"
 	bson2 "github.com/vinllen/mongo-go-driver/bson"
 )
 
@@ -35,7 +35,7 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 		tsMap, _, smallestNew, _, _, err = utils.GetAllTimestampInUT()
 	case false:
 		// smallestNew is the smallest of the all newest timestamp
-		tsMap, _, smallestNew, _, _, err = utils.GetAllTimestamp(coordinator.MongoD, conf.Options.MongoSslRootCaFile)
+		tsMap, _, smallestNew, _, _, err = utils.GetAllTimestamp(coordinator.MongoD, conf.Options.MongoSslRootCaFile, conf.Options.MongoSslPEMKeyFile)
 		if err != nil {
 			return 0, nil, false, fmt.Errorf("get all timestamp failed: %v", err)
 		}

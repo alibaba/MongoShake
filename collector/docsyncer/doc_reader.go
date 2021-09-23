@@ -3,9 +3,10 @@ package docsyncer
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
+
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	"sync/atomic"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
@@ -19,6 +20,7 @@ import (
 type DocumentSplitter struct {
 	src           string               // source mongo address url
 	sslRootCaFile string               // source root ca ssl
+	sslPEMKeyFile string               // source root ca ssl
 	ns            utils.NS             // namespace
 	conn          *utils.MongoConn     // connection
 	readerChan    chan *DocumentReader // reader chan
@@ -27,10 +29,11 @@ type DocumentSplitter struct {
 	pieceNumber   int                  // how many piece
 }
 
-func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitter {
+func NewDocumentSplitter(src, sslRootCaFile, sslPEMKeyFile string, ns utils.NS) *DocumentSplitter {
 	ds := &DocumentSplitter{
 		src:           src,
 		sslRootCaFile: sslRootCaFile,
+		sslPEMKeyFile: sslPEMKeyFile,
 		ns:            ns,
 	}
 
@@ -38,7 +41,7 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 	var err error
 	// disable timeout
 	ds.conn, err = utils.NewMongoConn(ds.src, conf.Options.MongoConnectMode, false,
-		utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, sslRootCaFile)
+		utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, sslRootCaFile, sslPEMKeyFile)
 	if err != nil {
 		LOG.Error("splitter[%s] connection mongo[%v] failed[%v]", ds,
 			utils.BlockMongoUrlPassword(ds.src, "***"), err)
@@ -94,7 +97,7 @@ func (ds *DocumentSplitter) Run() error {
 	// disable split
 	if conf.Options.FullSyncReaderParallelThread <= 1 {
 		LOG.Info("splitter[%s] disable split or no need", ds)
-		ds.readerChan <- NewDocumentReader(0, ds.src, ds.ns, "", nil, nil, ds.sslRootCaFile)
+		ds.readerChan <- NewDocumentReader(0, ds.src, ds.ns, "", nil, nil, ds.sslRootCaFile, ds.sslPEMKeyFile)
 		LOG.Info("splitter[%s] exits", ds)
 		return nil
 	}
@@ -111,7 +114,7 @@ func (ds *DocumentSplitter) Run() error {
 	// if failed, do not panic, run single thread fetching
 	if err != nil {
 		LOG.Warn("splitter[%s] run splitVector failed[%v], give up parallel fetching", ds, err)
-		ds.readerChan <- NewDocumentReader(0, ds.src, ds.ns, "", nil, nil, ds.sslRootCaFile)
+		ds.readerChan <- NewDocumentReader(0, ds.src, ds.ns, "", nil, nil, ds.sslRootCaFile, ds.sslPEMKeyFile)
 		LOG.Info("splitter[%s] exits", ds)
 		return nil
 	}
@@ -137,7 +140,7 @@ func (ds *DocumentSplitter) Run() error {
 
 				LOG.Info("splitter[%s] piece[%d] create reader with boundary(%v, %v]", ds, cnt, start, val)
 				// inject new DocumentReader into channel
-				ds.readerChan <- NewDocumentReader(cnt, ds.src, ds.ns, key, start, val, ds.sslRootCaFile)
+				ds.readerChan <- NewDocumentReader(cnt, ds.src, ds.ns, key, start, val, ds.sslRootCaFile, ds.sslPEMKeyFile)
 
 				// new start
 				start = val
@@ -147,7 +150,7 @@ func (ds *DocumentSplitter) Run() error {
 				if i == len(splitKeysList)-1 {
 					LOG.Info("splitter[%s] piece[%d] create reader with boundary(%v, INF)", ds, cnt, start)
 					// inject new DocumentReader into channel
-					ds.readerChan <- NewDocumentReader(cnt, ds.src, ds.ns, key, start, nil, ds.sslRootCaFile)
+					ds.readerChan <- NewDocumentReader(cnt, ds.src, ds.ns, key, start, nil, ds.sslRootCaFile, ds.sslPEMKeyFile)
 				}
 			}
 
@@ -160,7 +163,7 @@ func (ds *DocumentSplitter) Run() error {
 	}
 
 	LOG.Warn("splitter[%s] give up parallel fetching", ds, err)
-	ds.readerChan <- NewDocumentReader(0, ds.src, ds.ns, "", nil, nil, ds.sslRootCaFile)
+	ds.readerChan <- NewDocumentReader(0, ds.src, ds.ns, "", nil, nil, ds.sslRootCaFile, ds.sslPEMKeyFile)
 	LOG.Info("splitter[%s] exits", ds)
 
 	LOG.Info("splitter[%s] exits", ds)
@@ -191,6 +194,7 @@ type DocumentReader struct {
 	src           string
 	ns            utils.NS
 	sslRootCaFile string // source root ca ssl
+	sslPEMKeyFile string // source root ca ssl
 
 	// mongo document reader
 	client      *utils.MongoCommunityConn
@@ -210,7 +214,7 @@ type DocumentReader struct {
 }
 
 // NewDocumentReader creates reader with mongodb url
-func NewDocumentReader(id int, src string, ns utils.NS, key string, start, end interface{}, sslRootCaFile string) *DocumentReader {
+func NewDocumentReader(id int, src string, ns utils.NS, key string, start, end interface{}, sslRootCaFile, sslPEMKeyFile string) *DocumentReader {
 	q := make(bson.M)
 	if start != nil || end != nil {
 		innerQ := make(bson.M)
@@ -230,6 +234,7 @@ func NewDocumentReader(id int, src string, ns utils.NS, key string, start, end i
 		src:           src,
 		ns:            ns,
 		sslRootCaFile: sslRootCaFile,
+		sslPEMKeyFile: sslPEMKeyFile,
 		query:         q,
 		key:           key,
 		ctx:           ctx,
@@ -359,7 +364,7 @@ func (reader *DocumentReader) ensureNetworkMgo() (err error) {
 		}
 		// reconnect
 		if reader.conn, err = utils.NewMongoConn(reader.src, conf.Options.MongoConnectMode, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, reader.sslRootCaFile); reader.conn == nil || err != nil {
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, reader.sslRootCaFile, reader.sslPEMKeyFile); reader.conn == nil || err != nil {
 			return err
 		}
 	}

@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"io/ioutil"
 	"net/http"
+
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
 
@@ -68,7 +69,7 @@ func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 	// make connection if we haven't already established one
 	if ckpt.Conn == nil {
 		if conn, err := utils.NewMongoConn(ckpt.URL, utils.VarMongoConnectModePrimary, true,
-			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority, conf.Options.CheckpointStorageUrlMongoSslRootCaFile); err == nil {
+			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority, conf.Options.CheckpointStorageUrlMongoSslRootCaFile, conf.Options.CheckpointStorageUrlMongoSslPEMKeyFile); err == nil {
 			ckpt.Conn = conn
 			ckpt.QueryHandle = conn.Session.DB(ckpt.DB).C(ckpt.Table)
 		} else {

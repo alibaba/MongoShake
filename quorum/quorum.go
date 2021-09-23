@@ -2,11 +2,12 @@ package quorum
 
 import (
 	"fmt"
-	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"math/rand"
 	"net"
 	"os"
 	"time"
+
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
 
@@ -177,7 +178,7 @@ func competeMaster(coll *mgo.Collection) bool {
 
 func makeSession(uri string) (*utils.MongoConn, error) {
 	if conn, err := utils.NewMongoConn(uri, utils.VarMongoConnectModePrimary, true,
-		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile); err == nil {
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile, conf.Options.MongoSslPEMKeyFile); err == nil {
 		return conn, nil
 	} else {
 		return nil, err
