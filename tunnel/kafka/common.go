@@ -1,7 +1,11 @@
 package kafka
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	LOG "github.com/vinllen/log4go"
+	"io/ioutil"
 	"strings"
 	"time"
 
@@ -28,7 +32,7 @@ type Config struct {
 	Config *sarama.Config
 }
 
-func NewConfig() *Config {
+func NewConfig(rootCaFile string) (*Config, error) {
 	config := sarama.NewConfig()
 	config.Version = sarama.V0_10_0_0
 	config.MetricRegistry = metrics.NewRegistry()
@@ -38,9 +42,26 @@ func NewConfig() *Config {
 	config.Producer.Partitioner = sarama.NewManualPartitioner
 	config.Producer.MaxMessageBytes = 16*utils.MB + 2*utils.MB // 2MB for the reserve gap
 
+	// ssl
+	if rootCaFile != "" {
+		sslConfig := &tls.Config{
+			InsecureSkipVerify: true,
+		}
+		caCert, err := ioutil.ReadFile(rootCaFile)
+		if err != nil {
+			LOG.Critical("failed to load the ca cert file[%s]: %s failed: %s", rootCaFile, err.Error())
+			return nil, err
+		}
+		caCertPool := x509.NewCertPool()
+		caCertPool.AppendCertsFromPEM(caCert)
+		sslConfig.RootCAs = caCertPool
+		config.Net.TLS.Config = sslConfig
+		config.Net.TLS.Enable = true
+	}
+
 	return &Config{
 		Config: config,
-	}
+	}, nil
 }
 
 // parse the address (topic@broker1,broker2,...)
