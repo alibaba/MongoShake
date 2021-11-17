@@ -36,9 +36,6 @@ type ReplicationCoordinator struct {
 	// syncerGroup and workerGroup number is 1:N in ReplicaSet.
 	// 1:1 while replicated in shard cluster
 	syncerGroup []*collector.OplogSyncer
-
-	// control the qps, TODO, need modify to bucket
-	rateController *nimo.SimpleRateController
 }
 
 func (coordinator *ReplicationCoordinator) Run() error {

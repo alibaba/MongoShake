@@ -51,8 +51,6 @@ type OplogSyncer struct {
 	startPosition interface{}
 	// full sync finish position, used to check DDL between full sync and incr sync
 	fullSyncFinishPosition bson.MongoTimestamp
-	// pass from coordinator
-	rateController *nimo.SimpleRateController
 
 	ckptManager *ckpt.CheckpointManager
 
@@ -104,8 +102,7 @@ func NewOplogSyncer(
 	startPosition interface{},
 	fullSyncFinishPosition int64,
 	mongoUrl string,
-	gids []string,
-	rateController *nimo.SimpleRateController) *OplogSyncer {
+	gids []string) *OplogSyncer {
 
 	reader, err := sourceReader.CreateReader(conf.Options.IncrSyncMongoFetchMethod, mongoUrl, replset)
 	if err != nil {
@@ -117,7 +114,6 @@ func NewOplogSyncer(
 		Replset:                replset,
 		startPosition:          startPosition,
 		fullSyncFinishPosition: bson.MongoTimestamp(fullSyncFinishPosition),
-		rateController:         rateController,
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.Id, replset))),
 		reader: reader,
