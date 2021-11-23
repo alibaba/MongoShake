@@ -2,9 +2,9 @@ package docsyncer
 
 import (
 	"fmt"
-	"testing"
-	"strings"
 	"sort"
+	"strings"
+	"testing"
 
 	"github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/collector/configure"
@@ -467,7 +467,7 @@ func TestStartIndexSync(t *testing.T) {
 		conf.Options.FullSyncReaderCollectionParallel = 4
 
 		conn, err := utils.NewMongoCommunityConn(testMongoAddress, utils.VarMongoConnectModeSecondaryPreferred, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop old db
@@ -530,7 +530,7 @@ func TestStartIndexSync(t *testing.T) {
 		conf.Options.FullSyncReaderCollectionParallel = 4
 
 		conn, err := utils.NewMongoCommunityConn(testMongoAddressServerless, utils.VarMongoConnectModePrimary, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop old db

@@ -1,10 +1,10 @@
 package sourceReader
 
 import (
-	"testing"
 	"fmt"
-	"time"
 	"sync"
+	"testing"
+	"time"
 
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 	"github.com/alibaba/MongoShake/v2/common"
@@ -34,7 +34,7 @@ func TestEventReader(t *testing.T) {
 		nr++
 
 		cnt := 30
-		conn, err := utils.NewMongoCommunityConn(testMongoAddressCs, "primary", true, "", "")
+		conn, err := utils.NewMongoCommunityConn(testMongoAddressCs, "primary", true, "", "", "")
 		assert.Equal(t, nil, err, "should be equal")
 		err = conn.Client.Database("db1").Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
@@ -140,7 +140,7 @@ func TestEventReader(t *testing.T) {
 		fmt.Printf("TestEventReader case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoCommunityConn(testMongoAddressCs, "primary", true, "", "")
+		conn, err := utils.NewMongoCommunityConn(testMongoAddressCs, "primary", true, "", "", "")
 
 		// drop all databases
 		dbs, err := conn.Client.ListDatabaseNames(nil, bson.M{})

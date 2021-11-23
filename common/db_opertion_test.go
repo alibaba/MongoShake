@@ -1,10 +1,10 @@
 package utils
 
 import (
-	"fmt"
-	"testing"
-	"strings"
 	"context"
+	"fmt"
+	"strings"
+	"testing"
 
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 
@@ -300,7 +300,7 @@ func TestGetDbNamespace(t *testing.T) {
 			}
 			return true
 		}
-		nsList, nsMap, err := GetDbNamespace(testMongoAddress, filterFunc)
+		nsList, nsMap, err := GetDbNamespace(testMongoAddress, filterFunc, "")
 		fmt.Println(nsList, nsMap)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 5, len(nsList), "should be equal")
@@ -314,7 +314,7 @@ func TestGetDbNamespace(t *testing.T) {
 		nr++
 
 		// drop all old table
-		conn, err := NewMongoCommunityConn(testUrlServerless, "primary", true, "", "")
+		conn, err := NewMongoCommunityConn(testUrlServerless, "primary", true, "", "", "")
 		assert.Equal(t, nil, err, "should be equal")
 		conn.Client.Database(testDb).Drop(nil)
 
@@ -351,7 +351,7 @@ func TestGetDbNamespace(t *testing.T) {
 			}
 			return true
 		}
-		nsList, nsMap, err := GetDbNamespace(testUrlServerless, filterFunc)
+		nsList, nsMap, err := GetDbNamespace(testUrlServerless, filterFunc, "")
 		fmt.Println(nsList, nsMap)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 3, len(nsList), "should be equal")

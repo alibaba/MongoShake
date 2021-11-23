@@ -206,7 +206,7 @@ func StartIndexSync(indexMap map[utils.NS][]bson2.M, toUrl string,
 			var conn *utils.MongoCommunityConn
 			var err error
 			if conn, err = utils.NewMongoCommunityConn(toUrl, utils.VarMongoConnectModePrimary, false,
-				utils.ReadWriteConcernDefault, utils.ReadWriteConcernMajority); err != nil {
+				utils.ReadWriteConcernDefault, utils.ReadWriteConcernMajority, conf.Options.MongoSslRootCaFile); err != nil {
 				LOG.Error("write index but create client fail: %v", err)
 				return
 			}
@@ -346,7 +346,8 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	filterList := filter.NewDocFilterList()
 
 	// get all namespace
-	nsList, _, err := utils.GetDbNamespace(syncer.FromMongoUrl, filterList.IterateFilter)
+	nsList, _, err := utils.GetDbNamespace(syncer.FromMongoUrl, filterList.IterateFilter,
+		conf.Options.MongoSslRootCaFile)
 	if err != nil {
 		return err
 	}

@@ -167,7 +167,8 @@ func (er *EventReader) EnsureNetwork() error {
 		filterList.IterateFilter,
 		er.startAtOperationTime,
 		int32(BatchSize),
-		conf.Options.SourceDBVersion); err != nil {
+		conf.Options.SourceDBVersion,
+		conf.Options.MongoSslRootCaFile); err != nil {
 		return err
 	}
 

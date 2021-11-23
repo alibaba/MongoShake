@@ -404,11 +404,11 @@ func HasUniqueIndex(index []mgo.Index) bool {
  *     @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}
  *     @error: error info
  */
-func GetDbNamespace(url string, filterFunc func(name string) bool) ([]NS, map[string][]string, error) {
+func GetDbNamespace(url string, filterFunc func(name string) bool, sslRootFile string) ([]NS, map[string][]string, error) {
 	var err error
 	var conn *MongoCommunityConn
 	if conn, err = NewMongoCommunityConn(url, VarMongoConnectModePrimary, true,
-		ReadWriteConcernLocal, ReadWriteConcernDefault); conn == nil || err != nil {
+		ReadWriteConcernLocal, ReadWriteConcernDefault, sslRootFile); conn == nil || err != nil {
 		return nil, nil, err
 	}
 	defer conn.Close()
@@ -461,10 +461,11 @@ func GetDbNamespace(url string, filterFunc func(name string) bool) ([]NS, map[st
  *     @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}
  *     @error: error info
  */
-func GetAllNamespace(sources []*MongoSource, filterFunc func(name string) bool) (map[NS]struct{}, map[string][]string, error) {
+func GetAllNamespace(sources []*MongoSource, filterFunc func(name string) bool,
+	sslRootFile string) (map[NS]struct{}, map[string][]string, error) {
 	nsSet := make(map[NS]struct{})
 	for _, src := range sources {
-		nsList, _, err := GetDbNamespace(src.URL, filterFunc)
+		nsList, _, err := GetDbNamespace(src.URL, filterFunc, sslRootFile)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -739,7 +739,7 @@ func TestFetchIndexes(t *testing.T) {
 		}
 
 		// drop all old table
-		conn, err := utils.NewMongoCommunityConn(url, "primary", true, "", "")
+		conn, err := utils.NewMongoCommunityConn(url, "primary", true, "", "", "")
 		assert.Equal(t, nil, err, "should be equal")
 		conn.Client.Database(testDb).Drop(nil)
 

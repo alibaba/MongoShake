@@ -234,7 +234,8 @@ func (worker *Worker) probe() {
 
 func (worker *Worker) retain(batch []*oplog.GenericOplog) {
 	worker.listUnACK = append(worker.listUnACK, batch...)
-	LOG.Debug("%s copy batch oplogs [%d] to listUnACK count. UnACK remained [%d]", worker, len(batch), len(worker.listUnACK))
+	LOG.Debug("%s copy batch oplogs [%d] to listUnACK count. UnACK remained [%d]",
+		worker, len(batch), len(worker.listUnACK))
 }
 
 func (worker *Worker) purgeACK() {

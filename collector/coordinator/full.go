@@ -88,7 +88,8 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 
 	filterList := filter.NewDocFilterList()
 	// get all namespace need to sync
-	nsSet, _, err := utils.GetAllNamespace(coordinator.RealSourceFullSync, filterList.IterateFilter)
+	nsSet, _, err := utils.GetAllNamespace(coordinator.RealSourceFullSync, filterList.IterateFilter,
+		conf.Options.MongoSslRootCaFile)
 	if err != nil {
 		return err
 	}

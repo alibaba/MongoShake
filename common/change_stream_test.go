@@ -31,7 +31,8 @@ func TestChangeStreamConn(t *testing.T) {
 			nil,
 			nil,
 			1024,
-			"4.2.0")
+			"4.2.0",
+			"")
 		assert.Equal(t, nil, err, "should be equal")
 		optionStr := printCsOption(cs.Ops)
 		assert.Equal(t, " BatchSize[1024] MaxAwaitTime[24h0m0s]", optionStr, "should be equal")
@@ -53,7 +54,8 @@ func TestChangeStreamConn(t *testing.T) {
 			nil,
 			int64(newest),
 			1024,
-			"4.2.0")
+			"4.2.0",
+			"")
 		assert.Equal(t, nil, err, "should be equal")
 
 		optionStr := printCsOption(cs.Ops)
@@ -77,7 +79,8 @@ func TestChangeStreamConn(t *testing.T) {
 			nil,
 			int64(newest),
 			1024,
-			"4.2.0")
+			"4.2.0",
+			"")
 		assert.Equal(t, nil, err, "should be equal")
 
 		optionStr := printCsOption(cs.Ops)
@@ -98,7 +101,8 @@ func TestChangeStreamConn(t *testing.T) {
 			nil,
 			token,
 			1024,
-			"4.2.0")
+			"4.2.0",
+			"")
 		assert.Equal(t, nil, err, "should be equal")
 
 		optionStr2 := printCsOption(cs2.Ops)
@@ -144,7 +148,8 @@ func TestChangeStreamConn(t *testing.T) {
 			},
 			int64(newest),
 			1024,
-			"4.2.0")
+			"4.2.0",
+			"")
 		assert.Equal(t, nil, err, "should be equal")
 
 		optionStr := printCsOption(cs.Ops)

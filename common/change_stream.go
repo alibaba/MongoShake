@@ -2,15 +2,13 @@ package utils
 
 import (
 	"context"
-	"time"
 	"fmt"
 	LOG "github.com/vinllen/log4go"
+	"time"
 
-	"github.com/vinllen/mongo-go-driver/mongo/options"
-	"github.com/vinllen/mongo-go-driver/mongo"
-	"github.com/vinllen/mongo-go-driver/mongo/readpref"
-	"github.com/vinllen/mongo-go-driver/mongo/readconcern"
 	"github.com/vinllen/mongo-go-driver/bson/primitive"
+	"github.com/vinllen/mongo-go-driver/mongo"
+	"github.com/vinllen/mongo-go-driver/mongo/options"
 	"sort"
 	"strings"
 )
@@ -34,46 +32,13 @@ func NewChangeStreamConn(src string,
 	filterFunc func(name string) bool,
 	watchStartTime interface{},
 	batchSize int32,
-	sourceDbversion string) (*ChangeStreamConn, error) {
-	// init client ops
-	clientOps := options.Client().ApplyURI(src)
+	sourceDbversion string,
+	sslRootFile string) (*ChangeStreamConn, error) {
 
-	// clientOps.ReadConcern = readconcern.Local()
-
-	// read preference
-	readPreference := readpref.Primary()
-	switch mode {
-	case VarMongoConnectModePrimary:
-		readPreference = readpref.Primary()
-	case VarMongoConnectModeSecondaryPreferred:
-		readPreference = readpref.SecondaryPreferred()
-	case VarMongoConnectModeStandalone:
-		// TODO, no standalone, choose nearest
-		fallthrough
-	case VarMongoConnectModeNearset:
-		readPreference = readpref.Nearest()
-	default:
-		readPreference = readpref.Primary()
-	}
-	clientOps.SetReadPreference(readPreference)
-	clientOps.ReadConcern = readconcern.Majority() // mandatory set read concern to majority for change stream
-
-	// create client
-	client, err := mongo.NewClient(clientOps)
+	conn, err := NewMongoCommunityConn(src, mode, true, ReadWriteConcernMajority, "", sslRootFile)
 	if err != nil {
-		return nil, fmt.Errorf("create change stream client[%v] failed[%v]", src, err)
-	}
-
-	// ctx, _ := context.WithTimeout(context.Background(), contextTimeout)
-	ctx := context.Background()
-
-	if err = client.Connect(ctx); err != nil {
-		return nil, fmt.Errorf("change stream connect src[%v] failed[%v]", src, err)
-	}
-
-	// ping
-	if err = client.Ping(ctx, nil); err != nil {
-		return nil, fmt.Errorf("client[%v] ping failed[%v]", src, err)
+		return nil, fmt.Errorf("NewChangeStreamConn source[%v %v] build connection failed: %v",
+			src, mode, err)
 	}
 
 	waitTime := time.Duration(changeStreamTimeout * time.Hour) // hours
@@ -106,7 +71,7 @@ func NewChangeStreamConn(src string,
 
 	var csHandler *mongo.ChangeStream
 	if specialDb == VarSpecialSourceDBFlagAliyunServerless {
-		_, dbs, err := GetDbNamespace(src, filterFunc)
+		_, dbs, err := GetDbNamespace(src, filterFunc, sslRootFile)
 		if err != nil {
 			return nil, fmt.Errorf("GetDbNamespace failed: %v", err)
 		}
@@ -124,24 +89,26 @@ func NewChangeStreamConn(src string,
 
 		LOG.Info("change stream options with aliyun_serverless: %v", printCsOption(ops))
 		// csHandler, err = client.Database("non-exist-database-shake").Watch(ctx, mongo.Pipeline{}, ops)
-		csHandler, err = client.Database("serverless-shake-fake-db").Collection("serverless-shake-fake-collection").Watch(ctx, mongo.Pipeline{}, ops)
+		csHandler, err = conn.Client.Database("serverless-shake-fake-db").
+			Collection("serverless-shake-fake-collection").
+			Watch(conn.ctx, mongo.Pipeline{}, ops)
 		// csHandler, err = client.Database(dbList[0]).Collection("serverless-shake-fake-collection").Watch(ctx, mongo.Pipeline{}, ops)
 		if err != nil {
 			return nil, fmt.Errorf("client[%v] create change stream handler failed[%v]", src, err)
 		}
 	} else {
 		LOG.Info("change stream options: %v", printCsOption(ops))
-		csHandler, err = client.Watch(ctx, mongo.Pipeline{}, ops)
+		csHandler, err = conn.Client.Watch(conn.ctx, mongo.Pipeline{}, ops)
 		if err != nil {
 			return nil, fmt.Errorf("client[%v] create change stream handler failed[%v]", src, err)
 		}
 	}
 
 	return &ChangeStreamConn{
-		Client:    client,
+		Client:    conn.Client,
 		CsHandler: csHandler,
 		Ops:       ops,
-		ctx:       ctx,
+		ctx:       conn.ctx,
 	}, nil
 }
 

@@ -313,7 +313,7 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	if reader.client == nil {
 		LOG.Info("reader[%s] client is empty, create one", reader.String())
 		reader.client, err = utils.NewMongoCommunityConn(reader.src, conf.Options.MongoConnectMode, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return err
 		}

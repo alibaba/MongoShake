@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/alibaba/MongoShake/v2/common"
-	"github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
+	"github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/reader"
+	"github.com/alibaba/MongoShake/v2/common"
 
-	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
+	"github.com/vinllen/mgo/bson"
 	bson2 "github.com/vinllen/mongo-go-driver/bson"
 )
 
@@ -196,7 +196,7 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 	for _, src := range sourceList {
 		LOG.Info("source[%v %v] start fetching index", src.ReplicaName, utils.BlockMongoUrlPassword(src.URL, "***"))
 		// 1. fetch namespace
-		nsList, _, err := utils.GetDbNamespace(src.URL, filterFunc)
+		nsList, _, err := utils.GetDbNamespace(src.URL, filterFunc, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return nil, fmt.Errorf("source[%v %v] get namespace failed: %v", src.ReplicaName, src.URL, err)
 		}
@@ -204,7 +204,7 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 		LOG.Info("index namespace list: %v", nsList)
 		// 2. build connection
 		conn, err := utils.NewMongoCommunityConn(src.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return nil, fmt.Errorf("source[%v %v] build connection failed: %v", src.ReplicaName, src.URL, err)
 		}
