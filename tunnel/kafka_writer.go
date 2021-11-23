@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 
 	"github.com/alibaba/MongoShake/v2/collector/configure"
-	"github.com/alibaba/MongoShake/v2/tunnel/kafka"
 	"github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/tunnel/kafka"
 
 	LOG "github.com/vinllen/log4go"
 	bson2 "github.com/vinllen/mongo-go-driver/bson"
@@ -53,7 +53,7 @@ func (tunnel *KafkaWriter) Prepare() bool {
 	var writer *kafka.SyncWriter
 	var err error
 	if !unitTestWriteKafkaFlag && conf.Options.IncrSyncTunnelKafkaDebug == "" {
-		writer, err = kafka.NewSyncWriter(tunnel.RemoteAddr, tunnel.PartitionId)
+		writer, err = kafka.NewSyncWriter(conf.Options.TunnelMongoSslRootCaFile, tunnel.RemoteAddr, tunnel.PartitionId)
 		if err != nil {
 			LOG.Critical("KafkaWriter prepare[%v] create writer error[%v]", tunnel.RemoteAddr, err)
 			return false
@@ -120,7 +120,7 @@ func (tunnel *KafkaWriter) encode(id int) {
 			// write the raw oplog directly
 			for i, log := range message.RawLogs {
 				tunnel.outputChan[id] <- outputLog{
-					isEnd: i == len(log) - 1,
+					isEnd: i == len(log)-1,
 					log:   log,
 				}
 			}
@@ -154,7 +154,7 @@ func (tunnel *KafkaWriter) encode(id int) {
 				}
 
 				tunnel.outputChan[id] <- outputLog{
-					isEnd: i == len(message.ParsedLogs) - 1,
+					isEnd: i == len(message.ParsedLogs)-1,
 					log:   encode,
 				}
 			}
@@ -177,7 +177,7 @@ func (tunnel *KafkaWriter) encode(id int) {
 				binary.Write(byteBuffer, binary.BigEndian, log)
 
 				tunnel.outputChan[id] <- outputLog{
-					isEnd: i == len(message.ParsedLogs) - 1,
+					isEnd: i == len(message.ParsedLogs)-1,
 					log:   byteBuffer.Bytes(),
 				}
 			}
