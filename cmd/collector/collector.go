@@ -60,11 +60,13 @@ func main() {
 		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
 	}
 
-	if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogFlush, *verbose); err != nil {
+	if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName,
+		conf.Options.LogLevel, conf.Options.LogFlush, *verbose); err != nil {
 		crash(fmt.Sprintf("initial log.dir[%v] log.name[%v] failed[%v].", conf.Options.LogDirectory,
 			conf.Options.LogFileName, err), -2)
 	} else {
-		LOG.Info("log init succ. log.dir[%v] log.name[%v] log.level[%v]", conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel)
+		LOG.Info("log init succ. log.dir[%v] log.name[%v] log.level[%v]",
+			conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel)
 	}
 	LOG.Info("MongoDB Version Source[%v] Target[%v]", conf.Options.SourceDBVersion, conf.Options.TargetDBVersion)
 

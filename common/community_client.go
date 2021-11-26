@@ -6,7 +6,9 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	bson2 "github.com/vinllen/mongo-go-driver/bson"
 	"io/ioutil"
+	"time"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mongo-go-driver/mongo"
@@ -128,6 +130,8 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 	// set timeout
 	if !timeout {
 		clientOps.SetConnectTimeout(0)
+	} else {
+		clientOps.SetConnectTimeout(20 * time.Minute)
 	}
 
 	// create default context
@@ -158,4 +162,98 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 func (conn *MongoCommunityConn) Close() {
 	LOG.Info("Close client with %s", BlockMongoUrlPassword(conn.URL, "***"))
 	conn.Client.Disconnect(conn.ctx)
+}
+
+func (conn *MongoCommunityConn) IsGood() bool {
+	if err := conn.Client.Ping(nil, nil); err != nil {
+		return false
+	}
+
+	return true
+}
+
+func (conn *MongoCommunityConn) HasOplogNs() bool {
+	if ns, err := conn.Client.Database("local").ListCollectionNames(nil, bson2.M{}); err == nil {
+		for _, table := range ns {
+			if table == OplogNS {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (conn *MongoCommunityConn) AcquireReplicaSetName() string {
+
+	res, err := conn.Client.Database("admin").
+		RunCommand(conn.ctx, bson2.D{{"replSetGetStatus", 1}}).DecodeBytes()
+	if err != nil {
+		LOG.Warn("Replica set name not found in system.replset: %v", err)
+		return ""
+	}
+
+	id, ok := res.Lookup("set").StringValueOK()
+	if !ok {
+		LOG.Warn("Replica set name not found, is empty")
+		return ""
+	}
+
+	return id
+}
+
+func (conn *MongoCommunityConn) HasUniqueIndex() (bool, string, string) {
+	checkNs := make([]NS, 0, 128)
+	var databases []string
+	var err error
+	if databases, err = conn.Client.ListDatabaseNames(nil, bson2.M{}); err != nil {
+		LOG.Critical("Couldn't get databases from remote server: %v", err)
+		return false, "", ""
+	}
+
+	for _, db := range databases {
+		if db != "admin" && db != "local" {
+			coll, _ := conn.Client.Database(db).ListCollectionNames(nil, bson2.M{})
+			for _, c := range coll {
+				if c != "system.profile" {
+					// push all collections
+					checkNs = append(checkNs, NS{Database: db, Collection: c})
+				}
+			}
+		}
+	}
+
+	for _, ns := range checkNs {
+		cursor, _ := conn.Client.Database(ns.Database).Collection(ns.Collection).Indexes().List(nil)
+		for cursor.Next(nil) {
+
+
+			unique, uerr := cursor.Current.LookupErr("unique")
+			if uerr == nil && unique.Boolean() == true {
+				LOG.Info("Found unique index %s on %s.%s in auto shard mode",
+					cursor.Current.Lookup("name").StringValue(), ns.Database, ns.Collection)
+				return true, ns.Database, ns.Collection
+			}
+		}
+	}
+
+	return false, "", ""
+}
+
+func (conn *MongoCommunityConn) CurrentDate() int64 {
+
+	res, err := conn.Client.Database("admin").
+		RunCommand(conn.ctx, bson2.D{{"replSetGetStatus", 1}}).DecodeBytes()
+	if err != nil {
+		LOG.Warn("Replica set operationTime not found in system.replset: %v", err)
+		return 0
+	}
+
+	date, ok := res.Lookup("operationTime").DateTimeOK()
+	if !ok {
+		LOG.Warn("Replica set operationTime not found, is empty")
+		return 0
+	}
+
+	return date
 }

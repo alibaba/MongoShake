@@ -10,20 +10,19 @@ import (
 	"github.com/vinllen/mgo/bson"
 )
 
-func HandleDuplicated(collection *mgo.Collection, records []*OplogRecord, op int8) {
+func HandleDuplicated(conn *utils.MongoCommunityConn, coll string, records []*OplogRecord, op int8) {
 	for _, record := range records {
 		log := record.original.partialLog
 		switch conf.Options.IncrSyncConflictWriteTo {
 		case DumpConflictToDB:
-			// general process : write record to specific database
-			session := collection.Database.Session
 			// discard conflict again
-			session.DB(utils.APPConflictDatabase).C(collection.Name).Insert(log.Object)
+			conn.Client.Database(utils.APPConflictDatabase).Collection(coll).InsertOne(nil, log.Object)
 		case DumpConflictToSDK, NoDumpConflict:
 		}
 
 		if utils.IncrSentinelOptions.DuplicatedDump {
-			SnapshotDiffer{op: op, log: log}.dump(collection)
+			// TODO(zhangst)
+			//SnapshotDiffer{op: op, log: log}.dump(collection)
 		}
 	}
 }

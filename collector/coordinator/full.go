@@ -106,9 +106,9 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 
 	// create target client
 	toUrl := conf.Options.TunnelAddress[0]
-	var toConn *utils.MongoConn
+	var toConn *utils.MongoCommunityConn
 	if !conf.Options.FullSyncExecutorDebug {
-		if toConn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, true,
+		if toConn, err = utils.NewMongoCommunityConn(toUrl, utils.VarMongoConnectModePrimary, true,
 			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, conf.Options.TunnelMongoSslRootCaFile); err != nil {
 			return err
 		}

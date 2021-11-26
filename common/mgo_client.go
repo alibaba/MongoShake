@@ -18,7 +18,8 @@ type MongoConn struct {
 	URL     string
 }
 
-func NewMongoConn(url string, connectMode string, timeout bool, readConcern, writeConcern string, rootCaFile string) (*MongoConn, error) {
+func NewMongoConn(url string, connectMode string, timeout bool, readConcern, writeConcern string,
+	rootCaFile string) (*MongoConn, error) {
 	if connectMode == VarMongoConnectModeStandalone {
 		url += "?connect=direct"
 	}

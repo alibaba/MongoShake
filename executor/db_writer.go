@@ -44,21 +44,21 @@ type BasicWriter interface {
 	doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error
 }
 
-func NewDbWriter(session *mgo.Session, metadata bson.M, bulkInsert bool, fullFinishTs int64) BasicWriter {
+func NewDbWriter(conn *utils.MongoCommunityConn, metadata bson.M, bulkInsert bool, fullFinishTs int64) BasicWriter {
 	if !bulkInsert { // bulk insertion disable
 		// LOG.Info("db writer create: SingleWriter")
-		return &SingleWriter{session: session, fullFinishTs: fullFinishTs}
+		return &SingleWriter{conn: conn, fullFinishTs: fullFinishTs}
 	} else if _, ok := metadata["g"]; ok { // has gid
 		// LOG.Info("db writer create: CommandWriter")
-		return &CommandWriter{session: session, fullFinishTs: fullFinishTs}
+		return &CommandWriter{conn: conn, fullFinishTs: fullFinishTs}
 	}
 	// LOG.Info("db writer create: BulkWriter")
-	return &BulkWriter{session: session, fullFinishTs: fullFinishTs} // bulk insertion enable
+	return &BulkWriter{conn: conn, fullFinishTs: fullFinishTs} // bulk insertion enable
 }
 
-func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.Session) error {
+func RunCommand(database, operation string, log *oplog.PartialLog, conn *utils.MongoCommunityConn) error {
 	defer LOG.Debug("RunCommand run DDL: %v", log.Dump(nil, true))
-	dbHandler := session.DB(database)
+	dbHandler := conn.Client.Database(database)
 	LOG.Info("RunCommand run DDL with type[%s]", operation)
 	var err error
 	switch operation {
@@ -83,7 +83,7 @@ func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 				innerBsonD,
 			},
 		})
-		err = dbHandler.Run(indexes, nil)
+		err = dbHandler.RunCommand(nil, indexes).Err()
 	case "applyOps":
 		/*
 		 * Strictly speaking, we should handle applysOps nested case, but it is
@@ -121,9 +121,9 @@ func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 			}
 			store = append(store, ele)
 		}
-		err = dbHandler.Run(store, nil)
+		err = dbHandler.RunCommand(nil, store).Err()
 	case "dropDatabase":
-		err = dbHandler.DropDatabase()
+		err = dbHandler.Drop(nil)
 	case "create":
 		if oplog.GetKey(log.Object, "autoIndexId") != nil &&
 			oplog.GetKey(log.Object, "idIndex") != nil {
@@ -149,9 +149,9 @@ func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 		fallthrough
 	case "emptycapped":
 		if !oplog.IsRunOnAdminCommand(operation) {
-			err = dbHandler.Run(log.Object, nil)
+			err = dbHandler.RunCommand(nil, log.Object).Err()
 		} else {
-			err = session.DB("admin").Run(log.Object, nil)
+			err = conn.Client.Database("admin").RunCommand(nil, log.Object).Err()
 		}
 	default:
 		LOG.Info("type[%s] not found, use applyOps", operation)
@@ -174,7 +174,7 @@ func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 				log.Dump(nil, true),
 			},
 		})
-		err = dbHandler.Run(store, nil)
+		err = dbHandler.RunCommand(nil, store).Err()
 	}
 
 	return err

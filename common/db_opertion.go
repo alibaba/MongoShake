@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"github.com/vinllen/mongo-go-driver/bson/primitive"
 	"math"
 	"strconv"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
 	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	"github.com/vinllen/mongo-go-driver/mongo/options"
 	"sort"
 )
 
@@ -44,32 +46,32 @@ func (ms *MongoSource) String() string {
 }
 
 // get db version, return string with format like "3.0.1"
-func GetDBVersion(session *mgo.Session) (string, error) {
-	var result bson.M
-	err := session.Run(bson.D{{"buildInfo", 1}}, &result)
+func GetDBVersion(conn * MongoCommunityConn) (string, error) {
+
+	res, err := conn.Client.Database("admin").
+		RunCommand(conn.ctx, bson2.D{{"buildInfo", 1}}).DecodeBytes()
 	if err != nil {
 		return "", err
 	}
 
-	if version, ok := result["version"]; ok {
-		if s, ok := version.(string); ok {
-			return s, nil
-		}
-		return "", fmt.Errorf("version type assertion error[%v]", version)
+	ver, ok := res.Lookup("version").StringValueOK()
+	if !ok {
+		return "", fmt.Errorf("buildInfo do not have version")
 	}
-	return "", fmt.Errorf("version not found")
+
+	return ver, nil
 }
 
 // get current db version and compare to threshold. Return whether the result
 // is bigger or equal to the input threshold.
-func GetAndCompareVersion(session *mgo.Session, threshold string, compare string) (bool, error) {
+func GetAndCompareVersion(conn * MongoCommunityConn, threshold string, compare string) (bool, error) {
 	var err error
 	if compare == "" {
-		if session == nil {
+		if conn == nil {
 			return false, nil
 		}
 
-		compare, err = GetDBVersion(session)
+		compare, err = GetDBVersion(conn)
 		if err != nil {
 			return false, err
 		}
@@ -114,7 +116,30 @@ func ApplyOpsFilter(key string) bool {
 	return false
 }
 
+func getOplogTimestamp(conn *MongoCommunityConn, sortType int) (bson.MongoTimestamp, error) {
+	var result bson2.M
+	opts := options.FindOne().SetSort(bson2.D{{"$natural", sortType}})
+	err := conn.Client.Database(localDB).Collection(OplogNS).FindOne(nil, bson2.M{}, opts).Decode(&result)
+	if err != nil {
+		return 0, err
+	}
+
+	return bson.MongoTimestamp(int64(result["ts"].(primitive.Timestamp).T) << 32 +
+		int64(result["ts"].(primitive.Timestamp).I)), nil
+}
+
 // get newest oplog
+func GetNewestTimestampByConn(conn *MongoCommunityConn) (bson.MongoTimestamp, error) {
+
+	return getOplogTimestamp(conn, -1)
+}
+
+// get oldest oplog
+func GetOldestTimestampByConn(conn *MongoCommunityConn) (bson.MongoTimestamp, error) {
+
+	return getOplogTimestamp(conn, 1)
+}
+
 func GetNewestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, error) {
 	var retMap map[string]interface{}
 	err := session.DB(localDB).C(OplogNS).Find(bson.M{}).Sort("-$natural").Limit(1).One(&retMap)
@@ -124,7 +149,6 @@ func GetNewestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, err
 	return retMap[QueryTs].(bson.MongoTimestamp), nil
 }
 
-// get oldest oplog
 func GetOldestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, error) {
 	var retMap map[string]interface{}
 	err := session.DB(localDB).C(OplogNS).Find(bson.M{}).Limit(1).One(&retMap)
@@ -135,20 +159,20 @@ func GetOldestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, err
 }
 
 func GetNewestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (bson.MongoTimestamp, error) {
-	var conn *MongoConn
+	var conn *MongoCommunityConn
 	var err error
-	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true,
+	if conn, err = NewMongoCommunityConn(url, VarMongoConnectModeSecondaryPreferred, true,
 		ReadWriteConcernDefault, ReadWriteConcernDefault, sslRootFile); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()
 
 	if fromMongoS {
-		date := conn.CurrentDate()
+		date := bson.MongoTimestamp(conn.CurrentDate())
 		return date, nil
 	}
 
-	return GetNewestTimestampBySession(conn.Session)
+	return GetNewestTimestampByConn(conn)
 }
 
 func GetOldestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (bson.MongoTimestamp, error) {
@@ -156,15 +180,15 @@ func GetOldestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (b
 		return 0, nil
 	}
 
-	var conn *MongoConn
+	var conn *MongoCommunityConn
 	var err error
-	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true,
+	if conn, err = NewMongoCommunityConn(url, VarMongoConnectModeSecondaryPreferred, true,
 		ReadWriteConcernDefault, ReadWriteConcernDefault, sslRootFile); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()
 
-	return GetOldestTimestampBySession(conn.Session)
+	return GetOldestTimestampByConn(conn)
 }
 
 // deprecated

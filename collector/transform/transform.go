@@ -2,6 +2,7 @@ package transform
 
 import (
 	"fmt"
+	bson2 "github.com/vinllen/mongo-go-driver/bson"
 	"regexp"
 	"strings"
 
@@ -97,6 +98,41 @@ func TransformDBRef(logObject bson.D, db string, nsTrans *NamespaceTransform) bs
 		switch v := ele.Value.(type) {
 		case bson.D:
 			ele.Value = TransformDBRef(v, db, nsTrans)
+		default:
+			// do nothing
+		}
+	}
+	return logObject
+}
+
+func TransformDBRefBson2(logObject bson2.D, db string, nsTrans *NamespaceTransform) bson2.D {
+	if len(logObject) == 0 {
+		return logObject
+	}
+
+	if logObject[0].Key == "$ref" {
+		// if has DBRef, [0] must be "$ref"
+		collection := logObject[0].Value.(string)
+		if len(logObject) > 2 && logObject[2].Key == "$db" {
+			db = logObject[2].Value.(string)
+		}
+
+		ns := fmt.Sprintf("%s.%s", db, collection)
+		transformNs := nsTrans.Transform(ns)
+		tuple := strings.SplitN(transformNs, ".", 2)
+		logObject[0].Value = tuple[1]
+		if len(logObject) > 2 {
+			logObject[2].Value = tuple[0]
+		} else {
+			logObject = append(logObject, bson2.E{"$db", tuple[0]})
+		}
+		return logObject
+	}
+
+	for _, ele := range logObject {
+		switch v := ele.Value.(type) {
+		case bson2.D:
+			ele.Value = TransformDBRefBson2(v, db, nsTrans)
 		default:
 			// do nothing
 		}

@@ -3,6 +3,8 @@ package sharding
 import (
 	"fmt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	"github.com/vinllen/mongo-go-driver/mongo"
 	"strings"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
@@ -31,6 +33,28 @@ const (
 
 // get balancer status from config server
 func GetBalancerStatusByUrl(csUrl string) (bool, error) {
+	var conn *utils.MongoCommunityConn
+	var err error
+	if conn, err = utils.NewMongoCommunityConn(csUrl, utils.VarMongoConnectModePrimary, true,
+		utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault,
+		conf.Options.MongoSslRootCaFile); conn == nil || err != nil {
+		return true, err
+	}
+	defer conn.Close()
+
+	var result bson2.M
+	err = conn.Client.Database(ConfigDB).Collection(SettingsCol).FindOne(nil,
+		bson2.M{"_id": "balancer"}, nil).Decode(&result)
+	if err != nil && err != mongo.ErrNoDocuments {
+		return true, err
+	}
+	if stopped, ok := result["stopped"].(bool); ok {
+		return !stopped, nil
+	} else {
+		return true, nil
+	}
+}
+func GetBalancerStatusByUrlMgo(csUrl string) (bool, error) {
 	var conn *utils.MongoConn
 	var err error
 	if conn, err = utils.NewMongoConn(csUrl, utils.VarMongoConnectModePrimary, true,

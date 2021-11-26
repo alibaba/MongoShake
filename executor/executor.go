@@ -14,7 +14,6 @@ import (
 
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
 )
 
@@ -179,7 +178,8 @@ type Executor struct {
 	finisher   *sync.WaitGroup
 
 	// mongo connection
-	session *mgo.Session
+	//session *mgo.Session
+	conn * utils.MongoCommunityConn
 
 	// bulk insert or single insert
 	bulkInsert bool

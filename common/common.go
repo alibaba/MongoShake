@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/vinllen/mongo-go-driver/mongo"
 	"os"
 	"strings"
 
@@ -187,4 +188,22 @@ func MarshalStruct(input interface{}) string {
 		return fmt.Sprintf("marshal struct failed[%v]", err)
 	}
 	return string(ret)
+}
+
+
+func DuplicateKey(err error) bool {
+
+	if we, ok := err.(mongo.WriteException); ok {
+		if len(we.WriteErrors) > 0 && we.WriteErrors[0].Code == 11000 {
+			return true
+		}
+	}
+
+	if we, ok := err.(mongo.BulkWriteException); ok {
+		if len(we.WriteErrors) > 0 && we.WriteErrors[0].Code == 11000 {
+			return true
+		}
+	}
+
+	return false
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
+	bson2 "github.com/vinllen/mongo-go-driver/bson"
 	"sync/atomic"
 
 	LOG "github.com/vinllen/log4go"
@@ -20,7 +21,8 @@ type DocumentSplitter struct {
 	src           string               // source mongo address url
 	sslRootCaFile string               // source root ca ssl
 	ns            utils.NS             // namespace
-	conn          *utils.MongoConn     // connection
+	//conn          *utils.MongoConn     // connection
+	client        *utils.MongoCommunityConn
 	readerChan    chan *DocumentReader // reader chan
 	pieceByteSize uint64               // each piece max byte size
 	count         uint64               // total document number
@@ -37,7 +39,7 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 	// create connection
 	var err error
 	// disable timeout
-	ds.conn, err = utils.NewMongoConn(ds.src, conf.Options.MongoConnectMode, false,
+	ds.client, err = utils.NewMongoCommunityConn(ds.src, conf.Options.MongoConnectMode, false,
 		utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, sslRootCaFile)
 	if err != nil {
 		LOG.Error("splitter[%s] connection mongo[%v] failed[%v]", ds,
@@ -51,7 +53,9 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 		Size        float64 `bson:"size"`
 		StorageSize float64 `bson:"storageSize"`
 	}
-	if err := ds.conn.Session.DB(ds.ns.Database).Run(bson.M{"collStats": ds.ns.Collection}, &res); err != nil {
+	if err:= ds.client.Client.Database(ds.ns.Database).RunCommand(nil,
+		bson2.D{{"collStats", ds.ns.Collection}}).Decode(&res); err != nil {
+
 		LOG.Error("splitter[%s] connection mongo[%v] failed[%v]", ds,
 			utils.BlockMongoUrlPassword(ds.src, "***"), err)
 		return nil
@@ -62,6 +66,9 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 		// at most 8GB per chunk
 		ds.pieceByteSize = 8 * utils.GB
 	}
+
+	LOG.Info("NewDocumentSplitter db[%v] col[%v] res[%v], pieceByteSize[%v]",
+		ds.ns.Database, ds.ns.Collection, res, ds.pieceByteSize)
 
 	if conf.Options.FullSyncReaderParallelThread <= 1 {
 		ds.readerChan = make(chan *DocumentReader, 1)
@@ -77,8 +84,9 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 	return ds
 }
 
+
 func (ds *DocumentSplitter) Close() {
-	ds.conn.Close()
+	ds.client.Close()
 }
 
 func (ds *DocumentSplitter) String() string {
@@ -102,12 +110,18 @@ func (ds *DocumentSplitter) Run() error {
 	LOG.Info("splitter[%s] enable split, waiting splitVector return...", ds)
 
 	var res bson.M
-	err := ds.conn.Session.DB(ds.ns.Database).Run(bson.D{
+	err := ds.client.Client.Database(ds.ns.Database).RunCommand(nil, bson2.D{
 		{"splitVector", ds.ns.Str()},
-		{"keyPattern", bson.M{conf.Options.FullSyncReaderParallelIndex: 1}},
+		{"keyPattern", bson2.M{conf.Options.FullSyncReaderParallelIndex: 1}},
 		// {"maxSplitPoints", ds.pieceNumber - 1},
 		{"maxChunkSize", ds.pieceByteSize / utils.MB},
-	}, &res)
+	}).Decode(res)
+	//err := ds.conn.Session.DB(ds.ns.Database).Run(bson.D{
+	//	{"splitVector", ds.ns.Str()},
+	//	{"keyPattern", bson.M{conf.Options.FullSyncReaderParallelIndex: 1}},
+	//	// {"maxSplitPoints", ds.pieceNumber - 1},
+	//	{"maxChunkSize", ds.pieceByteSize / utils.MB},
+	//}, &res)
 	// if failed, do not panic, run single thread fetching
 	if err != nil {
 		LOG.Warn("splitter[%s] run splitVector failed[%v], give up parallel fetching", ds, err)
@@ -180,9 +194,9 @@ func parseDocKeyValue(x interface{}) (string, interface{}, error) {
 }
 
 // @deprecated
-func (ds *DocumentSplitter) GetIndexes() ([]mgo.Index, error) {
-	return ds.conn.Session.DB(ds.ns.Database).C(ds.ns.Collection).Indexes()
-}
+//func (ds *DocumentSplitter) GetIndexes() ([]mgo.Index, error) {
+//	return ds.conn.Session.DB(ds.ns.Database).C(ds.ns.Collection).Indexes()
+//}
 
 /*************************************************/
 // DocumentReader: the reader of single piece
@@ -246,9 +260,9 @@ func (reader *DocumentReader) String() string {
 }
 
 // NextDoc returns an document by raw bytes which is []byte
-func (reader *DocumentReader) NextDoc() (doc *bson.Raw, err error) {
+func (reader *DocumentReader) NextDoc() (doc *bson2.D, doc_len int, err error) {
 	if err := reader.ensureNetwork(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	atomic.AddInt32(&reader.concurrency, 1)
@@ -257,27 +271,26 @@ func (reader *DocumentReader) NextDoc() (doc *bson.Raw, err error) {
 	if !reader.docCursor.Next(reader.ctx) {
 		if err := reader.docCursor.Err(); err != nil {
 			reader.releaseCursor()
-			return nil, err
+			return nil, 0, err
 		} else {
 			LOG.Info("reader[%s] finish", reader.String())
-			return nil, nil
+			return nil, 0, nil
 		}
 	}
 
-	doc = new(bson.Raw)
-	err = bson.Unmarshal(reader.docCursor.Current, doc)
+	doc = new(bson2.D)
+	err = reader.docCursor.Decode(doc)
+	doc_len = len(reader.docCursor.Current)
+	//doc = new(bson.Raw)
+	//err = bson.Unmarshal(reader.docCursor.Current, doc)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	/*if conf.Options.LogLevel == utils.VarLogLevelDebug {
-		var docParsed bson.M
-		bson.Unmarshal(doc.Data, &docParsed)
-		LOG.Debug("reader[%v] read doc[%v] concurrency[%d] ts[%v]", reader.ns, docParsed["_id"],
-			atomic.LoadInt32(&reader.concurrency), time.Now().Unix())
-	}*/
-	// err = reader.docCursor.Decode(doc)
-	return doc, err
+	LOG.Debug("zhangst NextDoc-reader bson2.D[%v] bson2.D.len[%v] bson2.Raw.len[%v] bons.raw.data.len[%v]",
+		doc, len(*doc), len(reader.docCursor.Current), len(reader.docCursor.Current))
+
+	return doc, doc_len, err
 }
 
 // deprecate, used for mgo

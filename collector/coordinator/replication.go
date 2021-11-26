@@ -107,15 +107,17 @@ func (coordinator *ReplicationCoordinator) Run() error {
 }
 
 func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
-	var conn *utils.MongoConn
+	var conn *utils.MongoCommunityConn
+	//var conn *utils.MongoConn
 	var err error
 	var hasUniqIndex = false
 	rs := map[string]int{}
 
 	// try to connect CheckpointStorage
 	checkpointStorageUrl := conf.Options.CheckpointStorageUrl
-	if conn, err = utils.NewMongoConn(checkpointStorageUrl, utils.VarMongoConnectModePrimary, true,
-		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.CheckpointStorageUrlMongoSslRootCaFile); conn == nil || !conn.IsGood() || err != nil {
+	if conn, err = utils.NewMongoCommunityConn(checkpointStorageUrl, utils.VarMongoConnectModePrimary, true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault,
+		conf.Options.CheckpointStorageUrlMongoSslRootCaFile); conn == nil || !conn.IsGood() || err != nil {
 		LOG.Critical("Connect checkpointStorageUrl[%v] error[%v]. Please add primary node into 'mongo_urls' "+
 			"if 'context.storage.url' is empty", checkpointStorageUrl, err)
 		return err
@@ -123,9 +125,13 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	conn.Close()
 
 	for i, src := range coordinator.MongoD {
-		if conn, err = utils.NewMongoConn(src.URL, conf.Options.MongoConnectMode, true,
-			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile); conn == nil || !conn.IsGood() || err != nil {
-			LOG.Critical("Connect mongo server error. %v, url : %s. See https://github.com/alibaba/MongoShake/wiki/FAQ#q-how-to-solve-the-oplog-tailer-initialize-failed-no-reachable-servers-error", err, src.URL)
+		if conn, err = utils.NewMongoCommunityConn(src.URL, conf.Options.MongoConnectMode, true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault,
+			conf.Options.MongoSslRootCaFile); conn == nil || !conn.IsGood() || err != nil {
+
+			LOG.Critical("Connect mongo server error. %v, url : %s. " +
+				"See https://github.com/alibaba/MongoShake/wiki/FAQ" +
+				"#q-how-to-solve-the-oplog-tailer-initialize-failed-no-reachable-servers-error", err, src.URL)
 			return err
 		}
 
@@ -134,9 +140,12 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 			// conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog &&
 			conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog &&
 			!conn.HasOplogNs() {
+
 			LOG.Critical("There has no oplog collection in mongo db server")
 			conn.Close()
-			return errors.New("no oplog ns in mongo. See https://github.com/alibaba/MongoShake/wiki/FAQ#q-how-to-solve-the-oplog-tailer-initialize-failed-no-oplog-ns-in-mongo-error")
+			return errors.New("no oplog ns in mongo. " +
+				"See https://github.com/alibaba/MongoShake/wiki/FAQ" +
+				"#q-how-to-solve-the-oplog-tailer-initialize-failed-no-oplog-ns-in-mongo-error")
 		}
 
 		// check if there has dup server every replica set in RS or Shard
@@ -158,7 +167,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 
 		// look around if there has unique index
 		if !hasUniqIndex && conf.Options.IncrSyncShardKey == oplog.ShardAutomatic {
-			hasUniqIndex = conn.HasUniqueIndex()
+			hasUniqIndex,_,_ = conn.HasUniqueIndex()
 		}
 		// doesn't reuse current connection
 		conn.Close()

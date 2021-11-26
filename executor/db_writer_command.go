@@ -2,7 +2,9 @@ package executor
 
 import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
+	bson2 "github.com/vinllen/mongo-go-driver/bson"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
@@ -12,7 +14,7 @@ import (
 // use run_command to execute command
 type CommandWriter struct {
 	// mongo connection
-	session *mgo.Session
+	conn *utils.MongoCommunityConn
 	// init sync finish timestamp
 	fullFinishTs int64
 }
@@ -24,19 +26,25 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.M, 
 		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
 		newObject := log.original.partialLog.Object
 		inserts = append(inserts, newObject)
-		LOG.Debug("writer: insert %v", log.original.partialLog)
+		LOG.Debug("command_writer:: insert %v", log.original.partialLog)
 	}
-	dbHandle := cw.session.DB(database)
+	dbHandle := cw.conn.Client.Database(database)
+	//session := new(mgo.Session)
+	//dbHandle := session.DB(database)
 
 	var err error
-	if err = dbHandle.RunCommand(
-		"insert",
-		bson.D{{"insert", collection},
-			{"bypassDocumentValidation", false},
-			{"documents", inserts},
-			{"ordered", ExecuteOrdered}},
-		metadata,
-		bson.M{}, nil); err == nil {
+	if err = dbHandle.RunCommand(nil, bson2.D{{"insert", collection},
+		{"bypassDocumentValidation", false},
+		{"documents", inserts},
+		{"ordered", ExecuteOrdered}}).Err(); err == nil {
+	//if err = dbHandle.RunCommand(
+	//	"insert",
+	//	bson.D{{"insert", collection},
+	//		{"bypassDocumentValidation", false},
+	//		{"documents", inserts},
+	//		{"ordered", ExecuteOrdered}},
+	//	metadata,
+	//	bson.M{}, nil); err == nil {
 		return nil
 	}
 
@@ -49,7 +57,7 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.M, 
 	}
 
 	if mgo.IsDup(err) {
-		HandleDuplicated(dbHandle.C(collection), oplogs, OpInsert)
+		HandleDuplicated(cw.conn, collection, oplogs, OpInsert)
 		// update on duplicated key occur
 		if dupUpdate {
 			LOG.Info("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
@@ -76,18 +84,22 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 		} else {
 			LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
 		}
-		LOG.Debug("writer: updateOnInsert %v", log.original.partialLog)
+		LOG.Debug("command_writer:: updateOnInsert %v", log.original.partialLog)
 	}
 
 	var err error
-	if err = cw.session.DB(database).RunCommand(
-		"update",
-		bson.D{{"update", collection},
-			{"bypassDocumentValidation", false},
-			{"updates", updates},
-			{"ordered", ExecuteOrdered}},
-		metadata,
-		bson.M{}, nil); err == nil {
+	if err = cw.conn.Client.Database(database).RunCommand(nil, bson2.D{{"update", collection},
+		{"bypassDocumentValidation", false},
+		{"updates", updates},
+		{"ordered", ExecuteOrdered}}).Err(); err == nil {
+	//if err = cw.session.DB(database).RunCommand(
+	//	"update",
+	//	bson.D{{"update", collection},
+	//		{"bypassDocumentValidation", false},
+	//		{"updates", updates},
+	//		{"ordered", ExecuteOrdered}},
+	//	metadata,
+	//	bson.M{}, nil); err == nil {
 		return nil
 	}
 
@@ -120,19 +132,23 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.M,
 			"u":      log.original.partialLog.Object,
 			"upsert": upsert,
 			"multi":  false})
-		LOG.Debug("writer: update %v", log.original.partialLog)
+		LOG.Debug("command_writer:: update %v", log.original.partialLog)
 	}
 
 	var err error
-	dbHandle := cw.session.DB(database)
-	if err = dbHandle.RunCommand(
-		"update",
-		bson.D{{"update", collection},
-			{"bypassDocumentValidation", false},
-			{"updates", updates},
-			{"ordered", ExecuteOrdered}},
-		metadata,
-		bson.M{}, nil); err == nil {
+	if err = cw.conn.Client.Database(database).RunCommand(nil, bson2.D{{"update", collection},
+		{"bypassDocumentValidation", false},
+		{"updates", updates},
+		{"ordered", ExecuteOrdered}}).Err(); err == nil {
+	//dbHandle := cw.session.DB(database)
+	//if err = dbHandle.RunCommand(
+	//	"update",
+	//	bson.D{{"update", collection},
+	//		{"bypassDocumentValidation", false},
+	//		{"updates", updates},
+	//		{"ordered", ExecuteOrdered}},
+	//	metadata,
+	//	bson.M{}, nil); err == nil {
 
 		return nil
 	}
@@ -146,7 +162,7 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.M,
 
 	// ignore dup error
 	if mgo.IsDup(err) {
-		HandleDuplicated(dbHandle.C(collection), oplogs, OpUpdate)
+		HandleDuplicated(cw.conn, collection, oplogs, OpUpdate)
 		return nil
 	}
 	return err
@@ -158,16 +174,19 @@ func (cw *CommandWriter) doDelete(database, collection string, metadata bson.M,
 	var err error
 	for _, log := range oplogs {
 		deleted = append(deleted, bson.M{"q": log.original.partialLog.Object, "limit": 0})
-		LOG.Debug("writer: delete %v", log.original.partialLog)
+		LOG.Debug("command_writer:: delete %v", log.original.partialLog)
 	}
 
-	if err = cw.session.DB(database).RunCommand(
-		"delete",
-		bson.D{{"delete", collection},
-			{"deletes", deleted},
-			{"ordered", ExecuteOrdered}},
-		metadata,
-		bson.M{}, nil); err == nil {
+	if err = cw.conn.Client.Database(database).RunCommand(nil, bson2.D{{"delete", collection},
+		{"deletes", deleted},
+		{"ordered", ExecuteOrdered}}).Err(); err == nil {
+	//if err = cw.session.DB(database).RunCommand(
+	//	"delete",
+	//	bson.D{{"delete", collection},
+	//		{"deletes", deleted},
+	//		{"ordered", ExecuteOrdered}},
+	//	metadata,
+	//	bson.M{}, nil); err == nil {
 
 		return nil
 	}
@@ -201,7 +220,7 @@ func (cw *CommandWriter) doCommand(database string, metadata bson.M, oplogs []*O
 		} else {
 			// exec.batchExecutor.ReplMetric.AddFilter(1)
 		}
-		LOG.Debug("writer: command %v", log.original.partialLog)
+		LOG.Debug("command_writer:: command %v", log.original.partialLog)
 	}
 	return nil
 }
@@ -215,12 +234,14 @@ func (cw *CommandWriter) applyOps(database string, metadata bson.M, oplogs []*op
 	result := &Result{}
 	succeed := 0
 	for succeed < len(oplogs) {
-		if err := cw.session.DB(database).RunCommand(
-			"applyOps",
-			// only one field. therefore use bson.M simply
-			bson.M{"applyOps": oplogs[succeed:]},
-			metadata,
-			bson.M{}, result); err != nil {
+		if err := cw.conn.Client.Database(database).
+			RunCommand(nil, bson2.M{"applyOps": oplogs[succeed:]}).Err(); err != nil {
+		//if err := cw.session.DB(database).RunCommand(
+		//	"applyOps",
+		//	// only one field. therefore use bson.M simply
+		//	bson.M{"applyOps": oplogs[succeed:]},
+		//	metadata,
+		//	bson.M{}, result); err != nil {
 
 			if result.N == 0 {
 				// the first oplog is failed
