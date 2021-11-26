@@ -1,6 +1,11 @@
+2021-11-26 Alibaba Cloud.
+	* version: 2.6.5
+	* BUGFIX: fix ssl conn string #668 #628
+	* BUGFIX: fix password print in log #612
 2021-10-27 Alibaba Cloud.
-        * version: 2.6.5
+	* version: 2.6.5
 	* IMPROVE: support kafka channel ssl
+	* IMPROVE: support only have mongo_s_url
 2021-04-13 Alibaba Cloud.
 	* version: 2.6.4
 	* IMPROVE: parse configuration failed because of column length is bigger
