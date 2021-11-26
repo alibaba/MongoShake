@@ -286,9 +286,7 @@ func (reader *DocumentReader) NextDoc() (doc *bson2.D, doc_len int, err error) {
 	if err != nil {
 		return nil, 0, err
 	}
-
-	LOG.Debug("zhangst NextDoc-reader bson2.D[%v] bson2.D.len[%v] bson2.Raw.len[%v] bons.raw.data.len[%v]",
-		doc, len(*doc), len(reader.docCursor.Current), len(reader.docCursor.Current))
+	
 
 	return doc, doc_len, err
 }
