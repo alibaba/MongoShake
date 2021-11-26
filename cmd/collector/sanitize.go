@@ -280,7 +280,7 @@ func checkConnection() error {
 		_, err := utils.NewMongoConn(mongo, conf.Options.MongoConnectMode, true,
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
-			return fmt.Errorf("connect source mongodb[%v] failed[%v]", mongo, err)
+			return fmt.Errorf("connect source mongodb[%v] failed[%v]", utils.BlockMongoUrlPassword(mongo, "***"), err)
 		}
 	}
 
@@ -289,7 +289,7 @@ func checkConnection() error {
 		_, err := utils.NewMongoConn(conf.Options.MongoCsUrl, utils.VarMongoConnectModeSecondaryPreferred, true,
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
-			return fmt.Errorf("connect config-server[%v] failed[%v]", conf.Options.MongoCsUrl, err)
+			return fmt.Errorf("connect config-server[%v] failed[%v]", utils.BlockMongoUrlPassword(conf.Options.MongoCsUrl, "***"), err)
 		}
 	}
 
@@ -302,7 +302,7 @@ func checkConnection() error {
 			targetConn, err := utils.NewMongoConn(mongo, conf.Options.MongoConnectMode, true,
 				utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.TunnelMongoSslRootCaFile)
 			if err != nil {
-				return fmt.Errorf("connect target tunnel mongodb[%v] failed[%v]", mongo, err)
+				return fmt.Errorf("connect target tunnel mongodb[%v] failed[%v]", utils.BlockMongoUrlPassword(mongo, "***"), err)
 			}
 
 			// set target version
@@ -435,7 +435,7 @@ func checkConflict() error {
 		conn, err := utils.NewMongoConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
-			return fmt.Errorf("connect source[%v] failed[%v]", source, err)
+			return fmt.Errorf("connect source[%v] failed[%v]", utils.BlockMongoUrlPassword(source, "***"), err)
 		}
 		if isOk, err := utils.GetAndCompareVersion(conn.Session, "4.0.1", conf.Options.SourceDBVersion); err != nil {
 			return fmt.Errorf("compare source[%v] to v4.0.1 failed[%v]", source, err)
