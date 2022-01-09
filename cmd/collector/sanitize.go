@@ -86,13 +86,17 @@ func checkDefaultValue() error {
 		conf.Options.SyncMode != utils.VarSyncModeIncr {
 		return fmt.Errorf("sync_mode should in {all, full, incr}")
 	}
-	if len(conf.Options.MongoUrls) == 0 {
-		return fmt.Errorf("mongo_urls shouldn't be empty")
-	} else if len(conf.Options.MongoUrls) > 1 {
-		if len(conf.Options.MongoSUrl) == 0 {
-			return fmt.Errorf("mongo_s_urls shouldn't be empty when source is sharding")
+
+	if conf.Options.IncrSyncMongoFetchMethod != utils.VarIncrSyncMongoFetchMethodChangeStream {
+		if len(conf.Options.MongoUrls) == 0 {
+			return fmt.Errorf("mongo_urls shouldn't be empty")
+		} else if len(conf.Options.MongoUrls) > 1 {
+			if len(conf.Options.MongoSUrl) == 0 {
+				return fmt.Errorf("mongo_s_urls shouldn't be empty when source is sharding")
+			}
 		}
 	}
+
 	if conf.Options.MongoConnectMode == "" {
 		conf.Options.MongoConnectMode = utils.VarMongoConnectModeSecondaryPreferred
 	} else {
@@ -297,9 +301,9 @@ func checkConnection() error {
 	// set source version
 	var source string
 	if len(conf.Options.MongoUrls) > 1 {
-		source = conf.Options.MongoSUrl
-	} else {
 		source = conf.Options.MongoUrls[0]
+	} else {
+		source = conf.Options.MongoSUrl
 	}
 	sourceConn, _ := utils.NewMongoConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault)
@@ -412,9 +416,9 @@ func checkConflict() error {
 
 		var source string
 		if len(conf.Options.MongoUrls) > 1 {
-			source = conf.Options.MongoSUrl
-		} else {
 			source = conf.Options.MongoUrls[0]
+		} else {
+			source = conf.Options.MongoSUrl
 		}
 
 		conn, err := utils.NewMongoConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
