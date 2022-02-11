@@ -23,6 +23,7 @@ type ChangeStreamConn struct {
 	CsHandler *mongo.ChangeStream
 	Ops       *options.ChangeStreamOptions
 	ctx       context.Context
+	conn      *MongoCommunityConn
 }
 
 func NewChangeStreamConn(src string,
@@ -109,6 +110,7 @@ func NewChangeStreamConn(src string,
 		CsHandler: csHandler,
 		Ops:       ops,
 		ctx:       conn.ctx,
+		conn:      conn,
 	}, nil
 }
 
@@ -117,7 +119,14 @@ func (csc *ChangeStreamConn) Close() {
 		csc.CsHandler.Close(csc.ctx)
 		csc.CsHandler = nil
 	}
-	csc.Client = nil
+
+	// 关闭ChangeStream时，同时关闭NewMongoCommunityConn连接
+	if csc.conn != nil {
+		csc.conn.Close()
+	}
+	if csc.Client != nil {
+		csc.Client = nil
+	}
 }
 
 func (csc *ChangeStreamConn) IsNotNil() bool {
