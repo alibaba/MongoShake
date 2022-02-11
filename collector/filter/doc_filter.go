@@ -89,8 +89,10 @@ func (filter *NamespaceFilter) FilterNs(namespace string) bool {
 		}
 	}
 	if filter.whiteRule != "" {
+		// 白名单匹配到则不过滤，未匹配到则过滤
 		if match, _ := regexp.MatchString(filter.whiteRule, namespace); !match {
-			// filter
+			return false
+		} else {
 			return true
 		}
 	}
