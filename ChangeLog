@@ -1,7 +1,9 @@
 2021-11-26 Alibaba Cloud.
-	* version: 2.6.5
+	* version: 2.6.6
 	* BUGFIX: fix ssl conn string #668 #628
 	* BUGFIX: fix password print in log #612
+	* BUGFIX: fix connection leak #693
+	* BUGFIX: fix bug about whiteRule
 2021-10-27 Alibaba Cloud.
 	* version: 2.6.5
 	* IMPROVE: support kafka channel ssl
