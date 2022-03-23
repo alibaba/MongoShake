@@ -124,7 +124,8 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 	}
 
 	if moveChunkFilter.Filter(log) {
-		LOG.Crashf("move chunk oplog found[%v]", log)
+		LOG.Critical("shake exit, must close balancer in sharding + oplog")
+		LOG.Crashf("move chunk oplog found, must close balancer in sharding + oplog [%v]", log)
 		return false
 	}
 
