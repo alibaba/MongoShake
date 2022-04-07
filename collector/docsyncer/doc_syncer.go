@@ -173,7 +173,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 	return nil
 }
 
-func StartIndexSync(indexMap map[utils.NS][]bson2.M, toUrl string,
+func StartIndexSync(indexMap map[utils.NS][]bson2.D, toUrl string,
 	nsTrans *transform.NamespaceTransform, background bool) (syncError error) {
 	if conf.Options.FullSyncExecutorDebug {
 		LOG.Info("full_sync.executor.debug set, no need to sync index")
@@ -182,7 +182,7 @@ func StartIndexSync(indexMap map[utils.NS][]bson2.M, toUrl string,
 
 	type IndexNS struct {
 		ns        utils.NS
-		indexList []bson2.M
+		indexList []bson2.D
 	}
 
 	LOG.Info("start writing index with background[%v], indexMap length[%v]", background, len(indexMap))
@@ -227,14 +227,22 @@ func StartIndexSync(indexMap map[utils.NS][]bson2.M, toUrl string,
 
 				for _, index := range indexNs.indexList {
 					// ignore _id
-					if _, ok := index["key"].(bson2.M)["_id"]; ok {
+					if _, ok := index.Map()["key"].(bson2.D).Map()["_id"]; ok {
 						continue
 					}
-
-					index["background"] = background
+					// use bson2.D not bson2.M (Index creation is order sensitive)
+					newIndex := bson2.D{}
+					for _, v := range index {
+						if v.Key == "ns" || v.Key == "v" || v.Key == "background"{
+							continue
+						}
+						newIndex = append(newIndex, v)
+					}
+					indexOption := bson2.E{Key: "background", Value: background}
+					newIndex = append(newIndex, indexOption)
 					if out := conn.Client.Database(toNS.Database).RunCommand(nil, bson2.D{
 						{"createIndexes", toNS.Collection},
-						{"indexes", []bson2.M{index}},
+						{"indexes", []bson2.D{newIndex}},
 					}); out.Err() != nil {
 						LOG.Warn("Create indexes for ns %v of dest mongodb failed. %v", ns, out.Err())
 					}
