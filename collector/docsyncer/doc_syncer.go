@@ -227,8 +227,12 @@ func StartIndexSync(indexMap map[utils.NS][]bson2.D, toUrl string,
 
 				for _, index := range indexNs.indexList {
 					// ignore _id
-					if _, ok := index.Map()["key"].(bson2.D).Map()["_id"]; ok {
-						continue
+					fieldMap := index.Map()["key"].(bson2.D).Map()
+					if _, ok := fieldMap["_id"]; ok {
+						// ignore index that just contain _id field
+						if len(fieldMap) == 1 {
+							continue
+						}
 					}
 					// use bson2.D not bson2.M (Index creation is order sensitive)
 					newIndex := bson2.D{}
