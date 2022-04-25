@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"math"
 	"sync"
 
@@ -14,7 +15,6 @@ import (
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 	bson2 "github.com/vinllen/mongo-go-driver/bson"
 )
 
@@ -214,7 +214,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	if conf.Options.SyncMode != utils.VarSyncModeFull && conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless {
 		// need merge to one when from mongos and fetch_mothod=="change_stream"
 		if coordinator.MongoS != nil && conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
-			var smallestNew bson.MongoTimestamp = math.MaxInt64
+			var smallestNew primitive.DateTime = math.MaxInt64
 			for _, val := range ckptMap {
 				if smallestNew > val.Newest {
 					smallestNew = val.Newest

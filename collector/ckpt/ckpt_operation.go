@@ -8,29 +8,29 @@ import (
 	bson2 "github.com/vinllen/mongo-go-driver/bson"
 	"github.com/vinllen/mongo-go-driver/mongo"
 	"github.com/vinllen/mongo-go-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"io/ioutil"
 	"net/http"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
 	// we can't insert Timestamp(0, 0) that will be treat as Now() inserted
 	// into mongo. so we use Timestamp(0, 1)
-	InitCheckpoint  = bson.MongoTimestamp(1)
-	EmptyCheckpoint = bson.MongoTimestamp(0)
+	InitCheckpoint  = primitive.DateTime(1)
+	EmptyCheckpoint = primitive.DateTime(0)
 )
 
 type CheckpointContext struct {
-	Name                   string              `bson:"name" json:"name"`
-	Timestamp              bson.MongoTimestamp `bson:"ckpt" json:"ckpt"`
-	Version                int                 `bson:"version" json:"version"`
-	FetchMethod            string              `bson:"fetch_method" json:"fetch_method"`
-	OplogDiskQueue         string              `bson:"oplog_disk_queue" json:"oplog_disk_queue"`
-	OplogDiskQueueFinishTs bson.MongoTimestamp `bson:"oplog_disk_queue_apply_finish_ts" json:"oplog_disk_queue_apply_finish_ts"`
+	Name                   string             `bson:"name" json:"name"`
+	Timestamp              primitive.DateTime `bson:"ckpt" json:"ckpt"`
+	Version                int                `bson:"version" json:"version"`
+	FetchMethod            string             `bson:"fetch_method" json:"fetch_method"`
+	OplogDiskQueue         string             `bson:"oplog_disk_queue" json:"oplog_disk_queue"`
+	OplogDiskQueueFinishTs primitive.DateTime `bson:"oplog_disk_queue_apply_finish_ts" json:"oplog_disk_queue_apply_finish_ts"`
 }
 
 func (cc *CheckpointContext) String() string {
@@ -61,7 +61,7 @@ type MongoCheckpoint struct {
 	//Conn        *utils.MongoConn
 	//QueryHandle *mgo.Collection
 
-	client      *utils.MongoCommunityConn
+	client *utils.MongoCommunityConn
 
 	// connection info
 	URL       string
@@ -106,6 +106,7 @@ func (ckpt *MongoCheckpoint) close() {
 	ckpt.client.Close()
 	ckpt.client = nil
 }
+
 //func (ckpt *MongoCheckpoint) close() {
 //	ckpt.Conn.Close()
 //	ckpt.Conn = nil

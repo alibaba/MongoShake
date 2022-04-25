@@ -5,6 +5,7 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	bson2 "github.com/vinllen/mongo-go-driver/bson"
 	"github.com/vinllen/mongo-go-driver/mongo"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"strings"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
@@ -213,9 +214,9 @@ type ShardCollectionSpec struct {
 
 func GetShardCollectionSpec(session *mgo.Session, log *oplog.PartialLog) *ShardCollectionSpec {
 	type ConfigDoc struct {
-		Timestamp bson.MongoTimestamp `bson:"ts"`
-		Operation string              `bson:"op"`
-		Object    bson.D              `bson:"o"`
+		Timestamp primitive.DateTime `bson:"ts"`
+		Operation string             `bson:"op"`
+		Object    bson.D             `bson:"o"`
 	}
 	namespace := GetDDLNamespace(log)
 

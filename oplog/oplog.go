@@ -3,6 +3,7 @@ package oplog
 import (
 	"encoding/json"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"reflect"
 
 	"strings"
@@ -20,19 +21,19 @@ type GenericOplog struct {
 }
 
 type ParsedLog struct {
-	Timestamp     bson.MongoTimestamp `bson:"ts" json:"ts"`
-	HistoryId     int64               `bson:"h,omitempty" json:"h,omitempty"`
-	Version       int                 `bson:"v,omitempty" json:"v,omitempty"`
-	Operation     string              `bson:"op" json:"op"`
-	Gid           string              `bson:"g,omitempty" json:"g,omitempty"`
-	Namespace     string              `bson:"ns" json:"ns"`
-	Object        bson.D              `bson:"o" json:"o"`
-	Query         bson.M              `bson:"o2" json:"o2"`
-	UniqueIndexes bson.M              `bson:"uk,omitempty" json:"uk,omitempty"`
-	Lsid          bson.M              `bson:"lsid,omitempty" json:"lsid,omitempty"`               // mark the session id, used in transaction
-	FromMigrate   bool                `bson:"fromMigrate,omitempty" json:"fromMigrate,omitempty"` // move chunk
-	TxnNumber     uint64              `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`     // transaction number in session
-	DocumentKey   bson.M              `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists when source collection is sharded, only including shard key and _id
+	Timestamp     primitive.DateTime `bson:"ts" json:"ts"`
+	HistoryId     int64              `bson:"h,omitempty" json:"h,omitempty"`
+	Version       int                `bson:"v,omitempty" json:"v,omitempty"`
+	Operation     string             `bson:"op" json:"op"`
+	Gid           string             `bson:"g,omitempty" json:"g,omitempty"`
+	Namespace     string             `bson:"ns" json:"ns"`
+	Object        bson.D             `bson:"o" json:"o"`
+	Query         bson.M             `bson:"o2" json:"o2"`
+	UniqueIndexes bson.M             `bson:"uk,omitempty" json:"uk,omitempty"`
+	Lsid          bson.M             `bson:"lsid,omitempty" json:"lsid,omitempty"`               // mark the session id, used in transaction
+	FromMigrate   bool               `bson:"fromMigrate,omitempty" json:"fromMigrate,omitempty"` // move chunk
+	TxnNumber     uint64             `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`     // transaction number in session
+	DocumentKey   bson.M             `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists when source collection is sharded, only including shard key and _id
 	// Ui            bson.Binary         `bson:"ui,omitempty" json:"ui,omitempty"` // do not enable currently
 }
 
@@ -207,7 +208,7 @@ func SetFiled(input bson.D, key string, value interface{}) {
 	}
 }
 
-func ParseTimestampFromBson(intput []byte) bson.MongoTimestamp {
+func ParseTimestampFromBson(intput []byte) primitive.DateTime {
 	log := new(PartialLog)
 	if err := bson.Unmarshal(intput, log); err != nil {
 		return -1

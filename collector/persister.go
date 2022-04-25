@@ -3,6 +3,7 @@ package collector
 // persist oplog on disk
 
 import (
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,8 +37,8 @@ type Persister struct {
 	fetchStage int32
 	// disk queue used to store oplog temporarily
 	DiskQueue       *diskQueue.DiskQueue
-	diskQueueMutex  sync.Mutex          // disk queue mutex
-	diskQueueLastTs bson.MongoTimestamp // the last oplog timestamp in disk queue
+	diskQueueMutex  sync.Mutex         // disk queue mutex
+	diskQueueLastTs primitive.DateTime // the last oplog timestamp in disk queue
 
 	// metric info, used in print
 	diskWriteCount uint64
@@ -91,7 +92,7 @@ func (p *Persister) InitDiskQueue(dqName string) {
 		1000, 2*time.Second)
 }
 
-func (p *Persister) GetQueryTsFromDiskQueue() bson.MongoTimestamp {
+func (p *Persister) GetQueryTsFromDiskQueue() primitive.DateTime {
 	if p.DiskQueue == nil {
 		LOG.Crashf("persister replset[%v] get query timestamp from nil disk queue", p.replset)
 	}

@@ -2,6 +2,7 @@ package oplog
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -264,7 +265,7 @@ func TestGatherApplyOps(t *testing.T) {
 		input := []*PartialLog{
 			{
 				ParsedLog: ParsedLog{
-					Timestamp: bson.MongoTimestamp(1),
+					Timestamp: primitive.DateTime(1),
 					Operation: "i",
 					Namespace: "db1.c1",
 					Object: bson.D{
@@ -281,7 +282,7 @@ func TestGatherApplyOps(t *testing.T) {
 			},
 			{
 				ParsedLog: ParsedLog{
-					Timestamp: bson.MongoTimestamp(1),
+					Timestamp: primitive.DateTime(1),
 					Operation: "i",
 					Namespace: "db1.c2",
 					Object: bson.D{
@@ -298,7 +299,7 @@ func TestGatherApplyOps(t *testing.T) {
 			},
 			{
 				ParsedLog: ParsedLog{
-					Timestamp: bson.MongoTimestamp(1),
+					Timestamp: primitive.DateTime(1),
 					Operation: "i",
 					Namespace: "db2.c2",
 					Object: bson.D{
@@ -315,7 +316,7 @@ func TestGatherApplyOps(t *testing.T) {
 			},
 			{
 				ParsedLog: ParsedLog{
-					Timestamp: bson.MongoTimestamp(1),
+					Timestamp: primitive.DateTime(1),
 					Operation: "u",
 					Namespace: "db3.c3",
 					Object: bson.D{
@@ -340,7 +341,7 @@ func TestGatherApplyOps(t *testing.T) {
 		gather, err := GatherApplyOps(input)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, len(gather.Raw) > 0, "should be equal")
-		assert.Equal(t, bson.MongoTimestamp(1), gather.Parsed.Timestamp, "should be equal")
+		assert.Equal(t, primitive.DateTime(1), gather.Parsed.Timestamp, "should be equal")
 		assert.Equal(t, "admin.$cmd", gather.Parsed.Namespace, "should be equal")
 		assert.Equal(t, "c", gather.Parsed.Operation, "should be equal")
 		assert.Equal(t, bson.M(nil), gather.Parsed.Query, "should be equal")
@@ -360,7 +361,7 @@ func TestPartialLog(t *testing.T) {
 		nr++
 
 		input := bson.M{
-			"ts": bson.MongoTimestamp(1),
+			"ts": primitive.DateTime(1),
 			"ns": "a.b",
 			"o": bson.D{
 				bson.DocElem{
@@ -381,7 +382,7 @@ func TestPartialLog(t *testing.T) {
 		output := NewPartialLog(input)
 		assert.Equal(t, &PartialLog{
 			ParsedLog: ParsedLog{
-				Timestamp: bson.MongoTimestamp(1),
+				Timestamp: primitive.DateTime(1),
 				Namespace: "a.b",
 				Object: bson.D{
 					bson.DocElem{
@@ -410,7 +411,7 @@ func TestPartialLog(t *testing.T) {
 		assert.Equal(t, bson.D{
 			bson.DocElem{
 				Name:  "ts",
-				Value: bson.MongoTimestamp(1),
+				Value: primitive.DateTime(1),
 			},
 			bson.DocElem{
 				Name: "o",

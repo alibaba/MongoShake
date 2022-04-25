@@ -234,5 +234,5 @@ func parseLastTimestamp(oplogs []*OplogRecord) int64 {
 		return 0
 	}
 
-	return utils.TimestampToInt64(oplogs[len(oplogs)-1].original.partialLog.Timestamp)
+	return utils.DatetimeToInt64(oplogs[len(oplogs)-1].original.partialLog.Timestamp)
 }

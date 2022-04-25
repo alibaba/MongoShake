@@ -27,11 +27,11 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.M, o
 	var upserts []*OplogRecord
 	for _, log := range oplogs {
 		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-		newObject,_ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
+		newObject, _ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
 		if _, err := collectionHandle.InsertOne(nil, newObject); err != nil {
-		//if err := collectionHandle.Insert(newObject); err != nil {
+			//if err := collectionHandle.Insert(newObject); err != nil {
 			// error can be ignored
-			if IgnoreError(err, "i", utils.TimestampToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
+			if IgnoreError(err, "i", utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
 				continue
 			}
 
@@ -66,7 +66,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 	}
 	var updates []*pair
 	for _, log := range oplogs {
-		newObject,_ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
+		newObject, _ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
 		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
 			updates = append(updates, &pair{id: log.original.partialLog.DocumentKey, data: newObject})
 		} else {
@@ -95,7 +95,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 					update.id, update.data, err, res)
 
 				// error can be ignored
-				if IgnoreError(err, "ui", utils.TimestampToInt64(oplogs[i].original.partialLog.Timestamp) <= sw.fullFinishTs) {
+				if IgnoreError(err, "ui", utils.DatetimeToInt64(oplogs[i].original.partialLog.Timestamp) <= sw.fullFinishTs) {
 					continue
 				}
 
@@ -107,14 +107,14 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 		for i, update := range updates {
 
 			res, err := collectionHandle.UpdateOne(nil, bson2.D{{"_id", update.id}},
-			update.data, nil)
+				update.data, nil)
 			if err != nil && utils.DuplicateKey(err) == false {
 				LOG.Warn("update _id[%v] with data[%v] meets err[%v] res[%v], try to solve",
 					update.id, update.data, err, res)
 
 				// error can be ignored
 				if IgnoreError(err, "u",
-					utils.TimestampToInt64(oplogs[i].original.partialLog.Timestamp) <= sw.fullFinishTs) {
+					utils.DatetimeToInt64(oplogs[i].original.partialLog.Timestamp) <= sw.fullFinishTs) {
 					continue
 				}
 
@@ -138,7 +138,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 			//	delete(newObject, versionMark)
 			//}
 			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-			newObject,_ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
+			newObject, _ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
 			var err error
 			opts := options.Update().SetUpsert(true)
 			if upsert && len(log.original.partialLog.DocumentKey) > 0 {
@@ -154,7 +154,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 			}
 			if err != nil {
 				// error can be ignored
-				if IgnoreError(err, "u", utils.TimestampToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
+				if IgnoreError(err, "u", utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
 					continue
 				}
 
@@ -177,12 +177,12 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 			//	delete(newObject, versionMark)
 			//}
 			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-			newObject,_ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
+			newObject, _ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
 			_, err := collectionHandle.UpdateOne(nil, log.original.partialLog.Query,
 				newObject, nil)
 			if err != nil {
 				// error can be ignored
-				if IgnoreError(err, "u", utils.TimestampToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
+				if IgnoreError(err, "u", utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
 					continue
 				}
 
@@ -215,7 +215,7 @@ func (sw *SingleWriter) doDelete(database, collection string, metadata bson.M,
 
 		if _, err := collectionHandle.DeleteOne(nil, bson2.D{{"_id", id}}); err != nil {
 			// error can be ignored
-			if IgnoreError(err, "d", utils.TimestampToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
+			if IgnoreError(err, "d", utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
 				continue
 			}
 
@@ -247,7 +247,7 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*Op
 				LOG.Info("Execute command (op==c) oplog, operation [%s]", operation)
 			} else if err.Error() == "ns not found" {
 				LOG.Info("Execute command (op==c) oplog, operation [%s], ignore error[ns not found]", operation)
-			} else if IgnoreError(err, "c", utils.TimestampToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
+			} else if IgnoreError(err, "c", utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
 				continue
 			} else {
 				return err

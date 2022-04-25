@@ -2,6 +2,7 @@ package collector
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"testing"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
@@ -55,7 +56,7 @@ func mockOplogs(length int, ddlGiven []int, noopGiven []int, sameTsGiven []int, 
 				ParsedLog: oplog.ParsedLog{
 					Namespace: "a.b",
 					Operation: op,
-					Timestamp: bson.MongoTimestamp(startTs+int64(i)) << 32,
+					Timestamp: primitive.DateTime(startTs+int64(i)) << 32,
 					TxnNumber: 1,
 					Lsid: bson.M{
 						"id":  "xx",
@@ -1175,7 +1176,7 @@ func mockBatcher(nsWhite []string, nsBlack []string) *Batcher {
 func mockFilterPartialLog(op, ns string, logObject bson.D) *oplog.PartialLog {
 	// log.Timestamp > fullSyncFinishPosition
 	return &oplog.PartialLog{
-		Timestamp: bson.MongoTimestamp(1),
+		Timestamp: primitive.DateTime(1),
 		Namespace: ns,
 		Operation: op,
 		RawSize:   1,
@@ -1549,7 +1550,7 @@ func TestGetBatchWithDelay(t *testing.T) {
 		batcher := &Batcher{
 			syncer: mockSyncer(),
 		}
-		batcher.syncer.fullSyncFinishPosition = bson.MongoTimestamp(time.Now().Unix()+100) << 32
+		batcher.syncer.fullSyncFinishPosition = primitive.DateTime(time.Now().Unix()+100) << 32
 
 		nowTs := time.Now().Unix()
 		batcher.utBatchesDelay.flag = true

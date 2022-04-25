@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"sync"
 
 	"github.com/alibaba/MongoShake/v2/collector"
@@ -129,8 +130,8 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault,
 			conf.Options.MongoSslRootCaFile); conn == nil || !conn.IsGood() || err != nil {
 
-			LOG.Critical("Connect mongo server error. %v, url : %s. " +
-				"See https://github.com/alibaba/MongoShake/wiki/FAQ" +
+			LOG.Critical("Connect mongo server error. %v, url : %s. "+
+				"See https://github.com/alibaba/MongoShake/wiki/FAQ"+
 				"#q-how-to-solve-the-oplog-tailer-initialize-failed-no-reachable-servers-error", err, src.URL)
 			return err
 		}
@@ -167,7 +168,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 
 		// look around if there has unique index
 		if !hasUniqIndex && conf.Options.IncrSyncShardKey == oplog.ShardAutomatic {
-			hasUniqIndex,_,_ = conn.HasUniqueIndex()
+			hasUniqIndex, _, _ = conn.HasUniqueIndex()
 		}
 		// doesn't reuse current connection
 		conn.Close()
@@ -199,14 +200,14 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 	}
 
 	// get current newest timestamp
-	var fullFinishTs, oldestTs bson.MongoTimestamp
+	var fullFinishTs, oldestTs primitive.DateTime
 	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless && len(coordinator.MongoD) > 0 {
 		_, fullFinishTs, _, oldestTs, _, err = utils.GetAllTimestamp(coordinator.MongoD, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
 		}
 	} else {
-		fullFinishTs = bson.MongoTimestamp(bson.MaxKey)
+		fullFinishTs = primitive.DateTime(bson.MaxKey)
 	}
 
 	LOG.Info("------------------------full sync done!------------------------")
@@ -216,8 +217,8 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 		fullBegin = utils.ExtractTimestampForLog(val)
 
 		// the oldest oplog is lost
-		if utils.TimestampToInt64(oldestTs) >= val {
-			err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's " +
+		if utils.DatetimeToInt64(oldestTs) >= val {
+			err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's "+
 				"oplog collection size is too small or full sync continues too long",
 				fullBegin, utils.ExtractTimestampForLog(oldestTs))
 			LOG.Error(err)
@@ -231,7 +232,7 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 	LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
 		fullBegin, utils.ExtractTimestampForLog(fullFinishTs))
 
-	return coordinator.startOplogReplication(fullBeginTs, utils.TimestampToInt64(fullFinishTs), nil)
+	return coordinator.startOplogReplication(fullBeginTs, utils.DatetimeToInt64(fullFinishTs), nil)
 }
 
 // TODO, set initSyncFinishTs into worker
@@ -248,18 +249,18 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs int
 		}
 		LOG.Info("------------------------full sync done!------------------------")
 		/*
-		// get current newest timestamp
-		endAllTsMap, _, _, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
-		if err != nil {
-			docError = LOG.Critical("document replication get end timestamp failed[%v]", err)
-			return
-		}
-		for replset, endTs := range endAllTsMap {
-			beginTs := beginTsMap[replset]
-			LOG.Info("document replication replset %v beginTs[%v] endTs[%v]",
-				replset, utils.ExtractTs32(beginTs), utils.ExtractTs32(endTs.Newest))
-			docEndTsMap[replset] = endTs.Newest
-		}*/
+			// get current newest timestamp
+			endAllTsMap, _, _, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
+			if err != nil {
+				docError = LOG.Critical("document replication get end timestamp failed[%v]", err)
+				return
+			}
+			for replset, endTs := range endAllTsMap {
+				beginTs := beginTsMap[replset]
+				LOG.Info("document replication replset %v beginTs[%v] endTs[%v]",
+					replset, utils.ExtractTs32(beginTs), utils.ExtractTs32(endTs.Newest))
+				docEndTsMap[replset] = endTs.Newest
+			}*/
 	})
 	// during document replication, oplog syncer fetch oplog and store on disk, in order to avoid oplog roll up
 	// fullSyncFinishPosition means no need to check the end time to disable DDL

@@ -1,7 +1,7 @@
 package unit_test_common
 
 const (
-	TestUrl                 = "mongodb://100.81.164.186:31881,100.81.164.186:31882,100.81.164.186:31883"
+	TestUrl                 = "mongodb://100.81.164.181:18201,100.81.164.181:18202,100.81.164.181:18203"
 	TestUrl4_4              = "100.81.164.181:35309"
 	TestUrlServerless       = "mongodb://100.81.164.181:32155"
 	TestUrlServerlessTenant = "mongodb://100.81.164.181:36106" // sharding mongos with tenant

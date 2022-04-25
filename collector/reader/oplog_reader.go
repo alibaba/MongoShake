@@ -5,6 +5,7 @@ package sourceReader
 import (
 	"errors"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"sync"
 	"time"
 
@@ -78,19 +79,19 @@ func (or *OplogReader) Name() string {
 // SetQueryTimestampOnEmpty set internal timestamp if
 // not exist in this or. initial stage most of the time
 func (or *OplogReader) SetQueryTimestampOnEmpty(ts interface{}) {
-	tsB := ts.(bson.MongoTimestamp)
+	tsB := ts.(primitive.DateTime)
 	if _, exist := or.query[QueryTs]; !exist {
 		LOG.Info("set query timestamp: %v", utils.ExtractTimestampForLog(tsB))
 		or.UpdateQueryTimestamp(tsB)
 	}
 }
 
-func (or *OplogReader) UpdateQueryTimestamp(ts bson.MongoTimestamp) {
+func (or *OplogReader) UpdateQueryTimestamp(ts primitive.DateTime) {
 	or.query[QueryTs] = bson.M{QueryOpGT: ts}
 }
 
-func (or *OplogReader) getQueryTimestamp() bson.MongoTimestamp {
-	return or.query[QueryTs].(bson.M)[QueryOpGT].(bson.MongoTimestamp)
+func (or *OplogReader) getQueryTimestamp() primitive.DateTime {
+	return or.query[QueryTs].(bson.M)[QueryOpGT].(primitive.DateTime)
 }
 
 // Next returns an oplog by raw bytes which is []byte
@@ -139,7 +140,7 @@ func (or *OplogReader) StartFetcher() {
 func (or *OplogReader) fetcher() {
 	LOG.Info("start fetcher with src[%v] replica-name[%v] query-ts[%v]",
 		utils.BlockMongoUrlPassword(or.src, "***"), or.replset,
-		utils.ExtractTimestampForLog(or.query[QueryTs].(bson.M)[QueryOpGT].(bson.MongoTimestamp)))
+		utils.ExtractTimestampForLog(or.query[QueryTs].(bson.M)[QueryOpGT].(primitive.DateTime)))
 	var log *bson.Raw
 	for {
 		if err := or.EnsureNetwork(); err != nil {
@@ -195,7 +196,7 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 		or.conn.Session.SetPrefetch(PrefetchPercent)
 	}
 
-	var queryTs bson.MongoTimestamp
+	var queryTs primitive.DateTime
 	// the given oplog timestamp shouldn't bigger than the newest
 	if or.firstRead == true {
 		// check whether the starting fetching timestamp is less than the newest timestamp exist in the oplog
@@ -231,13 +232,13 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 }
 
 // get newest oplog
-func (or *OplogReader) getNewestTimestamp() bson.MongoTimestamp {
+func (or *OplogReader) getNewestTimestamp() primitive.DateTime {
 	ts, _ := utils.GetNewestTimestampBySession(or.conn.Session)
 	return ts
 }
 
 // get oldest oplog
-func (or *OplogReader) getOldestTimestamp() bson.MongoTimestamp {
+func (or *OplogReader) getOldestTimestamp() primitive.DateTime {
 	ts, _ := utils.GetOldestTimestampBySession(or.conn.Session)
 	return ts
 }

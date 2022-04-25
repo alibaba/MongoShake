@@ -3,13 +3,12 @@ package ckpt
 import (
 	"errors"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 
 	"sync"
-
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -33,7 +32,7 @@ func NewCheckpointManager(name string, startPosition int64) *CheckpointManager {
 		newManager.delegate = &HttpApiCheckpoint{
 			CheckpointContext: CheckpointContext{
 				Name:                   name,
-				Timestamp:              bson.MongoTimestamp(startPosition),
+				Timestamp:              primitive.DateTime(startPosition),
 				Version:                utils.FcvCheckpoint.CurrentVersion,
 				OplogDiskQueue:         "",
 				OplogDiskQueueFinishTs: InitCheckpoint,
@@ -44,7 +43,7 @@ func NewCheckpointManager(name string, startPosition int64) *CheckpointManager {
 		newManager.delegate = &MongoCheckpoint{
 			CheckpointContext: CheckpointContext{
 				Name:                   name,
-				Timestamp:              bson.MongoTimestamp(startPosition),
+				Timestamp:              primitive.DateTime(startPosition),
 				Version:                utils.FcvCheckpoint.CurrentVersion,
 				OplogDiskQueue:         "",
 				OplogDiskQueueFinishTs: InitCheckpoint,
@@ -82,7 +81,7 @@ func (manager *CheckpointManager) GetInMemory() *CheckpointContext {
 	return manager.ctx
 }
 
-func (manager *CheckpointManager) Update(ts bson.MongoTimestamp) error {
+func (manager *CheckpointManager) Update(ts primitive.DateTime) error {
 	if manager.ctx == nil || len(manager.ctx.Name) == 0 {
 		// must run Get() first
 		return errors.New("current ckpt context is empty")
@@ -108,7 +107,7 @@ func (manager *CheckpointManager) Update(ts bson.MongoTimestamp) error {
 }
 
 // OplogDiskQueueFinishTs and OplogDiskQueue won't immediate effect, will be inserted in the next Update call.
-func (manager *CheckpointManager) SetOplogDiskFinishTs(ts bson.MongoTimestamp) {
+func (manager *CheckpointManager) SetOplogDiskFinishTs(ts primitive.DateTime) {
 	if manager.ctxRec == nil {
 		manager.ctxRecLock.Lock()
 		if manager.ctxRec == nil { // double check
