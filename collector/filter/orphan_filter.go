@@ -3,6 +3,7 @@ package filter
 import (
 	"crypto/md5"
 	"encoding/binary"
+	bson2 "go.mongodb.org/mongo-driver/bson"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
 	"github.com/alibaba/MongoShake/v2/sharding"
@@ -33,7 +34,7 @@ func NewOrphanFilter(replset string, chunkMap sharding.DBChunkMap) *OrphanFilter
 	}
 }
 
-func (filter *OrphanFilter) Filter(docD bson.D, namespace string) bool {
+func (filter *OrphanFilter) Filter(docD bson2.D, namespace string) bool {
 	if filter.chunkMap == nil {
 		LOG.Warn("chunk map is nil")
 		return false
@@ -48,7 +49,7 @@ NextChunk:
 	for _, chunkRage := range shardCol.Chunks {
 		// check greater and equal than the minimum of the chunk range
 		for keyInd, keyName := range shardCol.Keys {
-			key := oplog.GetKey(docD, keyName)
+			key := oplog.GetKeyN(docD, keyName)
 			if key == nil {
 				LOG.Crashf("OrphanFilter find no shard key[%v] in doc %v", keyName, docD)
 			}
@@ -64,7 +65,7 @@ NextChunk:
 		}
 		// check less than the maximum of the chunk range
 		for keyInd, keyName := range shardCol.Keys {
-			key := oplog.GetKey(docD, keyName)
+			key := oplog.GetKeyN(docD, keyName)
 			if key == nil {
 				LOG.Crashf("OrphanFilter find no shard ke[%v] in doc %v", keyName, docD)
 			}

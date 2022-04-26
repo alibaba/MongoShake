@@ -2,7 +2,7 @@ package transform
 
 import (
 	"fmt"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	bson2 "go.mongodb.org/mongo-driver/bson"
 	"regexp"
 	"strings"
 

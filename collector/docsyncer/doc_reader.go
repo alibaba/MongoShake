@@ -5,22 +5,22 @@ import (
 	"fmt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	bson2 "go.mongodb.org/mongo-driver/bson"
 	"sync/atomic"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
 	"github.com/vinllen/mgo/bson"
-	"github.com/vinllen/mongo-go-driver/mongo"
-	"github.com/vinllen/mongo-go-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 /*************************************************/
 // splitter: pre-split the collection into several pieces
 type DocumentSplitter struct {
-	src           string               // source mongo address url
-	sslRootCaFile string               // source root ca ssl
-	ns            utils.NS             // namespace
+	src           string   // source mongo address url
+	sslRootCaFile string   // source root ca ssl
+	ns            utils.NS // namespace
 	//conn          *utils.MongoConn     // connection
 	client        *utils.MongoCommunityConn
 	readerChan    chan *DocumentReader // reader chan
@@ -53,7 +53,7 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 		Size        float64 `bson:"size"`
 		StorageSize float64 `bson:"storageSize"`
 	}
-	if err:= ds.client.Client.Database(ds.ns.Database).RunCommand(nil,
+	if err := ds.client.Client.Database(ds.ns.Database).RunCommand(nil,
 		bson2.D{{"collStats", ds.ns.Collection}}).Decode(&res); err != nil {
 
 		LOG.Error("splitter[%s] connection mongo[%v] failed[%v]", ds,
@@ -83,7 +83,6 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 	}()
 	return ds
 }
-
 
 func (ds *DocumentSplitter) Close() {
 	ds.client.Close()
@@ -286,7 +285,6 @@ func (reader *DocumentReader) NextDoc() (doc *bson2.D, doc_len int, err error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	
 
 	return doc, doc_len, err
 }

@@ -35,6 +35,8 @@ const (
 	MajorityWriteConcern = "majority"
 
 	Int32max = (int64(1) << 32) - 1
+
+	ErrorCodeDuplicateKey = 11000
 )
 
 var (
@@ -189,7 +191,6 @@ func MarshalStruct(input interface{}) string {
 	}
 	return string(ret)
 }
-
 
 func DuplicateKey(err error) bool {
 

@@ -4,9 +4,9 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
-	"github.com/vinllen/mongo-go-driver/mongo"
-	"github.com/vinllen/mongo-go-driver/mongo/options"
+	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
@@ -36,11 +36,12 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, opl
 		LOG.Debug("bulk_writer: insert org_oplog:%v insert_doc:%v", log.original.partialLog, doc)
 	}
 
+	// TODO(jianyou) 改为undorder的插入和dup判断，复用全量doSync()中的函数。doUpdateOnInsert中使用的是documentKey
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, nil)
 
 	if err != nil {
 		LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
-			len(models), database + "." + collection, err, res)
+			len(models), database+"."+collection, err, res)
 
 		if utils.DuplicateKey(err) {
 			HandleDuplicated(bw.conn, collection, oplogs, OpInsert)
@@ -62,7 +63,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 	var models []mongo.WriteModel
 	for _, log := range oplogs {
 		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-		newObject,_ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
+		newObject, _ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
 		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
 			update = append(update, log.original.partialLog.DocumentKey, newObject)
 
@@ -134,7 +135,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 		//	delete(newObject, versionMark)
 		//}
 		log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-		newObject,_ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
+		newObject, _ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
 		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
 			update = append(update, log.original.partialLog.DocumentKey, log.original.partialLog.Object)
 
@@ -201,7 +202,7 @@ func (bw *BulkWriter) doDelete(database, collection string, metadata bson.M,
 	for _, log := range oplogs {
 		delete = append(delete, log.original.partialLog.Object)
 
-		newObject,_ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
+		newObject, _ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
 		models = append(models, mongo.NewDeleteOneModel().SetFilter(newObject))
 
 		LOG.Debug("bulk_writer: delete %v", log.original.partialLog)

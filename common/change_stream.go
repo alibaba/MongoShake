@@ -4,13 +4,12 @@ import (
 	"context"
 	"fmt"
 	LOG "github.com/vinllen/log4go"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"time"
 
-	"github.com/vinllen/mongo-go-driver/bson/primitive"
-	"github.com/vinllen/mongo-go-driver/mongo"
-	"github.com/vinllen/mongo-go-driver/mongo/options"
 	"sort"
-	"strings"
 )
 
 const (
@@ -86,7 +85,8 @@ func NewChangeStreamConn(src string,
 			return nil, fmt.Errorf("db list is empty")
 		}
 
-		ops.SetMultiDbSelections("(" + strings.Join(dbList, "|") + ")")
+		// TODO(jianyou) deprecate aliyun_serverless
+		//ops.SetMultiDbSelections("(" + strings.Join(dbList, "|") + ")")
 
 		LOG.Info("change stream options with aliyun_serverless: %v", printCsOption(ops))
 		// csHandler, err = client.Database("non-exist-database-shake").Watch(ctx, mongo.Pipeline{}, ops)
@@ -178,9 +178,9 @@ func printCsOption(ops *options.ChangeStreamOptions) string {
 	if ops.StartAfter != nil {
 		ret = fmt.Sprintf("%v StartAfter[%v]", ret, ops.StartAfter)
 	}
-	if ops.MultiDbSelections != "" {
-		ret = fmt.Sprintf("%v MultiDbSelections[%v]", ret, ops.MultiDbSelections)
-	}
+	//if ops.MultiDbSelections != "" {
+	//	ret = fmt.Sprintf("%v MultiDbSelections[%v]", ret, ops.MultiDbSelections)
+	//}
 
 	return ret
 }

@@ -3,6 +3,7 @@ package oplog
 import (
 	"encoding/json"
 	"fmt"
+	bson2 "go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"reflect"
 
@@ -125,6 +126,27 @@ func GetKeyWithIndex(log bson.D, wanted string) (interface{}, int) {
 	// "_id" is always the first field
 	for id, ele := range log {
 		if ele.Name == wanted {
+			return ele.Value, id
+		}
+	}
+
+	return nil, 0
+}
+
+// TODO(jianyou)
+func GetKeyN(log bson2.D, wanted string) interface{} {
+	ret, _ := GetKeyWithIndexN(log, wanted)
+	return ret
+}
+
+func GetKeyWithIndexN(log bson2.D, wanted string) (interface{}, int) {
+	if wanted == "" {
+		wanted = PrimaryKey
+	}
+
+	// "_id" is always the first field
+	for id, ele := range log {
+		if ele.Key == wanted {
 			return ele.Value, id
 		}
 	}

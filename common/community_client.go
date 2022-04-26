@@ -6,16 +6,16 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readconcern"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
+	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 	"io/ioutil"
 	"time"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mongo-go-driver/mongo"
-	"github.com/vinllen/mongo-go-driver/mongo/options"
-	"github.com/vinllen/mongo-go-driver/mongo/readconcern"
-	"github.com/vinllen/mongo-go-driver/mongo/readpref"
-	"github.com/vinllen/mongo-go-driver/mongo/writeconcern"
 )
 
 type MongoCommunityConn struct {
@@ -155,7 +155,7 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 	return &MongoCommunityConn{
 		Client: client,
 		URL:    url,
-		ctx: ctx,
+		ctx:    ctx,
 	}, nil
 }
 
@@ -226,7 +226,6 @@ func (conn *MongoCommunityConn) HasUniqueIndex() (bool, string, string) {
 	for _, ns := range checkNs {
 		cursor, _ := conn.Client.Database(ns.Database).Collection(ns.Collection).Indexes().List(nil)
 		for cursor.Next(nil) {
-
 
 			unique, uerr := cursor.Current.LookupErr("unique")
 			if uerr == nil && unique.Boolean() == true {
