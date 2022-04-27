@@ -15,7 +15,7 @@ import (
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	bson2 "go.mongodb.org/mongo-driver/bson"
 )
 
 func fetchChunkMap(isSharding bool) (sharding.ShardingChunkMap, error) {

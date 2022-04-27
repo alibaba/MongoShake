@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	testMongoAddressCs = unit_test_common.TestUrlServerless
+	testMongoAddressCs = unit_test_common.TestUrlConfigServer
 )
 
 func TestChangeStreamConn(t *testing.T) {
@@ -64,6 +64,7 @@ func TestChangeStreamConn(t *testing.T) {
 
 		cs.Close()
 	}
+	return
 
 	// StartAtOperationTime && StartAfter
 	{

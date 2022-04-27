@@ -2,8 +2,8 @@ package executor
 
 import (
 	"fmt"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
-	"github.com/vinllen/mongo-go-driver/mongo/options"
+	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo/options"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/oplog"
