@@ -10,9 +10,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/vinllen/mgo/bson"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
-	"github.com/vinllen/mongo-go-driver/mongo"
-	"github.com/vinllen/mongo-go-driver/mongo/options"
+	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
@@ -220,11 +220,11 @@ func TestGetAndCompareVersion(t *testing.T) {
 		fmt.Printf("TestGetAndCompareVersion case %d.\n", nr)
 		nr++
 
-		conn, err := NewMongoConn(testMongoAddress, VarMongoConnectModeSecondaryPreferred, true,
+		conn, err := NewMongoCommunityConn(testMongoAddress, VarMongoConnectModeSecondaryPreferred, true,
 			ReadWriteConcernDefault, ReadWriteConcernDefault, "")
 		assert.Equal(t, err, nil, "")
 
-		ok, err := GetAndCompareVersion(conn.Session, "3.4.0", "")
+		ok, err := GetAndCompareVersion(conn, "3.4.0", "")
 		assert.Equal(t, err, nil, "")
 		assert.Equal(t, ok, true, "")
 	}
@@ -277,21 +277,21 @@ func TestGetDbNamespace(t *testing.T) {
 		fmt.Printf("TestGetDbNamespace case %d.\n", nr)
 		nr++
 
-		conn, err := NewMongoConn(testMongoAddress, VarMongoConnectModePrimary, true,
+		conn, err := NewMongoCommunityConn(testMongoAddress, VarMongoConnectModePrimary, true,
 			ReadWriteConcernLocal, ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
-		err = conn.Session.DB("db1").DropDatabase()
+		err = conn.Client.Database("db1").Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		err = conn.Session.DB("db2").DropDatabase()
+		err = conn.Client.Database("db2").Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		conn.Session.DB("db1").C("c1").Insert(bson.M{"x": 1})
-		conn.Session.DB("db1").C("c2").Insert(bson.M{"x": 1})
-		conn.Session.DB("db1").C("c3").Insert(bson.M{"x": 1})
-		conn.Session.DB("db2").C("c1").Insert(bson.M{"x": 1})
-		conn.Session.DB("db2").C("c4").Insert(bson.M{"x": 1})
+		conn.Client.Database("db1").Collection("c1").InsertOne(nil, bson2.M{"x": 1})
+		conn.Client.Database("db1").Collection("c2").InsertOne(nil, bson2.M{"x": 1})
+		conn.Client.Database("db1").Collection("c3").InsertOne(nil, bson2.M{"x": 1})
+		conn.Client.Database("db2").Collection("c1").InsertOne(nil, bson2.M{"x": 1})
+		conn.Client.Database("db2").Collection("c4").InsertOne(nil, bson2.M{"x": 1})
 
 		filterFunc := func(name string) bool {
 			list := strings.Split(name, ".")
