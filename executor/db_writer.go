@@ -3,11 +3,12 @@ package executor
 import (
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -44,6 +45,7 @@ type BasicWriter interface {
 	doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error
 }
 
+// oplog writer
 func NewDbWriter(conn *utils.MongoCommunityConn, metadata bson.M, bulkInsert bool, fullFinishTs int64) BasicWriter {
 	if !bulkInsert { // bulk insertion disable
 		// LOG.Info("db writer create: SingleWriter")
@@ -71,14 +73,14 @@ func RunCommand(database, operation string, log *oplog.PartialLog, conn *utils.M
 		var innerBsonD, indexes bson.D
 		for i, ele := range log.Object {
 			if i == 0 {
-				nimo.AssertTrue(ele.Name == "createIndexes", "should panic when ele.Name != 'createIndexes'")
+				nimo.AssertTrue(ele.Key == "createIndexes", "should panic when ele.Name != 'createIndexes'")
 			} else {
 				innerBsonD = append(innerBsonD, ele)
 			}
 		}
 		indexes = append(indexes, log.Object[0]) // createIndexes
-		indexes = append(indexes, bson.DocElem{
-			Name: "indexes",
+		indexes = append(indexes, primitive.E{
+			Key: "indexes",
 			Value: []bson.D{ // only has 1 bson.D
 				innerBsonD,
 			},
@@ -91,10 +93,10 @@ func RunCommand(database, operation string, log *oplog.PartialLog, conn *utils.M
 		 */
 		var store bson.D
 		for _, ele := range log.Object {
-			if utils.ApplyOpsFilter(ele.Name) {
+			if utils.ApplyOpsFilter(ele.Key) {
 				continue
 			}
-			if ele.Name == "applyOps" {
+			if ele.Key == "applyOps" {
 				switch v := ele.Value.(type) {
 				case []interface{}:
 					for i, ele := range v {
@@ -104,7 +106,7 @@ func RunCommand(database, operation string, log *oplog.PartialLog, conn *utils.M
 				case bson.D:
 					ret := make(bson.D, 0, len(v))
 					for _, ele := range v {
-						if ele.Name == uuidMark {
+						if ele.Key == uuidMark {
 							continue
 						}
 						ret = append(ret, ele)
@@ -125,8 +127,8 @@ func RunCommand(database, operation string, log *oplog.PartialLog, conn *utils.M
 	case "dropDatabase":
 		err = dbHandler.Drop(nil)
 	case "create":
-		if oplog.GetKey(log.Object, "autoIndexId") != nil &&
-			oplog.GetKey(log.Object, "idIndex") != nil {
+		if oplog.GetKeyN(log.Object, "autoIndexId") != nil &&
+			oplog.GetKeyN(log.Object, "idIndex") != nil {
 			// exits "autoIndexId" and "idIndex", remove "autoIndexId"
 			log.Object = oplog.RemoveFiled(log.Object, "autoIndexId")
 		}
@@ -159,7 +161,7 @@ func RunCommand(database, operation string, log *oplog.PartialLog, conn *utils.M
 		// filter log.Object
 		var rec bson.D
 		for _, ele := range log.Object {
-			if utils.ApplyOpsFilter(ele.Name) {
+			if utils.ApplyOpsFilter(ele.Key) {
 				continue
 			}
 
@@ -168,8 +170,8 @@ func RunCommand(database, operation string, log *oplog.PartialLog, conn *utils.M
 		log.Object = rec // reset log.Object
 
 		var store bson.D
-		store = append(store, bson.DocElem{
-			Name: "applyOps",
+		store = append(store, primitive.E{
+			Key: "applyOps",
 			Value: []bson.D{
 				log.Dump(nil, true),
 			},
@@ -188,6 +190,7 @@ func IgnoreError(err error, op string, isFullSyncStage bool) bool {
 	}
 
 	errorCode := mgo.ErrorCodeList(err)
+
 	if err != nil && len(errorCode) == 0 {
 		return false
 	}

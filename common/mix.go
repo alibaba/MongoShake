@@ -70,6 +70,7 @@ func DatetimeToInt64(ts primitive.DateTime) int64 {
 	return int64(ts)
 }
 
+// TODO(jianyou) deprecate
 func TimestampToString(ts int64) string {
 	return time.Unix(ts, 0).Format(TimeFormat)
 }

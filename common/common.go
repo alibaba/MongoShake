@@ -3,7 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/vinllen/mongo-go-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo"
 	"os"
 	"strings"
 
@@ -193,18 +193,5 @@ func MarshalStruct(input interface{}) string {
 }
 
 func DuplicateKey(err error) bool {
-
-	if we, ok := err.(mongo.WriteException); ok {
-		if len(we.WriteErrors) > 0 && we.WriteErrors[0].Code == 11000 {
-			return true
-		}
-	}
-
-	if we, ok := err.(mongo.BulkWriteException); ok {
-		if len(we.WriteErrors) > 0 && we.WriteErrors[0].Code == 11000 {
-			return true
-		}
-	}
-
-	return false
+	return mongo.IsDuplicateKeyError(err)
 }
