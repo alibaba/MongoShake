@@ -13,7 +13,7 @@ import (
 
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 var ErrorsShouldSkip = map[int]string{

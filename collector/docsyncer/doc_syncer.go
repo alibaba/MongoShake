@@ -498,6 +498,7 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 	bufferByteSize := 0
 
 	for {
+		//TODO(jianyou) test time cost of feth+decode
 		doc, doc_len, err := reader.NextDoc()
 		// doc, err := reader.NextDocMgo()
 		if err != nil {
@@ -521,7 +522,7 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 
 		// transform dbref for document
 		if len(conf.Options.TransformNamespace) > 0 && conf.Options.IncrSyncDBRef {
-			*doc = transform.TransformDBRefBson2(*doc, reader.ns.Database, syncer.nsTrans)
+			*doc = transform.TransformDBRef(*doc, reader.ns.Database, syncer.nsTrans)
 		}
 		buffer = append(buffer, doc)
 		bufferByteSize += doc_len

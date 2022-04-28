@@ -4,13 +4,11 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
 )
 
 // use general bulk interface such like Insert/Update/Delete to execute command
@@ -44,7 +42,7 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, opl
 			len(models), database+"."+collection, err, res)
 
 		if utils.DuplicateKey(err) {
-			HandleDuplicated(bw.conn, collection, oplogs, OpInsert)
+			RecordDuplicatedOplog(bw.conn, collection, oplogs)
 			// update on duplicated key occur
 			if dupUpdate {
 				LOG.Info("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
@@ -76,11 +74,11 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 			}
 			// insert must have _id
 			// if id, exist := log.original.partialLog.Object["_id"]; exist {
-			if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
+			if id := oplog.GetKeyN(log.original.partialLog.Object, ""); id != nil {
 				update = append(update, bson.M{"_id": id}, newObject)
 
 				model := mongo.NewUpdateOneModel().
-					SetFilter(bson2.D{{"_id", id}}).
+					SetFilter(bson.D{{"_id", id}}).
 					SetUpdate(newObject)
 				if upsert {
 					model.SetUpsert(true)
@@ -175,8 +173,10 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 			index, errMsg, dup, parseLastTimestamp(oplogs) <= bw.fullFinishTs,
 			*oplogRecord.original.partialLog, res)
 
-		if mgo.IsDup(err) {
-			HandleDuplicated(bw.conn, collection, oplogs, OpUpdate)
+		// TODO(jianyou) DUP judge
+		//if mgo.IsDup(err) {
+		if false {
+			RecordDuplicatedOplog(bw.conn, collection, oplogs)
 			// create single writer to write one by one
 			sw := NewDbWriter(bw.conn, bson.M{}, false, bw.fullFinishTs)
 			return sw.doUpdate(database, collection, metadata, oplogs[index:], upsert)

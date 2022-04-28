@@ -14,7 +14,6 @@ import (
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/vinllen/mgo/bson"
 	bson2 "go.mongodb.org/mongo-driver/bson"
 	"reflect"
 )
@@ -30,34 +29,8 @@ var (
 	testNs = strings.Join([]string{testDb, testCollection}, ".")
 )
 
-func marshalData(input []bson.D) []*bson.Raw {
-	output := make([]*bson.Raw, 0, len(input))
-	for _, ele := range input {
-		if data, err := bson.Marshal(ele); err != nil {
-			return nil
-		} else {
-			output = append(output, &bson.Raw{
-				Kind: 3,
-				Data: data,
-			})
-		}
-	}
-	return output
-}
-
 func fetchAllDocument(conn *utils.MongoCommunityConn) ([]bson2.D, error) {
-	cursor, _ := conn.Client.Database(testDb).Collection(testCollection).Find(nil, bson2.M{})
-
-	doc := new(bson2.D)
-	result := make([]bson2.D, 0)
-	for cursor.Next(nil) {
-		err := cursor.Decode(doc)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, *doc)
-	}
-	return result, nil
+	return unit_test_common.FetchAllDocumentbsonD(conn, testDb, testCollection, nil)
 }
 
 func TestDbSync(t *testing.T) {

@@ -1,9 +1,8 @@
 package oplog
 
 import (
+	"go.mongodb.org/mongo-driver/bson"
 	"strings"
-
-	"github.com/vinllen/mgo/bson"
 )
 
 type CommandOperation struct {
@@ -30,8 +29,8 @@ var opsMap = map[string]*CommandOperation{
 func ExtraCommandName(o bson.D) (string, bool) {
 	// command name must be at the first position
 	if len(o) > 0 {
-		if _, exist := opsMap[o[0].Name]; exist {
-			return o[0].Name, true
+		if _, exist := opsMap[o[0].Key]; exist {
+			return o[0].Key, true
 		}
 	}
 

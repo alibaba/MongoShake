@@ -3,6 +3,7 @@ package oplog
 import (
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo/bson"
+	bson2 "go.mongodb.org/mongo-driver/bson"
 )
 
 const (
@@ -109,16 +110,24 @@ func (wloi *WhiteListObjectIdHasher) DistributeOplogByMod(log *PartialLog, mod i
 }
 
 /*********************************************/
+func getValueFromBsonD(obj bson2.D, key string) (interface{}, bool) {
+	for _, ele := range obj {
+		if ele.Key == key {
+			return ele.Value, true
+		}
+	}
 
+	return nil, false
+}
 func GetIdOrNSFromOplog(log *PartialLog) interface{} {
 	switch log.Operation {
 	case "i", "d":
-		return GetKey(log.Object, "")
+		return GetKeyN(log.Object, "")
 	case "u":
-		if id, ok := log.Query["_id"]; ok {
+		if id, ok := getValueFromBsonD(log.Query, "_id"); ok {
 			return id
 		} else {
-			return GetKey(log.Object, "")
+			return GetKeyN(log.Object, "")
 		}
 	case "c":
 		return log.Namespace

@@ -125,27 +125,31 @@ func TestGetDbNamespace(t *testing.T) {
 		conn.Client.Database(testDb).Drop(nil)
 
 		// create index
-		index1, err := conn.Client.Database(testDb).Collection("c1").Indexes().CreateOne(context.Background(), mongo.IndexModel{
-			Keys:    bson2.D{{"x", 1}, {"y", 1}},
-			Options: &options.IndexOptions{},
-		})
+		index1, err := conn.Client.Database(testDb).Collection("c1").Indexes().
+			CreateOne(context.Background(), mongo.IndexModel{
+				Keys:    bson2.D{{"x", 1}, {"y", 1}},
+				Options: &options.IndexOptions{},
+			})
 		assert.Equal(t, nil, err, "should be equal")
 
 		// create index
-		index2, err := conn.Client.Database(testDb).Collection("c1").Indexes().CreateOne(context.Background(), mongo.IndexModel{
-			Keys:    bson2.D{{"wwwww", 1}},
-			Options: &options.IndexOptions{},
-		})
+		index2, err := conn.Client.Database(testDb).Collection("c1").Indexes().
+			CreateOne(context.Background(), mongo.IndexModel{
+				Keys:    bson2.D{{"wwwww", 1}},
+				Options: &options.IndexOptions{},
+			})
 		assert.Equal(t, nil, err, "should be equal")
 
 		// create index
-		index3, err := conn.Client.Database(testDb).Collection("c2").Indexes().CreateOne(context.Background(), mongo.IndexModel{
-			Keys:    bson2.D{{"hello", "hashed"}},
-			Options: &options.IndexOptions{},
-		})
+		index3, err := conn.Client.Database(testDb).Collection("c2").Indexes().
+			CreateOne(context.Background(), mongo.IndexModel{
+				Keys:    bson2.D{{"hello", "hashed"}},
+				Options: &options.IndexOptions{},
+			})
 		assert.Equal(t, nil, err, "should be equal")
 
-		_, err = conn.Client.Database(testDb).Collection("c3").InsertOne(context.Background(), map[string]interface{}{"x": 1})
+		_, err = conn.Client.Database(testDb).Collection("c3").InsertOne(context.Background(),
+			map[string]interface{}{"x": 1})
 		assert.Equal(t, nil, err, "should be equal")
 
 		fmt.Println(index1, index2, index3)

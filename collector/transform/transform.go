@@ -2,12 +2,12 @@ package transform
 
 import (
 	"fmt"
-	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"regexp"
 	"strings"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 type NamespaceTransform struct {
@@ -75,10 +75,10 @@ func TransformDBRef(logObject bson.D, db string, nsTrans *NamespaceTransform) bs
 		return logObject
 	}
 
-	if logObject[0].Name == "$ref" {
+	if logObject[0].Key == "$ref" {
 		// if has DBRef, [0] must be "$ref"
 		collection := logObject[0].Value.(string)
-		if len(logObject) > 2 && logObject[2].Name == "$db" {
+		if len(logObject) > 2 && logObject[2].Key == "$db" {
 			db = logObject[2].Value.(string)
 		}
 
@@ -89,7 +89,7 @@ func TransformDBRef(logObject bson.D, db string, nsTrans *NamespaceTransform) bs
 		if len(logObject) > 2 {
 			logObject[2].Value = tuple[0]
 		} else {
-			logObject = append(logObject, bson.DocElem{"$db", tuple[0]})
+			logObject = append(logObject, primitive.E{"$db", tuple[0]})
 		}
 		return logObject
 	}
@@ -105,7 +105,8 @@ func TransformDBRef(logObject bson.D, db string, nsTrans *NamespaceTransform) bs
 	return logObject
 }
 
-func TransformDBRefBson2(logObject bson2.D, db string, nsTrans *NamespaceTransform) bson2.D {
+// TODO(jianyou) deprecate
+func TransformDBRefbson(logObject bson.D, db string, nsTrans *NamespaceTransform) bson.D {
 	if len(logObject) == 0 {
 		return logObject
 	}
@@ -124,15 +125,15 @@ func TransformDBRefBson2(logObject bson2.D, db string, nsTrans *NamespaceTransfo
 		if len(logObject) > 2 {
 			logObject[2].Value = tuple[0]
 		} else {
-			logObject = append(logObject, bson2.E{"$db", tuple[0]})
+			logObject = append(logObject, bson.E{"$db", tuple[0]})
 		}
 		return logObject
 	}
 
 	for _, ele := range logObject {
 		switch v := ele.Value.(type) {
-		case bson2.D:
-			ele.Value = TransformDBRefBson2(v, db, nsTrans)
+		case bson.D:
+			ele.Value = TransformDBRefbson(v, db, nsTrans)
 		default:
 			// do nothing
 		}

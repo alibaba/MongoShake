@@ -2,6 +2,7 @@ package executor
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"testing"
 
 	"github.com/alibaba/MongoShake/v2/collector/transform"
@@ -10,7 +11,7 @@ import (
 	"sync"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/vinllen/mgo/bson"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 func mockLogs(op, ns string, size int, cb bool) *OplogRecord {
@@ -225,10 +226,10 @@ func TestTransformLog(t *testing.T) {
 		nsTrans := transform.NewNamespaceTransform([]string{"fdb1:fdb2"})
 
 		logs := []*OplogRecord{
-			mockTransLogs("i", "fdb1.tc1", bson.D{bson.DocElem{"a", 1}}),
+			mockTransLogs("i", "fdb1.tc1", bson.D{primitive.E{Key: "a", Value: 1}}),
 		}
 		logs = transformLogs(logs, nsTrans, false)
-		assert.Equal(t, mockTransLogs("i", "fdb2.tc1", bson.D{bson.DocElem{"a", 1}}), logs[0], "should be equal")
+		assert.Equal(t, mockTransLogs("i", "fdb2.tc1", bson.D{primitive.E{Key: "a", Value: 1}}), logs[0], "should be equal")
 	}
 
 	{
@@ -237,38 +238,38 @@ func TestTransformLog(t *testing.T) {
 		nsTrans := transform.NewNamespaceTransform([]string{"fdb1:tdb1"})
 
 		logs := []*OplogRecord{
-			mockTransLogs("i", "fdb1.fcol1", bson.D{bson.DocElem{"a", 1}}),
+			mockTransLogs("i", "fdb1.fcol1", bson.D{primitive.E{"a", 1}}),
 			mockTransLogs("i", "fdb2.fcol2", bson.D{
-				bson.DocElem{"a", 1},
-				bson.DocElem{"b", bson.D{
-					bson.DocElem{"$ref", "fcol1"},
-					bson.DocElem{"$id", "id1"},
-					bson.DocElem{"$db", "fdb1"}}}}),
-			mockTransLogs("c", "fdb1.$cmd", bson.D{bson.DocElem{"dropDatabase", 1}}),
+				primitive.E{Key: "a", Value: 1},
+				primitive.E{"b", bson.D{
+					primitive.E{"$ref", "fcol1"},
+					primitive.E{"$id", "id1"},
+					primitive.E{"$db", "fdb1"}}}}),
+			mockTransLogs("c", "fdb1.$cmd", bson.D{primitive.E{"dropDatabase", 1}}),
 			mockTransLogs("c", "fdb1.$cmd", bson.D{
-				bson.DocElem{"create", "fcol1"},
-				bson.DocElem{"idIndex", bson.D{
-					bson.DocElem{"key", bson.D{bson.DocElem{"a", 1}}},
-					bson.DocElem{"ns", "fdb1.fcol1"},
+				primitive.E{"create", "fcol1"},
+				primitive.E{"idIndex", bson.D{
+					primitive.E{"key", bson.D{primitive.E{"a", 1}}},
+					primitive.E{"ns", "fdb1.fcol1"},
 				}},
 			}),
 		}
 		logs = transformLogs(logs, nsTrans, false)
-		assert.Equal(t, mockTransLogs("i", "tdb1.fcol1", bson.D{bson.DocElem{"a", 1}}), logs[0], "should be equal")
+		assert.Equal(t, mockTransLogs("i", "tdb1.fcol1", bson.D{primitive.E{"a", 1}}), logs[0], "should be equal")
 		assert.Equal(t, mockTransLogs("i", "fdb2.fcol2", bson.D{
-			bson.DocElem{"a", 1},
-			bson.DocElem{"b", bson.D{
-				bson.DocElem{"$ref", "fcol1"},
-				bson.DocElem{"$id", "id1"},
-				bson.DocElem{"$db", "fdb1"},
+			primitive.E{"a", 1},
+			primitive.E{"b", bson.D{
+				primitive.E{"$ref", "fcol1"},
+				primitive.E{"$id", "id1"},
+				primitive.E{"$db", "fdb1"},
 			}},
 		}), logs[1], "should be equal")
-		assert.Equal(t, mockTransLogs("c", "tdb1.$cmd", bson.D{bson.DocElem{"dropDatabase", 1}}), logs[2], "should be equal")
+		assert.Equal(t, mockTransLogs("c", "tdb1.$cmd", bson.D{primitive.E{"dropDatabase", 1}}), logs[2], "should be equal")
 		assert.Equal(t, mockTransLogs("c", "tdb1.fcol1", bson.D{
-			bson.DocElem{"create", "fcol1"},
-			bson.DocElem{"idIndex", bson.D{
-				bson.DocElem{"key", bson.D{bson.DocElem{"a", 1}}},
-				bson.DocElem{"ns", "tdb1.fcol1"},
+			primitive.E{"create", "fcol1"},
+			primitive.E{"idIndex", bson.D{
+				primitive.E{"key", bson.D{primitive.E{"a", 1}}},
+				primitive.E{"ns", "tdb1.fcol1"},
 			}},
 		}), logs[3], "should be equal")
 	}
@@ -279,38 +280,38 @@ func TestTransformLog(t *testing.T) {
 		nsTrans := transform.NewNamespaceTransform([]string{"fdb1:tdb1"})
 
 		logs := []*OplogRecord{
-			mockTransLogs("i", "fdb1.fcol1", bson.D{bson.DocElem{"a", 1}}),
+			mockTransLogs("i", "fdb1.fcol1", bson.D{primitive.E{"a", 1}}),
 			mockTransLogs("i", "fdb2.fcol2", bson.D{
-				bson.DocElem{"a", 1},
-				bson.DocElem{"b", bson.D{
-					bson.DocElem{"$ref", "fcol1"},
-					bson.DocElem{"$id", "id1"},
-					bson.DocElem{"$db", "fdb1"}}}}),
-			mockTransLogs("c", "fdb1.$cmd", bson.D{bson.DocElem{"dropDatabase", 1}}),
+				primitive.E{"a", 1},
+				primitive.E{"b", bson.D{
+					primitive.E{"$ref", "fcol1"},
+					primitive.E{"$id", "id1"},
+					primitive.E{"$db", "fdb1"}}}}),
+			mockTransLogs("c", "fdb1.$cmd", bson.D{primitive.E{"dropDatabase", 1}}),
 			mockTransLogs("c", "fdb1.$cmd", bson.D{
-				bson.DocElem{"create", "fcol1"},
-				bson.DocElem{"idIndex", bson.D{
-					bson.DocElem{"key", bson.D{bson.DocElem{"a", 1}}},
-					bson.DocElem{"ns", "fdb1.fcol1"},
+				primitive.E{"create", "fcol1"},
+				primitive.E{"idIndex", bson.D{
+					primitive.E{"key", bson.D{primitive.E{"a", 1}}},
+					primitive.E{"ns", "fdb1.fcol1"},
 				}},
 			}),
 		}
 		logs = transformLogs(logs, nsTrans, true)
-		assert.Equal(t, mockTransLogs("i", "tdb1.fcol1", bson.D{bson.DocElem{"a", 1}}), logs[0], "should be equal")
+		assert.Equal(t, mockTransLogs("i", "tdb1.fcol1", bson.D{primitive.E{"a", 1}}), logs[0], "should be equal")
 		assert.Equal(t, mockTransLogs("i", "fdb2.fcol2", bson.D{
-			bson.DocElem{"a", 1},
-			bson.DocElem{"b", bson.D{
-				bson.DocElem{"$ref", "fcol1"},
-				bson.DocElem{"$id", "id1"},
-				bson.DocElem{"$db", "tdb1"},
+			primitive.E{"a", 1},
+			primitive.E{"b", bson.D{
+				primitive.E{"$ref", "fcol1"},
+				primitive.E{"$id", "id1"},
+				primitive.E{"$db", "tdb1"},
 			}},
 		}), logs[1], "should be equal")
-		assert.Equal(t, mockTransLogs("c", "tdb1.$cmd", bson.D{bson.DocElem{"dropDatabase", 1}}), logs[2], "should be equal")
+		assert.Equal(t, mockTransLogs("c", "tdb1.$cmd", bson.D{primitive.E{"dropDatabase", 1}}), logs[2], "should be equal")
 		assert.Equal(t, mockTransLogs("c", "tdb1.fcol1", bson.D{
-			bson.DocElem{"create", "fcol1"},
-			bson.DocElem{"idIndex", bson.D{
-				bson.DocElem{"key", bson.D{bson.DocElem{"a", 1}}},
-				bson.DocElem{"ns", "tdb1.fcol1"},
+			primitive.E{"create", "fcol1"},
+			primitive.E{"idIndex", bson.D{
+				primitive.E{"key", bson.D{primitive.E{"a", 1}}},
+				primitive.E{"ns", "tdb1.fcol1"},
 			}},
 		}), logs[3], "should be equal")
 	}
@@ -321,36 +322,36 @@ func TestTransformLog(t *testing.T) {
 		nsTrans := transform.NewNamespaceTransform([]string{"fdb1.fcol1:tdb1.tcol1", "fdb1:tdb2"})
 
 		logs := []*OplogRecord{
-			mockTransLogs("i", "fdb1.fcol1", bson.D{bson.DocElem{"a", 1}}),
+			mockTransLogs("i", "fdb1.fcol1", bson.D{primitive.E{"a", 1}}),
 			mockTransLogs("i", "fdb2.fcol2", bson.D{
-				bson.DocElem{"a", 1},
-				bson.DocElem{"b", bson.D{
-					bson.DocElem{"$ref", "fcol1"},
-					bson.DocElem{"$id", "id1"},
-					bson.DocElem{"$db", "fdb1"}}}}),
-			mockTransLogs("c", "fdb1.$cmd", bson.D{bson.DocElem{"dropDatabase", 1}}),
+				primitive.E{"a", 1},
+				primitive.E{"b", bson.D{
+					primitive.E{"$ref", "fcol1"},
+					primitive.E{"$id", "id1"},
+					primitive.E{"$db", "fdb1"}}}}),
+			mockTransLogs("c", "fdb1.$cmd", bson.D{primitive.E{"dropDatabase", 1}}),
 			mockTransLogs("c", "fdb1.$cmd", bson.D{
-				bson.DocElem{"create", "fcol1"},
-				bson.DocElem{"idIndex", bson.D{
-					bson.DocElem{"key", bson.D{bson.DocElem{"a", 1}}},
-					bson.DocElem{"ns", "fdb1.fcol1"}}}}),
+				primitive.E{"create", "fcol1"},
+				primitive.E{"idIndex", bson.D{
+					primitive.E{"key", bson.D{primitive.E{"a", 1}}},
+					primitive.E{"ns", "fdb1.fcol1"}}}}),
 		}
 		logs = transformLogs(logs, nsTrans, true)
-		assert.Equal(t, mockTransLogs("i", "tdb1.tcol1", bson.D{bson.DocElem{"a", 1}}), logs[0], "should be equal")
+		assert.Equal(t, mockTransLogs("i", "tdb1.tcol1", bson.D{primitive.E{"a", 1}}), logs[0], "should be equal")
 		assert.Equal(t, mockTransLogs("i", "fdb2.fcol2", bson.D{
-			bson.DocElem{"a", 1},
-			bson.DocElem{"b", bson.D{
-				bson.DocElem{"$ref", "tcol1"},
-				bson.DocElem{"$id", "id1"},
-				bson.DocElem{"$db", "tdb1"},
+			primitive.E{"a", 1},
+			primitive.E{"b", bson.D{
+				primitive.E{"$ref", "tcol1"},
+				primitive.E{"$id", "id1"},
+				primitive.E{"$db", "tdb1"},
 			}},
 		}), logs[1], "should be equal")
-		assert.Equal(t, mockTransLogs("c", "tdb2.$cmd", bson.D{bson.DocElem{"dropDatabase", 1}}), logs[2], "should be equal")
+		assert.Equal(t, mockTransLogs("c", "tdb2.$cmd", bson.D{primitive.E{"dropDatabase", 1}}), logs[2], "should be equal")
 		assert.Equal(t, mockTransLogs("c", "tdb1.tcol1", bson.D{
-			bson.DocElem{"create", "tcol1"},
-			bson.DocElem{"idIndex", bson.D{
-				bson.DocElem{"key", bson.D{bson.DocElem{"a", 1}}},
-				bson.DocElem{"ns", "tdb1.tcol1"},
+			primitive.E{"create", "tcol1"},
+			primitive.E{"idIndex", bson.D{
+				primitive.E{"key", bson.D{primitive.E{"a", 1}}},
+				primitive.E{"ns", "tdb1.tcol1"},
 			}},
 		}), logs[3], "should be equal")
 	}
@@ -362,38 +363,38 @@ func TestTransformLog(t *testing.T) {
 
 		logs := []*OplogRecord{
 			mockTransLogs("c", "admin.$cmd", bson.D{
-				bson.DocElem{
-					Name: "applyOps",
+				primitive.E{
+					Key: "applyOps",
 					Value: []bson.D{
 						{
-							bson.DocElem{"op", "i"},
-							bson.DocElem{"ns", "fdb1.fcol1"},
-							bson.DocElem{"o", bson.D{bson.DocElem{"a", 1}}},
+							primitive.E{"op", "i"},
+							primitive.E{"ns", "fdb1.fcol1"},
+							primitive.E{"o", bson.D{primitive.E{"a", 1}}},
 						},
 						{
-							bson.DocElem{"op", "i"},
-							bson.DocElem{"ns", "fdb1.fcol2"},
-							bson.DocElem{"o", bson.D{bson.DocElem{"a", 1}}},
+							primitive.E{"op", "i"},
+							primitive.E{"ns", "fdb1.fcol2"},
+							primitive.E{"o", bson.D{primitive.E{"a", 1}}},
 						},
 					},
 				},
 			}),
 			mockTransLogs("c", "admin.$cmd", bson.D{
-				bson.DocElem{
-					Name: "applyOps",
+				primitive.E{
+					Key: "applyOps",
 					Value: []bson.D{
 						{
-							bson.DocElem{"op", "i"},
-							bson.DocElem{"ns", "fdb1.fcol1"},
-							bson.DocElem{"o", bson.D{bson.DocElem{"b", 1}}},
+							primitive.E{"op", "i"},
+							primitive.E{"ns", "fdb1.fcol1"},
+							primitive.E{"o", bson.D{primitive.E{"b", 1}}},
 						},
 						{
-							bson.DocElem{"op", "i"},
-							bson.DocElem{"ns", "fdb1.fcol2"},
-							bson.DocElem{"o", bson.D{
-								bson.DocElem{"$ref", "fcol1"},
-								bson.DocElem{"$id", "id1"},
-								bson.DocElem{"$db", "fdb1"},
+							primitive.E{"op", "i"},
+							primitive.E{"ns", "fdb1.fcol2"},
+							primitive.E{"o", bson.D{
+								primitive.E{"$ref", "fcol1"},
+								primitive.E{"$id", "id1"},
+								primitive.E{"$db", "fdb1"},
 							}},
 						},
 					},
@@ -405,38 +406,38 @@ func TestTransformLog(t *testing.T) {
 		logs = transformLogs(logs, nsTrans, true)
 		// fmt.Println(logs[0].original.partialLog)
 		assert.Equal(t, mockTransLogs("c", "admin.$cmd", bson.D{
-			bson.DocElem{
-				Name: "applyOps",
+			primitive.E{
+				Key: "applyOps",
 				Value: []bson.D{
 					{
-						bson.DocElem{"op", "i"},
-						bson.DocElem{"ns", "tdb1.tcol1"},
-						bson.DocElem{"o", bson.D{bson.DocElem{"a", 1}}},
+						primitive.E{"op", "i"},
+						primitive.E{"ns", "tdb1.tcol1"},
+						primitive.E{"o", bson.D{primitive.E{"a", 1}}},
 					},
 					{
-						bson.DocElem{"op", "i"},
-						bson.DocElem{"ns", "tdb2.fcol2"},
-						bson.DocElem{"o", bson.D{bson.DocElem{"a", 1}}},
+						primitive.E{"op", "i"},
+						primitive.E{"ns", "tdb2.fcol2"},
+						primitive.E{"o", bson.D{primitive.E{"a", 1}}},
 					},
 				},
 			},
 		}), logs[0], "should be equal")
 		assert.Equal(t, mockTransLogs("c", "admin.$cmd", bson.D{
-			bson.DocElem{
-				Name: "applyOps",
+			primitive.E{
+				Key: "applyOps",
 				Value: []bson.D{
 					{
-						bson.DocElem{"op", "i"},
-						bson.DocElem{"ns", "tdb1.tcol1"},
-						bson.DocElem{"o", bson.D{bson.DocElem{"b", 1}}},
+						primitive.E{"op", "i"},
+						primitive.E{"ns", "tdb1.tcol1"},
+						primitive.E{"o", bson.D{primitive.E{"b", 1}}},
 					},
 					{
-						bson.DocElem{"op", "i"},
-						bson.DocElem{"ns", "tdb2.fcol2"},
-						bson.DocElem{"o", bson.D{
-							bson.DocElem{"$ref", "tcol1"},
-							bson.DocElem{"$id", "id1"},
-							bson.DocElem{"$db", "tdb1"},
+						primitive.E{"op", "i"},
+						primitive.E{"ns", "tdb2.fcol2"},
+						primitive.E{"o", bson.D{
+							primitive.E{"$ref", "tcol1"},
+							primitive.E{"$id", "id1"},
+							primitive.E{"$db", "tdb1"},
 						}},
 					},
 				},
@@ -451,14 +452,14 @@ func TestTransformLog(t *testing.T) {
 
 		logs := []*OplogRecord{
 			mockTransLogs("c", "fdb1.$cmd", bson.D{
-				bson.DocElem{"renameCollection", "fdb1.fcol1"},
-				bson.DocElem{"to", "fdb2.fcol2"}}),
+				primitive.E{"renameCollection", "fdb1.fcol1"},
+				primitive.E{"to", "fdb2.fcol2"}}),
 		}
 		logs = transformLogs(logs, nsTrans, true)
 		assert.Equal(t,
 			mockTransLogs("c", "tdb1.tcol1", bson.D{
-				bson.DocElem{"renameCollection", "tdb1.tcol1"},
-				bson.DocElem{"to", "tdb2.tcol2"}}), logs[0], "should be equal")
+				primitive.E{"renameCollection", "tdb1.tcol1"},
+				primitive.E{"to", "tdb2.tcol2"}}), logs[0], "should be equal")
 	}
 
 	{
@@ -468,15 +469,15 @@ func TestTransformLog(t *testing.T) {
 
 		logs := []*OplogRecord{
 			mockTransLogs("c", "admin.$cmd", bson.D{
-				bson.DocElem{
-					Name: "applyOps",
+				primitive.E{
+					Key: "applyOps",
 					Value: []bson.D{
 						{
-							bson.DocElem{"op", "i"},
-							bson.DocElem{"ns", "a.b"},
-							bson.DocElem{"o", bson.D{
-								bson.DocElem{"$ref", "e"},
-								bson.DocElem{"$id", "id1"},
+							primitive.E{"op", "i"},
+							primitive.E{"ns", "a.b"},
+							primitive.E{"o", bson.D{
+								primitive.E{"$ref", "e"},
+								primitive.E{"$id", "id1"},
 							}},
 						},
 					},
@@ -486,16 +487,16 @@ func TestTransformLog(t *testing.T) {
 
 		logs = transformLogs(logs, nsTrans, true)
 		assert.Equal(t, mockTransLogs("c", "admin.$cmd", bson.D{
-			bson.DocElem{
-				Name: "applyOps",
+			primitive.E{
+				Key: "applyOps",
 				Value: []bson.D{
 					{
-						bson.DocElem{"op", "i"},
-						bson.DocElem{"ns", "c.d"},
-						bson.DocElem{"o", bson.D{
-							bson.DocElem{"$ref", "e"},
-							bson.DocElem{"$id", "id1"},
-							bson.DocElem{"$db", "fff"},
+						primitive.E{"op", "i"},
+						primitive.E{"ns", "c.d"},
+						primitive.E{"o", bson.D{
+							primitive.E{"$ref", "e"},
+							primitive.E{"$id", "id1"},
+							primitive.E{"$db", "fff"},
 						}},
 					},
 				},
