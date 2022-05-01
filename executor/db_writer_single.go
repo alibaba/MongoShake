@@ -89,7 +89,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 		for _, update := range updates {
 
 			opts := options.Update().SetUpsert(true)
-			res, err := collectionHandle.UpdateOne(nil, bson.D{{"_id", update.id}},
+			res, err := collectionHandle.UpdateOne(context.Background(), bson.D{{"_id", update.id}},
 				bson.D{{"$set", update.data}}, opts)
 			if err != nil {
 				LOG.Warn("upsert _id[%v] with data[%v] meets err[%v] res[%v], try to solve",
@@ -108,7 +108,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 	} else {
 		for i, update := range updates {
 
-			res, err := collectionHandle.UpdateOne(nil, bson.D{{"_id", update.id}},
+			res, err := collectionHandle.UpdateOne(context.Background(), bson.D{{"_id", update.id}},
 				bson.D{{"$set", update.data}}, nil)
 			if err != nil && utils.DuplicateKey(err) == false {
 				LOG.Warn("update _id[%v] with data[%v] meets err[%v] res[%v], try to solve",
@@ -147,7 +147,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 					LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
 				}
 
-				_, err = collectionHandle.UpdateOne(nil, log.original.partialLog.Query,
+				_, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.Query,
 					bson.D{{"$set", log.original.partialLog.Object}}, opts)
 			}
 			if err != nil {
@@ -174,7 +174,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 	} else {
 		for _, log := range oplogs {
 			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-			_, err := collectionHandle.UpdateOne(nil, log.original.partialLog.Query,
+			_, err := collectionHandle.UpdateOne(context.Background(), log.original.partialLog.Query,
 				bson.D{{"$set", log.original.partialLog.Object}}, nil)
 			if err != nil {
 				// error can be ignored
@@ -209,20 +209,10 @@ func (sw *SingleWriter) doDelete(database, collection string, metadata bson.M,
 		// ignore ErrNotFound
 		id := oplog.GetKeyN(log.original.partialLog.Object, "")
 
-		if _, err := collectionHandle.DeleteOne(nil, bson.D{{"_id", id}}); err != nil {
-			// error can be ignored
-			if IgnoreError(err, "d", utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
-				continue
-			}
-
-			if IgnoreError(err, "d", parseLastTimestamp(oplogs) <= sw.fullFinishTs) {
-				LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]",
-					err, "d", parseLastTimestamp(oplogs) <= sw.fullFinishTs)
-				return nil
-			} else {
-				LOG.Error("delete data[%v] failed[%v]", log.original.partialLog.Query, err)
-				return err
-			}
+		_, err := collectionHandle.DeleteOne(context.Background(), bson.D{{"_id", id}})
+		if err != nil {
+			LOG.Error("delete data[%v] failed[%v]", log.original.partialLog.Query, err)
+			return err
 		}
 
 		LOG.Debug("single_writer: delete %v", log.original.partialLog)
