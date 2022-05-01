@@ -95,7 +95,6 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 					update.id, update.data, err, res)
 
 				// error can be ignored(insert fail & oplog is before full end)
-				//if IgnoreError(err, "ui", utils.DatetimeToInt64(oplogs[i].original.partialLog.Timestamp) <= sw.fullFinishTs) {
 				if utils.DuplicateKey(err) &&
 					utils.DatetimeToInt64(oplogs[update.index].original.partialLog.Timestamp) <= sw.fullFinishTs {
 					continue
