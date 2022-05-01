@@ -3,12 +3,11 @@ package executor
 import (
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
+	bson "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 const (
@@ -184,6 +183,7 @@ func RunCommand(database, operation string, log *oplog.PartialLog, conn *utils.M
 
 // true means error can be ignored
 // https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.yml
+// TODO(jianyou) deprecated
 func IgnoreError(err error, op string, isFullSyncStage bool) bool {
 	if err == nil {
 		return true

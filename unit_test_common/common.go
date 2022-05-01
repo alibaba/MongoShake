@@ -29,7 +29,7 @@ func FetchAllDocumentbsonM(conn *utils.MongoCommunityConn, testDb string, testCo
 
 	result := make([]bson.M, 0)
 	for cursor.Next(nil) {
-		var doc bson.M
+		var doc bson.M // doc is ptr
 		err := cursor.Decode(&doc)
 		if err != nil {
 			return nil, err

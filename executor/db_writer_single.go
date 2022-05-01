@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -135,38 +136,36 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 	collectionHandle := sw.conn.Client.Database(database).Collection(collection)
 	if upsert {
 		for _, log := range oplogs {
-			//newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-			//// we should handle the special case: "o" filed may include "$v" in mongo-3.6 which is not support in mgo.v2 library
-			//if _, ok := newObject[versionMark]; ok {
-			//	delete(newObject, versionMark)
-			//}
 			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-			newObject, _ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
 			var err error
 			opts := options.Update().SetUpsert(true)
 			if upsert && len(log.original.partialLog.DocumentKey) > 0 {
-				_, err = collectionHandle.UpdateOne(nil, log.original.partialLog.DocumentKey,
-					newObject, opts)
+				_, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.DocumentKey,
+					bson.D{{"$set", log.original.partialLog.Object}}, opts)
 			} else {
 				if upsert {
 					LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
 				}
 
 				_, err = collectionHandle.UpdateOne(nil, log.original.partialLog.Query,
-					newObject, opts)
+					bson.D{{"$set", log.original.partialLog.Object}}, opts)
 			}
 			if err != nil {
 				// error can be ignored
-				if IgnoreError(err, "u", utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
-					continue
+				if utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs {
+					er, ok := err.(mongo.ServerError)
+					if ok && (er.HasErrorCode(28) || er.HasErrorCode(211)) {
+						continue
+					}
 				}
 
 				if utils.DuplicateKey(err) {
 					RecordDuplicatedOplog(sw.conn, collection, oplogs)
 					continue
 				}
+
 				LOG.Error("doUpdate[upsert] old-data[%v] with new-data[%v] failed[%v]",
-					log.original.partialLog.Query, newObject, err)
+					log.original.partialLog.Query, log.original.partialLog.Object, err)
 				return err
 			}
 
@@ -174,29 +173,23 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 		}
 	} else {
 		for _, log := range oplogs {
-			//newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-			//// we should handle the special case: "o" filed may include "$v" in mongo-3.6 which is not support in mgo.v2 library
-			//if _, ok := newObject[versionMark]; ok {
-			//	delete(newObject, versionMark)
-			//}
 			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-			newObject, _ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
 			_, err := collectionHandle.UpdateOne(nil, log.original.partialLog.Query,
-				newObject, nil)
+				bson.D{{"$set", log.original.partialLog.Object}}, nil)
 			if err != nil {
 				// error can be ignored
-				if IgnoreError(err, "u", utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
-					continue
+				if utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs {
+					er, ok := err.(mongo.ServerError)
+					if ok && (er.HasErrorCode(28) || er.HasErrorCode(211)) {
+						continue
+					}
 				}
 
-				// err.Error() == "not found" ??
-				if utils.IsNotFound(err) {
-					return fmt.Errorf("doUpdate[update] data[%v] not found", log.original.partialLog.Query)
-				} else if utils.DuplicateKey(err) {
+				if utils.DuplicateKey(err) {
 					RecordDuplicatedOplog(sw.conn, collection, oplogs)
 				} else {
 					LOG.Error("doUpdate[update] old-data[%v] with new-data[%v] failed[%v]",
-						log.original.partialLog.Query, newObject, err)
+						log.original.partialLog.Query, log.original.partialLog.Object, err)
 					return err
 				}
 			}

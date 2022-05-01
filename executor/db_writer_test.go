@@ -89,12 +89,12 @@ func TestSingleWriter(t *testing.T) {
 		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
-		//// update 1->2
-		//err = writer.doUpdate(testDb, testCollection, bson.M{}, []*OplogRecord{
-		//	mockOplogRecord(1, 10, 1),
-		//}, false)
-		//assert.Equal(t, nil, err, "should be equal")
-		//
+		// update 1->2
+		err = writer.doUpdate(testDb, testCollection, bson.M{}, []*OplogRecord{
+			mockOplogRecord(1, 10, 1),
+		}, false)
+		assert.Equal(t, nil, err, "should be equal")
+
 		//// query
 		//result, err := unit_test_common.FetchAllDocumentbsonM(conn, testDb, testCollection, nil)
 		//assert.Equal(t, nil, err, "should be equal")
@@ -216,84 +216,84 @@ func TestSingleWriter(t *testing.T) {
 		}
 	}
 
-	//// test upsert, dupInsert
-	//{
-	//	fmt.Printf("TestSingleWriter case %d.\n", nr)
-	//	nr++
-	//
-	//	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
-	//	assert.Equal(t, nil, err, "should be equal")
-	//
-	//	writer := NewDbWriter(conn, bson.M{}, false, 0)
-	//
-	//	// drop database
-	//	err = conn.Client.Database(testDb).Drop(nil)
-	//	assert.Equal(t, nil, err, "should be equal")
-	//
-	//	// 1-5
-	//	inserts := []*OplogRecord{
-	//		mockOplogRecord(1, 1, -1),
-	//		mockOplogRecord(2, 2, -1),
-	//		mockOplogRecord(3, 3, -1),
-	//		mockOplogRecord(4, 4, -1),
-	//		mockOplogRecord(5, 5, -1),
-	//	}
-	//
-	//	// write 1
-	//	err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
-	//	assert.Equal(t, nil, err, "should be equal")
-	//
-	//	// update 6->10
-	//	err = writer.doUpdate(testDb, testCollection, bson.M{}, []*OplogRecord{
-	//		mockOplogRecord(6, 10, 6),
-	//	}, false)
-	//	assert.NotEqual(t, nil, err, "should be equal")
-	//
-	//	// upsert 6->10
-	//	err = writer.doUpdate(testDb, testCollection, bson.M{}, []*OplogRecord{
-	//		mockOplogRecord(6, 10, 6),
-	//	}, true)
-	//	assert.Equal(t, nil, err, "should be equal")
-	//
-	//	// query
-	//	opts := options.Find().SetSort(bson.D{{"_id", 1}})
-	//	result, err := unit_test_common.FetchAllDocumentbsonM(conn, testDb, testCollection, opts)
-	//	assert.Equal(t, nil, err, "should be equal")
-	//	assert.Equal(t, 6, len(result), "should be equal")
-	//	assert.Equal(t, 1, result[0]["x"], "should be equal")
-	//	assert.Equal(t, 2, result[1]["x"], "should be equal")
-	//	assert.Equal(t, 3, result[2]["x"], "should be equal")
-	//	assert.Equal(t, 4, result[3]["x"], "should be equal")
-	//	assert.Equal(t, 5, result[4]["x"], "should be equal")
-	//	assert.Equal(t, 10, result[5]["x"], "should be equal")
-	//	assert.Equal(t, 6, result[5]["_id"], "should be equal")
-	//
-	//	// dupInsert but ignore
-	//	err = writer.doInsert(testDb, testCollection, bson.M{}, []*OplogRecord{
-	//		mockOplogRecord(1, 30, 1),
-	//	}, false)
-	//	assert.Equal(t, nil, err, "should be equal")
-	//
-	//	// dupInsert -> update
-	//	err = writer.doInsert(testDb, testCollection, bson.M{}, []*OplogRecord{
-	//		mockOplogRecord(1, 30, 1),
-	//	}, true)
-	//	assert.Equal(t, nil, err, "should be equal")
-	//
-	//	// query
-	//	opts = options.Find().SetSort(bson.D{{"_id", 1}})
-	//	result, err = unit_test_common.FetchAllDocumentbsonM(conn, testDb, testCollection, opts)
-	//	assert.Equal(t, nil, err, "should be equal")
-	//	assert.Equal(t, 6, len(result), "should be equal")
-	//	assert.Equal(t, 30, result[0]["x"], "should be equal")
-	//
-	//	// delete not found
-	//	err = writer.doDelete(testDb, testCollection, bson.M{}, []*OplogRecord{
-	//		mockOplogRecord(20, 20, 20),
-	//	})
-	//	assert.NotEqual(t, nil, err, "should be equal")
-	//}
-	//
+	// test upsert, dupInsert
+	{
+		fmt.Printf("TestSingleWriter case %d.\n", nr)
+		nr++
+
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		assert.Equal(t, nil, err, "should be equal")
+
+		writer := NewDbWriter(conn, bson.M{}, false, 0)
+
+		// drop database
+		err = conn.Client.Database(testDb).Drop(nil)
+		assert.Equal(t, nil, err, "should be equal")
+
+		// 1-5
+		inserts := []*OplogRecord{
+			mockOplogRecord(1, 1, -1),
+			mockOplogRecord(2, 2, -1),
+			mockOplogRecord(3, 3, -1),
+			mockOplogRecord(4, 4, -1),
+			mockOplogRecord(5, 5, -1),
+		}
+
+		// write 1
+		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		assert.Equal(t, nil, err, "should be equal")
+
+		// update 6->10(return ok with MatchecCount==0)
+		err = writer.doUpdate(testDb, testCollection, bson.M{}, []*OplogRecord{
+			mockOplogRecord(6, 10, 6),
+		}, false)
+		assert.Equal(t, nil, err, "should be equal")
+
+		// upsert 6->10
+		err = writer.doUpdate(testDb, testCollection, bson.M{}, []*OplogRecord{
+			mockOplogRecord(6, 10, 6),
+		}, true)
+		assert.Equal(t, nil, err, "should be equal")
+
+		// query
+		opts := options.Find().SetSort(bson.D{{"_id", 1}})
+		result, err := unit_test_common.FetchAllDocumentbsonM(conn, testDb, testCollection, opts)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 6, len(result), "should be equal")
+		assert.Equal(t, int32(1), result[0]["x"], "should be equal")
+		assert.Equal(t, int32(2), result[1]["x"], "should be equal")
+		assert.Equal(t, int32(3), result[2]["x"], "should be equal")
+		assert.Equal(t, int32(4), result[3]["x"], "should be equal")
+		assert.Equal(t, int32(5), result[4]["x"], "should be equal")
+		assert.Equal(t, int32(10), result[5]["x"], "should be equal")
+		assert.Equal(t, int32(6), result[5]["_id"], "should be equal")
+
+		// dupInsert but ignore
+		err = writer.doInsert(testDb, testCollection, bson.M{}, []*OplogRecord{
+			mockOplogRecord(1, 30, 1),
+		}, false)
+		assert.Equal(t, nil, err, "should be equal")
+
+		// dupInsert -> update
+		err = writer.doInsert(testDb, testCollection, bson.M{}, []*OplogRecord{
+			mockOplogRecord(1, 30, 1),
+		}, true)
+		assert.Equal(t, nil, err, "should be equal")
+
+		// query
+		opts = options.Find().SetSort(bson.D{{"_id", 1}})
+		result, err = unit_test_common.FetchAllDocumentbsonM(conn, testDb, testCollection, opts)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 6, len(result), "should be equal")
+		assert.Equal(t, int32(30), result[0]["x"], "should be equal")
+
+		//// delete not found
+		//err = writer.doDelete(testDb, testCollection, bson.M{}, []*OplogRecord{
+		//	mockOplogRecord(20, 20, 20),
+		//})
+		//assert.NotEqual(t, nil, err, "should be equal")
+	}
+
 	//// test ignore error
 	//{
 	//	fmt.Printf("TestSingleWriter case %d.\n", nr)

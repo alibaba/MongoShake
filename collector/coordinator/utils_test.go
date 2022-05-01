@@ -12,9 +12,9 @@ import (
 
 	"context"
 	"github.com/stretchr/testify/assert"
-	"github.com/vinllen/mongo-go-driver/mongo"
-	"github.com/vinllen/mongo-go-driver/mongo/options"
-	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"strings"
 )
 
@@ -662,7 +662,7 @@ func TestSelectSyncMode(t *testing.T) {
 		fmt.Println(syncMode, fullBeginTs)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, syncMode, "should be equal")
-		assert.Equal(t, true, len(fullBeginTs.(bson2.Raw)) > 0, "should be equal")
+		assert.Equal(t, true, len(fullBeginTs.(bson.Raw)) > 0, "should be equal")
 	}
 
 	{
@@ -745,7 +745,7 @@ func TestFetchIndexes(t *testing.T) {
 		// create index
 		index1, err := conn.Client.Database(testDb).Collection("c1").Indexes().CreateOne(context.Background(),
 			mongo.IndexModel{
-				Keys:    bson2.D{{"x", 1}, {"y", 1}},
+				Keys:    bson.D{{"x", 1}, {"y", 1}},
 				Options: &options.IndexOptions{},
 			})
 		assert.Equal(t, nil, err, "should be equal")
@@ -753,7 +753,7 @@ func TestFetchIndexes(t *testing.T) {
 		// create index
 		index2, err := conn.Client.Database(testDb).Collection("c1").Indexes().CreateOne(context.Background(),
 			mongo.IndexModel{
-				Keys:    bson2.D{{"wwwww", 1}},
+				Keys:    bson.D{{"wwwww", 1}},
 				Options: &options.IndexOptions{},
 			})
 		assert.Equal(t, nil, err, "should be equal")
@@ -761,7 +761,7 @@ func TestFetchIndexes(t *testing.T) {
 		// create index
 		index3, err := conn.Client.Database(testDb).Collection("c2").Indexes().CreateOne(context.Background(),
 			mongo.IndexModel{
-				Keys:    bson2.D{{"hello", "hashed"}},
+				Keys:    bson.D{{"hello", "hashed"}},
 				Options: &options.IndexOptions{},
 			})
 		assert.Equal(t, nil, err, "should be equal")
