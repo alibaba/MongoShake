@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
@@ -12,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -376,92 +378,92 @@ func TestSingleWriter(t *testing.T) {
 		assert.Equal(t, int32(30), result[2]["x"], "should be equal")
 	}
 
-	//{
-	//	fmt.Printf("TestSingleWriter case %d.\n", nr)
-	//	nr++
-	//
-	//	conf.Options.IncrSyncExecutorUpsert = true
-	//
-	//	conn, err := utils.NewMongoCommunityConn(testMongoShardingAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
-	//	assert.Equal(t, nil, err, "should be equal")
-	//
-	//	writer := NewDbWriter(conn, bson.M{}, false, 0)
-	//
-	//	// drop database
-	//	err = conn.Client.Database(testDb).Drop(nil)
-	//
-	//	// enable sharding
-	//	err = conn.Session.DB("admin").Run(bson.D{{"enablesharding", testDb}}, nil)
-	//	assert.Equal(t, nil, err, "should be equal")
-	//
-	//	// shard collection
-	//	ns := fmt.Sprintf("%s.%s", testDb, testCollection)
-	//	err = conn.Session.DB("admin").Run(bson.D{
-	//		{"shardCollection", ns},
-	//		{"key", bson.M{"x": 1}},
-	//		{"unique", true},
-	//	}, nil)
-	//	assert.Equal(t, nil, err, "should be equal")
-	//
-	//	// 1-2
-	//	inserts := []*OplogRecord{
-	//		mockOplogRecord(1, 1, -1),
-	//		mockOplogRecord(2, 2, -1),
-	//	}
-	//
-	//	err = writer.doUpdate(testDb, testCollection, bson.M{}, inserts, true)
-	//	assert.NotEqual(t, nil, err, "should be equal")
-	//	assert.Equal(t, true, strings.Contains(err.Error(), "Failed to target upsert by query"), "should be equal")
-	//	fmt.Println(err)
-	//
-	//	inserts[0].original.partialLog.DocumentKey = bson.M{
-	//		"_id": 1,
-	//		"x":   1,
-	//	}
-	//	inserts[1].original.partialLog.DocumentKey = bson.M{
-	//		"_id": 2,
-	//		"x":   2,
-	//	}
-	//	err = writer.doUpdate(testDb, testCollection, bson.M{}, inserts, true)
-	//	assert.Equal(t, nil, err, "should be equal")
-	//
-	//	// query
-	//	result := make([]interface{}, 0)
-	//	err = conn.Session.DB(testDb).C(testCollection).Find(bson.M{}).Sort("_id").All(&result)
-	//	assert.Equal(t, nil, err, "should be equal")
-	//	assert.Equal(t, 2, len(result), "should be equal")
-	//	assert.Equal(t, 1, result[0].(bson.M)["x"], "should be equal")
-	//	assert.Equal(t, 2, result[1].(bson.M)["x"], "should be equal")
-	//
-	//	fmt.Println("---------------")
-	//	// 2-3
-	//	inserts2 := []*OplogRecord{
-	//		mockOplogRecord(2, 20, -1),
-	//		mockOplogRecord(3, 3, -1),
-	//	}
-	//	inserts2[0].original.partialLog.DocumentKey = bson.M{
-	//		"_id": 2,
-	//		"x":   2,
-	//	}
-	//	inserts2[1].original.partialLog.DocumentKey = bson.M{
-	//		"_id": 3,
-	//		"x":   3,
-	//	}
-	//
-	//	// see https://github.com/alibaba/MongoShake/issues/380
-	//	err = writer.doInsert(testDb, testCollection, bson.M{}, inserts2, true)
-	//	assert.NotEqual(t, nil, err, "should be equal")
-	//	// assert.Equal(t, true, strings.Contains(err.Error(), "Must run update to shard key"), "should be equal")
-	//
-	//	// query
-	//	result = make([]interface{}, 0)
-	//	err = conn.Session.DB(testDb).C(testCollection).Find(bson.M{}).Sort("_id").All(&result)
-	//	assert.Equal(t, nil, err, "should be equal")
-	//	assert.Equal(t, 3, len(result), "should be equal")
-	//	assert.Equal(t, 1, result[0].(bson.M)["x"], "should be equal")
-	//	assert.Equal(t, 2, result[1].(bson.M)["x"], "should be equal")
-	//	assert.Equal(t, 3, result[2].(bson.M)["x"], "should be equal")
-	//}
+	{
+		fmt.Printf("TestSingleWriter case %d.\n", nr)
+		nr++
+
+		conf.Options.IncrSyncExecutorUpsert = true
+
+		conn, err := utils.NewMongoCommunityConn(testMongoShardingAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		assert.Equal(t, nil, err, "should be equal")
+
+		writer := NewDbWriter(conn, bson.M{}, false, 0)
+
+		// drop database
+		err = conn.Client.Database(testDb).Drop(nil)
+
+		// enable sharding
+		result := conn.Client.Database("admin").RunCommand(context.Background(), bson.D{{"enablesharding", testDb}})
+		assert.Equal(t, nil, result.Err(), "should be equal")
+
+		// shard collection
+		ns := fmt.Sprintf("%s.%s", testDb, testCollection)
+		result = conn.Client.Database("admin").RunCommand(context.Background(), bson.D{
+			{"shardCollection", ns},
+			{"key", bson.M{"x": 1}},
+			{"unique", true},
+		}, nil)
+		assert.Equal(t, nil, result.Err(), "should be equal")
+
+		// 1-2(shardkey is x, so Query(upsert) only have _id field will failed, must have shardkey)
+		inserts := []*OplogRecord{
+			mockOplogRecord(1, 1, 1),
+			mockOplogRecord(2, 2, 1),
+		}
+
+		err = writer.doUpdate(testDb, testCollection, bson.M{}, inserts, true)
+		assert.NotEqual(t, nil, err, "should be equal")
+		assert.Equal(t, true, strings.Contains(err.Error(), "Failed to target upsert by query"), "should be equal")
+		fmt.Println(err)
+
+		inserts[0].original.partialLog.DocumentKey = bson.D{
+			{"_id", 1},
+			{"x", 1},
+		}
+		inserts[1].original.partialLog.DocumentKey = bson.D{
+			{"_id", 2},
+			{"x", 2},
+		}
+		err = writer.doUpdate(testDb, testCollection, bson.M{}, inserts, true)
+		assert.Equal(t, nil, err, "should be equal")
+
+		// query
+		opts := options.Find().SetSort(bson.D{{"_id", 1}})
+		res, err := unit_test_common.FetchAllDocumentbsonM(conn, testDb, testCollection, opts)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 2, len(res), "should be equal")
+		assert.Equal(t, int32(1), res[0]["x"], "should be equal")
+		assert.Equal(t, int32(2), res[1]["x"], "should be equal")
+
+		fmt.Println("---------------")
+		// 2-3
+		inserts2 := []*OplogRecord{
+			mockOplogRecord(2, 20, -1),
+			mockOplogRecord(3, 3, -1),
+		}
+		inserts2[0].original.partialLog.DocumentKey = bson.D{
+			{"_id", 2},
+			{"x", 2},
+		}
+		inserts2[1].original.partialLog.DocumentKey = bson.D{
+			{"_id", 3},
+			{"x", 3},
+		}
+
+		// see https://github.com/alibaba/MongoShake/issues/380 (need retryWrites: true)
+		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts2, true)
+		assert.NotEqual(t, nil, err, "should be equal")
+		// assert.Equal(t, true, strings.Contains(err.Error(), "Must run update to shard key"), "should be equal")
+
+		// query
+		opts = options.Find().SetSort(bson.D{{"_id", 1}})
+		res, err = unit_test_common.FetchAllDocumentbsonM(conn, testDb, testCollection, opts)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 3, len(res), "should be equal")
+		assert.Equal(t, int32(1), res[0]["x"], "should be equal")
+		assert.Equal(t, int32(2), res[1]["x"], "should be equal")
+		assert.Equal(t, int32(3), res[2]["x"], "should be equal")
+	}
 }
 
 //func TestBulkWriter(t *testing.T) {
