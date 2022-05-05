@@ -59,6 +59,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 
 	for _, log := range oplogs {
 		newObject := log.original.partialLog.Object
+		fmt.Printf("newObject:%v\n", newObject)
 		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
 
 			models = append(models, mongo.NewUpdateOneModel().
@@ -84,6 +85,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 		}
 
 		LOG.Debug("bulk_writer: updateOnInsert %v", log.original.partialLog)
+		fmt.Printf("bulk_writer: updateOnInsert %v\n", log.original.partialLog)
 	}
 
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, nil)

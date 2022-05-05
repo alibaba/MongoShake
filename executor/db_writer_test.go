@@ -893,64 +893,65 @@ func TestBulkWriter(t *testing.T) {
 		}, nil)
 		assert.Equal(t, nil, result.Err(), "should be equal")
 
-		//// 1-2
-		//inserts := []*OplogRecord{
-		//	mockOplogRecord(1, 1, -1),
-		//	mockOplogRecord(2, 2, -1),
-		//}
-		//
-		//err = writer.doUpdate(testDb, testCollection, bson.M{}, inserts, true)
+		// 1-2
+		inserts := []*OplogRecord{
+			mockOplogRecord(1, 1, 1),
+			mockOplogRecord(2, 2, 2),
+		}
+
+		err = writer.doUpdate(testDb, testCollection, bson.M{}, inserts, true)
+		assert.NotEqual(t, nil, err, "should be equal")
+		assert.Equal(t, true, strings.Contains(err.Error(), "Failed to target upsert by query"), "should be equal")
+		fmt.Println(err)
+
+		inserts[0].original.partialLog.DocumentKey = bson.D{
+			{"_id", 1},
+			{"x", 1},
+		}
+		inserts[1].original.partialLog.DocumentKey = bson.D{
+			{"_id", 2},
+			{"x", 2},
+		}
+		err = writer.doUpdate(testDb, testCollection, bson.M{}, inserts, true)
+		assert.Equal(t, nil, err, "should be equal")
+
+		// query
+		opts := options.Find().SetSort(bson.D{{"_id", 1}})
+		res, err := unit_test_common.FetchAllDocumentbsonM(conn, testDb, testCollection, opts)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 2, len(res), "should be equal")
+		assert.Equal(t, int32(1), res[0]["x"], "should be equal")
+		assert.Equal(t, int32(2), res[1]["x"], "should be equal")
+
+		fmt.Println("---------------")
+		// 2-3
+		inserts2 := []*OplogRecord{
+			mockOplogRecord(2, 20, -1),
+			mockOplogRecord(3, 3, -1),
+		}
+		inserts2[0].original.partialLog.DocumentKey = bson.D{
+			{"_id", 2},
+			{"x", 2},
+		}
+		inserts2[1].original.partialLog.DocumentKey = bson.D{
+			{"_id", 3},
+			{"x", 3},
+		}
+
+		//// see https://github.com/alibaba/MongoShake/issues/380
+		//err = writer.doInsert(testDb, testCollection, bson.M{}, inserts2, true)
+		//fmt.Printf("err:%v\n", err)
 		//assert.NotEqual(t, nil, err, "should be equal")
-		//assert.Equal(t, true, strings.Contains(err.Error(), "Failed to target upsert by query"), "should be equal")
-		//fmt.Println(err)
+		//assert.Equal(t, true, strings.Contains(err.Error(), "Must run update to shard key"), "should be equal")
 		//
-		//		inserts[0].original.partialLog.DocumentKey = bson.M{
-		//			"_id": 1,
-		//			"x":   1,
-		//		}
-		//		inserts[1].original.partialLog.DocumentKey = bson.M{
-		//			"_id": 2,
-		//			"x":   2,
-		//		}
-		//		err = writer.doUpdate(testDb, testCollection, bson.M{}, inserts, true)
-		//		assert.Equal(t, nil, err, "should be equal")
-		//
-		//		// query
-		//		result := make([]interface{}, 0)
-		//		err = conn.Session.DB(testDb).C(testCollection).Find(bson.M{}).Sort("_id").All(&result)
-		//		assert.Equal(t, nil, err, "should be equal")
-		//		assert.Equal(t, 2, len(result), "should be equal")
-		//		assert.Equal(t, 1, result[0]["x"], "should be equal")
-		//		assert.Equal(t, 2, result[1]["x"], "should be equal")
-		//
-		//		fmt.Println("---------------")
-		//		// 2-3
-		//		inserts2 := []*OplogRecord{
-		//			mockOplogRecord(2, 20, -1),
-		//			mockOplogRecord(3, 3, -1),
-		//		}
-		//		inserts2[0].original.partialLog.DocumentKey = bson.M{
-		//			"_id": 2,
-		//			"x":   2,
-		//		}
-		//		inserts2[1].original.partialLog.DocumentKey = bson.M{
-		//			"_id": 3,
-		//			"x":   3,
-		//		}
-		//
-		//		// see https://github.com/alibaba/MongoShake/issues/380
-		//		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts2, true)
-		//		assert.NotEqual(t, nil, err, "should be equal")
-		//		assert.Equal(t, true, strings.Contains(err.Error(), "Must run update to shard key"), "should be equal")
-		//
-		//		// query
-		//		result = make([]interface{}, 0)
-		//		err = conn.Session.DB(testDb).C(testCollection).Find(bson.M{}).Sort("_id").All(&result)
-		//		assert.Equal(t, nil, err, "should be equal")
-		//		assert.Equal(t, 3, len(result), "should be equal")
-		//		assert.Equal(t, 1, result[0]["x"], "should be equal")
-		//		assert.Equal(t, 2, result[1]["x"], "should be equal")
-		//		assert.Equal(t, 3, result[2]["x"], "should be equal")
+		//// query
+		//opts = options.Find().SetSort(bson.D{{"_id", 1}})
+		//res, err = unit_test_common.FetchAllDocumentbsonM(conn, testDb, testCollection, opts)
+		//assert.Equal(t, nil, err, "should be equal")
+		//assert.Equal(t, 3, len(res), "should be equal")
+		//assert.Equal(t, int32(1), res[0]["x"], "should be equal")
+		//assert.Equal(t, int32(2), res[1]["x"], "should be equal")
+		//assert.Equal(t, int32(3), res[2]["x"], "should be equal")
 	}
 }
 
