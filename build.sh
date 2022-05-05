@@ -30,7 +30,12 @@ if [ -z "$DEBUG" ]; then
     DEBUG=0
 fi
 
-info="mongoshake/common.BRANCH=$branch"
+modulename="mongoshake"
+if [ -f "go.mod" ];then
+    modulename=$(cat go.mod | grep module | awk '{print $2}')
+fi
+
+info="$modulename/common.BRANCH=$branch"
 # inject program information about compile
 if [ $DEBUG -eq 1 ]; then
 	echo "[ BUILD DEBUG ]"
@@ -65,7 +70,7 @@ for g in "${goos[@]}"; do
     export GOOS=$g
     echo "try build goos=$g"
     if [ $g != "windows" ]; then
-        build_info="$info -X mongoshake/common.SIGNALPROFILE=31 -X mongoshake/common.SIGNALSTACK=30"
+        build_info="$info -X $modulename/common.SIGNALPROFILE=31 -X $modulename/common.SIGNALSTACK=30"
     else
         build_info=$info
     fi
