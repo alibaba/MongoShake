@@ -4,6 +4,7 @@ import (
 	"fmt"
 	bson2 "go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"math"
 	"strconv"
@@ -299,7 +300,25 @@ func IsCollectionCappedError(err error) bool {
 	return false
 }
 
+func FindFirstErrorIndexAndMessageN(err error) (int, string, bool) {
+	if err == nil {
+		return 0, "", false
+	}
+
+	wError := (err.(mongo.BulkWriteException)).WriteErrors
+	if len(wError) == 0 {
+		return 0, "", false
+	}
+
+	if wError[0].HasErrorCode(11000) {
+		return wError[0].Index, wError[0].Message, true
+	}
+
+	return wError[0].Index, wError[0].Message, false
+}
+
 // used to handle bulk return error
+// TODO(jianyou) deprecate
 func FindFirstErrorIndexAndMessage(error string) (int, string, bool) {
 	subIndex := "index["
 	subMsg := "msg["

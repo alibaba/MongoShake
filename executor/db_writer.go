@@ -5,9 +5,9 @@ import (
 	"github.com/alibaba/MongoShake/v2/oplog"
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
 	bson "go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 const (
@@ -183,53 +183,48 @@ func RunCommand(database, operation string, log *oplog.PartialLog, conn *utils.M
 
 // true means error can be ignored
 // https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.yml
-// TODO(jianyou) deprecated
 func IgnoreError(err error, op string, isFullSyncStage bool) bool {
 	if err == nil {
 		return true
 	}
 
-	errorCode := mgo.ErrorCodeList(err)
-
-	if err != nil && len(errorCode) == 0 {
-		return false
+	er, ok := err.(mongo.ServerError)
+	if !ok {
+		return true
 	}
 
-	for _, err := range errorCode {
-		switch op {
-		case "i":
-			/*if isFullSyncStage {
-				if err == 11000 { // duplicate key
-					continue
-				}
-			}*/
-		case "u":
-			if isFullSyncStage {
-				if err == 28 || err == 211 { // PathNotViable
-					continue
-				}
-			}
-		case "ui":
-			if isFullSyncStage {
-				if err == 11000 { // duplicate key
-					continue
-				}
-			}
-		case "d":
-			if err == 26 { // NamespaceNotFound
+	switch op {
+	case "i":
+		/*if isFullSyncStage {
+			if err == 11000 { // duplicate key
 				continue
 			}
-		case "c":
-			if err == 26 { // NamespaceNotFound
-				continue
+		}*/
+	case "u":
+		if isFullSyncStage {
+			if er.HasErrorCode(28) || er.HasErrorCode(211) { // PathNotViable
+				return true
 			}
-		default:
-			return false
 		}
+	case "ui":
+		if isFullSyncStage {
+			if er.HasErrorCode(11000) { // duplicate key
+				return true
+			}
+		}
+	case "d":
+		if er.HasErrorCode(26) { // NamespaceNotFound
+			return true
+		}
+	case "c":
+		if er.HasErrorCode(26) { // NamespaceNotFound
+			return true
+		}
+	default:
 		return false
 	}
 
-	return true
+	return false
 }
 
 func parseLastTimestamp(oplogs []*OplogRecord) int64 {

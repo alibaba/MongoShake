@@ -104,6 +104,12 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 				LOG.Error("upsert _id[%v] with data[%v] failed[%v]", update.id, update.data, err)
 				return err
 			}
+			if res != nil {
+				if res.MatchedCount != 1 && res.UpsertedCount != 1 {
+					return fmt.Errorf("Update fail(MatchedCount:%d ModifiedCount:%d UpsertedCount:%d) upsert _id[%v] with data[%v]",
+						res.MatchedCount, res.ModifiedCount, res.UpsertedCount, update.id, update.data)
+				}
+			}
 		}
 	} else {
 		for i, update := range updates {
@@ -115,15 +121,19 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 					update.id, update.data, err, res)
 
 				// error can be ignored
-				if utils.DatetimeToInt64(oplogs[i].original.partialLog.Timestamp) <= sw.fullFinishTs {
-					er, ok := err.(mongo.ServerError)
-					if ok && (er.HasErrorCode(28) || er.HasErrorCode(211)) {
-						continue
-					}
+				if IgnoreError(err, "u",
+					utils.DatetimeToInt64(oplogs[i].original.partialLog.Timestamp) <= sw.fullFinishTs) {
+					continue
 				}
 
 				LOG.Error("update _id[%v] with data[%v] failed[%v]", update.id, update.data, err.Error())
 				return err
+			}
+			if res != nil {
+				if res.MatchedCount != 1 {
+					return fmt.Errorf("Update fail(MatchedCount:%d, ModifiedCount:%d) old-data[%v] with new-data[%v]",
+						res.MatchedCount, res.ModifiedCount, update.id, update.data)
+				}
 			}
 		}
 	}
@@ -138,25 +148,24 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 		for _, log := range oplogs {
 			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
 			var err error
+			var res *mongo.UpdateResult
 			opts := options.Update().SetUpsert(true)
 			if upsert && len(log.original.partialLog.DocumentKey) > 0 {
-				_, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.DocumentKey,
+				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.DocumentKey,
 					bson.D{{"$set", log.original.partialLog.Object}}, opts)
 			} else {
 				if upsert {
 					LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
 				}
 
-				_, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.Query,
+				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.Query,
 					bson.D{{"$set", log.original.partialLog.Object}}, opts)
 			}
 			if err != nil {
 				// error can be ignored
-				if utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs {
-					er, ok := err.(mongo.ServerError)
-					if ok && (er.HasErrorCode(28) || er.HasErrorCode(211)) {
-						continue
-					}
+				if IgnoreError(err, "u",
+					utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
+					continue
 				}
 
 				if utils.DuplicateKey(err) {
@@ -168,21 +177,26 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 					log.original.partialLog.Query, log.original.partialLog.Object, err)
 				return err
 			}
+			if res != nil {
+				if res.MatchedCount != 1 && res.UpsertedCount != 1 {
+					return fmt.Errorf("Update fail(MatchedCount:%d ModifiedCount:%d UpsertedCount:%d) old-data[%v] with new-data[%v]",
+						res.MatchedCount, res.ModifiedCount, res.UpsertedCount,
+						log.original.partialLog.Query, log.original.partialLog.Object)
+				}
+			}
 
 			LOG.Debug("single_writer: upsert %v", log.original.partialLog)
 		}
 	} else {
 		for _, log := range oplogs {
 			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-			_, err := collectionHandle.UpdateOne(context.Background(), log.original.partialLog.Query,
+			res, err := collectionHandle.UpdateOne(context.Background(), log.original.partialLog.Query,
 				bson.D{{"$set", log.original.partialLog.Object}}, nil)
 			if err != nil {
 				// error can be ignored
-				if utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs {
-					er, ok := err.(mongo.ServerError)
-					if ok && (er.HasErrorCode(28) || er.HasErrorCode(211)) {
-						continue
-					}
+				if IgnoreError(err, "u",
+					utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
+					continue
 				}
 
 				if utils.DuplicateKey(err) {
@@ -191,6 +205,13 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 					LOG.Error("doUpdate[update] old-data[%v] with new-data[%v] failed[%v]",
 						log.original.partialLog.Query, log.original.partialLog.Object, err)
 					return err
+				}
+			}
+			if res != nil {
+				if res.MatchedCount != 1 {
+					return fmt.Errorf("Update fail(MatchedCount:%d ModifiedCount:%d MatchedCount:%d) old-data[%v] with new-data[%v]",
+						res.MatchedCount, res.ModifiedCount, res.MatchedCount,
+						log.original.partialLog.Query, log.original.partialLog.Object)
 				}
 			}
 

@@ -1,6 +1,8 @@
 package executor
 
 import (
+	"context"
+	"fmt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
@@ -23,23 +25,19 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, opl
 	dupUpdate bool) error {
 
 	var models []mongo.WriteModel
-	var inserts []interface{}
 	for _, log := range oplogs {
-		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-		newObject := log.original.partialLog.Object
-		inserts = append(inserts, newObject)
-		doc, _ := oplog.ConvertBsonD2M(newObject)
-		models = append(models, mongo.NewInsertOneModel().SetDocument(doc))
+		models = append(models, mongo.NewInsertOneModel().SetDocument(log.original.partialLog.Object))
 
-		LOG.Debug("bulk_writer: insert org_oplog:%v insert_doc:%v", log.original.partialLog, doc)
+		LOG.Debug("bulk_writer: insert org_oplog:%v insert_doc:%v",
+			log.original.partialLog, log.original.partialLog.Object)
 	}
 
-	// TODO(jianyou) 改为undorder的插入和dup判断，复用全量doSync()中的函数。doUpdateOnInsert中使用的是documentKey
-	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, nil)
+	opts := options.BulkWrite().SetOrdered(false)
+	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, opts)
 
 	if err != nil {
 		LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
-			len(models), database+"."+collection, err, res)
+			len(models), database+"."+collection, (err.(mongo.BulkWriteException)).WriteErrors[0], res)
 
 		if utils.DuplicateKey(err) {
 			RecordDuplicatedOplog(bw.conn, collection, oplogs)
@@ -57,29 +55,25 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, opl
 
 func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bson.M,
 	oplogs []*OplogRecord, upsert bool) error {
-	var update []interface{} // deprecate
 	var models []mongo.WriteModel
+
 	for _, log := range oplogs {
-		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-		newObject, _ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
+		newObject := log.original.partialLog.Object
 		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
-			update = append(update, log.original.partialLog.DocumentKey, newObject)
 
 			models = append(models, mongo.NewUpdateOneModel().
 				SetFilter(log.original.partialLog.DocumentKey).
-				SetUpdate(newObject).SetUpsert(true))
+				SetUpdate(bson.D{{"$set", newObject}}).SetUpsert(true))
 		} else {
 			if upsert {
 				LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
 			}
 			// insert must have _id
-			// if id, exist := log.original.partialLog.Object["_id"]; exist {
 			if id := oplog.GetKeyN(log.original.partialLog.Object, ""); id != nil {
-				update = append(update, bson.M{"_id": id}, newObject)
 
 				model := mongo.NewUpdateOneModel().
 					SetFilter(bson.D{{"_id", id}}).
-					SetUpdate(newObject)
+					SetUpdate(bson.D{{"$set", newObject}})
 				if upsert {
 					model.SetUpsert(true)
 				}
@@ -96,7 +90,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 
 	if err != nil {
 		// parse error
-		index, errMsg, dup := utils.FindFirstErrorIndexAndMessage(err.Error())
+		index, errMsg, dup := utils.FindFirstErrorIndexAndMessageN(err)
 		LOG.Error("detail error info with index[%v] msg[%v] dup[%v] res[%v]", index, errMsg, dup, res)
 
 		if utils.DuplicateKey(err) {
@@ -124,31 +118,24 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 
 func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 	oplogs []*OplogRecord, upsert bool) error {
-	var update []interface{} // deprecate
+
 	var models []mongo.WriteModel
 	for _, log := range oplogs {
-		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
-		// we should handle the special case: "o" field may include "$v" in mongo-3.6 which is not support in mgo.v2 library
-		//if _, ok := newObject[versionMark]; ok {
-		//	delete(newObject, versionMark)
-		//}
 		log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-		newObject, _ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
-		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
-			update = append(update, log.original.partialLog.DocumentKey, log.original.partialLog.Object)
+		newObject := log.original.partialLog.Object
 
+		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
 			models = append(models, mongo.NewUpdateOneModel().
 				SetFilter(log.original.partialLog.DocumentKey).
-				SetUpdate(newObject).SetUpsert(true))
+				SetUpdate(bson.D{{"$set", newObject}}).SetUpsert(true))
 		} else {
 			if upsert {
 				LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
 			}
-			update = append(update, log.original.partialLog.Query, log.original.partialLog.Object)
 
 			model := mongo.NewUpdateOneModel().
 				SetFilter(log.original.partialLog.Query).
-				SetUpdate(newObject)
+				SetUpdate(bson.D{{"$set", newObject}})
 			if upsert {
 				model.SetUpsert(true)
 			}
@@ -158,13 +145,15 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 		LOG.Debug("bulk_writer: update %v", log.original.partialLog.Object)
 	}
 
-	LOG.Debug("bulk_writer: update %v", update)
+	LOG.Debug("bulk_writer: update %v", models)
 
-	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, nil)
+	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(
+		context.Background(), models, nil)
 
+	fmt.Printf("err:%v\n", err)
 	if err != nil {
 		// parse error
-		index, errMsg, dup := utils.FindFirstErrorIndexAndMessage(err.Error())
+		index, errMsg, dup := utils.FindFirstErrorIndexAndMessageN(err)
 		var oplogRecord *OplogRecord
 		if index != -1 {
 			oplogRecord = oplogs[index]
@@ -173,9 +162,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 			index, errMsg, dup, parseLastTimestamp(oplogs) <= bw.fullFinishTs,
 			*oplogRecord.original.partialLog, res)
 
-		// TODO(jianyou) DUP judge
-		//if mgo.IsDup(err) {
-		if false {
+		if utils.DuplicateKey(err) {
 			RecordDuplicatedOplog(bw.conn, collection, oplogs)
 			// create single writer to write one by one
 			sw := NewDbWriter(bw.conn, bson.M{}, false, bw.fullFinishTs)
@@ -184,32 +171,40 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 
 		// error can be ignored
 		if IgnoreError(err, "u", parseLastTimestamp(oplogs) <= bw.fullFinishTs) {
-			LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]", err, "u", parseLastTimestamp(oplogs) <= bw.fullFinishTs)
+			LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]", err, "u",
+				parseLastTimestamp(oplogs) <= bw.fullFinishTs)
+
 			// re-run (index, len(oplogs) - 1]
 			sw := NewDbWriter(bw.conn, bson.M{}, false, bw.fullFinishTs)
 			return sw.doUpdate(database, collection, metadata, oplogs[index+1:], upsert)
 		}
+
 		LOG.Error("doUpdate run upsert/update[%v] failed[%v]", upsert, err)
 		return err
 	}
+	// TODO(jianyou) deprecate
+	//if res != nil {
+	//	oplogsLen := int64(len(oplogs))
+	//	if res.MatchedCount != oplogsLen && res.InsertedCount+res.UpsertedCount+res.ModifiedCount != oplogsLen {
+	//		return fmt.Errorf("update fail(MatchedCount:%d ModifiedCount:%d UpsertedCount:%d InsertedCount:%d oplogsLen:%d) modules:%v",
+	//			res.MatchedCount, res.ModifiedCount, res.UpsertedCount, res.InsertedCount,
+	//			int64(len(oplogs)), models[0])
+	//	}
+	//}
 	return nil
 }
 
 func (bw *BulkWriter) doDelete(database, collection string, metadata bson.M,
 	oplogs []*OplogRecord) error {
-	var delete []interface{} //deprecate
 	var models []mongo.WriteModel
 	for _, log := range oplogs {
-		delete = append(delete, log.original.partialLog.Object)
-
-		newObject, _ := oplog.ConvertBsonD2M(log.original.partialLog.Object)
-		models = append(models, mongo.NewDeleteOneModel().SetFilter(newObject))
+		models = append(models, mongo.NewDeleteOneModel().SetFilter(log.original.partialLog.Object))
 
 		LOG.Debug("bulk_writer: delete %v", log.original.partialLog)
 	}
 
 	opts := options.BulkWrite().SetOrdered(false)
-	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, opts)
+	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(context.Background(), models, opts)
 	if err != nil {
 		// error can be ignored
 		if IgnoreError(err, "d", parseLastTimestamp(oplogs) <= bw.fullFinishTs) {
@@ -218,7 +213,7 @@ func (bw *BulkWriter) doDelete(database, collection string, metadata bson.M,
 			return nil
 		}
 
-		LOG.Error("doDelete run delete[%v] failed[%v] res[%v]", delete, err, res)
+		LOG.Error("doDelete run delete[%v] failed[%v] res[%v]", models, err, res)
 		return err
 	}
 	return nil
