@@ -958,236 +958,245 @@ func TestBulkWriter(t *testing.T) {
 	}
 }
 
-//func TestRunCommand(t *testing.T) {
-//	// test RunCommand
-//
-//	var nr int
-//
-//	// applyOps
-//	{
-//		fmt.Printf("TestRunCommand case %d.\n", nr)
-//		nr++
-//
-//		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
-//		assert.Equal(t, nil, err, "should be equal")
-//
-//		// drop database
-//		err = conn.Session.DB("zz").DropDatabase()
-//		assert.Equal(t, nil, err, "should be equal")
-//
-//		err = conn.Session.DB("zz").C("y").Insert(bson.M{"x": 1})
-//		assert.Equal(t, nil, err, "should be equal")
-//
-//		log := &oplog.PartialLog{
-//			ParsedLog: oplog.ParsedLog{
-//				Operation: "i",
-//				Namespace: "admin.$cmd",
-//				Object: bson.D{
-//					bson.DocElem{
-//						Name: "applyOps",
-//						Value: []bson.M{
-//							{
-//								"ns": "zz.y",
-//								"op": "i",
-//								"ui": "xxxx",
-//								"o": bson.M{
-//									"_id":   "567",
-//									"hello": "world",
-//								},
-//							},
-//							{
-//								"ns": "zz.y",
-//								"op": "i",
-//								"ui": "xxxx2",
-//								"o": bson.D{
-//									bson.DocElem{
-//										Name:  "_id",
-//										Value: "789",
-//									},
-//									bson.DocElem{
-//										Name:  "hello",
-//										Value: "w2",
-//									},
-//								},
-//							},
-//						},
-//					},
-//				},
-//			},
-//		}
-//		err = RunCommand(testDb, "applyOps", log, conn.Session)
-//		assert.Equal(t, nil, err, "should be equal")
-//
-//		result := make(map[string]interface{})
-//		err = conn.Session.DB("zz").C("y").Find(bson.M{"hello": "world"}).One(&result)
-//		assert.Equal(t, nil, err, "should be equal")
-//		assert.Equal(t, "567", result["_id"].(string), "should be equal")
-//		assert.Equal(t, "world", result["hello"].(string), "should be equal")
-//
-//		result = make(map[string]interface{})
-//		err = conn.Session.DB("zz").C("y").Find(bson.M{"hello": "w2"}).One(&result)
-//		assert.Equal(t, nil, err, "should be equal")
-//		assert.Equal(t, "789", result["_id"].(string), "should be equal")
-//		assert.Equal(t, "w2", result["hello"].(string), "should be equal")
-//	}
-//
-//	// applyOps with drop database
-//	{
-//		fmt.Printf("TestRunCommand case %d.\n", nr)
-//		nr++
-//
-//		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
-//		assert.Equal(t, nil, err, "should be equal")
-//
-//		err = conn.Session.DB("zz").C("y").Insert(bson.M{"x": 1})
-//		assert.Equal(t, nil, err, "should be equal")
-//
-//		log := &oplog.PartialLog{
-//			ParsedLog: oplog.ParsedLog{
-//				Operation: "c",
-//				Namespace: "admin.$cmd",
-//				Object: bson.D{
-//					bson.DocElem{
-//						Name: "applyOps",
-//						Value: []bson.M{
-//							{
-//								"ns": "zz.$cmd",
-//								"op": "c",
-//								"ui": "xxxx",
-//								"o": bson.M{
-//									"dropDatabase": 1,
-//								},
-//							},
-//						},
-//					},
-//				},
-//			},
-//		}
-//		err = RunCommand(testDb, "applyOps", log, conn.Session)
-//		assert.Equal(t, nil, err, "should be equal")
-//
-//		dbs, err := conn.Session.DatabaseNames()
-//		assert.Equal(t, nil, err, "should be equal")
-//		exist := false
-//		for _, db := range dbs {
-//			if db == "zz" {
-//				exist = true
-//			}
-//		}
-//		assert.Equal(t, false, exist, "should be equal")
-//	}
-//
-//	// normal drop database
-//	{
-//		fmt.Printf("TestRunCommand case %d.\n", nr)
-//		nr++
-//
-//		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
-//		assert.Equal(t, nil, err, "should be equal")
-//
-//		err = conn.Session.DB("zz").C("y").Insert(bson.M{"x": 1})
-//		assert.Equal(t, nil, err, "should be equal")
-//
-//		log := &oplog.PartialLog{
-//			ParsedLog: oplog.ParsedLog{
-//				Operation: "c",
-//				Namespace: "zz.$cmd",
-//				Object: bson.D{
-//					bson.DocElem{
-//						Name:  "dropDatabase",
-//						Value: 1,
-//					},
-//				},
-//			},
-//		}
-//
-//		err = RunCommand("zz", "dropDatabase", log, conn.Session)
-//		assert.Equal(t, nil, err, "should be equal")
-//
-//		dbs, err := conn.Session.DatabaseNames()
-//		assert.Equal(t, nil, err, "should be equal")
-//		exist := false
-//		for _, db := range dbs {
-//			if db == "zz" {
-//				exist = true
-//			}
-//		}
-//		assert.Equal(t, false, exist, "should be equal")
-//	}
-//
-//	// create index
-//	{
-//		fmt.Printf("TestRunCommand case %d.\n", nr)
-//		nr++
-//
-//		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
-//		assert.Equal(t, nil, err, "should be equal")
-//
-//		err = conn.Session.DB("zz").C("y").Insert(bson.M{"x": 1})
-//		assert.Equal(t, nil, err, "should be equal")
-//
-//		log := &oplog.PartialLog{
-//			ParsedLog: oplog.ParsedLog{
-//				Operation: "c",
-//				Namespace: "zz.$cmd",
-//				Object: bson.D{
-//					bson.DocElem{
-//						Name:  "createIndexes",
-//						Value: "y",
-//					},
-//					bson.DocElem{
-//						Name:  "unique",
-//						Value: "true",
-//					},
-//					bson.DocElem{
-//						Name:  "v",
-//						Value: 2,
-//					},
-//					bson.DocElem{
-//						Name:  "name",
-//						Value: "x_1",
-//					},
-//					bson.DocElem{
-//						Name: "key",
-//						Value: bson.M{
-//							"x": 1,
-//						},
-//					},
-//				},
-//			},
-//		}
-//
-//		err = RunCommand("zz", "createIndexes", log, conn.Session)
-//		assert.Equal(t, nil, err, "should be equal")
-//
-//		indexes, err := conn.Session.DB("zz").C("y").Indexes()
-//		exist := false
-//		for _, index := range indexes {
-//			if index.Name == "x_1" && index.Unique == true {
-//				exist = true
-//				break
-//			}
-//		}
-//		assert.Equal(t, true, exist, "should be equal")
-//	}
-//}
-//
-//func TestIgnoreError(t *testing.T) {
-//	// test IgnoreError
-//
-//	var nr int
-//
-//	// applyOps
-//	{
-//		fmt.Printf("TestIgnoreError case %d.\n", nr)
-//		nr++
-//
-//		var err error = &mgo.LastError{Code: 26}
-//		ignore := IgnoreError(err, "d", false)
-//		assert.Equal(t, true, ignore, "should be equal")
-//
-//		err = &mgo.QueryError{Code: 280}
-//		ignore = IgnoreError(err, "d", false)
-//		assert.Equal(t, false, ignore, "should be equal")
-//	}
-//}
+func TestRunCommand(t *testing.T) {
+	// test RunCommand
+
+	var nr int
+
+	// applyOps
+	{
+		fmt.Printf("TestRunCommand case %d.\n", nr)
+		nr++
+
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		assert.Equal(t, nil, err, "should be equal")
+
+		// drop database
+		err = conn.Client.Database("zz").Drop(nil)
+		assert.Equal(t, nil, err, "should be equal")
+
+		_, err = conn.Client.Database("zz").Collection("y").InsertOne(context.Background(), bson.M{"x": 1})
+		assert.Equal(t, nil, err, "should be equal")
+
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "i",
+				Namespace: "admin.$cmd",
+				Object: bson.D{
+					bson.E{
+						Key: "applyOps",
+						Value: []bson.M{
+							{
+								"ns": "zz.y",
+								"op": "i",
+								"ui": "xxxx",
+								"o": bson.M{
+									"_id":   "567",
+									"hello": "world",
+								},
+							},
+							{
+								"ns": "zz.y",
+								"op": "i",
+								"ui": "xxxx2",
+								"o": bson.D{
+									bson.E{
+										Key:   "_id",
+										Value: "789",
+									},
+									bson.E{
+										Key:   "hello",
+										Value: "w2",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		err = RunCommand(testDb, "applyOps", log, conn)
+		assert.Equal(t, nil, err, "should be equal")
+
+		opts := options.Find().SetSort(bson.D{{"_id", 1}})
+		result, err := unit_test_common.FetchAllDocumentbsonM(conn, "zz", "y", opts)
+		assert.Equal(t, nil, err, "should be equal")
+		fmt.Printf("result:%v\n", result)
+		assert.Equal(t, "567", result[0]["_id"].(string), "should be equal")
+		assert.Equal(t, "world", result[0]["hello"].(string), "should be equal")
+		assert.Equal(t, "789", result[1]["_id"].(string), "should be equal")
+		assert.Equal(t, "w2", result[1]["hello"].(string), "should be equal")
+		assert.Equal(t, int32(1), result[2]["x"], "should be equal")
+	}
+
+	// applyOps with drop database
+	{
+		fmt.Printf("TestRunCommand case %d.\n", nr)
+		nr++
+
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		assert.Equal(t, nil, err, "should be equal")
+
+		_, err = conn.Client.Database("zz").Collection("y").InsertOne(context.Background(), bson.M{"x": 1})
+		assert.Equal(t, nil, err, "should be equal")
+
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "c",
+				Namespace: "admin.$cmd",
+				Object: bson.D{
+					bson.E{
+						Key: "applyOps",
+						Value: []bson.M{
+							{
+								"ns": "zz.$cmd",
+								"op": "c",
+								"ui": "xxxx",
+								"o": bson.M{
+									"dropDatabase": 1,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		err = RunCommand(testDb, "applyOps", log, conn)
+		assert.Equal(t, nil, err, "should be equal")
+
+		dbs, err := conn.Client.ListDatabaseNames(context.Background(), bson.D{})
+		fmt.Printf("dbs:%v\n", dbs)
+		assert.Equal(t, nil, err, "should be equal")
+		exist := false
+		for _, db := range dbs {
+			if db == "zz" {
+				exist = true
+			}
+		}
+		assert.Equal(t, false, exist, "should be equal")
+	}
+
+	// normal drop database
+	{
+		fmt.Printf("TestRunCommand case %d.\n", nr)
+		nr++
+
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		assert.Equal(t, nil, err, "should be equal")
+
+		_, err = conn.Client.Database("zz").Collection("y").InsertOne(context.Background(), bson.M{"x": 1})
+		assert.Equal(t, nil, err, "should be equal")
+
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "c",
+				Namespace: "zz.$cmd",
+				Object: bson.D{
+					bson.E{
+						Key:   "dropDatabase",
+						Value: 1,
+					},
+				},
+			},
+		}
+
+		err = RunCommand("zz", "dropDatabase", log, conn)
+		assert.Equal(t, nil, err, "should be equal")
+
+		dbs, err := conn.Client.ListDatabaseNames(context.Background(), bson.D{})
+		fmt.Printf("dbs:%v\n", dbs)
+		assert.Equal(t, nil, err, "should be equal")
+		exist := false
+		for _, db := range dbs {
+			if db == "zz" {
+				exist = true
+			}
+		}
+		assert.Equal(t, false, exist, "should be equal")
+	}
+
+	// create index
+	{
+		fmt.Printf("TestRunCommand case %d.\n", nr)
+		nr++
+
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		assert.Equal(t, nil, err, "should be equal")
+
+		_, err = conn.Client.Database("zz").Collection("y").InsertOne(context.Background(), bson.M{"x": 1})
+		assert.Equal(t, nil, err, "should be equal")
+
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "c",
+				Namespace: "zz.$cmd",
+				Object: bson.D{
+					bson.E{
+						Key:   "createIndexes",
+						Value: "y",
+					},
+					bson.E{
+						Key:   "unique",
+						Value: "true",
+					},
+					bson.E{
+						Key:   "v",
+						Value: 2,
+					},
+					bson.E{
+						Key:   "name",
+						Value: "x_1",
+					},
+					bson.E{
+						Key: "key",
+						Value: bson.M{
+							"x": 1,
+						},
+					},
+				},
+			},
+		}
+
+		err = RunCommand("zz", "createIndexes", log, conn)
+		assert.Equal(t, nil, err, "should be equal")
+
+		cursor, err := conn.Client.Database("zz").Collection("y").Indexes().List(context.Background())
+		assert.Equal(t, nil, err, "should be equal")
+
+		indexes := make([]bson.M, 0)
+		cursor.All(nil, &indexes)
+		fmt.Printf("indexes:%v\n", indexes)
+
+		exist := false
+		for _, index := range indexes {
+			if index["name"] == "x_1" && index["unique"] == true {
+				exist = true
+				break
+			}
+		}
+		assert.Equal(t, true, exist, "should be equal")
+	}
+}
+
+func TestIgnoreError(t *testing.T) {
+	// test IgnoreError
+
+	var nr int
+
+	// applyOps
+	{
+		fmt.Printf("TestIgnoreError case %d.\n", nr)
+		nr++
+
+		var err error = &mongo.WriteError{Code: 26}
+		ignore := IgnoreError(err, "d", false)
+		assert.Equal(t, true, ignore, "should be equal")
+
+		err = &mongo.WriteError{Code: 280}
+		ignore = IgnoreError(err, "d", false)
+		assert.Equal(t, false, ignore, "should be equal")
+	}
+}
