@@ -75,7 +75,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 			}
 			// insert must have _id
 			if id := oplog.GetKeyN(log.original.partialLog.Object, ""); id != nil {
-				updates = append(updates, &pair{id: id, data: newObject, index: i})
+				updates = append(updates, &pair{id: bson.D{{"_id", id}}, data: newObject, index: i})
 			} else {
 				return fmt.Errorf("insert on duplicated update _id look up failed. %v", log.original.partialLog)
 			}
@@ -89,7 +89,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 		for _, update := range updates {
 
 			opts := options.Update().SetUpsert(true)
-			res, err := collectionHandle.UpdateOne(context.Background(), bson.D{{"_id", update.id}},
+			res, err := collectionHandle.UpdateOne(context.Background(), update.id,
 				bson.D{{"$set", update.data}}, opts)
 			if err != nil {
 				LOG.Warn("upsert _id[%v] with data[%v] meets err[%v] res[%v], try to solve",
@@ -114,7 +114,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 	} else {
 		for i, update := range updates {
 
-			res, err := collectionHandle.UpdateOne(context.Background(), bson.D{{"_id", update.id}},
+			res, err := collectionHandle.UpdateOne(context.Background(), update.id,
 				bson.D{{"$set", update.data}}, nil)
 			if err != nil && utils.DuplicateKey(err) == false {
 				LOG.Warn("update _id[%v] with data[%v] meets err[%v] res[%v], try to solve",
