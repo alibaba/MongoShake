@@ -4,7 +4,6 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
 	"go.mongodb.org/mongo-driver/bson"
 
 	LOG "github.com/vinllen/log4go"
@@ -23,14 +22,11 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.M, 
 	dupUpdate bool) error {
 	var inserts []bson.D
 	for _, log := range oplogs {
-		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
 		newObject := log.original.partialLog.Object
 		inserts = append(inserts, newObject)
 		LOG.Debug("command_writer:: insert %v", log.original.partialLog)
 	}
 	dbHandle := cw.conn.Client.Database(database)
-	//session := new(mgo.Session)
-	//dbHandle := session.DB(database)
 
 	var err error
 	if err = dbHandle.RunCommand(nil, bson.D{{"insert", collection},
@@ -88,7 +84,7 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 	}
 
 	var err error
-	if err = cw.conn.Client.Database(database).RunCommand(nil, bson2.D{{"update", collection},
+	if err = cw.conn.Client.Database(database).RunCommand(nil, bson.D{{"update", collection},
 		{"bypassDocumentValidation", false},
 		{"updates", updates},
 		{"ordered", ExecuteOrdered}}).Err(); err == nil {
@@ -136,7 +132,7 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.M,
 	}
 
 	var err error
-	if err = cw.conn.Client.Database(database).RunCommand(nil, bson2.D{{"update", collection},
+	if err = cw.conn.Client.Database(database).RunCommand(nil, bson.D{{"update", collection},
 		{"bypassDocumentValidation", false},
 		{"updates", updates},
 		{"ordered", ExecuteOrdered}}).Err(); err == nil {
@@ -177,7 +173,7 @@ func (cw *CommandWriter) doDelete(database, collection string, metadata bson.M,
 		LOG.Debug("command_writer:: delete %v", log.original.partialLog)
 	}
 
-	if err = cw.conn.Client.Database(database).RunCommand(nil, bson2.D{{"delete", collection},
+	if err = cw.conn.Client.Database(database).RunCommand(nil, bson.D{{"delete", collection},
 		{"deletes", deleted},
 		{"ordered", ExecuteOrdered}}).Err(); err == nil {
 		//if err = cw.session.DB(database).RunCommand(
@@ -235,7 +231,7 @@ func (cw *CommandWriter) applyOps(database string, metadata bson.M, oplogs []*op
 	succeed := 0
 	for succeed < len(oplogs) {
 		if err := cw.conn.Client.Database(database).
-			RunCommand(nil, bson2.M{"applyOps": oplogs[succeed:]}).Err(); err != nil {
+			RunCommand(nil, bson.M{"applyOps": oplogs[succeed:]}).Err(); err != nil {
 			//if err := cw.session.DB(database).RunCommand(
 			//	"applyOps",
 			//	// only one field. therefore use bson.M simply

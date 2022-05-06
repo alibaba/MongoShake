@@ -958,6 +958,18 @@ func TestBulkWriter(t *testing.T) {
 	}
 }
 
+func TestCommandWriter(t *testing.T) {
+
+	utils.InitialLogger("", "", "debug", true, 1)
+
+	var nr int
+
+	{
+		fmt.Printf("TestSingleWriter case %d.\n", nr)
+		nr++
+	}
+}
+
 func TestRunCommand(t *testing.T) {
 	// test RunCommand
 
