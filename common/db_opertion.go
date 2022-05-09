@@ -11,8 +11,6 @@ import (
 	"strings"
 
 	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
-
 	"sort"
 )
 
@@ -142,24 +140,6 @@ func GetOldestTimestampByConn(conn *MongoCommunityConn) (primitive.DateTime, err
 	return getOplogTimestamp(conn, 1)
 }
 
-func GetNewestTimestampBySession(session *mgo.Session) (primitive.DateTime, error) {
-	var retMap map[string]interface{}
-	err := session.DB(localDB).C(OplogNS).Find(bson.M{}).Sort("-$natural").Limit(1).One(&retMap)
-	if err != nil {
-		return 0, err
-	}
-	return retMap[QueryTs].(primitive.DateTime), nil
-}
-
-func GetOldestTimestampBySession(session *mgo.Session) (primitive.DateTime, error) {
-	var retMap map[string]interface{}
-	err := session.DB(localDB).C(OplogNS).Find(bson.M{}).Limit(1).One(&retMap)
-	if err != nil {
-		return 0, err
-	}
-	return retMap[QueryTs].(primitive.DateTime), nil
-}
-
 func GetNewestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (primitive.DateTime, error) {
 	var conn *MongoCommunityConn
 	var err error
@@ -191,17 +171,6 @@ func GetOldestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (p
 	defer conn.Close()
 
 	return GetOldestTimestampByConn(conn)
-}
-
-// deprecated
-func IsFromMongos(url string) (bool, error) {
-	var conn *MongoConn
-	var err error
-	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true,
-		ReadWriteConcernDefault, ReadWriteConcernDefault, ""); conn == nil || err != nil {
-		return false, err
-	}
-	return conn.IsMongos(), nil
 }
 
 // record the oldest and newest timestamp of each mongod

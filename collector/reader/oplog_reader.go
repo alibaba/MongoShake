@@ -3,9 +3,13 @@ package sourceReader
 // read oplog from source mongodb
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"sync"
 	"time"
 
@@ -14,8 +18,6 @@ import (
 	"github.com/alibaba/MongoShake/v2/oplog"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -41,8 +43,8 @@ type OplogReader struct {
 	replset string
 
 	// mongo oplog reader
-	conn           *utils.MongoConn
-	oplogsIterator *mgo.Iter
+	conn         *utils.MongoCommunityConn
+	oplogsCursor *mongo.Cursor
 
 	// query statement and current max cursor
 	query bson.M
@@ -141,16 +143,14 @@ func (or *OplogReader) fetcher() {
 	LOG.Info("start fetcher with src[%v] replica-name[%v] query-ts[%v]",
 		utils.BlockMongoUrlPassword(or.src, "***"), or.replset,
 		utils.ExtractTimestampForLog(or.query[QueryTs].(bson.M)[QueryOpGT].(primitive.DateTime)))
-	var log *bson.Raw
 	for {
 		if err := or.EnsureNetwork(); err != nil {
 			or.oplogChan <- &retOplog{nil, err}
 			continue
 		}
 
-		log = new(bson.Raw)
-		if !or.oplogsIterator.Next(log) {
-			if err := or.oplogsIterator.Err(); err != nil {
+		if !or.oplogsCursor.Next(context.Background()) {
+			if err := or.oplogsCursor.Err(); err != nil {
 				// some internal error. need rebuild the oplogsIterator
 				or.releaseIterator()
 				if utils.IsCollectionCappedError(err) { // print it
@@ -168,14 +168,14 @@ func (or *OplogReader) fetcher() {
 			continue
 		}
 
-		or.oplogChan <- &retOplog{log.Data, nil}
+		or.oplogChan <- &retOplog{or.oplogsCursor.Current, nil}
 	}
 }
 
 // ensureNetwork establish the mongodb connection at first
 // if current connection is not ready or disconnected
 func (or *OplogReader) EnsureNetwork() (err error) {
-	if or.oplogsIterator != nil {
+	if or.oplogsCursor != nil {
 		return nil
 	}
 	LOG.Info("%s ensure network", or.String())
@@ -185,16 +185,18 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 			or.conn.Close()
 		}
 		// reconnect
-		if or.conn, err = utils.NewMongoConn(or.src, conf.Options.MongoConnectMode, true,
+		if or.conn, err = utils.NewMongoCommunityConn(or.src, conf.Options.MongoConnectMode, true,
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault,
 			conf.Options.MongoSslRootCaFile); or.conn == nil || err != nil {
 			err = fmt.Errorf("oplog_reader reconnect mongo instance [%s] error. %s", or.src, err.Error())
 			return err
 		}
-
-		or.conn.Session.SetBatch(BatchSize)
-		or.conn.Session.SetPrefetch(PrefetchPercent)
 	}
+
+	findOptions := options.Find().SetBatchSize(8192).
+		SetNoCursorTimeout(true).
+		SetCursorType(options.Tailable).
+		SetOplogReplay(true)
 
 	var queryTs primitive.DateTime
 	// the given oplog timestamp shouldn't bigger than the newest
@@ -225,29 +227,33 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 	}
 	or.firstRead = false
 
-	// rebuild syncerGroup condition statement with current checkpoint timestamp
-	or.oplogsIterator = or.conn.Session.DB(localDB).C(utils.OplogNS).
-		Find(or.query).LogReplay().Tail(time.Second * tailTimeout) // this timeout is useless
+	or.oplogsCursor, err = or.conn.Client.Database(localDB).Collection(utils.OplogNS).Find(context.Background(),
+		or.query, findOptions)
+	if or.oplogsCursor == nil || err != nil {
+		err = fmt.Errorf("oplog_reader Find mongo instance [%s] error. %s", or.src, err.Error())
+		LOG.Warn("oplog_reader failed %v", err)
+		return err
+	}
 	return
 }
 
 // get newest oplog
 func (or *OplogReader) getNewestTimestamp() primitive.DateTime {
-	ts, _ := utils.GetNewestTimestampBySession(or.conn.Session)
+	ts, _ := utils.GetNewestTimestampByConn(or.conn)
 	return ts
 }
 
 // get oldest oplog
 func (or *OplogReader) getOldestTimestamp() primitive.DateTime {
-	ts, _ := utils.GetOldestTimestampBySession(or.conn.Session)
+	ts, _ := utils.GetOldestTimestampByConn(or.conn)
 	return ts
 }
 
 func (or *OplogReader) releaseIterator() {
-	if or.oplogsIterator != nil {
-		or.oplogsIterator.Close()
+	if or.oplogsCursor != nil {
+		or.oplogsCursor.Close(context.Background())
 	}
-	or.oplogsIterator = nil
+	or.oplogsCursor = nil
 }
 
 func (or *OplogReader) FetchNewestTimestamp() (interface{}, error) {
