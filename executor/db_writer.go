@@ -190,7 +190,7 @@ func IgnoreError(err error, op string, isFullSyncStage bool) bool {
 
 	er, ok := err.(mongo.ServerError)
 	if !ok {
-		return true
+		return false
 	}
 
 	switch op {

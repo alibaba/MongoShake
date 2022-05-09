@@ -220,7 +220,6 @@ func (bw *BulkWriter) doDelete(database, collection string, metadata bson.M,
 func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error {
 	var err error
 	for _, log := range oplogs {
-		// newObject := utils.AdjustDBRef(log.original.partialLog.Object, conf.Options.DBRef)
 		newObject := log.original.partialLog.Object
 		operation, found := oplog.ExtraCommandName(newObject)
 		if conf.Options.FilterDDLEnable || (found && oplog.IsSyncDataCommand(operation)) {
