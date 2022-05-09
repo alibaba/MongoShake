@@ -202,6 +202,7 @@ func (conn *MongoCommunityConn) AcquireReplicaSetName() string {
 	return id
 }
 
+//TODO(jianyou) add test case
 func (conn *MongoCommunityConn) HasUniqueIndex() (bool, string, string) {
 	checkNs := make([]NS, 0, 128)
 	var databases []string
