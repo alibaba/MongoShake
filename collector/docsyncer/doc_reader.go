@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -20,7 +19,6 @@ type DocumentSplitter struct {
 	src           string   // source mongo address url
 	sslRootCaFile string   // source root ca ssl
 	ns            utils.NS // namespace
-	//conn          *utils.MongoConn     // connection
 	client        *utils.MongoCommunityConn
 	readerChan    chan *DocumentReader // reader chan
 	pieceByteSize uint64               // each piece max byte size
@@ -200,10 +198,6 @@ type DocumentReader struct {
 	rebuild     int   // rebuild times
 	concurrency int32 // for test only
 
-	// deprecate, used for mgo
-	conn        *utils.MongoConn
-	docIterator *mgo.Iter
-
 	// query statement and current max cursor
 	query bson.M
 	key   string
@@ -334,14 +328,6 @@ func (reader *DocumentReader) releaseCursor() {
 	reader.docCursor = nil
 }
 
-// deprecate, used for mgo
-func (reader *DocumentReader) releaseIteratorMgo() {
-	if reader.docIterator != nil {
-		_ = reader.docIterator.Close()
-	}
-	reader.docIterator = nil
-}
-
 func (reader *DocumentReader) Close() {
 	LOG.Info("reader[%s] close", reader)
 	if reader.docCursor != nil {
@@ -351,13 +337,5 @@ func (reader *DocumentReader) Close() {
 	if reader.client != nil {
 		reader.client.Client.Disconnect(reader.ctx)
 		reader.client = nil
-	}
-}
-
-// deprecate, used for mgo
-func (reader *DocumentReader) CloseMgo() {
-	if reader.conn != nil {
-		reader.conn.Close()
-		reader.conn = nil
 	}
 }
