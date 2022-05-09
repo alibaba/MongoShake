@@ -181,7 +181,7 @@ func GetColShardType(conn *utils.MongoCommunityConn, namespace string) ([]string
 	var keys []string
 	var shardType string
 	var ok bool
-	if colDoc, ok = oplog.GetKeyN(colDoc, "key").(bson.D); !ok {
+	if colDoc, ok = oplog.GetKey(colDoc, "key").(bson.D); !ok {
 		return nil, "", fmt.Errorf("GetColShardType with namespace[%v] has no key item in doc %v", namespace, colDoc)
 	}
 
@@ -234,7 +234,7 @@ func GetDDLNamespace(log *oplog.PartialLog) string {
 		fallthrough
 	case "emptycapped":
 		db := strings.SplitN(log.Namespace, ".", 2)[0]
-		collection, ok := oplog.GetKeyN(log.Object, operation).(string)
+		collection, ok := oplog.GetKey(log.Object, operation).(string)
 		if !ok {
 			LOG.Crashf("GetDDLNamespace meet illegal DDL log[%s]", logD)
 		}
@@ -242,7 +242,7 @@ func GetDDLNamespace(log *oplog.PartialLog) string {
 	case "dropDatabase":
 		return log.Namespace
 	case "renameCollection":
-		ns, ok := oplog.GetKeyN(log.Object, operation).(string)
+		ns, ok := oplog.GetKey(log.Object, operation).(string)
 		if !ok {
 			LOG.Crashf("extraCommandName meets illegal %v oplog %v, ignore!", operation, log.Object)
 		}
@@ -251,7 +251,7 @@ func GetDDLNamespace(log *oplog.PartialLog) string {
 		LOG.Crashf("GetDDLNamespace illegal DDL log[%v]", logD)
 	default:
 		if strings.HasSuffix(log.Namespace, "system.indexes") {
-			namespace, ok := oplog.GetKeyN(log.Object, "ns").(string)
+			namespace, ok := oplog.GetKey(log.Object, "ns").(string)
 			if !ok {
 				LOG.Crashf("GetDDLNamespace meet illegal DDL log[%s]", logD)
 			}

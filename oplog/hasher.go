@@ -122,12 +122,12 @@ func getValueFromBsonD(obj bson2.D, key string) (interface{}, bool) {
 func GetIdOrNSFromOplog(log *PartialLog) interface{} {
 	switch log.Operation {
 	case "i", "d":
-		return GetKeyN(log.Object, "")
+		return GetKey(log.Object, "")
 	case "u":
 		if id, ok := getValueFromBsonD(log.Query, "_id"); ok {
 			return id
 		} else {
-			return GetKeyN(log.Object, "")
+			return GetKey(log.Object, "")
 		}
 	case "c":
 		return log.Namespace

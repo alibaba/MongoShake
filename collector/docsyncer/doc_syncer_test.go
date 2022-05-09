@@ -30,7 +30,7 @@ var (
 )
 
 func fetchAllDocument(conn *utils.MongoCommunityConn) ([]bson2.D, error) {
-	return unit_test_common.FetchAllDocumentbsonD(conn, testDb, testCollection, nil)
+	return unit_test_common.FetchAllDocumentbsonD(conn.Client, testDb, testCollection, nil)
 }
 
 func TestDbSync(t *testing.T) {

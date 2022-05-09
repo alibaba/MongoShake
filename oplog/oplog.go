@@ -113,33 +113,12 @@ func (partialLog *PartialLog) Dump(keys map[string]struct{}, all bool) bson2.D {
 	return out
 }
 
-func GetKey(log bson.D, wanted string) interface{} {
+func GetKey(log bson2.D, wanted string) interface{} {
 	ret, _ := GetKeyWithIndex(log, wanted)
 	return ret
 }
 
-func GetKeyWithIndex(log bson.D, wanted string) (interface{}, int) {
-	if wanted == "" {
-		wanted = PrimaryKey
-	}
-
-	// "_id" is always the first field
-	for id, ele := range log {
-		if ele.Name == wanted {
-			return ele.Value, id
-		}
-	}
-
-	return nil, 0
-}
-
-// TODO(jianyou)
-func GetKeyN(log bson2.D, wanted string) interface{} {
-	ret, _ := GetKeyWithIndexN(log, wanted)
-	return ret
-}
-
-func GetKeyWithIndexN(log bson2.D, wanted string) (interface{}, int) {
+func GetKeyWithIndex(log bson2.D, wanted string) (interface{}, int) {
 	if wanted == "" {
 		wanted = PrimaryKey
 	}

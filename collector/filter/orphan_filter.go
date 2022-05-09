@@ -49,7 +49,7 @@ NextChunk:
 	for _, chunkRage := range shardCol.Chunks {
 		// check greater and equal than the minimum of the chunk range
 		for keyInd, keyName := range shardCol.Keys {
-			key := oplog.GetKeyN(docD, keyName)
+			key := oplog.GetKey(docD, keyName)
 			if key == nil {
 				LOG.Crashf("OrphanFilter find no shard key[%v] in doc %v", keyName, docD)
 			}
@@ -65,7 +65,7 @@ NextChunk:
 		}
 		// check less than the maximum of the chunk range
 		for keyInd, keyName := range shardCol.Keys {
-			key := oplog.GetKeyN(docD, keyName)
+			key := oplog.GetKey(docD, keyName)
 			if key == nil {
 				LOG.Crashf("OrphanFilter find no shard ke[%v] in doc %v", keyName, docD)
 			}

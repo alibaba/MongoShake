@@ -74,7 +74,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 				LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
 			}
 			// insert must have _id
-			if id := oplog.GetKeyN(log.original.partialLog.Object, ""); id != nil {
+			if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
 				updates = append(updates, &pair{id: bson.D{{"_id", id}}, data: newObject, index: i})
 			} else {
 				return fmt.Errorf("insert on duplicated update _id look up failed. %v", log.original.partialLog)
@@ -228,7 +228,7 @@ func (sw *SingleWriter) doDelete(database, collection string, metadata bson.M,
 	collectionHandle := sw.conn.Client.Database(database).Collection(collection)
 	for _, log := range oplogs {
 		// ignore ErrNotFound
-		id := oplog.GetKeyN(log.original.partialLog.Object, "")
+		id := oplog.GetKey(log.original.partialLog.Object, "")
 
 		_, err := collectionHandle.DeleteOne(context.Background(), bson.D{{"_id", id}})
 		if err != nil {

@@ -2,12 +2,12 @@ package filter
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
 	"strings"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 // OplogFilter: AutologousFilter, NamespaceFilter, GidFilter, NoopFilter, DDLFilter

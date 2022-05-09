@@ -274,7 +274,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 	if partialLog.Operation != "c" {
 		// {"op" : "i", "ns" : "my.system.indexes", "o" : { "v" : 2, "key" : { "date" : 1 }, "name" : "date_1", "ns" : "my.tbl", "expireAfterSeconds" : 3600 }
 		if strings.HasSuffix(partialLog.Namespace, "system.indexes") {
-			value := oplog.GetKeyN(partialLog.Object, "ns")
+			value := oplog.GetKey(partialLog.Object, "ns")
 			oplog.SetFiled(partialLog.Object, "ns", nsTrans.Transform(value.(string)))
 		}
 		partialLog.Namespace = nsTrans.Transform(partialLog.Namespace)
@@ -290,8 +290,8 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		switch operation {
 		case "create":
 			// { "create" : "my", "idIndex" : { "v" : 2, "key" : { "_id" : 1 }, "name" : "_id_", "ns" : "my.my" }
-			if idIndex := oplog.GetKeyN(partialLog.Object, "idIndex"); idIndex != nil {
-				if ns := oplog.GetKeyN(idIndex.(bson.D), "ns"); ns != nil {
+			if idIndex := oplog.GetKey(partialLog.Object, "idIndex"); idIndex != nil {
+				if ns := oplog.GetKey(idIndex.(bson.D), "ns"); ns != nil {
 					oplog.SetFiled(idIndex.(bson.D), "ns", nsTrans.Transform(ns.(string)))
 				}
 			} else {
@@ -315,7 +315,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		case "convertToCapped":
 			fallthrough
 		case "emptycapped":
-			col, ok := oplog.GetKeyN(partialLog.Object, operation).(string)
+			col, ok := oplog.GetKey(partialLog.Object, operation).(string)
 			if !ok {
 				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
 				return nil
@@ -324,12 +324,12 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			oplog.SetFiled(partialLog.Object, operation, strings.SplitN(partialLog.Namespace, ".", 2)[1])
 		case "renameCollection":
 			// { "renameCollection" : "my.tbl", "to" : "my.my", "stayTemp" : false, "dropTarget" : false }
-			fromNs, ok := oplog.GetKeyN(partialLog.Object, operation).(string)
+			fromNs, ok := oplog.GetKey(partialLog.Object, operation).(string)
 			if !ok {
 				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
 				return nil
 			}
-			toNs, ok := oplog.GetKeyN(partialLog.Object, "to").(string)
+			toNs, ok := oplog.GetKey(partialLog.Object, "to").(string)
 			if !ok {
 				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
 				return nil
@@ -338,7 +338,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			oplog.SetFiled(partialLog.Object, operation, partialLog.Namespace)
 			oplog.SetFiled(partialLog.Object, "to", nsTrans.Transform(toNs))
 		case "applyOps":
-			if ops := oplog.GetKeyN(partialLog.Object, "applyOps").([]bson2.D); ops != nil {
+			if ops := oplog.GetKey(partialLog.Object, "applyOps").([]bson2.D); ops != nil {
 				// except field 'o'
 				except := map[string]struct{}{
 					"o": {},

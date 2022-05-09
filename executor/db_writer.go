@@ -126,8 +126,8 @@ func RunCommand(database, operation string, log *oplog.PartialLog, conn *utils.M
 	case "dropDatabase":
 		err = dbHandler.Drop(nil)
 	case "create":
-		if oplog.GetKeyN(log.Object, "autoIndexId") != nil &&
-			oplog.GetKeyN(log.Object, "idIndex") != nil {
+		if oplog.GetKey(log.Object, "autoIndexId") != nil &&
+			oplog.GetKey(log.Object, "idIndex") != nil {
 			// exits "autoIndexId" and "idIndex", remove "autoIndexId"
 			log.Object = oplog.RemoveFiled(log.Object, "autoIndexId")
 		}

@@ -63,7 +63,7 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 	var updates []bson.D
 	for _, log := range oplogs {
 		// insert must have _id
-		if id := oplog.GetKeyN(log.original.partialLog.Object, ""); id != nil {
+		if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
 			updates = append(updates, bson.D{
 				{"q", bson.M{"_id": id}},
 				{"u", log.original.partialLog.Object},

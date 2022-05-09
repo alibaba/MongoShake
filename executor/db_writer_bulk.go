@@ -68,7 +68,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 				LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
 			}
 			// insert must have _id
-			if id := oplog.GetKeyN(log.original.partialLog.Object, ""); id != nil {
+			if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
 
 				model := mongo.NewUpdateOneModel().
 					SetFilter(bson.D{{"_id", id}}).
