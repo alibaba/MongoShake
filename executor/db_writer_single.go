@@ -30,7 +30,7 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.M, o
 	var upserts []*OplogRecord
 
 	for _, log := range oplogs {
-		if _, err := collectionHandle.InsertOne(nil, log.original.partialLog.Object); err != nil {
+		if _, err := collectionHandle.InsertOne(context.Background(), log.original.partialLog.Object); err != nil {
 
 			if utils.DuplicateKey(err) {
 				upserts = append(upserts, log)

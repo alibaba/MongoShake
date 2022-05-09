@@ -1,8 +1,12 @@
 package quorum
 
 import (
+	"context"
 	"fmt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"math/rand"
 	"net"
 	"os"
@@ -11,8 +15,6 @@ import (
 	utils "github.com/alibaba/MongoShake/v2/common"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -29,7 +31,7 @@ const (
 // become or lost master status notifier
 var MasterPromotionNotifier chan bool
 
-var electionObjectId bson.ObjectId
+var electionObjectId primitive.ObjectID
 var master bool
 
 func init() {
@@ -56,15 +58,15 @@ func AlwaysMaster() {
 	master = true
 }
 
-func UseElectionObjectId(electionId bson.ObjectId) {
+func UseElectionObjectId(electionId primitive.ObjectID) {
 	electionObjectId = electionId
 }
 
 type ElectionEntry struct {
-	ObjectId  bson.ObjectId `bson:"_id"`
-	PID       int           `bson:"pid"`
-	Host      string        `bson:"host"`
-	Heartbeat int64         `bson:"heartbeat"`
+	ObjectId  primitive.ObjectID `bson:"_id"`
+	PID       int                `bson:"pid"`
+	Host      string             `bson:"host"`
+	Heartbeat int64              `bson:"heartbeat"`
 }
 
 const (
@@ -80,13 +82,11 @@ const (
 )
 
 func BecomeMaster(uri string, db string) error {
-	var session *mgo.Session
 
 	retry := 30
 	for retry != 0 {
 		if conn, err := makeSession(uri); err == nil {
-			session = conn.Session
-			masterCollection := session.DB(db).C(QUORUM_COLLECTION)
+			masterCollection := conn.Client.Database(db).Collection(QUORUM_COLLECTION)
 
 			status := STATUS_LOOKASIDE
 			entry := new(ElectionEntry)
@@ -101,7 +101,8 @@ func BecomeMaster(uri string, db string) error {
 				switch status {
 				case STATUS_LOOKASIDE:
 					// take from database firstly
-					err = masterCollection.Find(bson.M{"_id": electionObjectId}).One(entry)
+					err = masterCollection.FindOne(context.Background(),
+						bson.M{"_id": electionObjectId}).Decode(entry)
 
 					switch err {
 					case nil:
@@ -111,7 +112,7 @@ func BecomeMaster(uri string, db string) error {
 						} else {
 							status = STATUS_FOLLOW
 						}
-					case mgo.ErrNotFound:
+					case mongo.ErrNoDocuments:
 						LOG.Debug("No master node found. we elect myself")
 						status = STATUS_COMPETE_MASTER
 					default:
@@ -120,7 +121,9 @@ func BecomeMaster(uri string, db string) error {
 					}
 
 				case STATUS_MASTER:
-					if err := masterCollection.Update(bson.M{"_id": electionObjectId, "pid": os.Getpid()}, promotion()); err == nil {
+					if _, err := masterCollection.UpdateOne(context.Background(),
+						bson.D{{"_id", electionObjectId}, {"pid", os.Getpid()}},
+						promotion()); err == nil {
 						masterChanged(PromoteMaster)
 					} else {
 						LOG.Warn("Update master election info failed. %v", err)
@@ -141,7 +144,8 @@ func BecomeMaster(uri string, db string) error {
 					heartbeat := entry.Heartbeat
 					if time.Now().Unix()-heartbeat >= int64(HeartBeatTimeoutInSeconds) {
 						// I wanna be the master. DON'T care about the success of update
-						masterCollection.Update(bson.M{"_id": electionObjectId}, promotion())
+						masterCollection.UpdateOne(context.Background(),
+							bson.D{{"_id", electionObjectId}}, promotion())
 						LOG.Info("Expired master found. compete to become master")
 						// wait random time. just disrupt others compete
 						wait(time.Millisecond * time.Duration(rand.Uint32()%2500+1))
@@ -152,7 +156,7 @@ func BecomeMaster(uri string, db string) error {
 					status = STATUS_LOOKASIDE
 
 				case STATUS_SESSION_CLOSE:
-					session.Close()
+					conn.Close()
 					break Keep
 				}
 			}
@@ -164,19 +168,18 @@ func BecomeMaster(uri string, db string) error {
 	return fmt.Errorf("unreachable master election mongo %s", uri)
 }
 
-func competeMaster(coll *mgo.Collection) bool {
-	master := promotion()
-	if err := coll.Insert(master); err == nil {
+func competeMaster(coll *mongo.Collection) bool {
+	if _, err := coll.InsertOne(context.Background(), promotion()); err == nil {
 		LOG.Info("This node become master with election info %v", master)
 		return true
-	} else if mgo.IsDup(err) {
+	} else if utils.DuplicateKey(err) {
 		LOG.Warn("Another node is compete to master. we hold on a second")
 	}
 	return false
 }
 
-func makeSession(uri string) (*utils.MongoConn, error) {
-	if conn, err := utils.NewMongoConn(uri, utils.VarMongoConnectModePrimary, true,
+func makeSession(uri string) (*utils.MongoCommunityConn, error) {
+	if conn, err := utils.NewMongoCommunityConn(uri, utils.VarMongoConnectModePrimary, true,
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile); err == nil {
 		return conn, nil
 	} else {
@@ -184,12 +187,10 @@ func makeSession(uri string) (*utils.MongoConn, error) {
 	}
 }
 
-func promotion() *ElectionEntry {
-	return &ElectionEntry{
-		ObjectId:  electionObjectId,
-		PID:       os.Getpid(),
-		Host:      getNetAddr(),
-		Heartbeat: time.Now().Unix(),
+func promotion() bson.D {
+	return bson.D{
+		{"_id", electionObjectId}, {"pid", os.Getpid()},
+		{"host", getNetAddr()}, {"heartbeat", time.Now().Unix()},
 	}
 }
 

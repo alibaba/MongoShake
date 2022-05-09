@@ -5,6 +5,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"os"
 	"strconv"
 	"syscall"
@@ -16,7 +17,6 @@ import (
 
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 type Exit struct{ Code int }
@@ -159,7 +159,8 @@ func selectLeader() {
 	// first of all. ensure we are the Master
 	if conf.Options.MasterQuorum && conf.Options.CheckpointStorage == utils.VarCheckpointStorageDatabase {
 		// election become to Master. keep waiting if we are the candidate. election id is must fixed
-		quorum.UseElectionObjectId(bson.ObjectIdHex("5204af979955496907000001"))
+		objectId, _ := primitive.ObjectIDFromHex("5204af979955496907000001")
+		quorum.UseElectionObjectId(objectId)
 		go quorum.BecomeMaster(conf.Options.CheckpointStorageUrl, utils.VarCheckpointStorageDbReplicaDefault)
 
 		// wait until become to a real master
