@@ -23,6 +23,7 @@ type SingleWriter struct {
 	fullFinishTs int64
 }
 
+// { "op" : "i", "ns" : "test.c", "ui" : UUID("4654d08e-db1f-4e94-9778-90aeee4feff0"), "o" : { "_id" : ObjectId("627a1f83b95fae5fca006bac"), "a" : 1, "b" : 1, "c" : 1 }, "ts" : Timestamp(1652170627, 2), "t" : NumberLong(1), "wall" : ISODate("2022-05-10T08:17:07.558Z"), "v" : NumberLong(2) }
 func (sw *SingleWriter) doInsert(database, collection string, metadata bson.M, oplogs []*OplogRecord,
 	dupUpdate bool) error {
 
@@ -154,20 +155,27 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 	collectionHandle := sw.conn.Client.Database(database).Collection(collection)
 	if upsert {
 		for _, log := range oplogs {
-			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+			var update bson.D
+			if oplog.FindFiledPrefix(log.original.partialLog.Object, "$") {
+				log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+				update = log.original.partialLog.Object
+			} else {
+				update = bson.D{{"$set", log.original.partialLog.Object}}
+			}
+
 			var err error
 			var res *mongo.UpdateResult
 			opts := options.Update().SetUpsert(true)
 			if upsert && len(log.original.partialLog.DocumentKey) > 0 {
 				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.DocumentKey,
-					bson.D{{"$set", log.original.partialLog.Object}}, opts)
+					update, opts)
 			} else {
 				if upsert {
 					LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
 				}
 
 				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.Query,
-					bson.D{{"$set", log.original.partialLog.Object}}, opts)
+					update, opts)
 			}
 			if err != nil {
 				// error can be ignored
@@ -231,14 +239,14 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 
 }
 
+// { "op" : "d", "ns" : "test.c", "ui" : UUID("4654d08e-db1f-4e94-9778-90aeee4feff0"), "o" : { "_id" : ObjectId("627a1f83b95fae5fca006bac") }, "ts" : Timestamp(1652171085, 1), "t" : NumberLong(1), "wall" : ISODate("2022-05-10T08:24:45.828Z"), "v" : NumberLong(2) }
 func (sw *SingleWriter) doDelete(database, collection string, metadata bson.M,
 	oplogs []*OplogRecord) error {
 	collectionHandle := sw.conn.Client.Database(database).Collection(collection)
 	for _, log := range oplogs {
 		// ignore ErrNotFound
-		id := oplog.GetKey(log.original.partialLog.Object, "")
 
-		_, err := collectionHandle.DeleteOne(context.Background(), bson.D{{"_id", id}})
+		_, err := collectionHandle.DeleteOne(context.Background(), log.original.partialLog.Object)
 		if err != nil {
 			LOG.Error("delete data[%v] failed[%v]", log.original.partialLog.Query, err)
 			return err

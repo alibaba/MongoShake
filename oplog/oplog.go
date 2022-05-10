@@ -198,6 +198,16 @@ func RemoveFiled(input bson.D, key string) bson.D {
 	return input
 }
 
+func FindFiledPrefix(input bson.D, prefix string) bool {
+	for id := range input {
+		if strings.HasPrefix(input[id].Key, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func SetFiled(input bson.D, key string, value interface{}) {
 	for i, ele := range input {
 		if ele.Key == key {

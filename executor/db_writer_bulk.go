@@ -120,13 +120,18 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 
 	var models []mongo.WriteModel
 	for _, log := range oplogs {
-		log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-		newObject := log.original.partialLog.Object
+		var newObject bson.D
+		if oplog.FindFiledPrefix(log.original.partialLog.Object, "$") {
+			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+			newObject = log.original.partialLog.Object
+		} else {
+			newObject = bson.D{{"$set", log.original.partialLog.Object}}
+		}
 
 		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
 			models = append(models, mongo.NewUpdateOneModel().
 				SetFilter(log.original.partialLog.DocumentKey).
-				SetUpdate(bson.D{{"$set", newObject}}).SetUpsert(true))
+				SetUpdate(newObject).SetUpsert(true))
 		} else {
 			if upsert {
 				LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
@@ -134,7 +139,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 
 			model := mongo.NewUpdateOneModel().
 				SetFilter(log.original.partialLog.Query).
-				SetUpdate(bson.D{{"$set", newObject}})
+				SetUpdate(newObject)
 			if upsert {
 				model.SetUpsert(true)
 			}

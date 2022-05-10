@@ -24,6 +24,23 @@ const (
 	testCollection           = "a"
 )
 
+func mockDeleteOplogRecord(oId interface{}) *OplogRecord {
+	or := &OplogRecord{
+		original: &PartialLogWithCallbak{
+			partialLog: &oplog.PartialLog{
+				ParsedLog: oplog.ParsedLog{
+					Object: bson.D{
+						primitive.E{
+							Key:   "_id",
+							Value: oId,
+						},
+					},
+				},
+			},
+		},
+	}
+	return or
+}
 func mockOplogRecord(oId, oX interface{}, o2Id int) *OplogRecord {
 	or := &OplogRecord{
 		original: &PartialLogWithCallbak{
@@ -106,7 +123,7 @@ func TestSingleWriter(t *testing.T) {
 
 		// delete 2
 		err = writer.doDelete(testDb, testCollection, bson.M{}, []*OplogRecord{
-			mockOplogRecord(1, 1, 1),
+			mockDeleteOplogRecord(1),
 		})
 		assert.Equal(t, nil, err, "should be equal")
 
@@ -293,7 +310,7 @@ func TestSingleWriter(t *testing.T) {
 
 		// delete not found
 		err = writer.doDelete(testDb, testCollection, bson.M{}, []*OplogRecord{
-			mockOplogRecord(20, 20, 20),
+			mockDeleteOplogRecord(20),
 		})
 		assert.Equal(t, nil, err, "should be equal")
 	}
@@ -353,8 +370,14 @@ func TestSingleWriter(t *testing.T) {
 							Timestamp: 1,
 							Object: bson.D{
 								primitive.E{
-									Key:   "x.0.y",
-									Value: 123,
+									Key:   "$v",
+									Value: 1,
+								},
+								primitive.E{
+									Key: "$set",
+									Value: bson.M{
+										"x.0.y": 123,
+									},
 								},
 							},
 							Query: bson.D{{"_id", 110011}},
@@ -552,10 +575,10 @@ func TestBulkWriter(t *testing.T) {
 
 		// delete 8-11
 		deletes := []*OplogRecord{
-			mockOplogRecord(8, 80, -1),
-			mockOplogRecord(9, 90, -1),
-			mockOplogRecord(10, 100, -1),
-			mockOplogRecord(11, 110, -1), // not found
+			mockDeleteOplogRecord(8),
+			mockDeleteOplogRecord(9),
+			mockDeleteOplogRecord(10),
+			mockDeleteOplogRecord(11), // not found
 		}
 		err = writer.doDelete(testDb, testCollection, bson.M{}, deletes)
 		assert.Equal(t, nil, err, "should be equal") // won't throw error if not found
@@ -702,9 +725,9 @@ func TestBulkWriter(t *testing.T) {
 
 		// deletes
 		deletes := []*OplogRecord{
-			mockOplogRecord(1, 1, -1),
-			mockOplogRecord(2, 2, -1),
-			mockOplogRecord(999, 999, -1), // not exist
+			mockDeleteOplogRecord(1),
+			mockDeleteOplogRecord(2),
+			mockDeleteOplogRecord(999), // not exist
 		}
 
 		err = writer.doDelete(testDb, testCollection, bson.M{}, deletes)
@@ -839,8 +862,10 @@ func TestBulkWriter(t *testing.T) {
 							Timestamp: 1,
 							Object: bson.D{
 								primitive.E{
-									Key:   "x.0.y",
-									Value: 123,
+									Key: "$set",
+									Value: bson.M{
+										"x.0.y": 123,
+									},
 								},
 							},
 							Query: bson.D{
@@ -1041,10 +1066,10 @@ func TestCommandWriter(t *testing.T) {
 
 		// delete 8-11
 		deletes := []*OplogRecord{
-			mockOplogRecord(8, 80, -1),
-			mockOplogRecord(9, 90, -1),
-			mockOplogRecord(10, 100, -1),
-			mockOplogRecord(11, 110, -1), // not found
+			mockDeleteOplogRecord(8),
+			mockDeleteOplogRecord(9),
+			mockDeleteOplogRecord(10),
+			mockDeleteOplogRecord(11), // not found
 		}
 		err = writer.doDelete(testDb, testCollection, bson.M{}, deletes)
 		assert.Equal(t, nil, err, "should be equal") // won't throw error if not found
@@ -1193,9 +1218,9 @@ func TestCommandWriter(t *testing.T) {
 
 		// deletes
 		deletes := []*OplogRecord{
-			mockOplogRecord(1, 1, -1),
-			mockOplogRecord(2, 2, -1),
-			mockOplogRecord(999, 999, -1), // not exist
+			mockDeleteOplogRecord(1),
+			mockDeleteOplogRecord(2),
+			mockDeleteOplogRecord(999), // not exist
 		}
 
 		err = writer.doDelete(testDb, testCollection, bson.M{}, deletes)
