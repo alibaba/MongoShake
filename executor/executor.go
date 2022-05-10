@@ -2,6 +2,7 @@ package executor
 
 import (
 	"fmt"
+	bson2 "go.mongodb.org/mongo-driver/bson"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,14 +15,12 @@ import (
 
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 const (
-	DumpConflictToDB  = "db"
-	DumpConflictToSDK = "sdk"
-	NoDumpConflict    = "none"
+	DumpConflictToDB = "db"
+	NoDumpConflict   = "none"
 
 	ExecuteOrdered = false
 
@@ -179,7 +178,8 @@ type Executor struct {
 	finisher   *sync.WaitGroup
 
 	// mongo connection
-	session *mgo.Session
+	//session *mgo.Session
+	conn *utils.MongoCommunityConn
 
 	// bulk insert or single insert
 	bulkInsert bool
@@ -338,7 +338,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			oplog.SetFiled(partialLog.Object, operation, partialLog.Namespace)
 			oplog.SetFiled(partialLog.Object, "to", nsTrans.Transform(toNs))
 		case "applyOps":
-			if ops := oplog.GetKey(partialLog.Object, "applyOps").([]bson.D); ops != nil {
+			if ops := oplog.GetKey(partialLog.Object, "applyOps").([]bson2.D); ops != nil {
 				// except field 'o'
 				except := map[string]struct{}{
 					"o": {},

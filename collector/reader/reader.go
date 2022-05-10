@@ -4,10 +4,10 @@ package sourceReader
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 var (
@@ -19,7 +19,7 @@ type Reader interface {
 	Name() string                               // reader name
 	StartFetcher()                              // start fetcher
 	SetQueryTimestampOnEmpty(interface{})       // set query timestamp when first start
-	UpdateQueryTimestamp(bson.MongoTimestamp)   // update query timestamp
+	UpdateQueryTimestamp(primitive.DateTime)    // update query timestamp
 	Next() ([]byte, error)                      // fetch next oplog/event
 	EnsureNetwork() error                       // ensure network
 	FetchNewestTimestamp() (interface{}, error) // only used in EventReader that fetch PBRT

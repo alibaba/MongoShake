@@ -3,6 +3,7 @@ package sourceReader
 // read change stream event from source mongodb
 
 import (
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"sync"
 	"time"
 
@@ -15,7 +16,6 @@ import (
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	diskQueue "github.com/vinllen/go-diskqueue"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -45,7 +45,7 @@ type EventReader struct {
 	fetcherLock  sync.Mutex
 
 	firstRead       bool
-	diskQueueLastTs bson.MongoTimestamp // the last oplog timestamp in disk queue
+	diskQueueLastTs primitive.DateTime // the last oplog timestamp in disk queue
 }
 
 // NewEventReader creates reader with mongodb url
@@ -74,8 +74,8 @@ func (er *EventReader) Name() string {
 func (er *EventReader) SetQueryTimestampOnEmpty(ts interface{}) {
 	if er.startAtOperationTime == nil && ts != ckpt.InitCheckpoint {
 		LOG.Info("set query timestamp: %v", utils.ExtractTimestampForLog(ts))
-		if val, ok := ts.(bson.MongoTimestamp); ok {
-			er.startAtOperationTime = utils.TimestampToInt64(val)
+		if val, ok := ts.(primitive.DateTime); ok {
+			er.startAtOperationTime = utils.DatetimeToInt64(val)
 		} else if val2, ok := ts.(int64); ok {
 			er.startAtOperationTime = val2
 		} else {
@@ -85,12 +85,12 @@ func (er *EventReader) SetQueryTimestampOnEmpty(ts interface{}) {
 	}
 }
 
-func (er *EventReader) UpdateQueryTimestamp(ts bson.MongoTimestamp) {
-	er.startAtOperationTime = utils.TimestampToInt64(ts)
+func (er *EventReader) UpdateQueryTimestamp(ts primitive.DateTime) {
+	er.startAtOperationTime = utils.DatetimeToInt64(ts)
 }
 
-func (er *EventReader) getQueryTimestamp() bson.MongoTimestamp {
-	return bson.MongoTimestamp(er.startAtOperationTime.(int64))
+func (er *EventReader) getQueryTimestamp() primitive.DateTime {
+	return primitive.DateTime(er.startAtOperationTime.(int64))
 }
 
 // Next returns an oplog by raw bytes which is []byte
@@ -166,7 +166,9 @@ func (er *EventReader) EnsureNetwork() error {
 		conf.Options.SpecialSourceDBFlag,
 		filterList.IterateFilter,
 		er.startAtOperationTime,
-		int32(BatchSize)); err != nil {
+		int32(BatchSize),
+		conf.Options.SourceDBVersion,
+		conf.Options.MongoSslRootCaFile); err != nil {
 		return err
 	}
 

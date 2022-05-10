@@ -121,7 +121,7 @@ func (controller *WriteController) Send(logs []*oplog.GenericOplog, tag uint32) 
 		controller.LatestLsnAck = feedback
 	} else if message.Tag&tunnel.MsgProbe == 0 && len(message.RawLogs) != 0 {
 		// direct tunnel way will also come into this branch
-		controller.LatestLsnAck = utils.TimestampToInt64(logs[len(logs)-1].Parsed.Timestamp)
+		controller.LatestLsnAck = utils.DatetimeToInt64(logs[len(logs)-1].Parsed.Timestamp)
 	}
 	// accumulated overall logs size
 	controller.worker.syncer.replMetric.AddTunnelTraffic(message.ApproximateSize())

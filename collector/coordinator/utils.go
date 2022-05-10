@@ -2,16 +2,16 @@ package coordinator
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"sync"
 
-	"github.com/alibaba/MongoShake/v2/common"
-	"github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
+	"github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/reader"
+	"github.com/alibaba/MongoShake/v2/common"
 
-	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	bson2 "go.mongodb.org/mongo-driver/bson"
 )
 
 /*
@@ -21,11 +21,11 @@ import (
  *     bool: can run incremental sync directly?
  *     error: error
  */
-func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll bool) (bson.MongoTimestamp, map[string]int64, bool, error) {
+func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll bool) (primitive.DateTime, map[string]int64, bool, error) {
 	var (
 		tsMap       map[string]utils.TimestampNode
 		startTsMap  map[string]int64 // replica-set name => timestamp
-		smallestNew bson.MongoTimestamp
+		smallestNew primitive.DateTime
 		err         error
 	)
 
@@ -35,7 +35,7 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 		tsMap, _, smallestNew, _, _, err = utils.GetAllTimestampInUT()
 	case false:
 		// smallestNew is the smallest of the all newest timestamp
-		tsMap, _, smallestNew, _, _, err = utils.GetAllTimestamp(coordinator.MongoD)
+		tsMap, _, smallestNew, _, _, err = utils.GetAllTimestamp(coordinator.MongoD, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return 0, nil, false, fmt.Errorf("get all timestamp failed: %v", err)
 		}
@@ -46,7 +46,7 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 	LOG.Info("all node timestamp map: %v", tsMap)
 
 	confTs32 := conf.Options.CheckpointStartPosition
-	confTsMongoTs := bson.MongoTimestamp(confTs32 << 32)
+	confTsMongoTs := primitive.DateTime(confTs32 << 32)
 
 	// fetch mongos checkpoint when using change stream
 	var mongosCkpt *ckpt.CheckpointContext
@@ -91,7 +91,7 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 		}
 
 		if ckptRemote == nil {
-			if syncModeAll || confTsMongoTs > bson.MongoTimestamp(1<<32) && ts.Oldest >= confTsMongoTs {
+			if syncModeAll || confTsMongoTs > primitive.DateTime(1<<32) && ts.Oldest >= confTsMongoTs {
 				LOG.Info("%s syncModeAll[%v] ts.Oldest[%v], confTsMongoTs[%v]", replName, syncModeAll, ts.Oldest,
 					confTsMongoTs)
 				return smallestNew, nil, false, nil
@@ -137,7 +137,7 @@ func (coordinator *ReplicationCoordinator) isCheckpointExist() (bool, interface{
 		LOG.Info("isCheckpointExist change stream resumeToken: %v", resumeToken)
 		return false, resumeToken, nil
 	}
-	return true, utils.TimestampToInt64(ckptVar.Timestamp), nil
+	return true, utils.DatetimeToInt64(ckptVar.Timestamp), nil
 }
 
 // if the oplog of checkpoint timestamp exist in all source db, then only do oplog replication instead of document replication
@@ -148,7 +148,9 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 
 	// special case, I hate it.
 	// TODO, checkpoint support ResumeToken
-	if conf.Options.SpecialSourceDBFlag == utils.VarSpecialSourceDBFlagAliyunServerless {
+	if conf.Options.SpecialSourceDBFlag == utils.VarSpecialSourceDBFlagAliyunServerless ||
+		(len(conf.Options.MongoSUrl) > 0 && len(conf.Options.MongoCsUrl) == 0 && len(conf.Options.MongoUrls) == 0) {
+		// for only mongo_s_url address exists
 		if syncMode == utils.VarSyncModeIncr {
 			return syncMode, nil, int64(0), nil
 		}
@@ -180,7 +182,7 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 		// bugfix v2.4.12: return error when tunnel != "direct"
 		return "", nil, int64(0), fmt.Errorf("start time illegal, can't run incr sync")
 	} else {
-		return utils.VarSyncModeAll, nil, utils.TimestampToInt64(smallestNewTs), nil
+		return utils.VarSyncModeAll, nil, utils.DatetimeToInt64(smallestNewTs), nil
 	}
 }
 
@@ -194,7 +196,7 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 	for _, src := range sourceList {
 		LOG.Info("source[%v %v] start fetching index", src.ReplicaName, utils.BlockMongoUrlPassword(src.URL, "***"))
 		// 1. fetch namespace
-		nsList, _, err := utils.GetDbNamespace(src.URL, filterFunc)
+		nsList, _, err := utils.GetDbNamespace(src.URL, filterFunc, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return nil, fmt.Errorf("source[%v %v] get namespace failed: %v", src.ReplicaName, src.URL, err)
 		}
@@ -202,7 +204,7 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 		LOG.Info("index namespace list: %v", nsList)
 		// 2. build connection
 		conn, err := utils.NewMongoCommunityConn(src.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return nil, fmt.Errorf("source[%v %v] build connection failed: %v", src.ReplicaName, src.URL, err)
 		}

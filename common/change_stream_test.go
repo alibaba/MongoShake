@@ -2,16 +2,16 @@ package utils
 
 import (
 	"fmt"
+	bson2 "github.com/vinllen/mongo-go-driver/bson"
 	"testing"
 
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 	"github.com/stretchr/testify/assert"
-	"github.com/vinllen/mgo/bson"
 	"strings"
 )
 
 const (
-	testMongoAddressCs = unit_test_common.TestUrlServerless
+	testMongoAddressCs = unit_test_common.TestUrlConfigServer
 )
 
 func TestChangeStreamConn(t *testing.T) {
@@ -30,7 +30,9 @@ func TestChangeStreamConn(t *testing.T) {
 			"",
 			nil,
 			nil,
-			1024)
+			1024,
+			"4.2.0",
+			"")
 		assert.Equal(t, nil, err, "should be equal")
 		optionStr := printCsOption(cs.Ops)
 		assert.Equal(t, " BatchSize[1024] MaxAwaitTime[24h0m0s]", optionStr, "should be equal")
@@ -43,7 +45,7 @@ func TestChangeStreamConn(t *testing.T) {
 		fmt.Printf("TestChangeStreamConn case %d.\n", nr)
 		nr++
 
-		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false)
+		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false, "")
 		tsStr := fmt.Sprintf("{%v %v}", ExtractMongoTimestamp(newest), ExtractMongoTimestampCounter(newest))
 
 		cs, err := NewChangeStreamConn(testMongoAddressCs, VarMongoConnectModePrimary,
@@ -51,7 +53,9 @@ func TestChangeStreamConn(t *testing.T) {
 			"",
 			nil,
 			int64(newest),
-			1024)
+			1024,
+			"4.2.0",
+			"")
 		assert.Equal(t, nil, err, "should be equal")
 
 		optionStr := printCsOption(cs.Ops)
@@ -66,7 +70,7 @@ func TestChangeStreamConn(t *testing.T) {
 		fmt.Printf("TestChangeStreamConn case %d.\n", nr)
 		nr++
 
-		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false)
+		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false, "")
 		tsStr := fmt.Sprintf("{%v %v}", ExtractMongoTimestamp(newest), ExtractMongoTimestampCounter(newest))
 
 		cs, err := NewChangeStreamConn(testMongoAddressCs, VarMongoConnectModePrimary,
@@ -74,7 +78,9 @@ func TestChangeStreamConn(t *testing.T) {
 			"",
 			nil,
 			int64(newest),
-			1024)
+			1024,
+			"4.2.0",
+			"")
 		assert.Equal(t, nil, err, "should be equal")
 
 		optionStr := printCsOption(cs.Ops)
@@ -94,7 +100,9 @@ func TestChangeStreamConn(t *testing.T) {
 			"",
 			nil,
 			token,
-			1024)
+			1024,
+			"4.2.0",
+			"")
 		assert.Equal(t, nil, err, "should be equal")
 
 		optionStr2 := printCsOption(cs2.Ops)
@@ -102,30 +110,31 @@ func TestChangeStreamConn(t *testing.T) {
 		assert.Equal(t, expect2, optionStr2, "should be equal")
 	}
 
+	// TODO(jianyou) deprecate AliyunServerless
 	{
 		fmt.Printf("TestChangeStreamConn case %d.\n", nr)
 		nr++
 
-		conn, err := NewMongoConn(testMongoAddressCs, VarMongoConnectModePrimary, true,
-			ReadWriteConcernLocal, ReadWriteConcernDefault)
+		conn, err := NewMongoCommunityConn(testMongoAddressCs, VarMongoConnectModePrimary, true,
+			ReadWriteConcernLocal, ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop all databases
-		dbs, err := conn.Session.DatabaseNames()
+		dbs, err := conn.Client.ListDatabaseNames(nil, bson2.M{})
 		assert.Equal(t, nil, err, "should be equal")
 		for _, db := range dbs {
 			if db == "admin" || db == "local" || db == "config" {
 				continue
 			}
 
-			err = conn.Session.DB(db).DropDatabase()
+			err = conn.Client.Database(db).Drop(nil)
 			assert.Equal(t, nil, err, "should be equal")
 		}
-		conn.Session.DB("db1").C("c1").Insert(bson.M{"x": 1})
-		conn.Session.DB("db1").C("c2").Insert(bson.M{"x": 1})
-		conn.Session.DB("db2").C("c3").Insert(bson.M{"x": 1})
+		conn.Client.Database("db1").Collection("c1").InsertOne(nil, bson2.M{"x": 1})
+		conn.Client.Database("db1").Collection("c2").InsertOne(nil, bson2.M{"x": 1})
+		conn.Client.Database("db1").Collection("c3").InsertOne(nil, bson2.M{"x": 1})
 
-		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false)
+		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false, "")
 		tsStr := fmt.Sprintf("{%v %v}", ExtractMongoTimestamp(newest), ExtractMongoTimestampCounter(newest))
 
 		cs, err := NewChangeStreamConn(testMongoAddressCs, VarMongoConnectModePrimary,
@@ -139,7 +148,9 @@ func TestChangeStreamConn(t *testing.T) {
 				return false
 			},
 			int64(newest),
-			1024)
+			1024,
+			"4.2.0",
+			"")
 		assert.Equal(t, nil, err, "should be equal")
 
 		optionStr := printCsOption(cs.Ops)

@@ -2,13 +2,15 @@ package utils
 
 import (
 	"fmt"
+	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"math"
 	"strconv"
 	"strings"
 
 	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
 	"sort"
 )
 
@@ -44,32 +46,32 @@ func (ms *MongoSource) String() string {
 }
 
 // get db version, return string with format like "3.0.1"
-func GetDBVersion(session *mgo.Session) (string, error) {
-	var result bson.M
-	err := session.Run(bson.D{{"buildInfo", 1}}, &result)
+func GetDBVersion(conn *MongoCommunityConn) (string, error) {
+
+	res, err := conn.Client.Database("admin").
+		RunCommand(conn.ctx, bson2.D{{"buildInfo", 1}}).DecodeBytes()
 	if err != nil {
 		return "", err
 	}
 
-	if version, ok := result["version"]; ok {
-		if s, ok := version.(string); ok {
-			return s, nil
-		}
-		return "", fmt.Errorf("version type assertion error[%v]", version)
+	ver, ok := res.Lookup("version").StringValueOK()
+	if !ok {
+		return "", fmt.Errorf("buildInfo do not have version")
 	}
-	return "", fmt.Errorf("version not found")
+
+	return ver, nil
 }
 
 // get current db version and compare to threshold. Return whether the result
 // is bigger or equal to the input threshold.
-func GetAndCompareVersion(session *mgo.Session, threshold string, compare string) (bool, error) {
+func GetAndCompareVersion(conn *MongoCommunityConn, threshold string, compare string) (bool, error) {
 	var err error
 	if compare == "" {
-		if session == nil {
+		if conn == nil {
 			return false, nil
 		}
 
-		compare, err = GetDBVersion(session)
+		compare, err = GetDBVersion(conn)
 		if err != nil {
 			return false, err
 		}
@@ -114,100 +116,94 @@ func ApplyOpsFilter(key string) bool {
 	return false
 }
 
-// get newest oplog
-func GetNewestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, error) {
-	var retMap map[string]interface{}
-	err := session.DB(localDB).C(OplogNS).Find(bson.M{}).Sort("-$natural").Limit(1).One(&retMap)
+func getOplogTimestamp(conn *MongoCommunityConn, sortType int) (primitive.DateTime, error) {
+	var result bson2.M
+	opts := options.FindOne().SetSort(bson2.D{{"$natural", sortType}})
+	err := conn.Client.Database(localDB).Collection(OplogNS).FindOne(nil, bson2.M{}, opts).Decode(&result)
 	if err != nil {
 		return 0, err
 	}
-	return retMap[QueryTs].(bson.MongoTimestamp), nil
+
+	return primitive.DateTime(int64(result["ts"].(primitive.Timestamp).T)<<32 +
+		int64(result["ts"].(primitive.Timestamp).I)), nil
+}
+
+// get newest oplog
+func GetNewestTimestampByConn(conn *MongoCommunityConn) (primitive.DateTime, error) {
+
+	return getOplogTimestamp(conn, -1)
 }
 
 // get oldest oplog
-func GetOldestTimestampBySession(session *mgo.Session) (bson.MongoTimestamp, error) {
-	var retMap map[string]interface{}
-	err := session.DB(localDB).C(OplogNS).Find(bson.M{}).Limit(1).One(&retMap)
-	if err != nil {
-		return 0, err
-	}
-	return retMap[QueryTs].(bson.MongoTimestamp), nil
+func GetOldestTimestampByConn(conn *MongoCommunityConn) (primitive.DateTime, error) {
+
+	return getOplogTimestamp(conn, 1)
 }
 
-func GetNewestTimestampByUrl(url string, fromMongoS bool) (bson.MongoTimestamp, error) {
-	var conn *MongoConn
+func GetNewestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (primitive.DateTime, error) {
+	var conn *MongoCommunityConn
 	var err error
-	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true,
-		ReadWriteConcernDefault, ReadWriteConcernDefault); conn == nil || err != nil {
+	if conn, err = NewMongoCommunityConn(url, VarMongoConnectModeSecondaryPreferred, true,
+		ReadWriteConcernDefault, ReadWriteConcernDefault, sslRootFile); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()
 
 	if fromMongoS {
-		date := conn.CurrentDate()
+		date := primitive.DateTime(conn.CurrentDate())
 		return date, nil
 	}
 
-	return GetNewestTimestampBySession(conn.Session)
+	return GetNewestTimestampByConn(conn)
 }
 
-func GetOldestTimestampByUrl(url string, fromMongoS bool) (bson.MongoTimestamp, error) {
+func GetOldestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (primitive.DateTime, error) {
 	if fromMongoS {
 		return 0, nil
 	}
 
-	var conn *MongoConn
+	var conn *MongoCommunityConn
 	var err error
-	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true,
-		ReadWriteConcernDefault, ReadWriteConcernDefault); conn == nil || err != nil {
+	if conn, err = NewMongoCommunityConn(url, VarMongoConnectModeSecondaryPreferred, true,
+		ReadWriteConcernDefault, ReadWriteConcernDefault, sslRootFile); conn == nil || err != nil {
 		return 0, err
 	}
 	defer conn.Close()
 
-	return GetOldestTimestampBySession(conn.Session)
-}
-
-func IsFromMongos(url string) (bool, error) {
-	var conn *MongoConn
-	var err error
-	if conn, err = NewMongoConn(url, VarMongoConnectModeSecondaryPreferred, true,
-		ReadWriteConcernDefault, ReadWriteConcernDefault); conn == nil || err != nil {
-		return false, err
-	}
-	return conn.IsMongos(), nil
+	return GetOldestTimestampByConn(conn)
 }
 
 // record the oldest and newest timestamp of each mongod
 type TimestampNode struct {
-	Oldest bson.MongoTimestamp
-	Newest bson.MongoTimestamp
+	Oldest primitive.DateTime
+	Newest primitive.DateTime
 }
 
 /*
  * get all newest timestamp
  * return:
  *     map: whole timestamp map, key: replset name, value: struct that includes the newest and oldest timestamp
- *     bson.MongoTimestamp: the biggest of the newest timestamp
- *     bson.MongoTimestamp: the smallest of the newest timestamp
+ *     primitive.DateTime: the biggest of the newest timestamp
+ *     primitive.DateTime: the smallest of the newest timestamp
  *     error: error
  */
-func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.MongoTimestamp,
-	bson.MongoTimestamp, bson.MongoTimestamp, bson.MongoTimestamp, error) {
-	smallestNew := bson.MongoTimestamp(math.MaxInt64)
-	biggestNew := bson.MongoTimestamp(0)
-	smallestOld := bson.MongoTimestamp(math.MaxInt64)
-	biggestOld := bson.MongoTimestamp(0)
+func GetAllTimestamp(sources []*MongoSource, sslRootFile string) (map[string]TimestampNode, primitive.DateTime,
+	primitive.DateTime, primitive.DateTime, primitive.DateTime, error) {
+	smallestNew := primitive.DateTime(math.MaxInt64)
+	biggestNew := primitive.DateTime(0)
+	smallestOld := primitive.DateTime(math.MaxInt64)
+	biggestOld := primitive.DateTime(0)
 	tsMap := make(map[string]TimestampNode)
 
 	for _, src := range sources {
-		newest, err := GetNewestTimestampByUrl(src.URL, false)
+		newest, err := GetNewestTimestampByUrl(src.URL, false, sslRootFile)
 		if err != nil {
 			return nil, 0, 0, 0, 0, err
 		} else if newest == 0 {
 			return nil, 0, 0, 0, 0, fmt.Errorf("illegal newest timestamp == 0")
 		}
 
-		oldest, err := GetOldestTimestampByUrl(src.URL, false)
+		oldest, err := GetOldestTimestampByUrl(src.URL, false, sslRootFile)
 		if err != nil {
 			return nil, 0, 0, 0, 0, err
 		}
@@ -233,16 +229,16 @@ func GetAllTimestamp(sources []*MongoSource) (map[string]TimestampNode, bson.Mon
 }
 
 // only used in unit test
-func GetAllTimestampInUT() (map[string]TimestampNode, bson.MongoTimestamp,
-	bson.MongoTimestamp, bson.MongoTimestamp, bson.MongoTimestamp, error) {
-	smallestNew := bson.MongoTimestamp(math.MaxInt64)
-	biggestNew := bson.MongoTimestamp(0)
-	smallestOld := bson.MongoTimestamp(math.MaxInt64)
-	biggestOld := bson.MongoTimestamp(0)
+func GetAllTimestampInUT() (map[string]TimestampNode, primitive.DateTime,
+	primitive.DateTime, primitive.DateTime, primitive.DateTime, error) {
+	smallestNew := primitive.DateTime(math.MaxInt64)
+	biggestNew := primitive.DateTime(0)
+	smallestOld := primitive.DateTime(math.MaxInt64)
+	biggestOld := primitive.DateTime(0)
 	tsMap := make(map[string]TimestampNode)
 	for name, ele := range GetAllTimestampInUTInput {
-		oldest := ele.First.(bson.MongoTimestamp)
-		newest := ele.Second.(bson.MongoTimestamp)
+		oldest := ele.First.(primitive.DateTime)
+		newest := ele.Second.(primitive.DateTime)
 		tsMap[name] = TimestampNode{
 			Oldest: oldest,
 			Newest: newest,
@@ -273,74 +269,25 @@ func IsCollectionCappedError(err error) bool {
 	return false
 }
 
-// deprecated
-// adjust dbRef order: $ref, $id, $db, others
-func AdjustDBRef(input bson.M, dbRef bool) bson.M {
-	if dbRef {
-		doDfsDBRef(input)
-	}
-	return input
-}
-
-// change bson.M to bson.D when "$ref" find
-func doDfsDBRef(input interface{}) {
-	// only handle bson.M
-	if _, ok := input.(bson.M); !ok {
-		return
+func FindFirstErrorIndexAndMessageN(err error) (int, string, bool) {
+	if err == nil {
+		return 0, "", false
 	}
 
-	inputMap := input.(bson.M)
-
-	for k, v := range inputMap {
-		switch vr := v.(type) {
-		case bson.M:
-			doDfsDBRef(vr)
-			if HasDBRef(vr) {
-				inputMap[k] = SortDBRef(vr)
-			}
-		case bson.D:
-			for id, ele := range vr {
-				doDfsDBRef(ele)
-				if HasDBRef(ele.Value.(bson.M)) {
-					vr[id].Value = SortDBRef(ele.Value.(bson.M))
-				}
-			}
-		}
-	}
-}
-
-func HasDBRef(object bson.M) bool {
-	_, hasRef := object[DBRefRef]
-	_, hasId := object[DBRefId]
-	if hasRef && hasId {
-		return true
-	}
-	return false
-}
-
-func SortDBRef(input bson.M) bson.D {
-	var output bson.D
-	output = append(output, bson.DocElem{Name: DBRefRef, Value: input[DBRefRef]})
-
-	if _, ok := input[DBRefId]; ok {
-		output = append(output, bson.DocElem{Name: DBRefId, Value: input[DBRefId]})
-	}
-	if _, ok := input[DBRefDb]; ok {
-		output = append(output, bson.DocElem{Name: DBRefDb, Value: input[DBRefDb]})
+	wError := (err.(mongo.BulkWriteException)).WriteErrors
+	if len(wError) == 0 {
+		return 0, "", false
 	}
 
-	// add the others
-	for key, val := range input {
-		if key == DBRefRef || key == DBRefId || key == DBRefDb {
-			continue
-		}
-
-		output = append(output, bson.DocElem{Name: key, Value: val})
+	if wError[0].HasErrorCode(11000) {
+		return wError[0].Index, wError[0].Message, true
 	}
-	return output
+
+	return wError[0].Index, wError[0].Message, false
 }
 
 // used to handle bulk return error
+// TODO(jianyou) deprecate
 func FindFirstErrorIndexAndMessage(error string) (int, string, bool) {
 	subIndex := "index["
 	subMsg := "msg["
@@ -403,11 +350,11 @@ func HasUniqueIndex(index []mgo.Index) bool {
  *     @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}
  *     @error: error info
  */
-func GetDbNamespace(url string, filterFunc func(name string) bool) ([]NS, map[string][]string, error) {
+func GetDbNamespace(url string, filterFunc func(name string) bool, sslRootFile string) ([]NS, map[string][]string, error) {
 	var err error
 	var conn *MongoCommunityConn
 	if conn, err = NewMongoCommunityConn(url, VarMongoConnectModePrimary, true,
-		ReadWriteConcernLocal, ReadWriteConcernDefault); conn == nil || err != nil {
+		ReadWriteConcernLocal, ReadWriteConcernDefault, sslRootFile); conn == nil || err != nil {
 		return nil, nil, err
 	}
 	defer conn.Close()
@@ -460,10 +407,11 @@ func GetDbNamespace(url string, filterFunc func(name string) bool) ([]NS, map[st
  *     @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}
  *     @error: error info
  */
-func GetAllNamespace(sources []*MongoSource, filterFunc func(name string) bool) (map[NS]struct{}, map[string][]string, error) {
+func GetAllNamespace(sources []*MongoSource, filterFunc func(name string) bool,
+	sslRootFile string) (map[NS]struct{}, map[string][]string, error) {
 	nsSet := make(map[NS]struct{})
 	for _, src := range sources {
-		nsList, _, err := GetDbNamespace(src.URL, filterFunc)
+		nsList, _, err := GetDbNamespace(src.URL, filterFunc, sslRootFile)
 		if err != nil {
 			return nil, nil, err
 		}

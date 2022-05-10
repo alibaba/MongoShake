@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"math/rand"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
@@ -50,7 +51,7 @@ func (generator *FakeGenerator) start() {
 		for i := 0; i != BatchSize; i++ {
 			partialLog = &oplog.PartialLog{
 				ParsedLog: oplog.ParsedLog{
-					Timestamp: bson.MongoTimestamp(time.Now().Unix() << 32),
+					Timestamp: primitive.DateTime(time.Now().Unix() << 32),
 					Namespace: fmt.Sprintf("%s_%d", TableName, generator.index),
 				},
 			}

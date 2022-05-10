@@ -16,8 +16,6 @@ import (
 func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition interface{},
 	fullSyncFinishPosition int64,
 	startTsMap map[string]int64) error {
-	// replicate speed limit on all syncer
-	coordinator.rateController = nimo.NewSimpleRateController()
 
 	// prepare all syncer. only one syncer while source is ReplicaSet
 	// otherwise one syncer connects to one shard
@@ -36,7 +34,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 
 		LOG.Info("RealSourceIncrSync[%d]: %s, startTimestamp[%v]", i, src, syncerTs)
 		syncer := collector.NewOplogSyncer(src.ReplicaName, syncerTs, fullSyncFinishPosition, src.URL,
-			src.Gids, coordinator.rateController)
+			src.Gids)
 		// syncerGroup http api registry
 		syncer.Init()
 		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)

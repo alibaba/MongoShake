@@ -3,6 +3,8 @@ package oplog
 import (
 	"encoding/json"
 	"fmt"
+	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"reflect"
 
 	"strings"
@@ -20,19 +22,19 @@ type GenericOplog struct {
 }
 
 type ParsedLog struct {
-	Timestamp     bson.MongoTimestamp `bson:"ts" json:"ts"`
-	HistoryId     int64               `bson:"h,omitempty" json:"h,omitempty"`
-	Version       int                 `bson:"v,omitempty" json:"v,omitempty"`
-	Operation     string              `bson:"op" json:"op"`
-	Gid           string              `bson:"g,omitempty" json:"g,omitempty"`
-	Namespace     string              `bson:"ns" json:"ns"`
-	Object        bson.D              `bson:"o" json:"o"`
-	Query         bson.M              `bson:"o2" json:"o2"`
-	UniqueIndexes bson.M              `bson:"uk,omitempty" json:"uk,omitempty"`
-	Lsid          bson.M              `bson:"lsid,omitempty" json:"lsid,omitempty"`               // mark the session id, used in transaction
-	FromMigrate   bool                `bson:"fromMigrate,omitempty" json:"fromMigrate,omitempty"` // move chunk
-	TxnNumber     uint64              `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`     // transaction number in session
-	DocumentKey   bson.M              `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists when source collection is sharded, only including shard key and _id
+	Timestamp     primitive.DateTime `bson:"ts" json:"ts"`
+	HistoryId     int64              `bson:"h,omitempty" json:"h,omitempty"`
+	Version       int                `bson:"v,omitempty" json:"v,omitempty"`
+	Operation     string             `bson:"op" json:"op"`
+	Gid           string             `bson:"g,omitempty" json:"g,omitempty"`
+	Namespace     string             `bson:"ns" json:"ns"`
+	Object        bson2.D            `bson:"o" json:"o"`
+	Query         bson2.D            `bson:"o2,omitempty" json:"o2,omitempty"`                   // update condition
+	UniqueIndexes bson.M             `bson:"uk,omitempty" json:"uk,omitempty"`                   //
+	Lsid          bson.M             `bson:"lsid,omitempty" json:"lsid,omitempty"`               // mark the session id, used in transaction
+	FromMigrate   bool               `bson:"fromMigrate,omitempty" json:"fromMigrate,omitempty"` // move chunk
+	TxnNumber     uint64             `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`     // transaction number in session
+	DocumentKey   bson2.D            `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists when source collection is sharded, only including shard key and _id
 	// Ui            bson.Binary         `bson:"ui,omitempty" json:"ui,omitempty"` // do not enable currently
 }
 
@@ -66,7 +68,7 @@ func LogParsed(logs []*GenericOplog) []*PartialLog {
 	return parsedLogs
 }
 
-func NewPartialLog(data bson.M) *PartialLog {
+func NewPartialLog(data bson2.M) *PartialLog {
 	// partialLog := new(PartialLog)
 	parsedLog := new(ParsedLog)
 	logType := reflect.TypeOf(*parsedLog)
@@ -91,8 +93,8 @@ func (partialLog *PartialLog) String() string {
 }
 
 // dump according to the given keys, "all" == true means ignore keys
-func (partialLog *PartialLog) Dump(keys map[string]struct{}, all bool) bson.D {
-	var out bson.D
+func (partialLog *PartialLog) Dump(keys map[string]struct{}, all bool) bson2.D {
+	var out bson2.D
 	logType := reflect.TypeOf(partialLog.ParsedLog)
 	for i := 0; i < logType.NumField(); i++ {
 		if tagNameWithOption, ok := logType.Field(i).Tag.Lookup("bson"); ok {
@@ -104,26 +106,26 @@ func (partialLog *PartialLog) Dump(keys map[string]struct{}, all bool) bson.D {
 					continue
 				}
 			}
-			out = append(out, bson.DocElem{tagName, value})
+			out = append(out, primitive.E{tagName, value})
 		}
 	}
 
 	return out
 }
 
-func GetKey(log bson.D, wanted string) interface{} {
+func GetKey(log bson2.D, wanted string) interface{} {
 	ret, _ := GetKeyWithIndex(log, wanted)
 	return ret
 }
 
-func GetKeyWithIndex(log bson.D, wanted string) (interface{}, int) {
+func GetKeyWithIndex(log bson2.D, wanted string) (interface{}, int) {
 	if wanted == "" {
 		wanted = PrimaryKey
 	}
 
 	// "_id" is always the first field
 	for id, ele := range log {
-		if ele.Name == wanted {
+		if ele.Key == wanted {
 			return ele.Value, id
 		}
 	}
@@ -131,52 +133,52 @@ func GetKeyWithIndex(log bson.D, wanted string) (interface{}, int) {
 	return nil, 0
 }
 
-func ConvertBsonD2MExcept(input bson.D, except map[string]struct{}) (bson.M, map[string]struct{}) {
-	m := bson.M{}
+func ConvertBsonD2MExcept(input bson2.D, except map[string]struct{}) (bson2.M, map[string]struct{}) {
+	m := bson2.M{}
 	keys := make(map[string]struct{}, len(input))
 	for _, ele := range input {
 		switch ele.Value.(type) {
 		case bson.D:
-			if _, ok := except[ele.Name]; ok {
-				m[ele.Name] = ele.Value
+			if _, ok := except[ele.Key]; ok {
+				m[ele.Key] = ele.Value
 			} else {
-				son, _ := ConvertBsonD2M(ele.Value.(bson.D))
-				m[ele.Name] = son
+				son, _ := ConvertBsonD2M(ele.Value.(bson2.D))
+				m[ele.Key] = son
 			}
 		default:
-			m[ele.Name] = ele.Value
+			m[ele.Key] = ele.Value
 		}
 
-		keys[ele.Name] = struct{}{}
+		keys[ele.Key] = struct{}{}
 	}
 
 	return m, keys
 }
 
 // convert bson.D to bson.M
-func ConvertBsonD2M(input bson.D) (bson.M, map[string]struct{}) {
-	m := bson.M{}
+func ConvertBsonD2M(input bson2.D) (bson2.M, map[string]struct{}) {
+	m := bson2.M{}
 	keys := make(map[string]struct{}, len(input))
 	for _, ele := range input {
-		m[ele.Name] = ele.Value
+		m[ele.Key] = ele.Value
 		switch ele.Value.(type) {
-		case bson.D:
-			son, _ := ConvertBsonD2M(ele.Value.(bson.D))
-			m[ele.Name] = son
+		case bson2.D:
+			son, _ := ConvertBsonD2M(ele.Value.(bson2.D))
+			m[ele.Key] = son
 		default:
-			m[ele.Name] = ele.Value
+			m[ele.Key] = ele.Value
 		}
-		keys[ele.Name] = struct{}{}
+		keys[ele.Key] = struct{}{}
 	}
 
 	return m, keys
 }
 
-func ConvertBsonM2D(input bson.M) bson.D {
-	output := make(bson.D, 0, len(input))
+func ConvertBsonM2D(input bson2.M) bson2.D {
+	output := make(bson2.D, 0, len(input))
 	for key, val := range input {
-		output = append(output, bson.DocElem{
-			Name:  key,
+		output = append(output, primitive.E{
+			Key:   key,
 			Value: val,
 		})
 	}
@@ -184,10 +186,10 @@ func ConvertBsonM2D(input bson.M) bson.D {
 }
 
 // pay attention: the input bson.D will be modified.
-func RemoveFiled(input bson.D, key string) bson.D {
+func RemoveFiled(input bson2.D, key string) bson2.D {
 	flag := -1
 	for id := range input {
-		if input[id].Name == key {
+		if input[id].Key == key {
 			flag = id
 			break
 		}
@@ -199,15 +201,15 @@ func RemoveFiled(input bson.D, key string) bson.D {
 	return input
 }
 
-func SetFiled(input bson.D, key string, value interface{}) {
+func SetFiled(input bson2.D, key string, value interface{}) {
 	for i, ele := range input {
-		if ele.Name == key {
+		if ele.Key == key {
 			input[i].Value = value
 		}
 	}
 }
 
-func ParseTimestampFromBson(intput []byte) bson.MongoTimestamp {
+func ParseTimestampFromBson(intput []byte) primitive.DateTime {
 	log := new(PartialLog)
 	if err := bson.Unmarshal(intput, log); err != nil {
 		return -1
@@ -241,9 +243,9 @@ func GatherApplyOps(input []*PartialLog) (*GenericOplog, error) {
 			"o2": ele.Query,
 		})
 	}
-	newOplog.Object = bson.D{
-		bson.DocElem{
-			Name:  "applyOps",
+	newOplog.Object = bson2.D{
+		primitive.E{
+			Key:   "applyOps",
 			Value: applyOpsList,
 		},
 	}

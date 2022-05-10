@@ -2,6 +2,7 @@ package collector
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"testing"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
@@ -13,7 +14,7 @@ import (
 )
 
 // mock oplog with different namespace
-func mockLog(ns string, ts bson.MongoTimestamp, withDefault bool, gid string) *oplog.ParsedLog {
+func mockLog(ns string, ts primitive.DateTime, withDefault bool, gid string) *oplog.ParsedLog {
 	switch withDefault {
 	case true:
 		return &oplog.ParsedLog{
@@ -40,7 +41,7 @@ func mockLog(ns string, ts bson.MongoTimestamp, withDefault bool, gid string) *o
 }
 
 // mock change stream event
-func mockEvent(nsCollection string, ts bson.MongoTimestamp) *oplog.Event {
+func mockEvent(nsCollection string, ts primitive.DateTime) *oplog.Event {
 	return &oplog.Event{
 		Ns: bson.M{
 			"db":   "testDB",

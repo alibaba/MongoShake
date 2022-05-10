@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"math"
 	"sync"
 
@@ -14,8 +15,7 @@ import (
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	bson2 "go.mongodb.org/mongo-driver/bson"
 )
 
 func fetchChunkMap(isSharding bool) (sharding.ShardingChunkMap, error) {
@@ -42,7 +42,7 @@ func fetchChunkMap(isSharding bool) (sharding.ShardingChunkMap, error) {
 	return nil, nil
 }
 
-func getTimestampMap(sources []*utils.MongoSource) (map[string]utils.TimestampNode, error) {
+func getTimestampMap(sources []*utils.MongoSource, sslRootFile string) (map[string]utils.TimestampNode, error) {
 	// no need to fetch if sync mode is full only
 	if conf.Options.SyncMode == utils.VarSyncModeFull {
 		return nil, nil
@@ -51,7 +51,7 @@ func getTimestampMap(sources []*utils.MongoSource) (map[string]utils.TimestampNo
 	var ckptMap map[string]utils.TimestampNode
 	var err error
 
-	ckptMap, _, _, _, _, err = utils.GetAllTimestamp(sources)
+	ckptMap, _, _, _, _, err = utils.GetAllTimestamp(sources, sslRootFile)
 	if err != nil {
 		return nil, fmt.Errorf("fetch source all timestamp failed: %v", err)
 	}
@@ -88,16 +88,17 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 
 	filterList := filter.NewDocFilterList()
 	// get all namespace need to sync
-	nsSet, _, err := utils.GetAllNamespace(coordinator.RealSourceFullSync, filterList.IterateFilter)
+	nsSet, _, err := utils.GetAllNamespace(coordinator.RealSourceFullSync, filterList.IterateFilter,
+		conf.Options.MongoSslRootCaFile)
 	if err != nil {
 		return err
 	}
 	LOG.Info("all namespace: %v", nsSet)
 
 	var ckptMap map[string]utils.TimestampNode
-	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless {
+	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless && len(coordinator.MongoD) > 0 {
 		// get current newest timestamp
-		ckptMap, err = getTimestampMap(coordinator.MongoD)
+		ckptMap, err = getTimestampMap(coordinator.MongoD, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return err
 		}
@@ -105,10 +106,10 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 
 	// create target client
 	toUrl := conf.Options.TunnelAddress[0]
-	var toConn *utils.MongoConn
+	var toConn *utils.MongoCommunityConn
 	if !conf.Options.FullSyncExecutorDebug {
-		if toConn, err = utils.NewMongoConn(toUrl, utils.VarMongoConnectModePrimary, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault); err != nil {
+		if toConn, err = utils.NewMongoCommunityConn(toUrl, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, conf.Options.TunnelMongoSslRootCaFile); err != nil {
 			return err
 		}
 		defer toConn.Close()
@@ -125,7 +126,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// enable shard if sharding -> sharding
 	shardingSync := docsyncer.IsShardingToSharding(fromIsSharding, toConn)
 	if shardingSync {
-		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.MongoCsUrl, toConn, trans); err != nil {
+		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.MongoSUrl, toConn, trans); err != nil {
 			return err
 		}
 	}
@@ -213,7 +214,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	if conf.Options.SyncMode != utils.VarSyncModeFull && conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless {
 		// need merge to one when from mongos and fetch_mothod=="change_stream"
 		if coordinator.MongoS != nil && conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
-			var smallestNew bson.MongoTimestamp = math.MaxInt64
+			var smallestNew primitive.DateTime = math.MaxInt64
 			for _, val := range ckptMap {
 				if smallestNew > val.Newest {
 					smallestNew = val.Newest

@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"math/rand"
 	_ "net/http/pprof" // for profiling
 	"os"
@@ -13,7 +14,6 @@ import (
 	"reflect"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 func YieldInMs(n int64) {
@@ -66,17 +66,18 @@ func (p Int64Slice) Swap(i, j int) {
 	p[i], p[j] = p[j], p[i]
 }
 
-func TimestampToInt64(ts bson.MongoTimestamp) int64 {
+func DatetimeToInt64(ts primitive.DateTime) int64 {
 	return int64(ts)
 }
 
+// TODO(jianyou) deprecate
 func TimestampToString(ts int64) string {
 	return time.Unix(ts, 0).Format(TimeFormat)
 }
 
 func ExtractMongoTimestamp(ts interface{}) int64 {
 	switch src := ts.(type) {
-	case bson.MongoTimestamp:
+	case primitive.DateTime:
 		return int64(src) >> 32
 	case int64:
 		return src >> 32
@@ -89,7 +90,7 @@ func ExtractMongoTimestamp(ts interface{}) int64 {
 
 func ExtractMongoTimestampCounter(ts interface{}) int64 {
 	switch src := ts.(type) {
-	case bson.MongoTimestamp:
+	case primitive.DateTime:
 		return int64(src) & Int32max
 	case int64:
 		return src & Int32max

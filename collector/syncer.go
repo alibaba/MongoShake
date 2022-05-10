@@ -2,6 +2,7 @@ package collector
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"time"
 
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
@@ -50,9 +51,7 @@ type OplogSyncer struct {
 	// oplog start position of source mongodb
 	startPosition interface{}
 	// full sync finish position, used to check DDL between full sync and incr sync
-	fullSyncFinishPosition bson.MongoTimestamp
-	// pass from coordinator
-	rateController *nimo.SimpleRateController
+	fullSyncFinishPosition primitive.DateTime
 
 	ckptManager *ckpt.CheckpointManager
 
@@ -65,7 +64,7 @@ type OplogSyncer struct {
 	// buffer            []*bson.Raw // move to persister
 	PendingQueue []chan [][]byte
 	logsQueue    []chan []*oplog.GenericOplog
-	LastFetchTs  bson.MongoTimestamp // the previous last fetch timestamp
+	LastFetchTs  primitive.DateTime // the previous last fetch timestamp
 	// nextQueuePosition uint64 // move to persister
 
 	// source mongo oplog/event reader
@@ -104,8 +103,7 @@ func NewOplogSyncer(
 	startPosition interface{},
 	fullSyncFinishPosition int64,
 	mongoUrl string,
-	gids []string,
-	rateController *nimo.SimpleRateController) *OplogSyncer {
+	gids []string) *OplogSyncer {
 
 	reader, err := sourceReader.CreateReader(conf.Options.IncrSyncMongoFetchMethod, mongoUrl, replset)
 	if err != nil {
@@ -116,8 +114,7 @@ func NewOplogSyncer(
 	syncer := &OplogSyncer{
 		Replset:                replset,
 		startPosition:          startPosition,
-		fullSyncFinishPosition: bson.MongoTimestamp(fullSyncFinishPosition),
-		rateController:         rateController,
+		fullSyncFinishPosition: primitive.DateTime(fullSyncFinishPosition),
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.Id, replset))),
 		reader: reader,
@@ -257,12 +254,12 @@ func (sync *OplogSyncer) startBatcher() {
 			}
 		}
 
-		var newestTs bson.MongoTimestamp
+		var newestTs primitive.DateTime
 		if exit {
 			LOG.Info("%s find exit signal", sync)
 			// should exit now, make sure the checkpoint is updated before that
 			lastLog, lastFilterLog := batcher.getLastOplog()
-			var newestTs bson.MongoTimestamp = 1 // default is 1
+			var newestTs primitive.DateTime = 1 // default is 1
 			if lastLog != nil && lastLog.Timestamp > newestTs {
 				newestTs = lastLog.Timestamp
 			} else if newestTs == 1 && lastFilterLog != nil {
@@ -273,7 +270,7 @@ func (sync *OplogSyncer) startBatcher() {
 			if lastLog != nil && !allEmpty {
 				// push to worker
 				if worked := batcher.dispatchBatches(batchedOplog); worked {
-					sync.replMetric.SetLSN(utils.TimestampToInt64(newestTs))
+					sync.replMetric.SetLSN(utils.DatetimeToInt64(newestTs))
 					// update latest fetched timestamp in memory
 					sync.reader.UpdateQueryTimestamp(newestTs)
 				}
@@ -291,7 +288,7 @@ func (sync *OplogSyncer) startBatcher() {
 
 			// push to worker
 			if worked := batcher.dispatchBatches(batchedOplog); worked {
-				sync.replMetric.SetLSN(utils.TimestampToInt64(newestTs))
+				sync.replMetric.SetLSN(utils.DatetimeToInt64(newestTs))
 				// update latest fetched timestamp in memory
 				sync.reader.UpdateQueryTimestamp(newestTs)
 			}
@@ -365,11 +362,11 @@ func (sync *OplogSyncer) startBatcher() {
 	})
 }
 
-func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.MongoTimestamp) bool {
+func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs primitive.DateTime) bool {
 	// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
 	if barrier && newestTs > 0 {
 		LOG.Info("%s find barrier", sync)
-		var checkpointTs bson.MongoTimestamp
+		var checkpointTs primitive.DateTime
 		for i := 0; i < CheckCheckpointUpdateTimes; i++ {
 			// checkpointTs := sync.ckptManager.GetInMemory().Timestamp
 			checkpoint, _, err := sync.ckptManager.Get()

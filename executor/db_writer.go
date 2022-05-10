@@ -3,11 +3,11 @@ package executor
 import (
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
+	bson "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 const (
@@ -44,21 +44,22 @@ type BasicWriter interface {
 	doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error
 }
 
-func NewDbWriter(session *mgo.Session, metadata bson.M, bulkInsert bool, fullFinishTs int64) BasicWriter {
+// oplog writer
+func NewDbWriter(conn *utils.MongoCommunityConn, metadata bson.M, bulkInsert bool, fullFinishTs int64) BasicWriter {
 	if !bulkInsert { // bulk insertion disable
 		// LOG.Info("db writer create: SingleWriter")
-		return &SingleWriter{session: session, fullFinishTs: fullFinishTs}
+		return &SingleWriter{conn: conn, fullFinishTs: fullFinishTs}
 	} else if _, ok := metadata["g"]; ok { // has gid
 		// LOG.Info("db writer create: CommandWriter")
-		return &CommandWriter{session: session, fullFinishTs: fullFinishTs}
+		return &CommandWriter{conn: conn, fullFinishTs: fullFinishTs}
 	}
 	// LOG.Info("db writer create: BulkWriter")
-	return &BulkWriter{session: session, fullFinishTs: fullFinishTs} // bulk insertion enable
+	return &BulkWriter{conn: conn, fullFinishTs: fullFinishTs} // bulk insertion enable
 }
 
-func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.Session) error {
+func RunCommand(database, operation string, log *oplog.PartialLog, conn *utils.MongoCommunityConn) error {
 	defer LOG.Debug("RunCommand run DDL: %v", log.Dump(nil, true))
-	dbHandler := session.DB(database)
+	dbHandler := conn.Client.Database(database)
 	LOG.Info("RunCommand run DDL with type[%s]", operation)
 	var err error
 	switch operation {
@@ -71,19 +72,19 @@ func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 		var innerBsonD, indexes bson.D
 		for i, ele := range log.Object {
 			if i == 0 {
-				nimo.AssertTrue(ele.Name == "createIndexes", "should panic when ele.Name != 'createIndexes'")
+				nimo.AssertTrue(ele.Key == "createIndexes", "should panic when ele.Name != 'createIndexes'")
 			} else {
 				innerBsonD = append(innerBsonD, ele)
 			}
 		}
 		indexes = append(indexes, log.Object[0]) // createIndexes
-		indexes = append(indexes, bson.DocElem{
-			Name: "indexes",
+		indexes = append(indexes, primitive.E{
+			Key: "indexes",
 			Value: []bson.D{ // only has 1 bson.D
 				innerBsonD,
 			},
 		})
-		err = dbHandler.Run(indexes, nil)
+		err = dbHandler.RunCommand(nil, indexes).Err()
 	case "applyOps":
 		/*
 		 * Strictly speaking, we should handle applysOps nested case, but it is
@@ -91,10 +92,10 @@ func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 		 */
 		var store bson.D
 		for _, ele := range log.Object {
-			if utils.ApplyOpsFilter(ele.Name) {
+			if utils.ApplyOpsFilter(ele.Key) {
 				continue
 			}
-			if ele.Name == "applyOps" {
+			if ele.Key == "applyOps" {
 				switch v := ele.Value.(type) {
 				case []interface{}:
 					for i, ele := range v {
@@ -104,7 +105,7 @@ func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 				case bson.D:
 					ret := make(bson.D, 0, len(v))
 					for _, ele := range v {
-						if ele.Name == uuidMark {
+						if ele.Key == uuidMark {
 							continue
 						}
 						ret = append(ret, ele)
@@ -121,9 +122,9 @@ func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 			}
 			store = append(store, ele)
 		}
-		err = dbHandler.Run(store, nil)
+		err = dbHandler.RunCommand(nil, store).Err()
 	case "dropDatabase":
-		err = dbHandler.DropDatabase()
+		err = dbHandler.Drop(nil)
 	case "create":
 		if oplog.GetKey(log.Object, "autoIndexId") != nil &&
 			oplog.GetKey(log.Object, "idIndex") != nil {
@@ -149,9 +150,9 @@ func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 		fallthrough
 	case "emptycapped":
 		if !oplog.IsRunOnAdminCommand(operation) {
-			err = dbHandler.Run(log.Object, nil)
+			err = dbHandler.RunCommand(nil, log.Object).Err()
 		} else {
-			err = session.DB("admin").Run(log.Object, nil)
+			err = conn.Client.Database("admin").RunCommand(nil, log.Object).Err()
 		}
 	default:
 		LOG.Info("type[%s] not found, use applyOps", operation)
@@ -159,7 +160,7 @@ func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 		// filter log.Object
 		var rec bson.D
 		for _, ele := range log.Object {
-			if utils.ApplyOpsFilter(ele.Name) {
+			if utils.ApplyOpsFilter(ele.Key) {
 				continue
 			}
 
@@ -168,13 +169,13 @@ func RunCommand(database, operation string, log *oplog.PartialLog, session *mgo.
 		log.Object = rec // reset log.Object
 
 		var store bson.D
-		store = append(store, bson.DocElem{
-			Name: "applyOps",
+		store = append(store, primitive.E{
+			Key: "applyOps",
 			Value: []bson.D{
 				log.Dump(nil, true),
 			},
 		})
-		err = dbHandler.Run(store, nil)
+		err = dbHandler.RunCommand(nil, store).Err()
 	}
 
 	return err
@@ -187,35 +188,43 @@ func IgnoreError(err error, op string, isFullSyncStage bool) bool {
 		return true
 	}
 
-	errorCode := mgo.ErrorCodeList(err)
-	if err != nil && len(errorCode) == 0 {
+	er, ok := err.(mongo.ServerError)
+	if !ok {
 		return false
 	}
 
-	for _, err := range errorCode {
-		switch op {
-		case "i":
-		case "u":
-			if isFullSyncStage {
-				if err == 28 { // PathNotViable
-					continue
-				}
-			}
-		case "d":
-			if err == 26 { // NamespaceNotFound
+	switch op {
+	case "i":
+		/*if isFullSyncStage {
+			if err == 11000 { // duplicate key
 				continue
 			}
-		case "c":
-			if err == 26 { // NamespaceNotFound
-				continue
+		}*/
+	case "u":
+		if isFullSyncStage {
+			if er.HasErrorCode(28) || er.HasErrorCode(211) { // PathNotViable
+				return true
 			}
-		default:
-			return false
 		}
+	case "ui":
+		if isFullSyncStage {
+			if er.HasErrorCode(11000) { // duplicate key
+				return true
+			}
+		}
+	case "d":
+		if er.HasErrorCode(26) { // NamespaceNotFound
+			return true
+		}
+	case "c":
+		if er.HasErrorCode(26) { // NamespaceNotFound
+			return true
+		}
+	default:
 		return false
 	}
 
-	return true
+	return false
 }
 
 func parseLastTimestamp(oplogs []*OplogRecord) int64 {
@@ -223,5 +232,5 @@ func parseLastTimestamp(oplogs []*OplogRecord) int64 {
 		return 0
 	}
 
-	return utils.TimestampToInt64(oplogs[len(oplogs)-1].original.partialLog.Timestamp)
+	return utils.DatetimeToInt64(oplogs[len(oplogs)-1].original.partialLog.Timestamp)
 }

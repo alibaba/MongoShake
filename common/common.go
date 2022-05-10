@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
+	"go.mongodb.org/mongo-driver/mongo"
 	"os"
 	"strings"
 
@@ -34,6 +35,8 @@ const (
 	MajorityWriteConcern = "majority"
 
 	Int32max = (int64(1) << 32) - 1
+
+	ErrorCodeDuplicateKey = 11000
 )
 
 var (
@@ -187,4 +190,8 @@ func MarshalStruct(input interface{}) string {
 		return fmt.Sprintf("marshal struct failed[%v]", err)
 	}
 	return string(ret)
+}
+
+func DuplicateKey(err error) bool {
+	return mongo.IsDuplicateKeyError(err)
 }

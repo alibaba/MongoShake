@@ -1,10 +1,10 @@
 package sourceReader
 
 import (
-	"testing"
 	"fmt"
-	"time"
 	"sync"
+	"testing"
+	"time"
 
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 	"github.com/alibaba/MongoShake/v2/common"
@@ -34,7 +34,7 @@ func TestEventReader(t *testing.T) {
 		nr++
 
 		cnt := 30
-		conn, err := utils.NewMongoCommunityConn(testMongoAddressCs, "primary", true, "", "")
+		conn, err := utils.NewMongoCommunityConn(testMongoAddressCs, "primary", true, "", "", "")
 		assert.Equal(t, nil, err, "should be equal")
 		err = conn.Client.Database("db1").Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
@@ -52,7 +52,7 @@ func TestEventReader(t *testing.T) {
 		er := NewEventReader(testMongoAddressCs, "ut_event_reader")
 		conf.Options.SpecialSourceDBFlag = utils.VarSpecialSourceDBFlagAliyunServerless
 		er.StartFetcher()
-		time.Sleep(3 * time.Second) // wait fetcher start
+		time.Sleep(5 * time.Second) // wait fetcher start
 
 		flag := false
 		startIndex := 0
@@ -64,7 +64,12 @@ func TestEventReader(t *testing.T) {
 				in, err := er.Next()
 				if err == TimeoutError {
 					time.Sleep(2 * time.Second)
-					fmt.Printf("timeout, resumeToken: %v\n", er.client.ResumeToken())
+					if er.client != nil {
+						fmt.Printf("timeout, resumeToken: %v\n", er.client.ResumeToken())
+					} else {
+						fmt.Printf("timeout, er.client == nil\n")
+					}
+					
 					continue
 				}
 				assert.Equal(t, nil, err, "should be equal")
@@ -135,7 +140,7 @@ func TestEventReader(t *testing.T) {
 		fmt.Printf("TestEventReader case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoCommunityConn(testMongoAddressCs, "primary", true, "", "")
+		conn, err := utils.NewMongoCommunityConn(testMongoAddressCs, "primary", true, "", "", "")
 
 		// drop all databases
 		dbs, err := conn.Client.ListDatabaseNames(nil, bson.M{})

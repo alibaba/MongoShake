@@ -3,6 +3,8 @@ package executor
 import (
 	"bytes"
 	"fmt"
+	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"reflect"
 	"strings"
 
@@ -81,7 +83,7 @@ func fillupOperationValues(log *PartialLogWithCallbak) {
 			// all types of $inc, $mul, $rename, $unset, $set change to $set,$unset in oplog
 			// $set looks like o:{$set:{a:{b:1}}} or o:{$set:{"a.b":1}}
 			if m, exist := parent["$set"]; exist {
-				if child, ok := m.(bson.M); ok {
+				if child, ok := m.(bson2.M); ok {
 					// skip $set operator
 					parent = child
 				}
@@ -97,7 +99,7 @@ func fillupOperationValues(log *PartialLogWithCallbak) {
 				// going down
 				inPosition := true
 				for i := 0; i != descend; i++ {
-					if down, ok := parent[cascades[i]].(bson.M); ok {
+					if down, ok := parent[cascades[i]].(bson2.M); ok {
 						parent = down
 					} else {
 						inPosition = false
@@ -196,6 +198,8 @@ func calculateSignature(object interface{}) (sign float64) {
 		}
 	case bson.MongoTimestamp: // numbers
 		sign = float64(o)
+	case primitive.DateTime:
+		sign = float64(o)
 	case int, uint, int8, uint8, int16, uint16, int32, uint32, int64, uint64, float32, float64:
 		if v, ok := object.(float64); ok {
 			sign = float64(v)
@@ -263,6 +267,10 @@ func ExactlyMatch(first, second interface{}) bool {
 		}
 	case bson.MongoTimestamp: // numbers
 		if v, ok := second.(bson.MongoTimestamp); ok {
+			return uint64(o) == uint64(v)
+		}
+	case primitive.DateTime: // numbers
+		if v, ok := second.(primitive.DateTime); ok {
 			return uint64(o) == uint64(v)
 		}
 	case int, uint, int8, uint8, int16, uint16, int32, uint32, int64, uint64, float32, float64:

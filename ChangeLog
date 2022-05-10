@@ -1,3 +1,37 @@
+2021-11-26 Alibaba Cloud.
+	* version: 2.6.6
+	* BUGFIX: fix ssl conn string #668 #628
+	* BUGFIX: fix password print in log #612
+	* BUGFIX: fix connection leak #693
+	* BUGFIX: fix bug about whiteRule
+2021-10-27 Alibaba Cloud.
+	* version: 2.6.5
+	* IMPROVE: support kafka channel ssl
+	* IMPROVE: support only have mongo_s_url
+2021-04-13 Alibaba Cloud.
+	* version: 2.6.4
+	* IMPROVE: parse configuration failed because of column length is bigger
+	than 4096. #582
+	* IMPROVE: use splitVector command to split table and then support
+	parallel fetching in full sync stage. remove
+	'full_sync.reader.read_document_count' in configuration file.
+
+2021-04-12 Alibaba Cloud.
+	* version: 2.6.3
+	* BUGFIX: ignore duplicate key error when in full sync stage. #579
+
+2021-04-08 Alibaba Cloud.
+	* version: 2.6.2
+	* IMPROVE: support ssl.
+
+2021-03-22 Alibaba Cloud.
+	* version: 2.6.1
+	* BUGFIX: singleWriter with wrong type 'objectId' error. #570
+
+2021-03-22 Alibaba Cloud.
+	* version: 2.6
+	* replace govendor with go.mod.
+
 2021-03-19 Alibaba Cloud.
 	* version: 2.4.22
 	* IMPROVE: add 'tunnel.json.format' option to let user chose json format.

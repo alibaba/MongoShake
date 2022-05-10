@@ -11,7 +11,9 @@ logs
 tags
 *.bak
 *.tar.gz
+*.pem
 run_sys_test_dir
+mongo-shake-v*
 
 dump.data
 runtime.trace

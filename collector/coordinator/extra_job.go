@@ -71,10 +71,10 @@ func (cui *CheckUniqueIndexExistsJob) Name() string {
 
 func (cui *CheckUniqueIndexExistsJob) Run() {
 	var err error
-	conns := make([]*utils.MongoConn, len(cui.urls))
+	conns := make([]*utils.MongoCommunityConn, len(cui.urls))
 	for i, source := range cui.urls {
-		conns[i], err = utils.NewMongoConn(source.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
-			utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault)
+		conns[i], err = utils.NewMongoCommunityConn(source.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
+			utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			LOG.Error("extra job[%s] connect source[%v] failed: %v", cui.Name(), source.URL, err)
 			return
@@ -90,17 +90,10 @@ func (cui *CheckUniqueIndexExistsJob) Run() {
 	for range time.NewTicker(time.Duration(cui.interval) * time.Second).C {
 		LOG.Debug("extra job[%s] check", cui.Name())
 		for i, source := range cui.urls {
-			for _, ns := range nsList {
-				index, err := conns[i].Session.DB(ns.Database).C(ns.Collection).Indexes()
-				if err != nil {
-					LOG.Warn("extra job[%s] with source[%v] query index[%v] failed: %v", cui.Name(), source.URL,
-						ns.Str(), err)
-				}
 
-				if utils.HasUniqueIndex(index) {
-					LOG.Crashf("extra job[%s] with source[%v] query index[%v] find unique index: %v",
-						cui.Name(), source.URL, ns.Str(), index)
-				}
+			if unique, db, col := conns[i].HasUniqueIndex(); unique {
+				LOG.Crashf("extra job[%s] with source[%v] query index[%s - %s] find unique",
+					cui.Name(), source.URL, db, col)
 			}
 		}
 	}

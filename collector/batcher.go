@@ -4,6 +4,7 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	"github.com/alibaba/MongoShake/v2/oplog"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"reflect"
 	"time"
@@ -11,7 +12,6 @@ import (
 	utils "github.com/alibaba/MongoShake/v2/common"
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -25,7 +25,7 @@ var (
 		Raw: nil,
 		Parsed: &oplog.PartialLog{ // initial fake oplog only used in comparison
 			ParsedLog: oplog.ParsedLog{
-				Timestamp: bson.MongoTimestamp(-2), // fake timestamp,
+				Timestamp: primitive.DateTime(-2), // fake timestamp,
 				Operation: "meaningless operation",
 			},
 		},
@@ -40,12 +40,12 @@ func getTargetDelay() int64 {
 	}
 }
 
-func getExitPoint() bson.MongoTimestamp {
+func getExitPoint() primitive.DateTime {
 	if utils.IncrSentinelOptions.ExitPoint <= 0 {
 		return 0
 	}
 	// change to timestamp
-	return bson.MongoTimestamp(utils.IncrSentinelOptions.ExitPoint << 32)
+	return primitive.DateTime(utils.IncrSentinelOptions.ExitPoint << 32)
 }
 
 /*
@@ -124,7 +124,8 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 	}
 
 	if moveChunkFilter.Filter(log) {
-		LOG.Crashf("move chunk oplog found[%v]", log)
+		LOG.Critical("shake exit, must close balancer in sharding + oplog")
+		LOG.Crashf("move chunk oplog found, must close balancer in sharding + oplog [%v]", log)
 		return false
 	}
 
