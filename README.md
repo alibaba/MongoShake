@@ -80,7 +80,7 @@ add tag when releasing: "release-v{version}-{date}". for example: "release-v1.0.
 
 # Usage
 ---
-Run `./bin/collector.darwin64` or `collector.linux64` which is built in OSX and Linux respectively.
+Run `./bin/collector.darwin` or `collector.linux` which is built in OSX and Linux respectively.
 
 Or you can build mongo-shake yourself according to the following steps:
 
