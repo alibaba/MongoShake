@@ -344,7 +344,7 @@ func TestGatherApplyOps(t *testing.T) {
 		assert.Equal(t, primitive.DateTime(1), gather.Parsed.Timestamp, "should be equal")
 		assert.Equal(t, "admin.$cmd", gather.Parsed.Namespace, "should be equal")
 		assert.Equal(t, "c", gather.Parsed.Operation, "should be equal")
-		assert.Equal(t, bson.M(nil), gather.Parsed.Query, "should be equal")
+		assert.Equal(t, bson.D(nil), gather.Parsed.Query, "should be equal")
 		assert.Equal(t, "applyOps", gather.Parsed.Object[0].Key, "should be equal")
 		assert.Equal(t, 4, len(gather.Parsed.Object[0].Value.([]bson.M)), "should be equal")
 		assert.Equal(t, "i", gather.Parsed.Object[0].Value.([]bson.M)[0]["op"], "should be equal")
@@ -373,8 +373,8 @@ func TestPartialLog(t *testing.T) {
 					Value: "value2",
 				},
 			},
-			"o2": bson.M{
-				"_id": "123",
+			"o2": bson.D{
+				{"_id", "123"},
 			},
 			"useless": "can't see me",
 		}
@@ -428,8 +428,8 @@ func TestPartialLog(t *testing.T) {
 			},
 			bson.E{
 				Key: "o2",
-				Value: bson.M{
-					"_id": "123",
+				Value: bson.D{
+					{"_id", "123"},
 				},
 			},
 		}, bsonDOutput, "should be equal")

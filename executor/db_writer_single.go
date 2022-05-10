@@ -141,6 +141,14 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 	return nil
 }
 
+/*
+	replace(update all):
+		db.c.insert({"a":1,"b":1,"c":1}) + db.c.update({"a":1}, {"b":2})
+		{ "op" : "u", "ns" : "test.c", "ui" : UUID("4654d08e-db1f-4e94-9778-90aeee4feff0"), "o" : { "_id" : ObjectId("627a2492b95fae5fca006bad"), "b" : 2 }, "o2" : { "_id" : ObjectId("627a2492b95fae5fca006bad") }, "ts" : Timestamp(1652171939, 1), "t" : NumberLong(1), "wall" : ISODate("2022-05-10T08:38:59.701Z"), "v" : NumberLong(2) }
+	updateOne:
+		db.c.insert({"a":1,"b":1,"c":1}) + db.c.updateOne({"a":1}, {"$set":{"b":2}})
+		{ "op" : "u", "ns" : "test.c", "ui" : UUID("4654d08e-db1f-4e94-9778-90aeee4feff0"), "o" : { "$v" : 1, "$set" : { "b" : 3 }, "$unset" : { "c" : true } }, "o2" : { "_id" : ObjectId("627a1f83b95fae5fca006bac") }, "ts" : Timestamp(1652170892, 1), "t" : NumberLong(1), "wall" : ISODate("2022-05-10T08:21:32.695Z"), "v" : NumberLong(2) }
+*/
 func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 	oplogs []*OplogRecord, upsert bool) error {
 	collectionHandle := sw.conn.Client.Database(database).Collection(collection)
@@ -249,7 +257,7 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*Op
 		operation, found := oplog.ExtraCommandName(newObject)
 		if conf.Options.FilterDDLEnable || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
-			if err = RunCommand(database, operation, log.original.partialLog, sw.conn); err == nil {
+			if err = RunCommand(database, operation, log.original.partialLog, sw.conn.Client); err == nil {
 				LOG.Info("Execute command (op==c) oplog, operation [%s]", operation)
 			} else if err.Error() == "ns not found" {
 				LOG.Info("Execute command (op==c) oplog, operation [%s], ignore error[ns not found]", operation)

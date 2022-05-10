@@ -2,10 +2,10 @@ package oplog
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/vinllen/mgo/bson"
 )
 
 func TestDistributeOplogByMod(t *testing.T) {
@@ -49,8 +49,8 @@ func TestDistributeOplogByMod(t *testing.T) {
 		log1 := &PartialLog{
 			ParsedLog: ParsedLog{
 				Namespace: "test.h4",
-				Query: bson.M{
-					"_id": 123,
+				Query: bson.D{
+					{"_id", 123},
 				},
 				Operation: "u",
 			},
@@ -59,8 +59,8 @@ func TestDistributeOplogByMod(t *testing.T) {
 		log2 := &PartialLog{
 			ParsedLog: ParsedLog{
 				Namespace: "test.h4",
-				Query: bson.M{
-					"_id": 1230,
+				Query: bson.D{
+					{"_id", 1230},
 				},
 				Operation: "u",
 			},
@@ -79,8 +79,8 @@ func TestDistributeOplogByMod(t *testing.T) {
 		log1 := &PartialLog{
 			ParsedLog: ParsedLog{
 				Namespace: "test.h4",
-				Query: bson.M{
-					"_id": 123,
+				Query: bson.D{
+					{"_id", 123},
 				},
 				Operation: "u",
 			},
@@ -89,8 +89,8 @@ func TestDistributeOplogByMod(t *testing.T) {
 		log2 := &PartialLog{
 			ParsedLog: ParsedLog{
 				Namespace: "test.h4",
-				Query: bson.M{
-					"_id": 1230,
+				Query: bson.D{
+					{"_id", 1230},
 				},
 				Operation: "u",
 			},
@@ -100,8 +100,8 @@ func TestDistributeOplogByMod(t *testing.T) {
 		log3 := &PartialLog{
 			ParsedLog: ParsedLog{
 				Namespace: "white1",
-				Query: bson.M{
-					"_id": 123,
+				Query: bson.D{
+					{"_id", 123},
 				},
 				Operation: "u",
 			},
@@ -110,8 +110,8 @@ func TestDistributeOplogByMod(t *testing.T) {
 		log4 := &PartialLog{
 			ParsedLog: ParsedLog{
 				Namespace: "white1",
-				Query: bson.M{
-					"_id": 1230,
+				Query: bson.D{
+					{"_id", 1230},
 				},
 				Operation: "u",
 			},
@@ -122,8 +122,8 @@ func TestDistributeOplogByMod(t *testing.T) {
 		log5 := &PartialLog{
 			ParsedLog: ParsedLog{
 				Namespace: "white5",
-				Query: bson.M{
-					"_id": 1230,
+				Query: bson.D{
+					{"_id", 1230},
 				},
 				Operation: "u",
 			},

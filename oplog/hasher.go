@@ -2,8 +2,8 @@ package oplog
 
 import (
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
-	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 const (
@@ -110,7 +110,7 @@ func (wloi *WhiteListObjectIdHasher) DistributeOplogByMod(log *PartialLog, mod i
 }
 
 /*********************************************/
-func getValueFromBsonD(obj bson2.D, key string) (interface{}, bool) {
+func getValueFromBsonD(obj bson.D, key string) (interface{}, bool) {
 	for _, ele := range obj {
 		if ele.Key == key {
 			return ele.Value, true
@@ -153,7 +153,7 @@ func stringHashValue(s string) uint32 {
 
 func Hash(hashObject interface{}) uint32 {
 	switch object := hashObject.(type) {
-	case bson.ObjectId:
+	case primitive.ObjectID:
 		return stringHashValue(object.Hex())
 	case string:
 		return stringHashValue(object)

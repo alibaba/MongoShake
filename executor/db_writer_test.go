@@ -1508,7 +1508,7 @@ func TestRunCommand(t *testing.T) {
 				},
 			},
 		}
-		err = RunCommand(testDb, "applyOps", log, conn)
+		err = RunCommand(testDb, "applyOps", log, conn.Client)
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
@@ -1555,7 +1555,7 @@ func TestRunCommand(t *testing.T) {
 				},
 			},
 		}
-		err = RunCommand(testDb, "applyOps", log, conn)
+		err = RunCommand(testDb, "applyOps", log, conn.Client)
 		assert.Equal(t, nil, err, "should be equal")
 
 		dbs, err := conn.Client.ListDatabaseNames(context.Background(), bson.D{})
@@ -1595,7 +1595,7 @@ func TestRunCommand(t *testing.T) {
 			},
 		}
 
-		err = RunCommand("zz", "dropDatabase", log, conn)
+		err = RunCommand("zz", "dropDatabase", log, conn.Client)
 		assert.Equal(t, nil, err, "should be equal")
 
 		dbs, err := conn.Client.ListDatabaseNames(context.Background(), bson.D{})
@@ -1653,7 +1653,7 @@ func TestRunCommand(t *testing.T) {
 			},
 		}
 
-		err = RunCommand("zz", "createIndexes", log, conn)
+		err = RunCommand("zz", "createIndexes", log, conn.Client)
 		assert.Equal(t, nil, err, "should be equal")
 
 		cursor, err := conn.Client.Database("zz").Collection("y").Indexes().List(context.Background())

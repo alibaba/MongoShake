@@ -1,7 +1,13 @@
 package oplog
 
 import (
+	"context"
 	"fmt"
+	LOG "github.com/vinllen/log4go"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"strings"
 	"testing"
 
@@ -9,8 +15,6 @@ import (
 
 	nimo "github.com/gugemichael/nimo4go"
 	"github.com/stretchr/testify/assert"
-	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -18,12 +22,40 @@ const (
 )
 
 var (
-	session *mgo.Session
+	client *mongo.Client
 )
 
+func newMongoClient(url string) (*mongo.Client, error) {
+	clientOps := options.Client().ApplyURI(url)
+
+	client, err := mongo.NewClient(clientOps)
+	if err != nil {
+		return nil, fmt.Errorf("new client failed: %v", err)
+	}
+	if err := client.Connect(context.Background()); err != nil {
+		return nil, fmt.Errorf("connect to %s failed: %v", url, err)
+	}
+
+	return client, nil
+}
+
 // copy from executor.RunCommand
-func RunCommand(database, operation string, log *PartialLog, session *mgo.Session) error {
-	dbHandler := session.DB(database)
+func ApplyOpsFilter(key string) bool {
+	// convert to map if has more later
+	k := strings.TrimSpace(key)
+	if k == "$db" {
+		// 40621, $db is not allowed in OP_QUERY requests
+		return true
+	} else if k == "ui" {
+		return true
+	}
+
+	return false
+}
+func RunCommand(database, operation string, log *PartialLog, client *mongo.Client) error {
+	defer LOG.Debug("RunCommand run DDL: %v", log.Dump(nil, true))
+	dbHandler := client.Database(database)
+	LOG.Info("RunCommand run DDL with type[%s]", operation)
 	var err error
 	switch operation {
 	case "createIndexes":
@@ -35,19 +67,19 @@ func RunCommand(database, operation string, log *PartialLog, session *mgo.Sessio
 		var innerBsonD, indexes bson.D
 		for i, ele := range log.Object {
 			if i == 0 {
-				nimo.AssertTrue(ele.Name == "createIndexes", "should panic when ele.Name != 'createIndexes'")
+				nimo.AssertTrue(ele.Key == "createIndexes", "should panic when ele.Name != 'createIndexes'")
 			} else {
 				innerBsonD = append(innerBsonD, ele)
 			}
 		}
 		indexes = append(indexes, log.Object[0]) // createIndexes
-		indexes = append(indexes, bson.DocElem{
-			Name: "indexes",
+		indexes = append(indexes, primitive.E{
+			Key: "indexes",
 			Value: []bson.D{ // only has 1 bson.D
 				innerBsonD,
 			},
 		})
-		err = dbHandler.Run(indexes, nil)
+		err = dbHandler.RunCommand(nil, indexes).Err()
 	case "applyOps":
 		/*
 		 * Strictly speaking, we should handle applysOps nested case, but it is
@@ -55,22 +87,45 @@ func RunCommand(database, operation string, log *PartialLog, session *mgo.Sessio
 		 */
 		var store bson.D
 		for _, ele := range log.Object {
-			/*if utils.ApplyOpsFilter(ele.Name) {
+			if ApplyOpsFilter(ele.Key) {
 				continue
-			}*/
-			if ele.Name == "applyOps" {
-				arr := ele.Value.([]interface{})
-				for i, ele := range arr {
-					doc := ele.(bson.D)
-					arr[i] = RemoveFiled(doc, "ui")
+			}
+			if ele.Key == "applyOps" {
+				switch v := ele.Value.(type) {
+				case []interface{}:
+					for i, ele := range v {
+						doc := ele.(bson.D)
+						v[i] = RemoveFiled(doc, "ui")
+					}
+				case bson.D:
+					ret := make(bson.D, 0, len(v))
+					for _, ele := range v {
+						if ele.Key == "ui" {
+							continue
+						}
+						ret = append(ret, ele)
+					}
+					ele.Value = ret
+				case []bson.M:
+					for _, ele := range v {
+						if _, ok := ele["ui"]; ok {
+							delete(ele, "ui")
+						}
+					}
 				}
+
 			}
 			store = append(store, ele)
 		}
-		err = dbHandler.Run(store, nil)
+		err = dbHandler.RunCommand(nil, store).Err()
 	case "dropDatabase":
-		err = dbHandler.DropDatabase()
+		err = dbHandler.Drop(nil)
 	case "create":
+		if GetKey(log.Object, "autoIndexId") != nil &&
+			GetKey(log.Object, "idIndex") != nil {
+			// exits "autoIndexId" and "idIndex", remove "autoIndexId"
+			log.Object = RemoveFiled(log.Object, "autoIndexId")
+		}
 		fallthrough
 	case "collMod":
 		fallthrough
@@ -90,30 +145,32 @@ func RunCommand(database, operation string, log *PartialLog, session *mgo.Sessio
 		fallthrough
 	case "emptycapped":
 		if !IsRunOnAdminCommand(operation) {
-			err = dbHandler.Run(log.Object, nil)
+			err = dbHandler.RunCommand(nil, log.Object).Err()
 		} else {
-			err = session.DB("admin").Run(log.Object, nil)
+			err = client.Database("admin").RunCommand(nil, log.Object).Err()
 		}
 	default:
+		LOG.Info("type[%s] not found, use applyOps", operation)
+
 		// filter log.Object
 		var rec bson.D
 		for _, ele := range log.Object {
-			/*if utils.ApplyOpsFilter(ele.Name) {
+			if ApplyOpsFilter(ele.Key) {
 				continue
-			}*/
+			}
 
 			rec = append(rec, ele)
 		}
 		log.Object = rec // reset log.Object
 
 		var store bson.D
-		store = append(store, bson.DocElem{
-			Name: "applyOps",
+		store = append(store, primitive.E{
+			Key: "applyOps",
 			Value: []bson.D{
 				log.Dump(nil, true),
 			},
 		})
-		err = dbHandler.Run(store, nil)
+		err = dbHandler.RunCommand(nil, store).Err()
 	}
 
 	return err
@@ -123,18 +180,21 @@ func runOplog(data *PartialLog) error {
 	ns := strings.Split(data.Namespace, ".")
 	switch data.Operation {
 	case "i":
-		return session.DB(ns[0]).C(ns[1]).Insert(data.Object)
+		_, err := client.Database(ns[0]).Collection(ns[1]).InsertOne(context.Background(), data.Object)
+		return err
 	case "d":
-		return session.DB(ns[0]).C(ns[1]).Remove(data.Object)
+		_, err := client.Database(ns[0]).Collection(ns[1]).DeleteOne(context.Background(), data.Object)
+		return err
 	case "u":
-		return session.DB(ns[0]).C(ns[1]).Update(data.Query, data.Object)
+		_, err := client.Database(ns[0]).Collection(ns[1]).UpdateOne(context.Background(), data.Query, data.Object)
+		return err
 	case "c":
 		operation, found := ExtraCommandName(data.Object)
 		if !found {
 			return fmt.Errorf("extract command failed")
 		}
 
-		return RunCommand(ns[0], operation, data, session)
+		return RunCommand(ns[0], operation, data, client)
 	default:
 		return fmt.Errorf("unknown op[%v]", data.Operation)
 	}
@@ -152,10 +212,11 @@ func runByte(input []byte) error {
 }
 
 func getAllDoc(db, coll string) map[string]bson.M {
-	it := session.DB(db).C(coll).Find(bson.M{}).Iter()
+	cursor, _ := client.Database(db).Collection(coll).Find(context.Background(), bson.M{})
 	ret := make(map[string]bson.M)
 	result := make(bson.M)
-	for it.Next(&result) {
+	for cursor.Next(context.Background()) {
+		cursor.Decode(&result)
 		ret[result["_id"].(string)] = result
 		result = make(bson.M)
 	}
@@ -172,21 +233,21 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		nr++
 
 		var err error
-		session, err = mgo.Dial(testUrl)
+		client, err = newMongoClient(testUrl)
 		assert.Equal(t, nil, err, "should be equal")
 
-		err = session.DB("testDb").DropDatabase()
+		err = client.Database("testDb").Drop(context.Background())
 		assert.Equal(t, nil, err, "should be equal")
 
 		eventInsert1 := Event{
 			OperationType: "insert",
 			FullDocument: bson.D{
-				bson.DocElem{
-					Name:  "_id",
+				bson.E{
+					Key:   "_id",
 					Value: "1",
 				},
-				bson.DocElem{
-					Name:  "a",
+				bson.E{
+					Key:   "a",
 					Value: "1",
 				},
 			},
@@ -212,22 +273,22 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		nr++
 
 		var err error
-		session, err = mgo.Dial(testUrl)
+		client, err = newMongoClient(testUrl)
 		assert.Equal(t, nil, err, "should be equal")
 
-		err = session.DB("testDb").DropDatabase()
+		err = client.Database("testDb").Drop(context.Background())
 		assert.Equal(t, nil, err, "should be equal")
 
 		// insert a:1
 		eventInsert1 := Event{
 			OperationType: "insert",
 			FullDocument: bson.D{
-				bson.DocElem{
-					Name:  "_id",
+				bson.E{
+					Key:   "_id",
 					Value: "1",
 				},
-				bson.DocElem{
-					Name:  "a",
+				bson.E{
+					Key:   "a",
 					Value: "1",
 				},
 			},
@@ -246,12 +307,12 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		eventInsert2 := Event{
 			OperationType: "insert",
 			FullDocument: bson.D{
-				bson.DocElem{
-					Name:  "_id",
+				bson.E{
+					Key:   "_id",
 					Value: "2",
 				},
-				bson.DocElem{
-					Name:  "a",
+				bson.E{
+					Key:   "a",
 					Value: "2",
 				},
 			},
@@ -269,16 +330,16 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		// replace a:2 => a:20
 		eventUpdate1 := Event{
 			OperationType: "replace",
-			DocumentKey: bson.M{
-				"_id": "2",
+			DocumentKey: bson.D{
+				{"_id", "2"},
 			},
 			FullDocument: bson.D{
-				bson.DocElem{
-					Name:  "_id",
+				bson.E{
+					Key:   "_id",
 					Value: "2",
 				},
-				bson.DocElem{
-					Name:  "a",
+				bson.E{
+					Key:   "a",
 					Value: "20",
 				},
 			},
@@ -305,22 +366,22 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		nr++
 
 		var err error
-		session, err = mgo.Dial(testUrl)
+		client, err = newMongoClient(testUrl)
 		assert.Equal(t, nil, err, "should be equal")
 
-		err = session.DB("testDb").DropDatabase()
+		err = client.Database("testDb").Drop(context.Background())
 		assert.Equal(t, nil, err, "should be equal")
 
 		// insert a:1
 		eventInsert1 := Event{
 			OperationType: "insert",
 			FullDocument: bson.D{
-				bson.DocElem{
-					Name:  "_id",
+				bson.E{
+					Key:   "_id",
 					Value: "1",
 				},
-				bson.DocElem{
-					Name:  "a",
+				bson.E{
+					Key:   "a",
 					Value: "1",
 				},
 			},
@@ -339,12 +400,12 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		eventInsert2 := Event{
 			OperationType: "insert",
 			FullDocument: bson.D{
-				bson.DocElem{
-					Name:  "_id",
+				bson.E{
+					Key:   "_id",
 					Value: "2",
 				},
-				bson.DocElem{
-					Name:  "a",
+				bson.E{
+					Key:   "a",
 					Value: "2",
 				},
 			},
@@ -362,8 +423,8 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		// update a:2 => b:300, c:400
 		eventUpdate1 := Event{
 			OperationType: "update",
-			DocumentKey: bson.M{
-				"_id": "2",
+			DocumentKey: bson.D{
+				{"_id", "2"},
 			},
 			UpdateDescription: bson.M{
 				"updatedFields": bson.M{
@@ -393,8 +454,8 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		// delete a:1
 		eventDelete1 := Event{
 			OperationType: "delete",
-			DocumentKey: bson.M{
-				"_id": "1",
+			DocumentKey: bson.D{
+				{"_id", "1"},
 			},
 			Ns: bson.M{
 				"db":   "testDb",
@@ -421,22 +482,22 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		nr++
 
 		var err error
-		session, err = mgo.Dial(testUrl)
+		client, err = newMongoClient(testUrl)
 		assert.Equal(t, nil, err, "should be equal")
 
-		err = session.DB("testDb").DropDatabase()
+		err = client.Database("testDb").Drop(context.Background())
 		assert.Equal(t, nil, err, "should be equal")
 
 		// insert a:1
 		eventInsert1 := Event{
 			OperationType: "insert",
 			FullDocument: bson.D{
-				bson.DocElem{
-					Name:  "_id",
+				bson.E{
+					Key:   "_id",
 					Value: "1",
 				},
-				bson.DocElem{
-					Name:  "a",
+				bson.E{
+					Key:   "a",
 					Value: "1",
 				},
 			},
@@ -468,8 +529,7 @@ func TestConvertEvent2Oplog(t *testing.T) {
 
 		err = runByte(out)
 		assert.Equal(t, nil, err, "should be equal")
-
-		list, err := session.DB("testDb").CollectionNames()
+		list, err := client.Database("testDb").ListCollectionNames(context.Background(), bson.M{})
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 0, len(list), "should be equal")
 	}
@@ -480,23 +540,23 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		nr++
 
 		var err error
-		session, err = mgo.Dial(testUrl)
+		client, err = newMongoClient(testUrl)
 		assert.Equal(t, nil, err, "should be equal")
 
-		err = session.DB("testDb").DropDatabase()
-		_ = session.DB("testDb2").DropDatabase()
+		err = client.Database("testDb").Drop(context.Background())
+		_ = client.Database("testDb2").Drop(context.Background())
 		assert.Equal(t, nil, err, "should be equal")
 
 		// insert a:1
 		eventInsert1 := Event{
 			OperationType: "insert",
 			FullDocument: bson.D{
-				bson.DocElem{
-					Name:  "_id",
+				bson.E{
+					Key:   "_id",
 					Value: "1",
 				},
-				bson.DocElem{
-					Name:  "a",
+				bson.E{
+					Key:   "a",
 					Value: "1",
 				},
 			},
@@ -533,7 +593,7 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		err = runByte(out)
 		assert.Equal(t, nil, err, "should be equal")
 
-		list, err := session.DB("testDb").CollectionNames()
+		list, err := client.Database("testDb").ListCollectionNames(context.Background(), bson.M{})
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 0, len(list), "should be equal")
 
@@ -548,22 +608,22 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		nr++
 
 		var err error
-		session, err = mgo.Dial(testUrl)
+		client, err = newMongoClient(testUrl)
 		assert.Equal(t, nil, err, "should be equal")
 
-		err = session.DB("testDb").DropDatabase()
+		err = client.Database("testDb").Drop(context.Background())
 		assert.Equal(t, nil, err, "should be equal")
 
 		// insert a:1
 		eventInsert1 := Event{
 			OperationType: "insert",
 			FullDocument: bson.D{
-				bson.DocElem{
-					Name:  "_id",
+				bson.E{
+					Key:   "_id",
 					Value: "1",
 				},
-				bson.DocElem{
-					Name:  "a",
+				bson.E{
+					Key:   "a",
 					Value: "1",
 				},
 			},
@@ -595,7 +655,7 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		err = runByte(out)
 		assert.Equal(t, nil, err, "should be equal")
 
-		list, err := session.DB("testDb").CollectionNames()
+		list, err := client.Database("testDb").ListCollectionNames(context.Background(), bson.M{})
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 0, len(list), "should be equal")
 	}
@@ -606,22 +666,22 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		nr++
 
 		var err error
-		session, err = mgo.Dial(testUrl)
+		client, err = newMongoClient(testUrl)
 		assert.Equal(t, nil, err, "should be equal")
 
-		err = session.DB("testDb").DropDatabase()
+		err = client.Database("testDb").Drop(context.Background())
 		assert.Equal(t, nil, err, "should be equal")
 
 		// insert a:1
 		eventInsert1 := Event{
 			OperationType: "insert",
 			FullDocument: bson.D{
-				bson.DocElem{
-					Name:  "_id",
+				bson.E{
+					Key:   "_id",
 					Value: "1",
 				},
-				bson.DocElem{
-					Name:  "a",
+				bson.E{
+					Key:   "a",
 					Value: "1",
 				},
 			},
@@ -663,7 +723,7 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		err = runByte(out)
 		assert.Equal(t, nil, err, "should be equal")
 
-		list, err := session.DB("testDb").CollectionNames()
+		list, err := client.Database("testDb").ListCollectionNames(context.Background(), bson.M{})
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 0, len(list), "should be equal")
 	}
@@ -675,8 +735,8 @@ func TestConvertEvent2Oplog(t *testing.T) {
 
 		eventUpdate1 := Event{
 			OperationType: "update",
-			DocumentKey: bson.M{
-				"_id": "2",
+			DocumentKey: bson.D{
+				{"_id", "2"},
 			},
 			UpdateDescription: bson.M{
 				"updatedFields": bson.M{

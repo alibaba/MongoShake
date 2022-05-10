@@ -224,7 +224,7 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*Oplo
 		operation, found := oplog.ExtraCommandName(newObject)
 		if conf.Options.FilterDDLEnable || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
-			if err = RunCommand(database, operation, log.original.partialLog, bw.conn); err == nil {
+			if err = RunCommand(database, operation, log.original.partialLog, bw.conn.Client); err == nil {
 				LOG.Info("Execute command (op==c) oplog, operation [%s]", operation)
 			} else if err.Error() == "ns not found" {
 				LOG.Info("Execute command (op==c) oplog, operation [%s], ignore error[ns not found]", operation)

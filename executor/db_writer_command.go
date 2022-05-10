@@ -173,7 +173,7 @@ func (cw *CommandWriter) doCommand(database string, metadata bson.M, oplogs []*O
 		operation, found := oplog.ExtraCommandName(log.original.partialLog.Object)
 		if conf.Options.FilterDDLEnable || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
-			if err = RunCommand(database, operation, log.original.partialLog, cw.conn); err == nil {
+			if err = RunCommand(database, operation, log.original.partialLog, cw.conn.Client); err == nil {
 				LOG.Info("Execute command (op==c) oplog , operation [%s]", conf.Options.FilterDDLEnable,
 					operation)
 			} else if IgnoreError(err, "c", parseLastTimestamp(oplogs) <= cw.fullFinishTs) {

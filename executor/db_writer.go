@@ -57,9 +57,9 @@ func NewDbWriter(conn *utils.MongoCommunityConn, metadata bson.M, bulkInsert boo
 	return &BulkWriter{conn: conn, fullFinishTs: fullFinishTs} // bulk insertion enable
 }
 
-func RunCommand(database, operation string, log *oplog.PartialLog, conn *utils.MongoCommunityConn) error {
+func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo.Client) error {
 	defer LOG.Debug("RunCommand run DDL: %v", log.Dump(nil, true))
-	dbHandler := conn.Client.Database(database)
+	dbHandler := client.Database(database)
 	LOG.Info("RunCommand run DDL with type[%s]", operation)
 	var err error
 	switch operation {
@@ -152,7 +152,7 @@ func RunCommand(database, operation string, log *oplog.PartialLog, conn *utils.M
 		if !oplog.IsRunOnAdminCommand(operation) {
 			err = dbHandler.RunCommand(nil, log.Object).Err()
 		} else {
-			err = conn.Client.Database("admin").RunCommand(nil, log.Object).Err()
+			err = client.Database("admin").RunCommand(nil, log.Object).Err()
 		}
 	default:
 		LOG.Info("type[%s] not found, use applyOps", operation)
