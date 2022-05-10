@@ -2,6 +2,7 @@ package collector
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"testing"
 
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/vinllen/mgo/bson"
 )
 
 func mockSyncer() *OplogSyncer {

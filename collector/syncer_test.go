@@ -10,10 +10,11 @@ import (
 	"github.com/alibaba/MongoShake/v2/oplog"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/vinllen/mgo/bson"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 // mock oplog with different namespace
+// because "o2,omitempty" in oplog.go Query can't be empty
 func mockLog(ns string, ts primitive.DateTime, withDefault bool, gid string) *oplog.ParsedLog {
 	switch withDefault {
 	case true:
@@ -22,7 +23,7 @@ func mockLog(ns string, ts primitive.DateTime, withDefault bool, gid string) *op
 			Operation:     "i",
 			Namespace:     ns,
 			Object:        bson.D{},
-			Query:         bson.M{},
+			Query:         bson.D{{"_id", "1"}},
 			UniqueIndexes: bson.M{},
 			Lsid:          bson.M{},
 			Gid:           gid,
@@ -33,7 +34,7 @@ func mockLog(ns string, ts primitive.DateTime, withDefault bool, gid string) *op
 			Operation: "i",
 			Namespace: ns,
 			Object:    bson.D{},
-			Query:     bson.M{},
+			Query:     bson.D{{"_id", "1"}},
 			Gid:       gid,
 		}
 	}
@@ -54,6 +55,8 @@ func mockEvent(nsCollection string, ts primitive.DateTime) *oplog.Event {
 
 func TestDeserializer(t *testing.T) {
 	// test deserializer
+
+	utils.InitialLogger("", "", "debug", true, 1)
 
 	var nr int
 	// normal

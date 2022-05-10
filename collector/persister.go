@@ -3,6 +3,7 @@ package collector
 // persist oplog on disk
 
 import (
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"sync"
 	"sync/atomic"
@@ -15,7 +16,6 @@ import (
 	nimo "github.com/gugemichael/nimo4go"
 	diskQueue "github.com/vinllen/go-diskqueue"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
