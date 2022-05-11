@@ -14,7 +14,7 @@ import (
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 
 	"github.com/stretchr/testify/assert"
-	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 	"reflect"
 )
 
@@ -29,12 +29,14 @@ var (
 	testNs = strings.Join([]string{testDb, testCollection}, ".")
 )
 
-func fetchAllDocument(conn *utils.MongoCommunityConn) ([]bson2.D, error) {
+func fetchAllDocument(conn *utils.MongoCommunityConn) ([]bson.D, error) {
 	return unit_test_common.FetchAllDocumentbsonD(conn.Client, testDb, testCollection, nil)
 }
 
 func TestDbSync(t *testing.T) {
 	// test doSync
+
+	utils.InitialLogger("", "", "debug", true, 1)
 
 	conn, err := utils.NewMongoCommunityConn(testMongoAddress, utils.VarMongoConnectModePrimary, false,
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
@@ -61,7 +63,7 @@ func TestDbSync(t *testing.T) {
 		err := conn.Client.Database(testDb).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		input := []*bson2.D{
+		input := []*bson.D{
 			{
 				{"_id", 1},
 				{"x", 1},
@@ -95,11 +97,7 @@ func TestDbSync(t *testing.T) {
 		/*------------------------------------------------------------*/
 
 		// insert duplicate document
-		input = []*bson2.D{
-			{
-				{"_id", 1},
-				{"x", 11},
-			},
+		input = []*bson.D{
 			{
 				{"_id", 3},
 				{"x", 3},
@@ -139,7 +137,7 @@ func TestDbSync(t *testing.T) {
 			if idVal != 2 {
 				assert.Equal(t, xVal, idVal, "should be equal")
 			} else {
-				assert.Equal(t, 20, xVal, "should be equal")
+				assert.Equal(t, int32(20), xVal, "should be equal")
 			}
 		}
 	}
@@ -184,7 +182,7 @@ func TestDbSync(t *testing.T) {
 		err := conn.Client.Database(testDb).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		input := []*bson2.D{
+		input := []*bson.D{
 			{
 				{"_id", 1},
 				{"x", 1},
@@ -224,7 +222,7 @@ func TestDbSync(t *testing.T) {
 		conf.Options.FullSyncExecutorInsertOnDupUpdate = false
 		conf.Options.FullSyncExecutorFilterOrphanDocument = true
 		conf.Options.MongoUrls = []string{"xx0", "xx1"} // meaningless but only for judge
-		input = []*bson2.D{
+		input = []*bson.D{
 			{
 				{"_id", 7},
 				{"x", 7},
@@ -281,17 +279,17 @@ func TestStartDropDestCollection(t *testing.T) {
 
 		// create test.c1
 		_, err = conn.Client.Database("test").Collection("c1").
-			InsertOne(nil, bson2.D{{"c", 1}})
+			InsertOne(nil, bson.D{{"c", 1}})
 		assert.Equal(t, nil, err, "should be equal")
 
 		// create test.c2
 		_, err = conn.Client.Database("test").Collection("c2").
-			InsertOne(nil, bson2.D{{"c", 1}})
+			InsertOne(nil, bson.D{{"c", 1}})
 		assert.Equal(t, nil, err, "should be equal")
 
 		// create test2.c3
 		_, err = conn.Client.Database("test").Collection("c3").
-			InsertOne(nil, bson2.D{{"c", 1}})
+			InsertOne(nil, bson.D{{"c", 1}})
 		assert.Equal(t, nil, err, "should be equal")
 
 		nsSet := map[utils.NS]struct{}{}
@@ -305,8 +303,8 @@ func TestStartDropDestCollection(t *testing.T) {
 		err = StartDropDestCollection(nsSet, conn, nsTrans)
 		assert.Equal(t, nil, err, "should be equal")
 
-		list, err := conn.Client.Database("test").ListCollectionNames(nil, bson2.M{})
-		conn.Client.Database("test").ListCollections(nil, bson2.M{})
+		list, err := conn.Client.Database("test").ListCollectionNames(nil, bson.M{})
+		conn.Client.Database("test").ListCollections(nil, bson.M{})
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 1, len(list), "should be equal")
 		assert.Equal(t, "c2", list[0], "should be equal")
@@ -329,17 +327,17 @@ func TestStartDropDestCollection(t *testing.T) {
 
 		// create test.c1
 		_, err = conn.Client.Database("test").Collection("c1").
-			InsertOne(nil, bson2.D{{"c", 1}})
+			InsertOne(nil, bson.D{{"c", 1}})
 		assert.Equal(t, nil, err, "should be equal")
 
 		// create test.c2
 		_, err = conn.Client.Database("test").Collection("c2").
-			InsertOne(nil, bson2.D{{"c", 1}})
+			InsertOne(nil, bson.D{{"c", 1}})
 		assert.Equal(t, nil, err, "should be equal")
 
 		// create test2.c3
 		_, err = conn.Client.Database("test").Collection("c3").
-			InsertOne(nil, bson2.D{{"c", 1}})
+			InsertOne(nil, bson.D{{"c", 1}})
 		assert.Equal(t, nil, err, "should be equal")
 
 		nsSet := map[utils.NS]struct{}{}
@@ -353,7 +351,7 @@ func TestStartDropDestCollection(t *testing.T) {
 		err = StartDropDestCollection(nsSet, conn, nsTrans)
 		assert.Equal(t, nil, err, "should be equal")
 
-		list, err := conn.Client.Database("test").ListCollectionNames(nil, bson2.M{})
+		list, err := conn.Client.Database("test").ListCollectionNames(nil, bson.M{})
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 3, len(list), "should be equal")
 		sort.Strings(list)
@@ -385,23 +383,23 @@ func TestStartIndexSync(t *testing.T) {
 		err = conn.Client.Database("test_db").Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		indexInput := []bson2.M{
+		indexInput := []bson.M{
 			{
-				"key": bson2.M{
+				"key": bson.M{
 					"_id": int32(1),
 				},
 				"name": "_id_",
 				"ns":   "test_db.test_coll",
 			},
 			{
-				"key": bson2.M{
+				"key": bson.M{
 					"hello": "hashed",
 				},
 				"name": "hello_hashed",
 				"ns":   "test_db.test_coll",
 			},
 			{
-				"key": bson2.M{
+				"key": bson.M{
 					"x": int32(1),
 					"y": int32(1),
 				},
@@ -409,14 +407,14 @@ func TestStartIndexSync(t *testing.T) {
 				"ns":   "test_db.test_coll",
 			},
 			{
-				"key": bson2.M{
+				"key": bson.M{
 					"z": int32(1),
 				},
 				"name": "z_1",
 				"ns":   "test_db.test_coll",
 			},
 		}
-		indexMap := map[utils.NS][]bson2.M{
+		indexMap := map[utils.NS][]bson.M{
 			utils.NS{"test_db", "test_coll"}: indexInput,
 		}
 		err = StartIndexSync(indexMap, testMongoAddress, nil, true)
@@ -425,7 +423,7 @@ func TestStartIndexSync(t *testing.T) {
 		cursor, err := conn.Client.Database("test_db").Collection("test_coll").Indexes().List(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		indexes := make([]bson2.M, 0)
+		indexes := make([]bson.M, 0)
 
 		cursor.All(nil, &indexes)
 		assert.Equal(t, nil, err, "should be equal")
@@ -448,23 +446,23 @@ func TestStartIndexSync(t *testing.T) {
 		err = conn.Client.Database("test_db").Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		indexInput := []bson2.M{
+		indexInput := []bson.M{
 			{
-				"key": bson2.M{
+				"key": bson.M{
 					"_id": int32(1),
 				},
 				"name": "_id_",
 				//"ns":   "test_db.test_coll",
 			},
 			{
-				"key": bson2.M{
+				"key": bson.M{
 					"hello": "hashed",
 				},
 				"name": "hello_hashed",
 				//"ns":   "test_db.test_coll",
 			},
 			{
-				"key": bson2.M{
+				"key": bson.M{
 					"x": int32(1),
 					"y": int32(1),
 				},
@@ -472,14 +470,14 @@ func TestStartIndexSync(t *testing.T) {
 				//"ns":   "test_db.test_coll",
 			},
 			{
-				"key": bson2.M{
+				"key": bson.M{
 					"z": int32(1),
 				},
 				"name": "z_1",
 				//"ns":   "test_db.test_coll",
 			},
 		}
-		indexMap := map[utils.NS][]bson2.M{
+		indexMap := map[utils.NS][]bson.M{
 			utils.NS{"test_db", "test_coll"}: indexInput,
 		}
 		err = StartIndexSync(indexMap, testMongoAddressServerless, nil, true)
@@ -488,7 +486,7 @@ func TestStartIndexSync(t *testing.T) {
 		cursor, err := conn.Client.Database("test_db").Collection("test_coll").Indexes().List(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		indexes := make([]bson2.M, 0)
+		indexes := make([]bson.M, 0)
 
 		cursor.All(nil, &indexes)
 		assert.Equal(t, nil, err, "should be equal")
@@ -497,7 +495,7 @@ func TestStartIndexSync(t *testing.T) {
 	}
 }
 
-func isEqual(x, y []bson2.M) bool {
+func isEqual(x, y []bson.M) bool {
 	sort.Slice(x, func(i, j int) bool {
 		if x[i]["name"].(string) < x[j]["name"].(string) {
 			return true
@@ -525,7 +523,7 @@ func isEqual(x, y []bson2.M) bool {
 	return true
 }
 
-func removeField(x []bson2.M) {
+func removeField(x []bson.M) {
 	for _, ele := range x {
 		delete(ele, "v")
 		delete(ele, "ns")

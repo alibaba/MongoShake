@@ -17,8 +17,7 @@ import (
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
 	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
-	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 const (
@@ -38,7 +37,7 @@ func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoCommunityConn)
 		source = "replica"
 	}
 
-	err := toConn.Client.Database("config").Collection("version").FindOne(nil, bson2.M{})
+	err := toConn.Client.Database("config").Collection("version").FindOne(nil, bson.M{})
 	if err != nil {
 		target = "replica"
 	} else {
@@ -63,7 +62,7 @@ func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoCom
 		toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
 		if !conf.Options.FullSyncCollectionDrop {
 			// do not drop
-			colNames, err := toConn.Client.Database(toNS.Database).ListCollectionNames(nil, bson2.M{})
+			colNames, err := toConn.Client.Database(toNS.Database).ListCollectionNames(nil, bson.M{})
 			if err != nil {
 				LOG.Critical("Get collection names of db %v of dest mongodb failed. %v", toNS.Database, err)
 				return err
@@ -111,7 +110,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoCommunit
 	var dbSpecDoc dbSpec
 	var docCursor *mongo.Cursor
 	// enable sharding for db
-	docCursor, err = fromConn.Client.Database("config").Collection("databases").Find(nil, bson2.M{})
+	docCursor, err = fromConn.Client.Database("config").Collection("databases").Find(nil, bson.M{})
 	if err != nil {
 		return err
 	}
@@ -132,12 +131,12 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoCommunit
 			for _, todb := range todbList {
 
 				err = toConn.Client.Database("config").Collection("databases").FindOne(nil,
-					bson2.D{{"_id", todb}}).Decode(&todbSpecDoc)
+					bson.D{{"_id", todb}}).Decode(&todbSpecDoc)
 				if err == nil && todbSpecDoc.Partitioned {
 					continue
 				}
 				err = toConn.Client.Database("admin").RunCommand(nil,
-					bson2.D{{"enablesharding", todb}}).Err()
+					bson.D{{"enablesharding", todb}}).Err()
 				if err != nil {
 					LOG.Critical("Enable sharding for db %v of dest mongodb failed. %v", todb, err)
 					return errors.New(fmt.Sprintf("Enable sharding for db %v of dest mongodb failed. %v",
@@ -161,7 +160,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoCommunit
 	var colDocCursor *mongo.Cursor
 	// enable sharding for db(shardCollection)
 	colDocCursor, err = fromConn.Client.Database("config").Collection(
-		"collections").Find(nil, bson2.D{})
+		"collections").Find(nil, bson.D{})
 	//colSpecIter := fromConn.Session.DB("config").C("collections").Find(bson.M{}).Iter()
 	for colDocCursor.Next(nil) {
 		err = bson.Unmarshal(colDocCursor.Current, &colSpecDoc)
@@ -176,7 +175,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoCommunit
 				continue
 			}
 			toNs := nsTrans.Transform(colSpecDoc.Ns)
-			err = toConn.Client.Database("admin").RunCommand(nil, bson2.D{{"shardCollection", toNs},
+			err = toConn.Client.Database("admin").RunCommand(nil, bson.D{{"shardCollection", toNs},
 				{"key", colSpecDoc.Key}, {"unique", colSpecDoc.Unique}}).Err()
 			if err != nil {
 				LOG.Critical("Shard collection for ns %v of dest mongodb failed. %v", toNs, err)
@@ -194,7 +193,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoCommunit
 	return nil
 }
 
-func StartIndexSync(indexMap map[utils.NS][]bson2.M, toUrl string,
+func StartIndexSync(indexMap map[utils.NS][]bson.M, toUrl string,
 	nsTrans *transform.NamespaceTransform, background bool) (syncError error) {
 	if conf.Options.FullSyncExecutorDebug {
 		LOG.Info("full_sync.executor.debug set, no need to sync index")
@@ -203,7 +202,7 @@ func StartIndexSync(indexMap map[utils.NS][]bson2.M, toUrl string,
 
 	type IndexNS struct {
 		ns        utils.NS
-		indexList []bson2.M
+		indexList []bson.M
 	}
 
 	LOG.Info("start writing index with background[%v], indexMap length[%v]", background, len(indexMap))
@@ -248,14 +247,14 @@ func StartIndexSync(indexMap map[utils.NS][]bson2.M, toUrl string,
 
 				for _, index := range indexNs.indexList {
 					// ignore _id
-					if _, ok := index["key"].(bson2.M)["_id"]; ok {
+					if _, ok := index["key"].(bson.M)["_id"]; ok {
 						continue
 					}
 
 					index["background"] = background
-					if out := conn.Client.Database(toNS.Database).RunCommand(nil, bson2.D{
+					if out := conn.Client.Database(toNS.Database).RunCommand(nil, bson.D{
 						{"createIndexes", toNS.Collection},
-						{"indexes", []bson2.M{index}},
+						{"indexes", []bson.M{index}},
 					}); out.Err() != nil {
 						LOG.Warn("Create indexes for ns %v of dest mongodb failed. %v", ns, out.Err())
 					}
@@ -494,7 +493,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 
 func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *CollectionExecutor, collectionMetric *CollectionMetric) error {
 	bufferSize := conf.Options.FullSyncReaderDocumentBatchSize
-	buffer := make([]*bson2.D, 0, bufferSize)
+	buffer := make([]*bson.D, 0, bufferSize)
 	bufferByteSize := 0
 
 	for {
@@ -516,7 +515,7 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 			atomic.AddUint64(&collectionMetric.FinishCount, uint64(len(buffer)))
 			colExecutor.Sync(buffer)
 			syncer.replMetric.AddSuccess(uint64(len(buffer))) // only used to calculate the tps which is extract from "success"
-			buffer = make([]*bson2.D, 0, bufferSize)
+			buffer = make([]*bson.D, 0, bufferSize)
 			bufferByteSize = 0
 		}
 

@@ -2,13 +2,13 @@ package filter
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
 	"testing"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
 
 	"github.com/getlantern/deepcopy"
 	"github.com/stretchr/testify/assert"
-	"github.com/vinllen/mgo/bson"
 )
 
 func TestNamespaceFilter(t *testing.T) {
@@ -108,22 +108,22 @@ func TestNamespaceFilter(t *testing.T) {
 				Operation: "c",
 				Object: bson.D{
 					{
-						Name: "applyOps",
+						Key: "applyOps",
 						Value: []bson.D{
 							{
-								bson.DocElem{"op", "i"},
-								bson.DocElem{"ns", "zz.mmm"},
-								bson.DocElem{"o", bson.D{
-									bson.DocElem{"a", 1},
-									bson.DocElem{"_id", "xxx"},
+								bson.E{"op", "i"},
+								bson.E{"ns", "zz.mmm"},
+								bson.E{"o", bson.D{
+									bson.E{"a", 1},
+									bson.E{"_id", "xxx"},
 								}},
 							},
 							{
-								bson.DocElem{"op", "i"},
-								bson.DocElem{"ns", "zz.x"},
-								bson.DocElem{"o", bson.D{
-									bson.DocElem{"xyz", "ff"},
-									bson.DocElem{"_id", "yyy"},
+								bson.E{"op", "i"},
+								bson.E{"ns", "zz.x"},
+								bson.E{"o", bson.D{
+									bson.E{"xyz", "ff"},
+									bson.E{"_id", "yyy"},
 								}},
 							},
 						},
@@ -146,22 +146,22 @@ func TestNamespaceFilter(t *testing.T) {
 				Operation: "c",
 				Object: bson.D{
 					{
-						Name: "applyOps",
+						Key: "applyOps",
 						Value: []bson.D{
 							{
-								bson.DocElem{"op", "i"},
-								bson.DocElem{"ns", "zz.mmm"},
-								bson.DocElem{"o", bson.D{
-									bson.DocElem{"a", 1},
-									bson.DocElem{"_id", "xxx"},
+								bson.E{"op", "i"},
+								bson.E{"ns", "zz.mmm"},
+								bson.E{"o", bson.D{
+									bson.E{"a", 1},
+									bson.E{"_id", "xxx"},
 								}},
 							},
 							{
-								bson.DocElem{"op", "i"},
-								bson.DocElem{"ns", "ff.x"},
-								bson.DocElem{"o", bson.D{
-									bson.DocElem{"xyz", "ff"},
-									bson.DocElem{"_id", "yyy"},
+								bson.E{"op", "i"},
+								bson.E{"ns", "ff.x"},
+								bson.E{"o", bson.D{
+									bson.E{"xyz", "ff"},
+									bson.E{"_id", "yyy"},
 								}},
 							},
 						},

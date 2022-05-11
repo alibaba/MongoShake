@@ -3,7 +3,7 @@ package docsyncer
 import (
 	"errors"
 	"fmt"
-	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"sync/atomic"
@@ -36,7 +36,7 @@ type CollectionExecutor struct {
 
 	conn *utils.MongoCommunityConn
 
-	docBatch chan []*bson2.D
+	docBatch chan []*bson.D
 
 	// not own
 	syncer *DBSyncer
@@ -73,7 +73,7 @@ func (colExecutor *CollectionExecutor) Start() error {
 	}
 
 	parallel := conf.Options.FullSyncReaderWriteDocumentParallel
-	colExecutor.docBatch = make(chan []*bson2.D, parallel)
+	colExecutor.docBatch = make(chan []*bson.D, parallel)
 
 	executors := make([]*DocExecutor, parallel)
 	for i := 0; i != len(executors); i++ {
@@ -89,7 +89,7 @@ func (colExecutor *CollectionExecutor) Start() error {
 	return nil
 }
 
-func (colExecutor *CollectionExecutor) Sync(docs []*bson2.D) {
+func (colExecutor *CollectionExecutor) Sync(docs []*bson.D) {
 	count := uint64(len(docs))
 	if count == 0 {
 		return
@@ -182,7 +182,7 @@ func (exec *DocExecutor) start() {
 }
 
 // use by full sync
-func (exec *DocExecutor) doSync(docs []*bson2.D) error {
+func (exec *DocExecutor) doSync(docs []*bson.D) error {
 	if len(docs) == 0 || conf.Options.FullSyncExecutorDebug {
 		return nil
 	}
@@ -230,11 +230,11 @@ func (exec *DocExecutor) doSync(docs []*bson2.D) error {
 				}
 
 				dupDocument := *docs[wError.Index]
-				var updateFilter bson2.D
+				var updateFilter bson.D
 				updateFilterBool := false
 				for _, bsonE := range dupDocument {
 					if bsonE.Key == "_id" {
-						updateFilter = bson2.D{bsonE}
+						updateFilter = bson.D{bsonE}
 						updateFilterBool = true
 					}
 				}
@@ -242,7 +242,7 @@ func (exec *DocExecutor) doSync(docs []*bson2.D) error {
 					return fmt.Errorf("duplicate key error[%v], can't get _id from document", wError)
 				}
 				updateModels = append(updateModels, mongo.NewUpdateOneModel().
-					SetFilter(updateFilter).SetUpdate(bson2.D{{"$set", dupDocument}}))
+					SetFilter(updateFilter).SetUpdate(bson.D{{"$set", dupDocument}}))
 			} else {
 				return fmt.Errorf("bulk run failed[%v]", wError)
 			}
