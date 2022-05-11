@@ -14,7 +14,6 @@ import (
 )
 
 // mock oplog with different namespace
-// because "o2,omitempty" in oplog.go Query can't be empty
 func mockLog(ns string, ts primitive.DateTime, withDefault bool, gid string) *oplog.ParsedLog {
 	switch withDefault {
 	case true:
@@ -23,7 +22,7 @@ func mockLog(ns string, ts primitive.DateTime, withDefault bool, gid string) *op
 			Operation:     "i",
 			Namespace:     ns,
 			Object:        bson.D{},
-			Query:         bson.D{{"_id", "1"}},
+			Query:         bson.D{},
 			UniqueIndexes: bson.M{},
 			Lsid:          bson.M{},
 			Gid:           gid,
@@ -34,7 +33,7 @@ func mockLog(ns string, ts primitive.DateTime, withDefault bool, gid string) *op
 			Operation: "i",
 			Namespace: ns,
 			Object:    bson.D{},
-			Query:     bson.D{{"_id", "1"}},
+			Query:     bson.D{},
 			Gid:       gid,
 		}
 	}
@@ -87,6 +86,7 @@ func TestDeserializer(t *testing.T) {
 		assert.Equal(t, 1, len(out2), "should be equal")
 		assert.Equal(t, *log2, out2[0].Parsed.ParsedLog, "should be equal")
 	}
+	return
 
 	{
 		fmt.Printf("TestDeserializer case %d.\n", nr)

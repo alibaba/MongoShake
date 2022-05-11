@@ -27,7 +27,7 @@ type ParsedLog struct {
 	Gid           string             `bson:"g,omitempty" json:"g,omitempty"`
 	Namespace     string             `bson:"ns" json:"ns"`
 	Object        bson.D             `bson:"o" json:"o"`
-	Query         bson.D             `bson:"o2,omitempty" json:"o2,omitempty"`                   // update condition
+	Query         bson.D             `bson:"o2" json:"o2"`                                       // update condition
 	UniqueIndexes bson.M             `bson:"uk,omitempty" json:"uk,omitempty"`                   //
 	Lsid          bson.M             `bson:"lsid,omitempty" json:"lsid,omitempty"`               // mark the session id, used in transaction
 	FromMigrate   bool               `bson:"fromMigrate,omitempty" json:"fromMigrate,omitempty"` // move chunk
