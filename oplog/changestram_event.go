@@ -53,16 +53,16 @@ const (
 	}
 */
 type Event struct {
-	Id                bson.M             `bson:"_id" json:"_id"`
-	OperationType     string             `bson:"operationType" json:"operationType"`
-	FullDocument      bson.D             `bson:"fullDocument,omitempty" json:"fullDocument,omitempty"` // exists on "insert", "replace", "delete", "update"
-	Ns                bson.M             `bson:"ns" json:"ns"`
-	To                bson.M             `bson:"to,omitempty" json:"to,omitempty"`
-	DocumentKey       bson.D             `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists on "insert", "replace", "delete", "update"
-	UpdateDescription bson.M             `bson:"updateDescription,omitempty" json:"updateDescription,omitempty"`
-	ClusterTime       primitive.DateTime `bson:"clusterTime,omitempty" json:"clusterTime,omitempty"`
-	TxnNumber         int64              `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`
-	Lsid              bson.M             `bson:"lsid,omitempty" json:"lsid,omitempty"`
+	Id                bson.M              `bson:"_id" json:"_id"`
+	OperationType     string              `bson:"operationType" json:"operationType"`
+	FullDocument      bson.D              `bson:"fullDocument,omitempty" json:"fullDocument,omitempty"` // exists on "insert", "replace", "delete", "update"
+	Ns                bson.M              `bson:"ns" json:"ns"`
+	To                bson.M              `bson:"to,omitempty" json:"to,omitempty"`
+	DocumentKey       bson.D              `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists on "insert", "replace", "delete", "update"
+	UpdateDescription bson.M              `bson:"updateDescription,omitempty" json:"updateDescription,omitempty"`
+	ClusterTime       primitive.Timestamp `bson:"clusterTime,omitempty" json:"clusterTime,omitempty"`
+	TxnNumber         int64               `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`
+	Lsid              bson.M              `bson:"lsid,omitempty" json:"lsid,omitempty"`
 }
 
 func (e *Event) String() string {
