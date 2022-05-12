@@ -20,7 +20,7 @@ import (
 const (
 	// we can't insert Timestamp(0, 0) that will be treat as Now() inserted
 	// into mongo. so we use Timestamp(0, 1)
-	InitCheckpoint  = 1
+	InitCheckpoint  = int64(1)
 	EmptyCheckpoint = 0
 )
 
@@ -143,37 +143,6 @@ func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 	return nil, false
 }
 
-//func (ckpt *MongoCheckpoint) GetMgo() (*CheckpointContext, bool) {
-//	if !ckpt.ensureNetwork() {
-//		LOG.Warn("%s Reload ckpt ensure network failed. %v", ckpt.Name, ckpt.Conn)
-//		return nil, false
-//	}
-//
-//	var err error
-//	value := new(CheckpointContext)
-//	if err = ckpt.QueryHandle.Find(bson.M{CheckpointName: ckpt.Name}).One(value); err == nil {
-//		LOG.Info("%s Load exist checkpoint. content %v", ckpt.Name, value)
-//		return value, true
-//	} else if err == mgo.ErrNotFound {
-//		if InitCheckpoint > ckpt.Timestamp {
-//			ckpt.Timestamp = InitCheckpoint
-//		}
-//		value.Name = ckpt.Name
-//		value.Timestamp = ckpt.Timestamp
-//		value.Version = ckpt.Version
-//		value.OplogDiskQueue = ckpt.OplogDiskQueue
-//		value.OplogDiskQueueFinishTs = ckpt.OplogDiskQueueFinishTs
-//		LOG.Info("%s Regenerate checkpoint but won't persist. content: %s", ckpt.Name, value)
-//		// insert current ckpt snapshot in memory
-//		// ckpt.QueryHandle.Insert(value)
-//		return value, false
-//	}
-//
-//	ckpt.close()
-//	LOG.Warn("%s Reload ckpt find context fail. %v", ckpt.Name, err)
-//	return nil, false
-//}
-
 func (ckpt *MongoCheckpoint) Insert(updates *CheckpointContext) error {
 	if !ckpt.ensureNetwork() {
 		LOG.Warn("%s Record ckpt ensure network failed. %v", ckpt.Name, ckpt.client)
@@ -195,22 +164,6 @@ func (ckpt *MongoCheckpoint) Insert(updates *CheckpointContext) error {
 		int64(utils.ExtractMongoTimestamp(updates.Timestamp)))
 	return nil
 }
-
-//func (ckpt *MongoCheckpoint) InsertMgo(updates *CheckpointContext) error {
-//	if !ckpt.ensureNetwork() {
-//		LOG.Warn("%s Record ckpt ensure network failed. %v", ckpt.Name, ckpt.Conn)
-//		return fmt.Errorf("%s record ckpt network failed", ckpt.Name)
-//	}
-//
-//	if _, err := ckpt.QueryHandle.Upsert(bson.M{CheckpointName: ckpt.Name}, bson.M{"$set": updates}); err != nil {
-//		LOG.Warn("%s Record checkpoint %v upsert error %v", ckpt.Name, updates, err)
-//		ckpt.close()
-//		return err
-//	}
-//
-//	LOG.Info("%s Record new checkpoint success [%d]", ckpt.Name, int64(utils.ExtractMongoTimestamp(updates.Timestamp)))
-//	return nil
-//}
 
 // http
 type HttpApiCheckpoint struct {
