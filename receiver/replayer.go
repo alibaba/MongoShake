@@ -5,9 +5,9 @@ import (
 	module "github.com/alibaba/MongoShake/v2/modules"
 	"github.com/alibaba/MongoShake/v2/oplog"
 	"github.com/alibaba/MongoShake/v2/tunnel"
+	"go.mongodb.org/mongo-driver/bson"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (

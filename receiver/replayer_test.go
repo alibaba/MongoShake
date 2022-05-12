@@ -2,6 +2,8 @@ package replayer
 
 import (
 	"fmt"
+	utils "github.com/alibaba/MongoShake/v2/common"
+	"go.mongodb.org/mongo-driver/bson"
 	"testing"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
@@ -10,11 +12,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/vinllen/mgo/bson"
 )
 
 func TestReplayer(t *testing.T) {
 	// test Replayer
+
+	utils.InitialLogger("", "", "debug", true, 1)
 
 	var nr int
 	{
@@ -22,17 +25,17 @@ func TestReplayer(t *testing.T) {
 		nr++
 
 		data := &oplog.ParsedLog{
-			Timestamp: 1234567,
+			Timestamp: utils.TimeToTimestamp(1234567),
 			Operation: "o",
 			Namespace: "a.b",
 			Object: bson.D{
-				bson.DocElem{
-					Name:  "_id",
+				bson.E{
+					Key:   "_id",
 					Value: "xxx",
 				},
 			},
-			Query: bson.M{
-				"what": "fff",
+			Query: bson.D{
+				{"what", "fff"},
 			},
 		}
 
@@ -50,6 +53,6 @@ func TestReplayer(t *testing.T) {
 		ret = r.Sync(&tunnel.TMessage{
 			RawLogs: [][]byte{},
 		}, nil)
-		assert.Equal(t, int64(1234567), ret, "should be equal")
+		assert.Equal(t, int64(1234567)<<32, ret, "should be equal")
 	}
 }
