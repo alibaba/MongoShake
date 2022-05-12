@@ -3,7 +3,6 @@ package sourceReader
 // read change stream event from source mongodb
 
 import (
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"sync"
 	"time"
 
@@ -45,7 +44,7 @@ type EventReader struct {
 	fetcherLock  sync.Mutex
 
 	firstRead       bool
-	diskQueueLastTs primitive.DateTime // the last oplog timestamp in disk queue
+	diskQueueLastTs int64 // the last oplog timestamp in disk queue
 }
 
 // NewEventReader creates reader with mongodb url
@@ -74,8 +73,8 @@ func (er *EventReader) Name() string {
 func (er *EventReader) SetQueryTimestampOnEmpty(ts interface{}) {
 	if er.startAtOperationTime == nil && ts != ckpt.InitCheckpoint {
 		LOG.Info("set query timestamp: %v", utils.ExtractTimestampForLog(ts))
-		if val, ok := ts.(primitive.DateTime); ok {
-			er.startAtOperationTime = utils.DatetimeToInt64(val)
+		if val, ok := ts.(int64); ok {
+			er.startAtOperationTime = val
 		} else if val2, ok := ts.(int64); ok {
 			er.startAtOperationTime = val2
 		} else {
@@ -85,12 +84,12 @@ func (er *EventReader) SetQueryTimestampOnEmpty(ts interface{}) {
 	}
 }
 
-func (er *EventReader) UpdateQueryTimestamp(ts primitive.DateTime) {
-	er.startAtOperationTime = utils.DatetimeToInt64(ts)
+func (er *EventReader) UpdateQueryTimestamp(ts int64) {
+	er.startAtOperationTime = ts
 }
 
-func (er *EventReader) getQueryTimestamp() primitive.DateTime {
-	return primitive.DateTime(er.startAtOperationTime.(int64))
+func (er *EventReader) getQueryTimestamp() int64 {
+	return er.startAtOperationTime.(int64)
 }
 
 // Next returns an oplog by raw bytes which is []byte

@@ -367,7 +367,7 @@ func TestSingleWriter(t *testing.T) {
 				original: &PartialLogWithCallbak{
 					partialLog: &oplog.PartialLog{
 						ParsedLog: oplog.ParsedLog{
-							Timestamp: 1,
+							Timestamp: primitive.Timestamp{T: 0, I: 1},
 							Object: bson.D{
 								primitive.E{
 									Key:   "$v",
@@ -859,7 +859,7 @@ func TestBulkWriter(t *testing.T) {
 				original: &PartialLogWithCallbak{
 					partialLog: &oplog.PartialLog{
 						ParsedLog: oplog.ParsedLog{
-							Timestamp: 1,
+							Timestamp: primitive.Timestamp{T: 0, I: 1},
 							Object: bson.D{
 								primitive.E{
 									Key: "$set",
@@ -1352,7 +1352,7 @@ func TestCommandWriter(t *testing.T) {
 				original: &PartialLogWithCallbak{
 					partialLog: &oplog.PartialLog{
 						ParsedLog: oplog.ParsedLog{
-							Timestamp: 1,
+							Timestamp: primitive.Timestamp{T: 0, I: 1},
 							Object: bson.D{
 								primitive.E{
 									Key:   "x.0.y",

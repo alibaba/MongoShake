@@ -66,8 +66,17 @@ func (p Int64Slice) Swap(i, j int) {
 	p[i], p[j] = p[j], p[i]
 }
 
-func DatetimeToInt64(ts primitive.DateTime) int64 {
-	return int64(ts)
+func TimeStampToInt64(ts primitive.Timestamp) int64 {
+	return int64(ts.T)<<32 + int64(ts.I)
+}
+
+func Int64ToTimestamp(t int64) primitive.Timestamp {
+	return primitive.Timestamp{T: uint32(uint64(t) >> 32), I: uint32(t)}
+}
+
+// Unix() to TimeStamp
+func TimeToTimestamp(t int64) primitive.Timestamp {
+	return primitive.Timestamp{T: uint32(t), I: 0}
 }
 
 // TODO(jianyou) deprecate
@@ -77,8 +86,8 @@ func TimestampToString(ts int64) string {
 
 func ExtractMongoTimestamp(ts interface{}) int64 {
 	switch src := ts.(type) {
-	case primitive.DateTime:
-		return int64(src) >> 32
+	case primitive.Timestamp:
+		return int64(src.T)
 	case int64:
 		return src >> 32
 	default:
@@ -90,8 +99,6 @@ func ExtractMongoTimestamp(ts interface{}) int64 {
 
 func ExtractMongoTimestampCounter(ts interface{}) int64 {
 	switch src := ts.(type) {
-	case primitive.DateTime:
-		return int64(src) & Int32max
 	case int64:
 		return src & Int32max
 	default:

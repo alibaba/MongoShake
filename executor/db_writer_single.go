@@ -98,7 +98,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 
 				// error can be ignored(insert fail & oplog is before full end)
 				if utils.DuplicateKey(err) &&
-					utils.DatetimeToInt64(oplogs[update.index].original.partialLog.Timestamp) <= sw.fullFinishTs {
+					utils.TimeStampToInt64(oplogs[update.index].original.partialLog.Timestamp) <= sw.fullFinishTs {
 					continue
 				}
 
@@ -123,7 +123,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 
 				// error can be ignored
 				if IgnoreError(err, "u",
-					utils.DatetimeToInt64(oplogs[i].original.partialLog.Timestamp) <= sw.fullFinishTs) {
+					utils.TimeStampToInt64(oplogs[i].original.partialLog.Timestamp) <= sw.fullFinishTs) {
 					continue
 				}
 
@@ -180,7 +180,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 			if err != nil {
 				// error can be ignored
 				if IgnoreError(err, "u",
-					utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
+					utils.TimeStampToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
 					continue
 				}
 
@@ -211,7 +211,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 			if err != nil {
 				// error can be ignored
 				if IgnoreError(err, "u",
-					utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
+					utils.TimeStampToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
 					continue
 				}
 
@@ -269,7 +269,7 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.M, oplogs []*Op
 				LOG.Info("Execute command (op==c) oplog, operation [%s]", operation)
 			} else if err.Error() == "ns not found" {
 				LOG.Info("Execute command (op==c) oplog, operation [%s], ignore error[ns not found]", operation)
-			} else if IgnoreError(err, "c", utils.DatetimeToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
+			} else if IgnoreError(err, "c", utils.TimeStampToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
 				continue
 			} else {
 				return err

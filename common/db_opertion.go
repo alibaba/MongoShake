@@ -116,7 +116,7 @@ func ApplyOpsFilter(key string) bool {
 	return false
 }
 
-func getOplogTimestamp(conn *MongoCommunityConn, sortType int) (primitive.DateTime, error) {
+func getOplogTimestamp(conn *MongoCommunityConn, sortType int) (int64, error) {
 	var result bson2.M
 	opts := options.FindOne().SetSort(bson2.D{{"$natural", sortType}})
 	err := conn.Client.Database(localDB).Collection(OplogNS).FindOne(nil, bson2.M{}, opts).Decode(&result)
@@ -124,23 +124,22 @@ func getOplogTimestamp(conn *MongoCommunityConn, sortType int) (primitive.DateTi
 		return 0, err
 	}
 
-	return primitive.DateTime(int64(result["ts"].(primitive.Timestamp).T)<<32 +
-		int64(result["ts"].(primitive.Timestamp).I)), nil
+	return TimeStampToInt64(result["ts"].(primitive.Timestamp)), nil
 }
 
 // get newest oplog
-func GetNewestTimestampByConn(conn *MongoCommunityConn) (primitive.DateTime, error) {
+func GetNewestTimestampByConn(conn *MongoCommunityConn) (int64, error) {
 
 	return getOplogTimestamp(conn, -1)
 }
 
 // get oldest oplog
-func GetOldestTimestampByConn(conn *MongoCommunityConn) (primitive.DateTime, error) {
+func GetOldestTimestampByConn(conn *MongoCommunityConn) (int64, error) {
 
 	return getOplogTimestamp(conn, 1)
 }
 
-func GetNewestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (primitive.DateTime, error) {
+func GetNewestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (int64, error) {
 	var conn *MongoCommunityConn
 	var err error
 	if conn, err = NewMongoCommunityConn(url, VarMongoConnectModeSecondaryPreferred, true,
@@ -150,14 +149,13 @@ func GetNewestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (p
 	defer conn.Close()
 
 	if fromMongoS {
-		date := primitive.DateTime(conn.CurrentDate())
-		return date, nil
+		return TimeStampToInt64(conn.CurrentDate()), nil
 	}
 
 	return GetNewestTimestampByConn(conn)
 }
 
-func GetOldestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (primitive.DateTime, error) {
+func GetOldestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (int64, error) {
 	if fromMongoS {
 		return 0, nil
 	}
@@ -175,24 +173,24 @@ func GetOldestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (p
 
 // record the oldest and newest timestamp of each mongod
 type TimestampNode struct {
-	Oldest primitive.DateTime
-	Newest primitive.DateTime
+	Oldest int64
+	Newest int64
 }
 
 /*
  * get all newest timestamp
  * return:
  *     map: whole timestamp map, key: replset name, value: struct that includes the newest and oldest timestamp
- *     primitive.DateTime: the biggest of the newest timestamp
- *     primitive.DateTime: the smallest of the newest timestamp
+ *     primitive.Timestamp: the biggest of the newest timestamp
+ *     primitive.Timestamp: the smallest of the newest timestamp
  *     error: error
  */
-func GetAllTimestamp(sources []*MongoSource, sslRootFile string) (map[string]TimestampNode, primitive.DateTime,
-	primitive.DateTime, primitive.DateTime, primitive.DateTime, error) {
-	smallestNew := primitive.DateTime(math.MaxInt64)
-	biggestNew := primitive.DateTime(0)
-	smallestOld := primitive.DateTime(math.MaxInt64)
-	biggestOld := primitive.DateTime(0)
+func GetAllTimestamp(sources []*MongoSource, sslRootFile string) (map[string]TimestampNode, int64,
+	int64, int64, int64, error) {
+	smallestNew := int64(math.MaxInt64)
+	biggestNew := int64(0)
+	smallestOld := int64(math.MaxInt64)
+	biggestOld := int64(0)
 	tsMap := make(map[string]TimestampNode)
 
 	for _, src := range sources {
@@ -229,16 +227,16 @@ func GetAllTimestamp(sources []*MongoSource, sslRootFile string) (map[string]Tim
 }
 
 // only used in unit test
-func GetAllTimestampInUT() (map[string]TimestampNode, primitive.DateTime,
-	primitive.DateTime, primitive.DateTime, primitive.DateTime, error) {
-	smallestNew := primitive.DateTime(math.MaxInt64)
-	biggestNew := primitive.DateTime(0)
-	smallestOld := primitive.DateTime(math.MaxInt64)
-	biggestOld := primitive.DateTime(0)
+func GetAllTimestampInUT() (map[string]TimestampNode, int64,
+	int64, int64, int64, error) {
+	smallestNew := int64(math.MaxInt64)
+	biggestNew := int64(0)
+	smallestOld := int64(math.MaxInt64)
+	biggestOld := int64(0)
 	tsMap := make(map[string]TimestampNode)
 	for name, ele := range GetAllTimestampInUTInput {
-		oldest := ele.First.(primitive.DateTime)
-		newest := ele.Second.(primitive.DateTime)
+		oldest := ele.First.(int64)
+		newest := ele.Second.(int64)
 		tsMap[name] = TimestampNode{
 			Oldest: oldest,
 			Newest: newest,

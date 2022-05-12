@@ -51,7 +51,7 @@ func (generator *FakeGenerator) start() {
 		for i := 0; i != BatchSize; i++ {
 			partialLog = &oplog.PartialLog{
 				ParsedLog: oplog.ParsedLog{
-					Timestamp: primitive.DateTime(time.Now().Unix() << 32),
+					Timestamp: primitive.Timestamp{T: uint32(time.Now().Unix()), I: 0},
 					Namespace: fmt.Sprintf("%s_%d", TableName, generator.index),
 				},
 			}

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"sync"
 
 	"github.com/alibaba/MongoShake/v2/collector"
@@ -200,14 +199,14 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 	}
 
 	// get current newest timestamp
-	var fullFinishTs, oldestTs primitive.DateTime
+	var fullFinishTs, oldestTs int64
 	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless && len(coordinator.MongoD) > 0 {
 		_, fullFinishTs, _, oldestTs, _, err = utils.GetAllTimestamp(coordinator.MongoD, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
 		}
 	} else {
-		fullFinishTs = primitive.DateTime(bson.MaxKey)
+		fullFinishTs = int64(bson.MaxKey)
 	}
 
 	LOG.Info("------------------------full sync done!------------------------")
@@ -217,7 +216,7 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 		fullBegin = utils.ExtractTimestampForLog(val)
 
 		// the oldest oplog is lost
-		if utils.DatetimeToInt64(oldestTs) >= val {
+		if oldestTs >= val {
 			err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's "+
 				"oplog collection size is too small or full sync continues too long",
 				fullBegin, utils.ExtractTimestampForLog(oldestTs))
@@ -232,7 +231,7 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 	LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
 		fullBegin, utils.ExtractTimestampForLog(fullFinishTs))
 
-	return coordinator.startOplogReplication(fullBeginTs, utils.DatetimeToInt64(fullFinishTs), nil)
+	return coordinator.startOplogReplication(fullBeginTs, fullFinishTs, nil)
 }
 
 // TODO, set initSyncFinishTs into worker

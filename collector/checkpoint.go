@@ -3,7 +3,6 @@ package collector
 import (
 	"errors"
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -79,7 +78,7 @@ func (sync *OplogSyncer) loadCheckpoint() error {
  * calculate and update current checkpoint value. `flush` means whether force calculate & update checkpoint.
  * if inputTs is given(> 0), use this value to update checkpoint, otherwise, calculate from workers.
  */
-func (sync *OplogSyncer) checkpoint(flush bool, inputTs primitive.DateTime) {
+func (sync *OplogSyncer) checkpoint(flush bool, inputTs int64) {
 	now := time.Now()
 
 	// do checkpoint every once in a while
@@ -105,12 +104,12 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs primitive.DateTime) {
 	var err error
 	if inputTs > 0 {
 		// use inputTs if inputTs is > 0
-		lowest = utils.DatetimeToInt64(inputTs)
+		lowest = inputTs
 	} else {
 		lowest, err = sync.calculateWorkerLowestCheckpoint()
 	}
 
-	lowestInt64 := primitive.DateTime(lowest)
+	lowestInt64 := lowest
 	// if all oplogs from disk has been replayed successfully, store the newest oplog timestamp
 	if conf.Options.FullSyncReaderOplogStoreDisk && sync.persister.diskQueueLastTs > 0 {
 		if lowestInt64 >= sync.persister.diskQueueLastTs {

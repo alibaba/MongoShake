@@ -196,9 +196,7 @@ func calculateSignature(object interface{}) (sign float64) {
 			sign = 31.0*sign + float64(c)
 		}
 	case primitive.Timestamp: // numbers
-		sign = float64(o.T<<32 + o.I)
-	case primitive.DateTime:
-		sign = float64(o)
+		sign = float64(int64(o.T<<32) + int64(o.I))
 	case int, uint, int8, uint8, int16, uint16, int32, uint32, int64, uint64, float32, float64:
 		if v, ok := object.(float64); ok {
 			sign = float64(v)
@@ -266,10 +264,6 @@ func ExactlyMatch(first, second interface{}) bool {
 		}
 	case primitive.Timestamp: // numbers
 		return (first.(primitive.Timestamp)).Equal(second.(primitive.Timestamp))
-	case primitive.DateTime: // numbers
-		if v, ok := second.(primitive.DateTime); ok {
-			return uint64(o) == uint64(v)
-		}
 	case int, uint, int8, uint8, int16, uint16, int32, uint32, int64, uint64, float32, float64:
 		if v1, ok := first.(float64); ok {
 			if v2, ok := second.(float64); ok {

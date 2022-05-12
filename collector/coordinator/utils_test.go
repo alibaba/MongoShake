@@ -2,7 +2,6 @@ package coordinator
 
 import (
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"testing"
 
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
@@ -64,8 +63,8 @@ func TestSelectSyncMode(t *testing.T) {
 		// mock GetAllTimestampInUT input map
 		utils.GetAllTimestampInUTInput = map[string]utils.Pair{
 			testReplicaName: {
-				First:  primitive.DateTime(10 << 32),
-				Second: primitive.DateTime(100 << 32),
+				First:  int64(10 << 32),
+				Second: int64(100 << 32),
 			},
 		}
 
@@ -82,7 +81,7 @@ func TestSelectSyncMode(t *testing.T) {
 
 		ckptManager.Get()
 
-		err = ckptManager.Update(primitive.DateTime(5 << 32))
+		err = ckptManager.Update(int64(5 << 32))
 		assert.Equal(t, nil, err, "should be equal")
 
 		coordinator := &ReplicationCoordinator{
@@ -98,12 +97,12 @@ func TestSelectSyncMode(t *testing.T) {
 		_, _, _, err = coordinator.selectSyncMode(utils.VarSyncModeAll)
 		assert.Equal(t, true, err != nil, "should be equal")
 
-		err = ckptManager.Update(primitive.DateTime(15 << 32))
+		err = ckptManager.Update(int64(15 << 32))
 		assert.Equal(t, nil, err, "should be equal")
 		mode, startTsMap, ts, err := coordinator.selectSyncMode(utils.VarSyncModeAll)
 		fmt.Printf("startTsMap: %v\n", startTsMap)
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, int64(primitive.DateTime(15<<32)), startTsMap[testReplicaName], "should be equal")
+		assert.Equal(t, int64(15<<32), startTsMap[testReplicaName], "should be equal")
 		assert.Equal(t, utils.VarSyncModeIncr, mode, "should be equal")
 		assert.Equal(t, int64(0), ts, "should be equal")
 	}
@@ -138,8 +137,8 @@ func TestSelectSyncMode(t *testing.T) {
 		// mock GetAllTimestampInUT input map
 		utils.GetAllTimestampInUTInput = map[string]utils.Pair{
 			testReplicaName: {
-				First:  primitive.DateTime(10 << 32),
-				Second: primitive.DateTime(100 << 32),
+				First:  int64(10 << 32),
+				Second: int64(100 << 32),
 			},
 		}
 
@@ -157,7 +156,7 @@ func TestSelectSyncMode(t *testing.T) {
 		ckptManager.Get()
 
 		// full sync
-		err = ckptManager.Update(primitive.DateTime(5 << 32))
+		err = ckptManager.Update(int64(5 << 32))
 		assert.Equal(t, nil, err, "should be equal")
 
 		coordinator := &ReplicationCoordinator{
@@ -174,20 +173,20 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(primitive.DateTime(100<<32)), ts, "should be equal")
+		assert.Equal(t, int64(100<<32), ts, "should be equal")
 
 		// run sync mode incr
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeIncr)
 		assert.Equal(t, true, err != nil, "should be equal")
 
 		// incr sync
-		err = ckptManager.Update(primitive.DateTime(50 << 32))
+		err = ckptManager.Update(int64(50 << 32))
 		assert.Equal(t, nil, err, "should be equal")
 
 		checkpoint, exist, err := ckptManager.Get()
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, exist, "should be equal")
-		assert.Equal(t, primitive.DateTime(50<<32), checkpoint.Timestamp, "should be equal")
+		assert.Equal(t, int64(50<<32), checkpoint.Timestamp, "should be equal")
 
 		// run
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeAll)
@@ -216,7 +215,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(primitive.DateTime(100<<32)), ts, "should be equal")
+		assert.Equal(t, int64(100<<32), ts, "should be equal")
 
 		conf.Options.CheckpointStartPosition = 20
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeAll)
@@ -224,7 +223,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(primitive.DateTime(100<<32)), ts, "should be equal")
+		assert.Equal(t, int64(100<<32), ts, "should be equal")
 	}
 
 	// test replica set with fetch_method = "oplog" and no checkpoint exists
@@ -243,8 +242,8 @@ func TestSelectSyncMode(t *testing.T) {
 		// mock GetAllTimestampInUT input map
 		utils.GetAllTimestampInUTInput = map[string]utils.Pair{
 			testReplicaName: {
-				First:  primitive.DateTime(10 << 32),
-				Second: primitive.DateTime(100 << 32),
+				First:  int64(10 << 32),
+				Second: int64(100 << 32),
 			},
 		}
 
@@ -269,7 +268,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(primitive.DateTime(100<<32)), ts, "should be equal")
+		assert.Equal(t, int64(100<<32), ts, "should be equal")
 
 		// run sync_mode incr
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeIncr)
@@ -282,7 +281,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(primitive.DateTime(100<<32)), ts, "should be equal")
+		assert.Equal(t, int64(100<<32), ts, "should be equal")
 
 		// run sync_mode incr
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeIncr)
@@ -314,16 +313,16 @@ func TestSelectSyncMode(t *testing.T) {
 		// mock GetAllTimestampInUT input map
 		utils.GetAllTimestampInUTInput = map[string]utils.Pair{
 			"mockReplicaSet1": {
-				First:  primitive.DateTime(10 << 32),
-				Second: primitive.DateTime(100 << 32),
+				First:  int64(10 << 32),
+				Second: int64(100 << 32),
 			},
 			"mockReplicaSet2": {
-				First:  primitive.DateTime(20 << 32),
-				Second: primitive.DateTime(101 << 32),
+				First:  int64(20 << 32),
+				Second: int64(101 << 32),
 			},
 			"mockReplicaSet3": {
-				First:  primitive.DateTime(30 << 32),
-				Second: primitive.DateTime(102 << 32),
+				First:  int64(30 << 32),
+				Second: int64(102 << 32),
 			},
 		}
 
@@ -339,7 +338,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, true, ckptManager1 != nil, "should be equal")
 
 		ckptManager1.Get()
-		err = ckptManager1.Update(primitive.DateTime(20 << 32))
+		err = ckptManager1.Update(int64(20 << 32))
 		assert.Equal(t, nil, err, "should be equal")
 
 		// insert mockReplicaSet2
@@ -347,7 +346,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, true, ckptManager2 != nil, "should be equal")
 
 		ckptManager2.Get()
-		err = ckptManager2.Update(primitive.DateTime(25 << 32))
+		err = ckptManager2.Update(int64(25 << 32))
 		assert.Equal(t, nil, err, "should be equal")
 
 		// insert mockReplicaSet3
@@ -355,7 +354,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, true, ckptManager3 != nil, "should be equal")
 
 		ckptManager3.Get()
-		err = ckptManager3.Update(primitive.DateTime(20 << 32))
+		err = ckptManager3.Update(int64(20 << 32))
 		assert.Equal(t, nil, err, "should be equal")
 
 		coordinator := &ReplicationCoordinator{
@@ -380,14 +379,14 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(primitive.DateTime(100<<32)), ts, "should be equal")
+		assert.Equal(t, int64(100<<32), ts, "should be equal")
 
 		// run, return all
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeIncr)
 		assert.Equal(t, true, err != nil, "should be equal")
 
 		// run, return incr
-		err = ckptManager3.Update(primitive.DateTime(35 << 32))
+		err = ckptManager3.Update(int64(35 << 32))
 		assert.Equal(t, nil, err, "should be equal")
 
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeAll)
@@ -413,7 +412,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(primitive.DateTime(100<<32)), ts, "should be equal")
+		assert.Equal(t, int64(100<<32), ts, "should be equal")
 
 		// run sync_mode incr
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeIncr)
@@ -441,16 +440,16 @@ func TestSelectSyncMode(t *testing.T) {
 		// mock GetAllTimestampInUT input map
 		utils.GetAllTimestampInUTInput = map[string]utils.Pair{
 			"mockReplicaSet1": {
-				First:  primitive.DateTime(10 << 32),
-				Second: primitive.DateTime(100 << 32),
+				First:  int64(10 << 32),
+				Second: int64(100 << 32),
 			},
 			"mockReplicaSet2": {
-				First:  primitive.DateTime(20 << 32),
-				Second: primitive.DateTime(101 << 32),
+				First:  int64(20 << 32),
+				Second: int64(101 << 32),
 			},
 			"mockReplicaSet3": {
-				First:  primitive.DateTime(30 << 32),
-				Second: primitive.DateTime(102 << 32),
+				First:  int64(30 << 32),
+				Second: int64(102 << 32),
 			},
 		}
 
@@ -466,7 +465,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, true, ckptManager4 != nil, "should be equal")
 
 		ckptManager4.Get()
-		err = ckptManager4.Update(primitive.DateTime(10 << 32))
+		err = ckptManager4.Update(int64(10 << 32))
 		assert.Equal(t, nil, err, "should be equal")
 
 		coordinator := &ReplicationCoordinator{
@@ -495,30 +494,30 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(primitive.DateTime(100<<32)), ts, "should be equal")
+		assert.Equal(t, int64(100<<32), ts, "should be equal")
 
 		// run, return all
-		err = ckptManager4.Update(primitive.DateTime(20 << 32))
+		err = ckptManager4.Update(int64(20 << 32))
 		assert.Equal(t, nil, err, "should be equal")
 
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeAll)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(primitive.DateTime(100<<32)), ts, "should be equal")
+		assert.Equal(t, int64(100<<32), ts, "should be equal")
 
 		// run, return all
-		err = ckptManager4.Update(primitive.DateTime(30 << 32))
+		err = ckptManager4.Update(int64(30 << 32))
 		assert.Equal(t, nil, err, "should be equal")
 
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeAll)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(primitive.DateTime(100<<32)), ts, "should be equal")
+		assert.Equal(t, int64(100<<32), ts, "should be equal")
 
 		// run, return incr
-		err = ckptManager4.Update(primitive.DateTime(35 << 32))
+		err = ckptManager4.Update(int64(35 << 32))
 		assert.Equal(t, nil, err, "should be equal")
 
 		mode, startTsMap, ts, err = coordinator.selectSyncMode(utils.VarSyncModeAll)
@@ -549,7 +548,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, startTsMap == nil, "should be equal")
 		assert.Equal(t, utils.VarSyncModeAll, mode, "should be equal")
-		assert.Equal(t, int64(primitive.DateTime(100<<32)), ts, "should be equal")
+		assert.Equal(t, int64(100<<32), ts, "should be equal")
 	}
 
 	// test sharding with fetch_method = "change_stream" with no checkpoint exist and kafka tunnel
@@ -567,16 +566,16 @@ func TestSelectSyncMode(t *testing.T) {
 		// mock GetAllTimestampInUT input map
 		utils.GetAllTimestampInUTInput = map[string]utils.Pair{
 			"mockReplicaSet1": {
-				First:  primitive.DateTime(10 << 32),
-				Second: primitive.DateTime(80 << 32),
+				First:  int64(10 << 32),
+				Second: int64(80 << 32),
 			},
 			"mockReplicaSet2": {
-				First:  primitive.DateTime(20 << 32),
-				Second: primitive.DateTime(101 << 32),
+				First:  int64(20 << 32),
+				Second: int64(101 << 32),
 			},
 			"mockReplicaSet3": {
-				First:  primitive.DateTime(30 << 32),
-				Second: primitive.DateTime(102 << 32),
+				First:  int64(30 << 32),
+				Second: int64(102 << 32),
 			},
 		}
 
@@ -592,7 +591,7 @@ func TestSelectSyncMode(t *testing.T) {
 		assert.Equal(t, true, ckptManager4 != nil, "should be equal")
 
 		/*ckptManager4.Get()
-		err = ckptManager4.Update(primitive.DateTime(10 << 32))
+		err = ckptManager4.Update(int64(10 << 32))
 		assert.Equal(t, nil, err, "should be equal")*/
 
 		coordinator := &ReplicationCoordinator{
@@ -693,7 +692,7 @@ func TestSelectSyncMode(t *testing.T) {
 
 		ckptManager.Get()
 
-		err = ckptManager.Update(primitive.DateTime(5 << 32))
+		err = ckptManager.Update(int64(5 << 32))
 		assert.Equal(t, nil, err, "should be equal")
 
 		coordinator := &ReplicationCoordinator{
@@ -716,7 +715,7 @@ func TestSelectSyncMode(t *testing.T) {
 		fmt.Println(syncMode, fullBeginTs)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, utils.VarSyncModeIncr, syncMode, "should be equal")
-		assert.Equal(t, int64(primitive.DateTime(5<<32)), fullBeginTs, "should be equal")
+		assert.Equal(t, int64(5<<32), fullBeginTs, "should be equal")
 	}
 }
 

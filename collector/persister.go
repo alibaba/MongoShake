@@ -37,8 +37,8 @@ type Persister struct {
 	fetchStage int32
 	// disk queue used to store oplog temporarily
 	DiskQueue       *diskQueue.DiskQueue
-	diskQueueMutex  sync.Mutex         // disk queue mutex
-	diskQueueLastTs primitive.DateTime // the last oplog timestamp in disk queue
+	diskQueueMutex  sync.Mutex // disk queue mutex
+	diskQueueLastTs int64      // the last oplog timestamp in disk queue(full timestamp, have T + I)
 
 	// metric info, used in print
 	diskWriteCount uint64
@@ -92,14 +92,14 @@ func (p *Persister) InitDiskQueue(dqName string) {
 		1000, 2*time.Second)
 }
 
-func (p *Persister) GetQueryTsFromDiskQueue() primitive.DateTime {
+func (p *Persister) GetQueryTsFromDiskQueue() primitive.Timestamp {
 	if p.DiskQueue == nil {
 		LOG.Crashf("persister replset[%v] get query timestamp from nil disk queue", p.replset)
 	}
 
 	logData := p.DiskQueue.GetLastWriteData()
 	if len(logData) == 0 {
-		return 0
+		return primitive.Timestamp{}
 	}
 
 	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
@@ -259,7 +259,7 @@ Loop:
 		}
 
 		// parse the last oplog timestamp
-		p.diskQueueLastTs = p.GetQueryTsFromDiskQueue()
+		p.diskQueueLastTs = utils.TimeStampToInt64(p.GetQueryTsFromDiskQueue())
 
 		if err := p.DiskQueue.Next(); err != nil {
 			LOG.Crash(err)

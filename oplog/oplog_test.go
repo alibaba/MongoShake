@@ -265,7 +265,7 @@ func TestGatherApplyOps(t *testing.T) {
 		input := []*PartialLog{
 			{
 				ParsedLog: ParsedLog{
-					Timestamp: primitive.DateTime(1),
+					Timestamp: primitive.Timestamp{T: 0, I: 1},
 					Operation: "i",
 					Namespace: "db1.c1",
 					Object: bson.D{
@@ -282,7 +282,7 @@ func TestGatherApplyOps(t *testing.T) {
 			},
 			{
 				ParsedLog: ParsedLog{
-					Timestamp: primitive.DateTime(1),
+					Timestamp: primitive.Timestamp{T: 0, I: 1},
 					Operation: "i",
 					Namespace: "db1.c2",
 					Object: bson.D{
@@ -299,7 +299,7 @@ func TestGatherApplyOps(t *testing.T) {
 			},
 			{
 				ParsedLog: ParsedLog{
-					Timestamp: primitive.DateTime(1),
+					Timestamp: primitive.Timestamp{T: 0, I: 1},
 					Operation: "i",
 					Namespace: "db2.c2",
 					Object: bson.D{
@@ -316,7 +316,7 @@ func TestGatherApplyOps(t *testing.T) {
 			},
 			{
 				ParsedLog: ParsedLog{
-					Timestamp: primitive.DateTime(1),
+					Timestamp: primitive.Timestamp{T: 0, I: 1},
 					Operation: "u",
 					Namespace: "db3.c3",
 					Object: bson.D{
@@ -341,7 +341,7 @@ func TestGatherApplyOps(t *testing.T) {
 		gather, err := GatherApplyOps(input)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, len(gather.Raw) > 0, "should be equal")
-		assert.Equal(t, primitive.DateTime(1), gather.Parsed.Timestamp, "should be equal")
+		assert.Equal(t, primitive.Timestamp{T: 0, I: 1}, gather.Parsed.Timestamp, "should be equal")
 		assert.Equal(t, "admin.$cmd", gather.Parsed.Namespace, "should be equal")
 		assert.Equal(t, "c", gather.Parsed.Operation, "should be equal")
 		assert.Equal(t, bson.D(nil), gather.Parsed.Query, "should be equal")
@@ -361,7 +361,7 @@ func TestPartialLog(t *testing.T) {
 		nr++
 
 		input := bson.M{
-			"ts": primitive.DateTime(1),
+			"ts": primitive.Timestamp{T: 0, I: 1},
 			"ns": "a.b",
 			"o": bson.D{
 				bson.E{
@@ -382,7 +382,7 @@ func TestPartialLog(t *testing.T) {
 		output := NewPartialLog(input)
 		assert.Equal(t, &PartialLog{
 			ParsedLog: ParsedLog{
-				Timestamp: primitive.DateTime(1),
+				Timestamp: primitive.Timestamp{T: 0, I: 1},
 				Namespace: "a.b",
 				Object: bson.D{
 					bson.E{
@@ -411,7 +411,7 @@ func TestPartialLog(t *testing.T) {
 		assert.Equal(t, bson.D{
 			bson.E{
 				Key:   "ts",
-				Value: primitive.DateTime(1),
+				Value: primitive.Timestamp{T: 0, I: 1},
 			},
 			bson.E{
 				Key: "o",

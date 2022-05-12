@@ -3,7 +3,6 @@ package ckpt
 import (
 	"fmt"
 	bson2 "github.com/vinllen/mongo-go-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"testing"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
@@ -75,12 +74,12 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, false, exist, "should be equal")
 		assert.Equal(t, name, ctx.Name, "should be equal")
 		assert.Equal(t, utils.FcvCheckpoint.CurrentVersion, ctx.Version, "should be equal")
-		assert.Equal(t, primitive.DateTime(100), ctx.Timestamp, "should be equal")
+		assert.Equal(t, int64(100), ctx.Timestamp, "should be equal")
 		assert.Equal(t, "", ctx.OplogDiskQueue, "should be equal")
 		assert.Equal(t, InitCheckpoint, ctx.OplogDiskQueueFinishTs, "should be equal")
 
 		// update
-		newTime := primitive.DateTime(200)
+		newTime := int64(200)
 		err = ckptManager.Update(newTime)
 
 		// get again
@@ -114,7 +113,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		// insert remote with startTs == 300
-		remoteTime := primitive.DateTime(300)
+		remoteTime := int64(300)
 		conn.Client.Database(utils.VarCheckpointStorageDbReplicaDefault).
 			Collection(conf.Options.CheckpointStorageCollection).
 			InsertOne(nil, bson2.M{
@@ -155,7 +154,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		// insert remote with startTs == 300
-		remoteTime := primitive.DateTime(300)
+		remoteTime := int64(300)
 		conn.Client.Database(utils.VarCheckpointStorageDbReplicaDefault).
 			Collection(conf.Options.CheckpointStorageCollection).
 			InsertOne(nil, bson2.M{
@@ -180,7 +179,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		// assert.Equal(t, InitCheckpoint, ctx.OplogDiskQueueFinishTs, "should be equal")
 
 		// update with 400
-		updateTime := primitive.DateTime(400)
+		updateTime := int64(400)
 		err = ckptManager.Update(updateTime)
 
 		// get again
@@ -217,7 +216,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		ckptManager := NewCheckpointManager(name, 100)
 		assert.NotEqual(t, nil, ckptManager, "should be equal")
 
-		startTime := primitive.DateTime(100)
+		startTime := int64(100)
 
 		// get remote
 		ctx, exist, err := ckptManager.Get()
@@ -246,7 +245,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, "", ctx.OplogDiskQueue, "should be equal")
 
 		// update
-		updateTime := primitive.DateTime(200)
+		updateTime := int64(200)
 		ckptManager.Update(updateTime)
 
 		// get again
@@ -262,7 +261,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		ckptManager.SetOplogDiskQueueName("ut_test_disk_queue_name_2")
 
 		// update again
-		updateTime = primitive.DateTime(300)
+		updateTime = int64(300)
 		ckptManager.Update(updateTime)
 
 		// get again
@@ -275,7 +274,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, "ut_test_disk_queue_name_2", ctx.OplogDiskQueue, "should be equal")
 
 		// update again, test ctx.OplogDiskQueue is not clear
-		updateTime = primitive.DateTime(400)
+		updateTime = int64(400)
 		ckptManager.Update(updateTime)
 
 		// get again
@@ -288,11 +287,11 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, "ut_test_disk_queue_name_2", ctx.OplogDiskQueue, "should be equal")
 
 		// call SetOplogDiskFinishTs
-		diskFinishTs := primitive.DateTime(450)
+		diskFinishTs := int64(450)
 		ckptManager.SetOplogDiskFinishTs(diskFinishTs)
 
 		// update again
-		updateTime = primitive.DateTime(500)
+		updateTime = int64(500)
 		ckptManager.Update(updateTime)
 
 		// get again

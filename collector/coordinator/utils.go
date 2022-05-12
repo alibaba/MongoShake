@@ -2,7 +2,6 @@ package coordinator
 
 import (
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"sync"
 
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
@@ -21,11 +20,11 @@ import (
  *     bool: can run incremental sync directly?
  *     error: error
  */
-func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll bool) (primitive.DateTime, map[string]int64, bool, error) {
+func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll bool) (int64, map[string]int64, bool, error) {
 	var (
 		tsMap       map[string]utils.TimestampNode
 		startTsMap  map[string]int64 // replica-set name => timestamp
-		smallestNew primitive.DateTime
+		smallestNew int64
 		err         error
 	)
 
@@ -46,7 +45,7 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 	LOG.Info("all node timestamp map: %v", tsMap)
 
 	confTs32 := conf.Options.CheckpointStartPosition
-	confTsMongoTs := primitive.DateTime(confTs32 << 32)
+	confTsMongoTs := confTs32 << 32
 
 	// fetch mongos checkpoint when using change stream
 	var mongosCkpt *ckpt.CheckpointContext
@@ -91,7 +90,7 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 		}
 
 		if ckptRemote == nil {
-			if syncModeAll || confTsMongoTs > primitive.DateTime(1<<32) && ts.Oldest >= confTsMongoTs {
+			if syncModeAll || confTsMongoTs > (1<<32) && ts.Oldest >= confTsMongoTs {
 				LOG.Info("%s syncModeAll[%v] ts.Oldest[%v], confTsMongoTs[%v]", replName, syncModeAll, ts.Oldest,
 					confTsMongoTs)
 				return smallestNew, nil, false, nil
@@ -137,7 +136,7 @@ func (coordinator *ReplicationCoordinator) isCheckpointExist() (bool, interface{
 		LOG.Info("isCheckpointExist change stream resumeToken: %v", resumeToken)
 		return false, resumeToken, nil
 	}
-	return true, utils.DatetimeToInt64(ckptVar.Timestamp), nil
+	return true, ckptVar.Timestamp, nil
 }
 
 // if the oplog of checkpoint timestamp exist in all source db, then only do oplog replication instead of document replication
@@ -182,7 +181,7 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 		// bugfix v2.4.12: return error when tunnel != "direct"
 		return "", nil, int64(0), fmt.Errorf("start time illegal, can't run incr sync")
 	} else {
-		return utils.VarSyncModeAll, nil, utils.DatetimeToInt64(smallestNewTs), nil
+		return utils.VarSyncModeAll, nil, smallestNewTs, nil
 	}
 }
 

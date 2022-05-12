@@ -25,7 +25,7 @@ var (
 		Raw: nil,
 		Parsed: &oplog.PartialLog{ // initial fake oplog only used in comparison
 			ParsedLog: oplog.ParsedLog{
-				Timestamp: primitive.DateTime(-2), // fake timestamp,
+				Timestamp: primitive.Timestamp{T: 0, I: 0}, // fake timestamp,
 				Operation: "meaningless operation",
 			},
 		},
@@ -40,12 +40,13 @@ func getTargetDelay() int64 {
 	}
 }
 
-func getExitPoint() primitive.DateTime {
+func getExitPoint() primitive.Timestamp {
 	if utils.IncrSentinelOptions.ExitPoint <= 0 {
-		return 0
+		return primitive.Timestamp{}
 	}
+
 	// change to timestamp
-	return primitive.DateTime(utils.IncrSentinelOptions.ExitPoint << 32)
+	return utils.Int64ToTimestamp(utils.IncrSentinelOptions.ExitPoint)
 }
 
 /*
@@ -131,11 +132,12 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 
 	// DDL is disable when timestamp <= fullSyncFinishPosition
 	// v2.4.10: do not crash when "fetch_method" == "change_stream"
-	if ddlFilter.Filter(log) && log.Timestamp <= batcher.syncer.fullSyncFinishPosition &&
+	if ddlFilter.Filter(log) &&
+		primitive.CompareTimestamp(log.Timestamp, batcher.syncer.fullSyncFinishPosition) <= 0 &&
 		conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
 		LOG.Crashf("%s ddl oplog found[%v] when oplog timestamp[%v] less than fullSyncFinishPosition[%v]",
-			batcher.syncer, log, utils.ExtractTimestampForLog(log.Timestamp),
-			utils.ExtractTimestampForLog(batcher.syncer.fullSyncFinishPosition))
+			batcher.syncer, log, log.Timestamp,
+			batcher.syncer.fullSyncFinishPosition)
 		return false
 	}
 	return false
@@ -229,16 +231,18 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 	// judge should exit
 	exitPoint := getExitPoint()
 	lastOplog := mergeBatch[len(mergeBatch)-1].Parsed
-	if exitPoint > 0 && lastOplog.Timestamp > batcher.syncer.fullSyncFinishPosition && exitPoint < lastOplog.Timestamp {
+
+	if !exitPoint.IsZero() &&
+		primitive.CompareTimestamp(lastOplog.Timestamp, batcher.syncer.fullSyncFinishPosition) > 0 &&
+		primitive.CompareTimestamp(exitPoint, lastOplog.Timestamp) < 0 {
 		// only run detail judgement when exit point is bigger than the last one
-		LOG.Info("%s exitPoint[%v] < lastOplog.Timestamp[%v]", batcher.syncer,
-			utils.ExtractTimestampForLog(exitPoint), utils.ExtractTimestampForLog(lastOplog.Timestamp))
+		LOG.Info("%s exitPoint[%v] < lastOplog.Timestamp[%v]", batcher.syncer, exitPoint, lastOplog.Timestamp)
 		var i int
 		for i = range mergeBatch {
 			// fmt.Println(exitPoint, mergeBatch[i].Parsed.Timestamp)
-			if exitPoint < mergeBatch[i].Parsed.Timestamp {
+			if primitive.CompareTimestamp(exitPoint, mergeBatch[i].Parsed.Timestamp) < 0 {
 				LOG.Info("%s exitPoint[%v] < current.Timestamp[%v]", batcher.syncer,
-					utils.ExtractTimestampForLog(exitPoint), utils.ExtractTimestampForLog(mergeBatch[i].Parsed.Timestamp))
+					exitPoint, mergeBatch[i].Parsed.Timestamp)
 				break
 			}
 		}
@@ -250,7 +254,7 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 	if delay > 0 {
 		firstOplog := mergeBatch[0].Parsed
 		// do not wait delay when oplog time less than fullSyncFinishPosition
-		if firstOplog.Timestamp > batcher.syncer.fullSyncFinishPosition {
+		if primitive.CompareTimestamp(firstOplog.Timestamp, batcher.syncer.fullSyncFinishPosition) > 0 {
 			for {
 				// only run sleep if delay > 0
 				// re-fetch delay in every round
@@ -259,8 +263,8 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 
 				if utils.ExtractMongoTimestamp(firstOplog.Timestamp) > delayBoundary {
 					LOG.Info("%s --- wait target delay[%v seconds]: first oplog timestamp[%v] > delayBoundary[%v], fullSyncFinishPosition[%v]",
-						batcher.syncer, delay, utils.ExtractTimestampForLog(firstOplog.Timestamp), delayBoundary,
-						utils.ExtractTimestampForLog(batcher.syncer.fullSyncFinishPosition))
+						batcher.syncer, delay, firstOplog.Timestamp, delayBoundary,
+						batcher.syncer.fullSyncFinishPosition)
 					time.Sleep(5 * time.Second)
 
 					// for ut only
@@ -304,7 +308,7 @@ func (batcher *Batcher) BatchMore() ([][]*oplog.GenericOplog, bool, bool, bool) 
 			// no cached data, set filterOplog and break.
 			// filterOplog is fake when == lastOplog.
 			// this is for flushing checkpoint only.
-			if batcher.lastOplog.Parsed.Timestamp > batcher.lastFilterOplog.Timestamp {
+			if primitive.CompareTimestamp(batcher.lastOplog.Parsed.Timestamp, batcher.lastFilterOplog.Timestamp) > 0 {
 				batcher.lastFilterOplog = batcher.lastOplog.Parsed
 			}
 			batcher.previousFlush = false
@@ -418,7 +422,7 @@ func (batcher *Batcher) setLastOplog() bool {
 		if ele != nil && len(ele) > 0 {
 			allEmpty = false
 			rawLast := ele[len(ele)-1]
-			if rawLast.Parsed.Timestamp > batcher.lastOplog.Parsed.Timestamp {
+			if primitive.CompareTimestamp(rawLast.Parsed.Timestamp, batcher.lastOplog.Parsed.Timestamp) > 0 {
 				batcher.lastOplog = rawLast
 			}
 		}

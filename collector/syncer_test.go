@@ -2,7 +2,6 @@ package collector
 
 import (
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"testing"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
@@ -14,11 +13,11 @@ import (
 )
 
 // mock oplog with different namespace
-func mockLog(ns string, ts primitive.DateTime, withDefault bool, gid string) *oplog.ParsedLog {
+func mockLog(ns string, ts int64, withDefault bool, gid string) *oplog.ParsedLog {
 	switch withDefault {
 	case true:
 		return &oplog.ParsedLog{
-			Timestamp:     ts,
+			Timestamp:     utils.Int64ToTimestamp(ts),
 			Operation:     "i",
 			Namespace:     ns,
 			Object:        bson.D{},
@@ -29,7 +28,7 @@ func mockLog(ns string, ts primitive.DateTime, withDefault bool, gid string) *op
 		}
 	case false:
 		return &oplog.ParsedLog{
-			Timestamp: ts,
+			Timestamp: utils.Int64ToTimestamp(ts),
 			Operation: "i",
 			Namespace: ns,
 			Object:    bson.D{},
@@ -41,14 +40,14 @@ func mockLog(ns string, ts primitive.DateTime, withDefault bool, gid string) *op
 }
 
 // mock change stream event
-func mockEvent(nsCollection string, ts primitive.DateTime) *oplog.Event {
+func mockEvent(nsCollection string, ts int64) *oplog.Event {
 	return &oplog.Event{
 		Ns: bson.M{
 			"db":   "testDB",
 			"coll": nsCollection,
 		},
 		OperationType: "insert",
-		ClusterTime:   ts,
+		ClusterTime:   utils.Int64ToTimestamp(ts),
 	}
 }
 
@@ -86,7 +85,6 @@ func TestDeserializer(t *testing.T) {
 		assert.Equal(t, 1, len(out2), "should be equal")
 		assert.Equal(t, *log2, out2[0].Parsed.ParsedLog, "should be equal")
 	}
-	return
 
 	{
 		fmt.Printf("TestDeserializer case %d.\n", nr)

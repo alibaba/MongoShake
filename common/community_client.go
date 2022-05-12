@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
@@ -240,20 +241,16 @@ func (conn *MongoCommunityConn) HasUniqueIndex() (bool, string, string) {
 	return false, "", ""
 }
 
-func (conn *MongoCommunityConn) CurrentDate() int64 {
+func (conn *MongoCommunityConn) CurrentDate() primitive.Timestamp {
 
-	res, err := conn.Client.Database("admin").
+	res, _ := conn.Client.Database("admin").
 		RunCommand(conn.ctx, bson2.D{{"replSetGetStatus", 1}}).DecodeBytes()
-	if err != nil {
-		LOG.Warn("Replica set operationTime not found in system.replset: %v", err)
-		return 0
-	}
 
-	date, ok := res.Lookup("operationTime").DateTimeOK()
+	t, i, ok := res.Lookup("operationTime").TimestampOK()
 	if !ok {
-		LOG.Warn("Replica set operationTime not found, is empty")
-		return 0
+		LOG.Warn("Replica set operationTime not found, res[%v]", res)
+		return primitive.Timestamp{T: uint32(time.Now().Unix()), I: 0}
 	}
 
-	return date
+	return primitive.Timestamp{T: t, I: i}
 }

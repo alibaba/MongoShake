@@ -9,7 +9,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"io/ioutil"
 	"net/http"
 
@@ -21,17 +20,17 @@ import (
 const (
 	// we can't insert Timestamp(0, 0) that will be treat as Now() inserted
 	// into mongo. so we use Timestamp(0, 1)
-	InitCheckpoint  = primitive.DateTime(1)
-	EmptyCheckpoint = primitive.DateTime(0)
+	InitCheckpoint  = 1
+	EmptyCheckpoint = 0
 )
 
 type CheckpointContext struct {
-	Name                   string             `bson:"name" json:"name"`
-	Timestamp              primitive.DateTime `bson:"ckpt" json:"ckpt"`
-	Version                int                `bson:"version" json:"version"`
-	FetchMethod            string             `bson:"fetch_method" json:"fetch_method"`
-	OplogDiskQueue         string             `bson:"oplog_disk_queue" json:"oplog_disk_queue"`
-	OplogDiskQueueFinishTs primitive.DateTime `bson:"oplog_disk_queue_apply_finish_ts" json:"oplog_disk_queue_apply_finish_ts"`
+	Name                   string `bson:"name" json:"name"`
+	Timestamp              int64  `bson:"ckpt" json:"ckpt"`
+	Version                int    `bson:"version" json:"version"`
+	FetchMethod            string `bson:"fetch_method" json:"fetch_method"`
+	OplogDiskQueue         string `bson:"oplog_disk_queue" json:"oplog_disk_queue"`
+	OplogDiskQueueFinishTs int64  `bson:"oplog_disk_queue_apply_finish_ts" json:"oplog_disk_queue_apply_finish_ts"`
 }
 
 func (cc *CheckpointContext) String() string {

@@ -51,7 +51,7 @@ type OplogSyncer struct {
 	// oplog start position of source mongodb
 	startPosition interface{}
 	// full sync finish position, used to check DDL between full sync and incr sync
-	fullSyncFinishPosition primitive.DateTime
+	fullSyncFinishPosition primitive.Timestamp
 
 	ckptManager *ckpt.CheckpointManager
 
@@ -64,7 +64,7 @@ type OplogSyncer struct {
 	// buffer            []*bson.Raw // move to persister
 	PendingQueue []chan [][]byte
 	logsQueue    []chan []*oplog.GenericOplog
-	LastFetchTs  primitive.DateTime // the previous last fetch timestamp
+	LastFetchTs  primitive.Timestamp // the previous last fetch timestamp
 	// nextQueuePosition uint64 // move to persister
 
 	// source mongo oplog/event reader
@@ -114,7 +114,7 @@ func NewOplogSyncer(
 	syncer := &OplogSyncer{
 		Replset:                replset,
 		startPosition:          startPosition,
-		fullSyncFinishPosition: primitive.DateTime(fullSyncFinishPosition),
+		fullSyncFinishPosition: utils.Int64ToTimestamp(fullSyncFinishPosition),
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.Id, replset))),
 		reader: reader,
@@ -254,23 +254,23 @@ func (sync *OplogSyncer) startBatcher() {
 			}
 		}
 
-		var newestTs primitive.DateTime
+		var newestTs int64
 		if exit {
 			LOG.Info("%s find exit signal", sync)
 			// should exit now, make sure the checkpoint is updated before that
 			lastLog, lastFilterLog := batcher.getLastOplog()
-			var newestTs primitive.DateTime = 1 // default is 1
-			if lastLog != nil && lastLog.Timestamp > newestTs {
-				newestTs = lastLog.Timestamp
+			newestTs = 1 // default is 1
+			if lastLog != nil && utils.TimeStampToInt64(lastLog.Timestamp) > newestTs {
+				newestTs = utils.TimeStampToInt64(lastLog.Timestamp)
 			} else if newestTs == 1 && lastFilterLog != nil {
 				// only set to the lastFilterLog timestamp if all before oplog filtered.
-				newestTs = lastFilterLog.Timestamp
+				newestTs = utils.TimeStampToInt64(lastFilterLog.Timestamp)
 			}
 
 			if lastLog != nil && !allEmpty {
 				// push to worker
 				if worked := batcher.dispatchBatches(batchedOplog); worked {
-					sync.replMetric.SetLSN(utils.DatetimeToInt64(newestTs))
+					sync.replMetric.SetLSN(newestTs)
 					// update latest fetched timestamp in memory
 					sync.reader.UpdateQueryTimestamp(newestTs)
 				}
@@ -284,11 +284,11 @@ func (sync *OplogSyncer) startBatcher() {
 			select {} // block forever, wait outer routine exits
 		} else if log, filterLog := batcher.getLastOplog(); log != nil && !allEmpty {
 			// if all filtered, still update checkpoint
-			newestTs = log.Timestamp
+			newestTs = utils.TimeStampToInt64(log.Timestamp)
 
 			// push to worker
 			if worked := batcher.dispatchBatches(batchedOplog); worked {
-				sync.replMetric.SetLSN(utils.DatetimeToInt64(newestTs))
+				sync.replMetric.SetLSN(newestTs)
 				// update latest fetched timestamp in memory
 				sync.reader.UpdateQueryTimestamp(newestTs)
 			}
@@ -303,7 +303,7 @@ func (sync *OplogSyncer) startBatcher() {
 			if filterLog == nil {
 				// no need to update
 				return
-			} else if filterLog.Timestamp <= sync.ckptManager.GetInMemory().Timestamp {
+			} else if utils.TimeStampToInt64(filterLog.Timestamp) <= sync.ckptManager.GetInMemory().Timestamp {
 				// no need to update
 				return
 			} else {
@@ -326,10 +326,10 @@ func (sync *OplogSyncer) startBatcher() {
 				if filterNewestTs-FilterCheckpointGap > checkpointTs {
 					// if checkpoint has not been update for {FilterCheckpointGap} seconds, update
 					// checkpoint mandatory.
-					newestTs = filterLog.Timestamp
+					newestTs = utils.TimeStampToInt64(filterLog.Timestamp)
 					LOG.Info("%s try to update checkpoint mandatory from %v to %v", sync,
 						utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp),
-						utils.ExtractTimestampForLog(filterLog.Timestamp))
+						filterLog.Timestamp)
 				} else {
 					return
 				}
@@ -339,15 +339,15 @@ func (sync *OplogSyncer) startBatcher() {
 
 			if log != nil {
 				newestTsLog := utils.ExtractTimestampForLog(newestTs)
-				if newestTs < log.Timestamp {
+				if newestTs < utils.TimeStampToInt64(log.Timestamp) {
 					LOG.Crashf("%s filter newestTs[%v] smaller than previous timestamp[%v]",
-						sync, newestTsLog, utils.ExtractTimestampForLog(log.Timestamp))
+						sync, newestTsLog, log.Timestamp)
 				}
 
 				LOG.Info("%s waiting last checkpoint[%v] updated", sync, newestTsLog)
 				// check last checkpoint updated
 
-				status := sync.checkCheckpointUpdate(true, log.Timestamp)
+				status := sync.checkCheckpointUpdate(true, utils.TimeStampToInt64(log.Timestamp))
 				LOG.Info("%s last checkpoint[%v] updated [%v]", sync, newestTsLog, status)
 			} else {
 				LOG.Info("%s last log is empty, skip waiting checkpoint updated", sync)
@@ -362,11 +362,11 @@ func (sync *OplogSyncer) startBatcher() {
 	})
 }
 
-func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs primitive.DateTime) bool {
+func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) bool {
 	// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
 	if barrier && newestTs > 0 {
 		LOG.Info("%s find barrier", sync)
-		var checkpointTs primitive.DateTime
+		var checkpointTs int64
 		for i := 0; i < CheckCheckpointUpdateTimes; i++ {
 			// checkpointTs := sync.ckptManager.GetInMemory().Timestamp
 			checkpoint, _, err := sync.ckptManager.Get()
@@ -575,7 +575,7 @@ func (sync *OplogSyncer) checkShutdown() {
 
 	nimo.GoRoutine(func() {
 		if utils.IncrSentinelOptions.Shutdown {
-			utils.IncrSentinelOptions.ExitPoint = utils.ExtractMongoTimestamp(sync.LastFetchTs)
+			utils.IncrSentinelOptions.ExitPoint = utils.TimeStampToInt64(sync.LastFetchTs)
 		}
 
 		LOG.Info("%s check shutdown, set exit-point[%v]", sync, utils.IncrSentinelOptions.ExitPoint)

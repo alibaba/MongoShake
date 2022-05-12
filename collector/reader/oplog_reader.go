@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"sync"
@@ -81,19 +80,19 @@ func (or *OplogReader) Name() string {
 // SetQueryTimestampOnEmpty set internal timestamp if
 // not exist in this or. initial stage most of the time
 func (or *OplogReader) SetQueryTimestampOnEmpty(ts interface{}) {
-	tsB := ts.(primitive.DateTime)
+	tsB := ts.(int64)
 	if _, exist := or.query[QueryTs]; !exist {
 		LOG.Info("set query timestamp: %v", utils.ExtractTimestampForLog(tsB))
 		or.UpdateQueryTimestamp(tsB)
 	}
 }
 
-func (or *OplogReader) UpdateQueryTimestamp(ts primitive.DateTime) {
+func (or *OplogReader) UpdateQueryTimestamp(ts int64) {
 	or.query[QueryTs] = bson.M{QueryOpGT: ts}
 }
 
-func (or *OplogReader) getQueryTimestamp() primitive.DateTime {
-	return or.query[QueryTs].(bson.M)[QueryOpGT].(primitive.DateTime)
+func (or *OplogReader) getQueryTimestamp() int64 {
+	return or.query[QueryTs].(bson.M)[QueryOpGT].(int64)
 }
 
 // Next returns an oplog by raw bytes which is []byte
@@ -142,7 +141,7 @@ func (or *OplogReader) StartFetcher() {
 func (or *OplogReader) fetcher() {
 	LOG.Info("start fetcher with src[%v] replica-name[%v] query-ts[%v]",
 		utils.BlockMongoUrlPassword(or.src, "***"), or.replset,
-		utils.ExtractTimestampForLog(or.query[QueryTs].(bson.M)[QueryOpGT].(primitive.DateTime)))
+		utils.ExtractTimestampForLog(or.query[QueryTs].(bson.M)[QueryOpGT].(int64)))
 	for {
 		if err := or.EnsureNetwork(); err != nil {
 			or.oplogChan <- &retOplog{nil, err}
@@ -198,7 +197,7 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 		SetCursorType(options.Tailable).
 		SetOplogReplay(true)
 
-	var queryTs primitive.DateTime
+	var queryTs int64
 	// the given oplog timestamp shouldn't bigger than the newest
 	if or.firstRead == true {
 		// check whether the starting fetching timestamp is less than the newest timestamp exist in the oplog
@@ -238,13 +237,13 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 }
 
 // get newest oplog
-func (or *OplogReader) getNewestTimestamp() primitive.DateTime {
+func (or *OplogReader) getNewestTimestamp() int64 {
 	ts, _ := utils.GetNewestTimestampByConn(or.conn)
 	return ts
 }
 
 // get oldest oplog
-func (or *OplogReader) getOldestTimestamp() primitive.DateTime {
+func (or *OplogReader) getOldestTimestamp() int64 {
 	ts, _ := utils.GetOldestTimestampByConn(or.conn)
 	return ts
 }
