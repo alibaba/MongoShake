@@ -16,7 +16,6 @@ import (
 
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -290,8 +289,6 @@ type DBSyncer struct {
 	fromReplset  string
 	// destination mongodb url
 	ToMongoUrl string
-	// index of namespace
-	indexMap map[utils.NS][]mgo.Index
 	// start time of sync
 	startTime time.Time
 	// source is sharding?
@@ -353,11 +350,6 @@ func (syncer *DBSyncer) Close() {
 	syncer.replMetric.Close()
 	//sleep 1 second for metric routine exit gracefully
 	time.Sleep(1 * time.Second)
-}
-
-// @deprecated
-func (syncer *DBSyncer) GetIndexMap() map[utils.NS][]mgo.Index {
-	return syncer.indexMap
 }
 
 func (syncer *DBSyncer) Start() (syncError error) {

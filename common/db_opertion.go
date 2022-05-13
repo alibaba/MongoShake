@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/vinllen/mgo"
 	"sort"
 )
 
@@ -97,10 +96,6 @@ func GetAndCompareVersion(conn *MongoCommunityConn, threshold string, compare st
 		}
 	}
 	return true, nil
-}
-
-func IsNotFound(err error) bool {
-	return err.Error() == mgo.ErrNotFound.Error()
 }
 
 func ApplyOpsFilter(key string) bool {
@@ -331,15 +326,6 @@ func FindFirstErrorIndexAndMessage(error string) (int, string, bool) {
 	dupVal := error[index+len(subMsg) : i]
 
 	return indexVal, msg, dupVal == "true"
-}
-
-func HasUniqueIndex(index []mgo.Index) bool {
-	for _, idx := range index {
-		if !strings.HasPrefix(idx.Name, "_id") && idx.Unique == true {
-			return true
-		}
-	}
-	return false
 }
 
 /**

@@ -58,9 +58,6 @@ type CheckpointOperation interface {
 type MongoCheckpoint struct {
 	CheckpointContext
 
-	//Conn        *utils.MongoConn
-	//QueryHandle *mgo.Collection
-
 	client *utils.MongoCommunityConn
 
 	// connection info

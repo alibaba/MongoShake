@@ -55,7 +55,7 @@ User can monitor or debug Mongo-Shake through RESTful API, please visit [FAQ doc
 
 # Other Details
 ---
-Mongo-Shake uses [mgo.v2 library](https://github.com/vinllen/mgo) which is a modification version of [mgo.v2](https://github.com/go-mgo/mgo/tree/v2) to fetch oplogs from source MongoDB which is later than the given timestamp in configuration. Then, it filters oplogs based on whitelist, blacklist, and gid. All the oplogs will be transferred at least once which is acceptable because of idempotent of oplog DML. We use __seq__ and __ack__ to make sure the package is received which is similar to the sequence and acknowledgment numbers in TCP.<br>
+Mongo-Shake uses [go-driver](github.com/mongodb/mongo-go-driver)  to fetch oplogs from source MongoDB which is later than the given timestamp in configuration. Then, it filters oplogs based on whitelist, blacklist, and gid. All the oplogs will be transferred at least once which is acceptable because of idempotent of oplog DML. We use __seq__ and __ack__ to make sure the package is received which is similar to the sequence and acknowledgment numbers in TCP.<br>
 The oplogs are batched together in the handling pipeline.<br>
 Users can adjust the worker concurrency and executor concurrency according to the different environment.<br>
 Please see the detail documents listed at the beginning if you want to see more details.<br>

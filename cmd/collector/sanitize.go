@@ -166,9 +166,6 @@ func checkDefaultValue() error {
 	}
 	if conf.Options.FullSyncReaderDocumentBatchSize <= 0 {
 		conf.Options.FullSyncReaderDocumentBatchSize = 128
-	} else if conf.Options.FullSyncReaderDocumentBatchSize > 1000 {
-		// mgo driver restriction: batch size <= 1000
-		conf.Options.FullSyncReaderDocumentBatchSize = 1000
 	}
 	if conf.Options.FullSyncCreateIndex == "" {
 		conf.Options.FullSyncCreateIndex = utils.VarFullSyncCreateIndexForeground
@@ -207,7 +204,7 @@ func checkDefaultValue() error {
 	}
 	if conf.Options.IncrSyncTunnelWriteThread == 0 {
 		conf.Options.IncrSyncTunnelWriteThread = conf.Options.IncrSyncWorker
-	} else if conf.Options.IncrSyncTunnelWriteThread % conf.Options.IncrSyncWorker != 0 {
+	} else if conf.Options.IncrSyncTunnelWriteThread%conf.Options.IncrSyncWorker != 0 {
 		return fmt.Errorf("incr_sync.tunnel.write_thread[%v] must be an interge multiple of incr_sync.worker[%v]",
 			conf.Options.IncrSyncTunnelWriteThread, conf.Options.IncrSyncWorker)
 	}
@@ -308,7 +305,7 @@ func checkConnection() error {
 			// set target version
 			if i == 0 {
 				conf.Options.TargetDBVersion, _ = utils.GetDBVersion(targetConn)
-				}
+			}
 		}
 	}
 

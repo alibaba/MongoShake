@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"go.mongodb.org/mongo-driver/mongo"
 	"reflect"
 	"strings"
 
@@ -12,7 +13,6 @@ import (
 	"sync/atomic"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -145,11 +145,21 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 }
 
 func (exec *Executor) errorIgnore(err error) bool {
-	switch e := err.(type) {
-	case *mgo.LastError:
-		_, skip := ErrorsShouldSkip[e.Code]
-		return skip
+	if err == nil {
+		return true
 	}
+
+	er, ok := err.(mongo.ServerError)
+	if !ok {
+		return false
+	}
+
+	for k, _ := range ErrorsShouldSkip {
+		if er.HasErrorCode(k) {
+			return true
+		}
+	}
+
 	return false
 }
 

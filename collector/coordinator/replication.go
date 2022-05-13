@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 
 	"github.com/alibaba/MongoShake/v2/collector"
@@ -13,7 +14,6 @@ import (
 
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 var (
@@ -206,7 +206,7 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
 		}
 	} else {
-		fullFinishTs = int64(bson.MaxKey)
+		fullFinishTs = int64(math.MaxInt64)
 	}
 
 	LOG.Info("------------------------full sync done!------------------------")

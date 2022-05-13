@@ -178,7 +178,6 @@ type Executor struct {
 	finisher   *sync.WaitGroup
 
 	// mongo connection
-	//session *mgo.Session
 	conn *utils.MongoCommunityConn
 
 	// bulk insert or single insert

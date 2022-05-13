@@ -81,6 +81,7 @@ func (colExecutor *CollectionExecutor) Start() error {
 		//if !conf.Options.FullSyncExecutorDebug {
 		//	docSession = colExecutor.conn.Session.Clone()
 		//}
+		//TODO(jianyou) is conn need to clone
 
 		executors[i] = NewDocExecutor(GenerateDocExecutorId(), colExecutor, colExecutor.conn, colExecutor.syncer)
 		go executors[i].start()
@@ -130,7 +131,6 @@ type DocExecutor struct {
 	// colExecutor, not owned
 	colExecutor *CollectionExecutor
 
-	//session *mgo.Session
 	conn *utils.MongoCommunityConn
 
 	error error
