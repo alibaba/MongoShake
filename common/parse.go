@@ -1,7 +1,7 @@
 package utils
 
 import (
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	bson2 "go.mongodb.org/mongo-driver/bson"
 )
 
 func GetKey(log bson2.D, wanted string) interface{} {

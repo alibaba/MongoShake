@@ -2,7 +2,7 @@ package ckpt
 
 import (
 	"fmt"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 	"testing"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
@@ -116,7 +116,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		remoteTime := int64(300)
 		conn.Client.Database(utils.VarCheckpointStorageDbReplicaDefault).
 			Collection(conf.Options.CheckpointStorageCollection).
-			InsertOne(nil, bson2.M{
+			InsertOne(nil, bson.M{
 				"name":                             name,
 				"ckpt":                             remoteTime,
 				"oplog_disk_queue":                 "",
@@ -157,7 +157,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		remoteTime := int64(300)
 		conn.Client.Database(utils.VarCheckpointStorageDbReplicaDefault).
 			Collection(conf.Options.CheckpointStorageCollection).
-			InsertOne(nil, bson2.M{
+			InsertOne(nil, bson.M{
 				"name":                             name,
 				"ckpt":                             remoteTime,
 				"oplog_disk_queue":                 "",

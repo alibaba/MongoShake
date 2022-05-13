@@ -13,7 +13,7 @@ import (
 	"github.com/alibaba/MongoShake/v2/tunnel/kafka"
 
 	LOG "github.com/vinllen/log4go"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 	"os"
 	"strings"
 )
@@ -143,7 +143,7 @@ func (tunnel *KafkaWriter) encode(id int) {
 						}
 					}
 				} else if conf.Options.TunnelJsonFormat == "canonical_extended_json" {
-					encode, err = bson2.MarshalExtJSON(log.ParsedLog, true, true)
+					encode, err = bson.MarshalExtJSON(log.ParsedLog, true, true)
 					if err != nil {
 						// should panic
 						LOG.Crashf("%s json marshal data[%v] error[%v]", tunnel, log.ParsedLog, err)
