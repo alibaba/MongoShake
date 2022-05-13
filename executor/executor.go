@@ -2,7 +2,7 @@ package executor
 
 import (
 	"fmt"
-	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,7 +15,6 @@ import (
 
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"go.mongodb.org/mongo-driver/bson"
 )
 
 const (
@@ -337,7 +336,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			oplog.SetFiled(partialLog.Object, operation, partialLog.Namespace)
 			oplog.SetFiled(partialLog.Object, "to", nsTrans.Transform(toNs))
 		case "applyOps":
-			if ops := oplog.GetKey(partialLog.Object, "applyOps").([]bson2.D); ops != nil {
+			if ops := oplog.GetKey(partialLog.Object, "applyOps").([]bson.D); ops != nil {
 				// except field 'o'
 				except := map[string]struct{}{
 					"o": {},

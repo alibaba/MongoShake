@@ -6,7 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -174,7 +174,7 @@ func (conn *MongoCommunityConn) IsGood() bool {
 }
 
 func (conn *MongoCommunityConn) HasOplogNs() bool {
-	if ns, err := conn.Client.Database("local").ListCollectionNames(nil, bson2.M{}); err == nil {
+	if ns, err := conn.Client.Database("local").ListCollectionNames(nil, bson.M{}); err == nil {
 		for _, table := range ns {
 			if table == OplogNS {
 				return true
@@ -188,7 +188,7 @@ func (conn *MongoCommunityConn) HasOplogNs() bool {
 func (conn *MongoCommunityConn) AcquireReplicaSetName() string {
 
 	res, err := conn.Client.Database("admin").
-		RunCommand(conn.ctx, bson2.D{{"replSetGetStatus", 1}}).DecodeBytes()
+		RunCommand(conn.ctx, bson.D{{"replSetGetStatus", 1}}).DecodeBytes()
 	if err != nil {
 		LOG.Warn("Replica set name not found in system.replset: %v", err)
 		return ""
@@ -208,14 +208,14 @@ func (conn *MongoCommunityConn) HasUniqueIndex() (bool, string, string) {
 	checkNs := make([]NS, 0, 128)
 	var databases []string
 	var err error
-	if databases, err = conn.Client.ListDatabaseNames(nil, bson2.M{}); err != nil {
+	if databases, err = conn.Client.ListDatabaseNames(nil, bson.M{}); err != nil {
 		LOG.Critical("Couldn't get databases from remote server: %v", err)
 		return false, "", ""
 	}
 
 	for _, db := range databases {
 		if db != "admin" && db != "local" {
-			coll, _ := conn.Client.Database(db).ListCollectionNames(nil, bson2.M{})
+			coll, _ := conn.Client.Database(db).ListCollectionNames(nil, bson.M{})
 			for _, c := range coll {
 				if c != "system.profile" {
 					// push all collections
@@ -244,7 +244,7 @@ func (conn *MongoCommunityConn) HasUniqueIndex() (bool, string, string) {
 func (conn *MongoCommunityConn) CurrentDate() primitive.Timestamp {
 
 	res, _ := conn.Client.Database("admin").
-		RunCommand(conn.ctx, bson2.D{{"replSetGetStatus", 1}}).DecodeBytes()
+		RunCommand(conn.ctx, bson.D{{"replSetGetStatus", 1}}).DecodeBytes()
 
 	t, i, ok := res.Lookup("operationTime").TimestampOK()
 	if !ok {

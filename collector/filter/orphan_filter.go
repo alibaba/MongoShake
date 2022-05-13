@@ -3,7 +3,7 @@ package filter
 import (
 	"crypto/md5"
 	"encoding/binary"
-	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"math"
 
@@ -35,7 +35,7 @@ func NewOrphanFilter(replset string, chunkMap sharding.DBChunkMap) *OrphanFilter
 	}
 }
 
-func (filter *OrphanFilter) Filter(docD bson2.D, namespace string) bool {
+func (filter *OrphanFilter) Filter(docD bson.D, namespace string) bool {
 	if filter.chunkMap == nil {
 		LOG.Warn("chunk map is nil")
 		return false

@@ -118,7 +118,7 @@ func TestChangeStreamConn(t *testing.T) {
 	//	assert.Equal(t, nil, err, "should be equal")
 	//
 	//	// drop all databases
-	//	dbs, err := conn.Client.ListDatabaseNames(nil, bson2.M{})
+	//	dbs, err := conn.Client.ListDatabaseNames(nil, bson.M{})
 	//	assert.Equal(t, nil, err, "should be equal")
 	//	for _, db := range dbs {
 	//		if db == "admin" || db == "local" || db == "config" {
@@ -128,9 +128,9 @@ func TestChangeStreamConn(t *testing.T) {
 	//		err = conn.Client.Database(db).Drop(nil)
 	//		assert.Equal(t, nil, err, "should be equal")
 	//	}
-	//	conn.Client.Database("db1").Collection("c1").InsertOne(nil, bson2.M{"x": 1})
-	//	conn.Client.Database("db1").Collection("c2").InsertOne(nil, bson2.M{"x": 1})
-	//	conn.Client.Database("db1").Collection("c3").InsertOne(nil, bson2.M{"x": 1})
+	//	conn.Client.Database("db1").Collection("c1").InsertOne(nil, bson.M{"x": 1})
+	//	conn.Client.Database("db1").Collection("c2").InsertOne(nil, bson.M{"x": 1})
+	//	conn.Client.Database("db1").Collection("c3").InsertOne(nil, bson.M{"x": 1})
 	//
 	//	newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false, "")
 	//	tsStr := fmt.Sprintf("{%v %v}", ExtractMongoTimestamp(newest), ExtractMongoTimestampCounter(newest))

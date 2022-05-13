@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
-	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
@@ -118,7 +118,7 @@ func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 	var err error
 	value := new(CheckpointContext)
 	if err = ckpt.client.Client.Database(ckpt.DB).Collection(ckpt.Table).FindOne(nil,
-		bson2.M{CheckpointName: ckpt.Name}).Decode(value); err == nil {
+		bson.M{CheckpointName: ckpt.Name}).Decode(value); err == nil {
 
 		LOG.Info("%s Load exist checkpoint. content %v", ckpt.Name, value)
 		return value, true
@@ -147,8 +147,8 @@ func (ckpt *MongoCheckpoint) Insert(updates *CheckpointContext) error {
 	}
 
 	opts := options.Update().SetUpsert(true)
-	filter := bson2.M{CheckpointName: ckpt.Name}
-	update := bson2.M{"$set": updates}
+	filter := bson.M{CheckpointName: ckpt.Name}
+	update := bson.M{"$set": updates}
 
 	_, err := ckpt.client.Client.Database(ckpt.DB).Collection(ckpt.Table).UpdateOne(nil, filter, update, opts)
 	if err != nil {

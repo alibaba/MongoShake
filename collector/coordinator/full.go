@@ -14,7 +14,7 @@ import (
 
 	"github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 func fetchChunkMap(isSharding bool) (sharding.ShardingChunkMap, error) {
@@ -131,7 +131,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 
 	// fetch all indexes
-	var indexMap map[utils.NS][]bson2.M
+	var indexMap map[utils.NS][]bson.M
 	if conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexNone {
 		if indexMap, err = fetchIndexes(coordinator.RealSourceFullSync, filterList.IterateFilter); err != nil {
 			return fmt.Errorf("fetch index failed[%v]", err)

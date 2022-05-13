@@ -2,7 +2,7 @@ package utils
 
 import (
 	"fmt"
-	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -48,7 +48,7 @@ func (ms *MongoSource) String() string {
 func GetDBVersion(conn *MongoCommunityConn) (string, error) {
 
 	res, err := conn.Client.Database("admin").
-		RunCommand(conn.ctx, bson2.D{{"buildInfo", 1}}).DecodeBytes()
+		RunCommand(conn.ctx, bson.D{{"buildInfo", 1}}).DecodeBytes()
 	if err != nil {
 		return "", err
 	}
@@ -112,9 +112,9 @@ func ApplyOpsFilter(key string) bool {
 }
 
 func getOplogTimestamp(conn *MongoCommunityConn, sortType int) (int64, error) {
-	var result bson2.M
-	opts := options.FindOne().SetSort(bson2.D{{"$natural", sortType}})
-	err := conn.Client.Database(localDB).Collection(OplogNS).FindOne(nil, bson2.M{}, opts).Decode(&result)
+	var result bson.M
+	opts := options.FindOne().SetSort(bson.D{{"$natural", sortType}})
+	err := conn.Client.Database(localDB).Collection(OplogNS).FindOne(nil, bson.M{}, opts).Decode(&result)
 	if err != nil {
 		return 0, err
 	}
@@ -344,7 +344,7 @@ func GetDbNamespace(url string, filterFunc func(name string) bool, sslRootFile s
 	defer conn.Close()
 
 	var dbNames []string
-	if dbNames, err = conn.Client.ListDatabaseNames(nil, bson2.M{}); err != nil {
+	if dbNames, err = conn.Client.ListDatabaseNames(nil, bson.M{}); err != nil {
 		err = fmt.Errorf("get database names of mongodb[%s] error: %v", url, err)
 		return nil, nil, err
 	}
@@ -353,7 +353,7 @@ func GetDbNamespace(url string, filterFunc func(name string) bool, sslRootFile s
 
 	nsList := make([]NS, 0, 128)
 	for _, db := range dbNames {
-		colNames, err := conn.Client.Database(db).ListCollectionNames(nil, bson2.M{})
+		colNames, err := conn.Client.Database(db).ListCollectionNames(nil, bson.M{})
 		if err != nil {
 			err = fmt.Errorf("get collection names of mongodb[%s] db[%v] error: %v", url, db, err)
 			return nil, nil, err

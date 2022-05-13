@@ -9,7 +9,7 @@ import (
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 
 	"github.com/stretchr/testify/assert"
-	bson2 "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -93,11 +93,11 @@ func TestGetDbNamespace(t *testing.T) {
 		err = conn.Client.Database("db2").Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		conn.Client.Database("db1").Collection("c1").InsertOne(nil, bson2.M{"x": 1})
-		conn.Client.Database("db1").Collection("c2").InsertOne(nil, bson2.M{"x": 1})
-		conn.Client.Database("db1").Collection("c3").InsertOne(nil, bson2.M{"x": 1})
-		conn.Client.Database("db2").Collection("c1").InsertOne(nil, bson2.M{"x": 1})
-		conn.Client.Database("db2").Collection("c4").InsertOne(nil, bson2.M{"x": 1})
+		conn.Client.Database("db1").Collection("c1").InsertOne(nil, bson.M{"x": 1})
+		conn.Client.Database("db1").Collection("c2").InsertOne(nil, bson.M{"x": 1})
+		conn.Client.Database("db1").Collection("c3").InsertOne(nil, bson.M{"x": 1})
+		conn.Client.Database("db2").Collection("c1").InsertOne(nil, bson.M{"x": 1})
+		conn.Client.Database("db2").Collection("c4").InsertOne(nil, bson.M{"x": 1})
 
 		filterFunc := func(name string) bool {
 			list := strings.Split(name, ".")
@@ -127,7 +127,7 @@ func TestGetDbNamespace(t *testing.T) {
 		// create index
 		index1, err := conn.Client.Database(testDb).Collection("c1").Indexes().
 			CreateOne(context.Background(), mongo.IndexModel{
-				Keys:    bson2.D{{"x", 1}, {"y", 1}},
+				Keys:    bson.D{{"x", 1}, {"y", 1}},
 				Options: &options.IndexOptions{},
 			})
 		assert.Equal(t, nil, err, "should be equal")
@@ -135,7 +135,7 @@ func TestGetDbNamespace(t *testing.T) {
 		// create index
 		index2, err := conn.Client.Database(testDb).Collection("c1").Indexes().
 			CreateOne(context.Background(), mongo.IndexModel{
-				Keys:    bson2.D{{"wwwww", 1}},
+				Keys:    bson.D{{"wwwww", 1}},
 				Options: &options.IndexOptions{},
 			})
 		assert.Equal(t, nil, err, "should be equal")
@@ -143,7 +143,7 @@ func TestGetDbNamespace(t *testing.T) {
 		// create index
 		index3, err := conn.Client.Database(testDb).Collection("c2").Indexes().
 			CreateOne(context.Background(), mongo.IndexModel{
-				Keys:    bson2.D{{"hello", "hashed"}},
+				Keys:    bson.D{{"hello", "hashed"}},
 				Options: &options.IndexOptions{},
 			})
 		assert.Equal(t, nil, err, "should be equal")
