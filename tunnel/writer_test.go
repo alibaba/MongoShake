@@ -19,9 +19,7 @@ func generateWMessage(val, nr int) *WMessage {
 		parsedLogs = append(parsedLogs, &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Operation: "i",
-				Object: bson.D{
-					bson.E{"val", i},
-				},
+				Object:    bson.D{{"val", i}},
 			},
 		})
 	}
@@ -42,7 +40,8 @@ func parseJsonValue(input []byte) (interface{}, error) {
 		return 0, err
 	}
 
-	return jsonParsedMap["o"].(bson.A)[0].(map[string]interface{})["value"], nil
+	fmt.Printf("jsonParsedMap:%v\n", jsonParsedMap)
+	return jsonParsedMap["o"].(map[string]interface{})["val"], nil
 }
 
 func TestKafkaWriter(t *testing.T) {
@@ -162,8 +161,8 @@ func TestKafkaWriter(t *testing.T) {
 				{
 					ParsedLog: oplog.ParsedLog{
 						Object: bson.D{
-							bson.E{"$v", 1},
-							bson.E{"$set", bson.M{
+							bson.E{Key: "$v", Value: 1},
+							bson.E{Key: "$set", Value: bson.M{
 								"sale_qty":   0,
 								"sale_value": math.NaN(),
 							}},
@@ -181,7 +180,7 @@ func TestKafkaWriter(t *testing.T) {
 		err := bson.UnmarshalExtJSON(data, true, &jsonParsedMap)
 		assert.Equal(t, nil, err, "should be equal")
 		fmt.Println(jsonParsedMap)
-		output := jsonParsedMap["o"].(bson.A)[1].(map[string]interface{})["value"].(map[string]interface{})
+		output := jsonParsedMap["o"].(map[string]interface{})["$set"].(map[string]interface{})
 		assert.Equal(t, int32(0), output["sale_qty"], "should be equal")
 		assert.Equal(t, true, math.IsNaN(output["sale_value"].(float64)), "should be equal")
 	}
