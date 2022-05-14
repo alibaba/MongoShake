@@ -59,21 +59,12 @@ func getTimestampMap(sources []*utils.MongoSource, sslRootFile string) (map[stri
 }
 
 func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
-	// for change stream, we need to fetch current timestamp
-	/*fromConn0, err := utils.NewMongoConn(coordinator.Sources[0].URL, utils.VarMongoConnectModePrimary, true)
-	if err != nil {
-		return fmt.Errorf("connect soruce[%v] failed[%v]", coordinator.Sources[0].URL, err)
-	}
-	defer fromConn0.Close()*/
-
-	// the source is sharding or replica-set
-	// fromIsSharding := len(coordinator.Sources) > 1 || fromConn0.IsMongos()
 
 	fromIsSharding := coordinator.SourceIsSharding()
 
 	var shardingChunkMap sharding.ShardingChunkMap
 	var err error
-	// init orphan sharding chunk map if source is mongod
+	// init orphan sharding chunk map if source is mongod(get data directly from mongod)
 	if fromIsSharding && coordinator.MongoS == nil {
 		LOG.Info("source is mongod, need to fetching chunk map")
 		shardingChunkMap, err = fetchChunkMap(fromIsSharding)

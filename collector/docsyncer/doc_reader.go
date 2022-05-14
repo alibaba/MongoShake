@@ -241,9 +241,10 @@ func (reader *DocumentReader) String() string {
 }
 
 // NextDoc returns an document by raw bytes which is []byte
-func (reader *DocumentReader) NextDoc() (doc *bson.D, doc_len int, err error) {
+// reader.docCursor.Current is valid only before next docCursor.Next(), So must be copy
+func (reader *DocumentReader) NextDoc() (doc bson.Raw, err error) {
 	if err := reader.ensureNetwork(); err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 
 	atomic.AddInt32(&reader.concurrency, 1)
@@ -252,24 +253,14 @@ func (reader *DocumentReader) NextDoc() (doc *bson.D, doc_len int, err error) {
 	if !reader.docCursor.Next(reader.ctx) {
 		if err := reader.docCursor.Err(); err != nil {
 			reader.releaseCursor()
-			return nil, 0, err
+			return nil, err
 		} else {
 			LOG.Info("reader[%s] finish", reader.String())
-			return nil, 0, nil
+			return nil, nil
 		}
 	}
 
-	// TODO(jianyou) decode in new routine
-	doc = new(bson.D)
-	err = reader.docCursor.Decode(doc)
-	doc_len = len(reader.docCursor.Current)
-	//doc = new(bson.Raw)
-	//err = bson.Unmarshal(reader.docCursor.Current, doc)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	return doc, doc_len, err
+	return reader.docCursor.Current, err
 }
 
 // ensureNetwork establish the mongodb connection at first

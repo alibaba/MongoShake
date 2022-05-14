@@ -29,6 +29,20 @@ var (
 	testNs = strings.Join([]string{testDb, testCollection}, ".")
 )
 
+func marshalData(input []bson.D) []*bson.Raw {
+	output := make([]*bson.Raw, 0, len(input))
+	for _, ele := range input {
+		if data, err := bson.Marshal(ele); err != nil {
+			return nil
+		} else {
+			var dataRaw bson.Raw
+			dataRaw = data[:]
+			output = append(output, &dataRaw)
+		}
+	}
+	return output
+}
+
 func fetchAllDocument(conn *utils.MongoCommunityConn) ([]bson.D, error) {
 	return unit_test_common.FetchAllDocumentbsonD(conn.Client, testDb, testCollection, nil)
 }
@@ -63,7 +77,7 @@ func TestDbSync(t *testing.T) {
 		err := conn.Client.Database(testDb).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		input := []*bson.D{
+		input := []bson.D{
 			{
 				{"_id", 1},
 				{"x", 1},
@@ -74,7 +88,10 @@ func TestDbSync(t *testing.T) {
 			},
 		}
 
-		err = de.doSync(input)
+		inputMarshal := marshalData(input)
+		assert.NotEqual(t, nil, inputMarshal, "should be equal")
+
+		err = de.doSync(inputMarshal)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// fetch result
@@ -97,7 +114,7 @@ func TestDbSync(t *testing.T) {
 		/*------------------------------------------------------------*/
 
 		// insert duplicate document
-		input = []*bson.D{
+		input = []bson.D{
 			{
 				{"_id", 3},
 				{"x", 3},
@@ -112,12 +129,15 @@ func TestDbSync(t *testing.T) {
 			},
 		}
 
-		err = de.doSync(input)
+		inputMarshal = marshalData(input)
+		assert.NotEqual(t, nil, inputMarshal, "should be equal")
+
+		err = de.doSync(inputMarshal)
 		fmt.Println(err)
 		assert.NotEqual(t, nil, err, "should be equal")
 
 		conf.Options.FullSyncExecutorInsertOnDupUpdate = true
-		err = de.doSync(input)
+		err = de.doSync(inputMarshal)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// fetch result
@@ -182,7 +202,7 @@ func TestDbSync(t *testing.T) {
 		err := conn.Client.Database(testDb).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		input := []*bson.D{
+		input := []bson.D{
 			{
 				{"_id", 1},
 				{"x", 1},
@@ -197,7 +217,10 @@ func TestDbSync(t *testing.T) {
 			},
 		}
 
-		err = de.doSync(input)
+		inputMarshal := marshalData(input)
+		assert.NotEqual(t, nil, inputMarshal, "should be equal")
+
+		err = de.doSync(inputMarshal)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// fetch result
@@ -222,7 +245,7 @@ func TestDbSync(t *testing.T) {
 		conf.Options.FullSyncExecutorInsertOnDupUpdate = false
 		conf.Options.FullSyncExecutorFilterOrphanDocument = true
 		conf.Options.MongoUrls = []string{"xx0", "xx1"} // meaningless but only for judge
-		input = []*bson.D{
+		input = []bson.D{
 			{
 				{"_id", 7},
 				{"x", 7},
@@ -237,7 +260,10 @@ func TestDbSync(t *testing.T) {
 			},
 		}
 
-		err = de.doSync(input)
+		inputMarshal = marshalData(input)
+		assert.NotEqual(t, nil, inputMarshal, "should be equal")
+
+		err = de.doSync(inputMarshal)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// fetch result

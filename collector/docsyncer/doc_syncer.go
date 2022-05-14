@@ -485,12 +485,11 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 
 func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *CollectionExecutor, collectionMetric *CollectionMetric) error {
 	bufferSize := conf.Options.FullSyncReaderDocumentBatchSize
-	buffer := make([]*bson.D, 0, bufferSize)
+	buffer := make([]*bson.Raw, 0, bufferSize)
 	bufferByteSize := 0
 
 	for {
-		//TODO(jianyou) test time cost of feth+decode
-		doc, doc_len, err := reader.NextDoc()
+		doc, err := reader.NextDoc()
 		// doc, err := reader.NextDocMgo()
 		if err != nil {
 			return fmt.Errorf("splitter reader[%v] get next document failed: %v", reader, err)
@@ -503,20 +502,31 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 
 		syncer.replMetric.AddGet(1)
 
-		if bufferByteSize+doc_len > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
+		if bufferByteSize+len(doc) > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
 			atomic.AddUint64(&collectionMetric.FinishCount, uint64(len(buffer)))
 			colExecutor.Sync(buffer)
 			syncer.replMetric.AddSuccess(uint64(len(buffer))) // only used to calculate the tps which is extract from "success"
-			buffer = make([]*bson.D, 0, bufferSize)
+			buffer = make([]*bson.Raw, 0, bufferSize)
 			bufferByteSize = 0
 		}
 
 		// transform dbref for document
 		if len(conf.Options.TransformNamespace) > 0 && conf.Options.IncrSyncDBRef {
-			*doc = transform.TransformDBRef(*doc, reader.ns.Database, syncer.nsTrans)
+			var docData bson.D
+			if err := bson.Unmarshal(doc, &docData); err != nil {
+				LOG.Error("splitter reader[%v] do bson unmarshal %v failed. %v", reader, doc, err)
+			} else {
+				docData = transform.TransformDBRef(docData, reader.ns.Database, syncer.nsTrans)
+				if v, err := bson.Marshal(docData); err != nil {
+					LOG.Warn("splitter reader[%v] do bson marshal %v failed. %v", reader, docData, err)
+				} else {
+					doc = v
+				}
+			}
 		}
-		buffer = append(buffer, doc)
-		bufferByteSize += doc_len
+
+		buffer = append(buffer, &doc)
+		bufferByteSize += len(doc)
 	}
 
 	LOG.Info("splitter reader finishes: %v", reader)

@@ -36,7 +36,7 @@ type CollectionExecutor struct {
 
 	conn *utils.MongoCommunityConn
 
-	docBatch chan []*bson.D
+	docBatch chan []*bson.Raw
 
 	// not own
 	syncer *DBSyncer
@@ -73,7 +73,7 @@ func (colExecutor *CollectionExecutor) Start() error {
 	}
 
 	parallel := conf.Options.FullSyncReaderWriteDocumentParallel
-	colExecutor.docBatch = make(chan []*bson.D, parallel)
+	colExecutor.docBatch = make(chan []*bson.Raw, parallel)
 
 	executors := make([]*DocExecutor, parallel)
 	for i := 0; i != len(executors); i++ {
@@ -90,7 +90,7 @@ func (colExecutor *CollectionExecutor) Start() error {
 	return nil
 }
 
-func (colExecutor *CollectionExecutor) Sync(docs []*bson.D) {
+func (colExecutor *CollectionExecutor) Sync(docs []*bson.Raw) {
 	count := uint64(len(docs))
 	if count == 0 {
 		return
@@ -182,7 +182,7 @@ func (exec *DocExecutor) start() {
 }
 
 // use by full sync
-func (exec *DocExecutor) doSync(docs []*bson.D) error {
+func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 	if len(docs) == 0 || conf.Options.FullSyncExecutorDebug {
 		return nil
 	}
@@ -193,8 +193,12 @@ func (exec *DocExecutor) doSync(docs []*bson.D) error {
 	for _, doc := range docs {
 
 		if conf.Options.FullSyncExecutorFilterOrphanDocument && exec.syncer.orphanFilter != nil {
+			var docData bson.D
+			if err := bson.Unmarshal(*doc, &docData); err != nil {
+				LOG.Error("doSync do bson unmarshal %v failed. %v", doc, err)
+			}
 			// judge whether is orphan document, pass if so
-			if exec.syncer.orphanFilter.Filter(*doc, ns.Database+"."+ns.Collection) {
+			if exec.syncer.orphanFilter.Filter(docData, ns.Database+"."+ns.Collection) {
 				LOG.Info("orphan document [%v] filter", doc)
 				continue
 			}
@@ -232,10 +236,13 @@ func (exec *DocExecutor) doSync(docs []*bson.D) error {
 				dupDocument := *docs[wError.Index]
 				var updateFilter bson.D
 				updateFilterBool := false
-				for _, bsonE := range dupDocument {
-					if bsonE.Key == "_id" {
-						updateFilter = bson.D{bsonE}
-						updateFilterBool = true
+				var docData bson.D
+				if err := bson.Unmarshal(dupDocument, &docData); err == nil {
+					for _, bsonE := range docData {
+						if bsonE.Key == "_id" {
+							updateFilter = bson.D{bsonE}
+							updateFilterBool = true
+						}
 					}
 				}
 				if updateFilterBool == false {
