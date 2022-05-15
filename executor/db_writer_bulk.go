@@ -185,15 +185,6 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 		LOG.Error("doUpdate run upsert/update[%v] failed[%v]", upsert, err)
 		return err
 	}
-	// TODO(jianyou) deprecate
-	//if res != nil {
-	//	oplogsLen := int64(len(oplogs))
-	//	if res.MatchedCount != oplogsLen && res.InsertedCount+res.UpsertedCount+res.ModifiedCount != oplogsLen {
-	//		return fmt.Errorf("update fail(MatchedCount:%d ModifiedCount:%d UpsertedCount:%d InsertedCount:%d oplogsLen:%d) modules:%v",
-	//			res.MatchedCount, res.ModifiedCount, res.UpsertedCount, res.InsertedCount,
-	//			int64(len(oplogs)), models[0])
-	//	}
-	//}
 	return nil
 }
 

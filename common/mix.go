@@ -79,7 +79,6 @@ func TimeToTimestamp(t int64) primitive.Timestamp {
 	return primitive.Timestamp{T: uint32(t), I: 0}
 }
 
-// TODO(jianyou) deprecate
 func TimestampToString(ts int64) string {
 	return time.Unix(ts, 0).Format(TimeFormat)
 }
