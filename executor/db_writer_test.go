@@ -70,9 +70,8 @@ func mockOplogRecord(oId, oX interface{}, o2Id int) *OplogRecord {
 	return or
 }
 
-// TODO(jianyou) deprecate
 func objectIdFromInt(num int64) primitive.ObjectID {
-	objectId, err := primitive.ObjectIDFromHex(fmt.Sprintf("%024s", strconv.FormatInt(num, 16)))
+	objectId, err := primitive.ObjectIDFromHex(fmt.Sprintf("%024s", strconv.FormatInt(num, 10)))
 	if err != nil {
 		return primitive.ObjectID{}
 	}
