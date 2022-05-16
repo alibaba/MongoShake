@@ -59,11 +59,10 @@ type OplogReader struct {
 // NewOplogReader creates reader with mongodb url
 func NewOplogReader(src string, replset string) *OplogReader {
 	return &OplogReader{
-		src:     src,
-		replset: replset,
-		query:   bson.M{},
-		// the mgo driver already has cache mechanism(prefetch), so there is no need to buffer here again
-		oplogChan: make(chan *retOplog, 0),
+		src:       src,
+		replset:   replset,
+		query:     bson.M{},
+		oplogChan: make(chan *retOplog, 2048),
 		firstRead: true,
 	}
 }
