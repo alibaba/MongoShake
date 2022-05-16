@@ -81,33 +81,10 @@ func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 	return true
 }
 
-// deprecate
-//func (ckpt *MongoCheckpoint) ensureNetworkMgo() bool {
-//	// make connection if we haven't already established one
-//	if ckpt.Conn == nil {
-//		if conn, err := utils.NewMongoConn(ckpt.URL, utils.VarMongoConnectModePrimary, true,
-//			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority,
-//			conf.Options.CheckpointStorageUrlMongoSslRootCaFile); err == nil {
-//			ckpt.Conn = conn
-//			ckpt.QueryHandle = conn.Session.DB(ckpt.DB).C(ckpt.Table)
-//		} else {
-//			LOG.Warn("%s CheckpointOperation manager connect mongo cluster failed. %v", ckpt.Name, err)
-//			return false
-//		}
-//	}
-//
-//	return true
-//}
-
 func (ckpt *MongoCheckpoint) close() {
 	ckpt.client.Close()
 	ckpt.client = nil
 }
-
-//func (ckpt *MongoCheckpoint) close() {
-//	ckpt.Conn.Close()
-//	ckpt.Conn = nil
-//}
 
 func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 	if !ckpt.ensureNetwork() {

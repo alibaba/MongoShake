@@ -26,7 +26,7 @@ func TestEventReader(t *testing.T) {
 	utils.InitialLogger("", "", "all", true, 1)
 
 	var nr int
-	// deprecate serverless（serverless  only watch tables that already exits, new create table(like dbxxx) not watch）
+	// TODO(jianyou) deprecate serverless（serverless  only watch tables that already exits, new create table(like dbxxx) not watch）
 	// normal: test 2 db
 	//{
 	//	fmt.Printf("TestEventReader case %d.\n", nr)
