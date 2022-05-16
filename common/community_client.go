@@ -135,6 +135,8 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 		clientOps.SetConnectTimeout(20 * time.Minute)
 	}
 
+	//clientOps.SetMaxConnIdleTime(1 * time.Hour)
+
 	// create default context
 	ctx := context.Background()
 

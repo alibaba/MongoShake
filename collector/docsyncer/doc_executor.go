@@ -77,12 +77,9 @@ func (colExecutor *CollectionExecutor) Start() error {
 
 	executors := make([]*DocExecutor, parallel)
 	for i := 0; i != len(executors); i++ {
-		//var docSession *mgo.Session
-		//if !conf.Options.FullSyncExecutorDebug {
-		//	docSession = colExecutor.conn.Session.Clone()
-		//}
-		//TODO(jianyou) is conn need to clone
-
+		// Client is a handle representing a pool of connections, can be use by multi routines
+		// You Can get one idle connection, if all is idle, then always get the same one
+		// connections pool default parameter(min_conn:0 max_conn:100 create_conn_once:2)
 		executors[i] = NewDocExecutor(GenerateDocExecutorId(), colExecutor, colExecutor.conn, colExecutor.syncer)
 		go executors[i].start()
 	}
