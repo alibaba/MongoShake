@@ -21,7 +21,7 @@ const (
 	// we can't insert Timestamp(0, 0) that will be treat as Now() inserted
 	// into mongo. so we use Timestamp(0, 1)
 	InitCheckpoint  = int64(1)
-	EmptyCheckpoint = 0
+	EmptyCheckpoint = int64(0)
 )
 
 type CheckpointContext struct {
@@ -135,7 +135,7 @@ func (ckpt *MongoCheckpoint) Insert(updates *CheckpointContext) error {
 	}
 
 	LOG.Info("%s Record new checkpoint success [%d]", ckpt.Name,
-		int64(utils.ExtractMongoTimestamp(updates.Timestamp)))
+		utils.ExtractMongoTimestamp(updates.Timestamp))
 	return nil
 }
 
@@ -181,6 +181,6 @@ func (ckpt *HttpApiCheckpoint) Insert(insert *CheckpointContext) error {
 		return err
 	}
 
-	LOG.Info("%s Record new checkpoint success [%d]", ckpt.Name, int64(utils.ExtractMongoTimestamp(insert.Timestamp)))
+	LOG.Info("%s Record new checkpoint success [%d]", ckpt.Name, utils.ExtractMongoTimestamp(insert.Timestamp))
 	return nil
 }

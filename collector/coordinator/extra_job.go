@@ -1,6 +1,8 @@
 package coordinator
 
 import (
+	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -90,10 +92,19 @@ func (cui *CheckUniqueIndexExistsJob) Run() {
 	for range time.NewTicker(time.Duration(cui.interval) * time.Second).C {
 		LOG.Debug("extra job[%s] check", cui.Name())
 		for i, source := range cui.urls {
+			for _, ns := range nsList {
 
-			if unique, db, col := conns[i].HasUniqueIndex(); unique {
-				LOG.Crashf("extra job[%s] with source[%v] query index[%s - %s] find unique",
-					cui.Name(), source.URL, db, col)
+				cursor, _ := conns[i].Client.Database(ns.Database).Collection(ns.Collection).Indexes().List(nil)
+				for cursor.Next(context.Background()) {
+
+					name, nerr := cursor.Current.LookupErr("name")
+					unique, uerr := cursor.Current.LookupErr("unique")
+					if uerr == nil && nerr == nil &&
+						!strings.HasPrefix(name.String(), "_id") && unique.Boolean() == true {
+						LOG.Crashf("extra job[%s] with source[%v] query index[%s - %s] find unique",
+							cui.Name(), source.URL, ns.Database, ns.Collection)
+					}
+				}
 			}
 		}
 	}
