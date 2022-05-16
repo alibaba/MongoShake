@@ -1456,8 +1456,7 @@ func TestCommandWriter(t *testing.T) {
 			{"_id", 3},
 			{"x", 3},
 		}
-
-		// TODO(jianyou) need to update doUpdateOnInsert q condition to DocumentKey to support ShakeKey update
+		
 		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts2, true)
 		fmt.Printf("err:%v\n", err)
 		//assert.Equal(t, nil, err, "should be equal")
