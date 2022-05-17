@@ -49,11 +49,10 @@ type EventReader struct {
 
 // NewEventReader creates reader with mongodb url
 func NewEventReader(src string, replset string) *EventReader {
-	var channelSize = int(float64(BatchSize) * PrefetchPercent)
 	return &EventReader{
 		src:             src,
 		replset:         replset,
-		eventChan:       make(chan *retOplog, channelSize),
+		eventChan:       make(chan *retOplog, ChannelSize),
 		firstRead:       true,
 		diskQueueLastTs: -1,
 	}

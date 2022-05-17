@@ -62,7 +62,7 @@ func NewOplogReader(src string, replset string) *OplogReader {
 		src:       src,
 		replset:   replset,
 		query:     bson.M{},
-		oplogChan: make(chan *retOplog, 81920), // ten times of batchSize
+		oplogChan: make(chan *retOplog, ChannelSize), // ten times of batchSize
 		firstRead: true,
 	}
 }

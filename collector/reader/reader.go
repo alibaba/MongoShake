@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	BatchSize       = 8192
-	PrefetchPercent = 0.2
+	BatchSize   = 8192
+	ChannelSize = 81920
 )
 
 type Reader interface {
