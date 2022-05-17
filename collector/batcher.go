@@ -25,7 +25,8 @@ var (
 		Raw: nil,
 		Parsed: &oplog.PartialLog{ // initial fake oplog only used in comparison
 			ParsedLog: oplog.ParsedLog{
-				Timestamp: primitive.Timestamp{T: 0, I: 0}, // fake timestamp,
+				// fake timestamp that doesn't appear in reality, must be the smallest ts for compare in SetLastLog
+				Timestamp: primitive.Timestamp{T: 0, I: 0},
 				Operation: "meaningless operation",
 			},
 		},

@@ -35,8 +35,6 @@ const (
 	MajorityWriteConcern = "majority"
 
 	Int32max = (int64(1) << 32) - 1
-
-	ErrorCodeDuplicateKey = 11000
 )
 
 var (

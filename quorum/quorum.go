@@ -189,8 +189,10 @@ func makeSession(uri string) (*utils.MongoCommunityConn, error) {
 
 func promotion() bson.D {
 	return bson.D{
-		{"_id", electionObjectId}, {"pid", os.Getpid()},
-		{"host", getNetAddr()}, {"heartbeat", time.Now().Unix()},
+		{"_id", electionObjectId},
+		{"pid", os.Getpid()},
+		{"host", getNetAddr()},
+		{"heartbeat", time.Now().Unix()},
 	}
 }
 

@@ -25,7 +25,7 @@ func (exec *Executor) ensureConnection() bool {
 	if exec.conn == nil || !exec.conn.IsGood() {
 		writeContern := utils.ReadWriteConcernDefault
 		if conf.Options.FullSyncExecutorMajorityEnable {
-			writeContern = utils.ReadWriteConcernDefault
+			writeContern = utils.ReadWriteConcernMajority
 		}
 
 		if conn, err := utils.NewMongoCommunityConn(exec.MongoUrl, utils.VarMongoConnectModePrimary, true,

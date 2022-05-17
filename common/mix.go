@@ -98,6 +98,8 @@ func ExtractMongoTimestamp(ts interface{}) int64 {
 
 func ExtractMongoTimestampCounter(ts interface{}) int64 {
 	switch src := ts.(type) {
+	case primitive.Timestamp:
+		return int64(src.I)
 	case int64:
 		return src & Int32max
 	default:

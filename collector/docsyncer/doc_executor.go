@@ -226,7 +226,7 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 
 		var updateModels []mongo.WriteModel
 		for _, wError := range (err.(mongo.BulkWriteException)).WriteErrors {
-			if wError.Code == utils.ErrorCodeDuplicateKey {
+			if utils.DuplicateKey(wError) {
 				if !conf.Options.FullSyncExecutorInsertOnDupUpdate {
 					return fmt.Errorf("duplicate key error[%v], you can clean the document on the target mongodb, "+
 						"or enable %v to solve, but full-sync stage needs restart",
