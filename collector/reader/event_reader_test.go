@@ -176,7 +176,6 @@ func TestEventReader(t *testing.T) {
 
 				var val oplog.Event
 				err = bson.Unmarshal(in, &val)
-				// err = bson.Unmarshal(in, &val)
 				fmt.Printf("%v\n", val)
 				assert.Equal(t, nil, err, "should be equal")
 

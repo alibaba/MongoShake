@@ -62,7 +62,7 @@ func NewOplogReader(src string, replset string) *OplogReader {
 		src:       src,
 		replset:   replset,
 		query:     bson.M{},
-		oplogChan: make(chan *retOplog, 2048),
+		oplogChan: make(chan *retOplog, 81920), // ten times of batchSize
 		firstRead: true,
 	}
 }
@@ -149,8 +149,8 @@ func (or *OplogReader) fetcher() {
 
 		if !or.oplogsCursor.Next(context.Background()) {
 			if err := or.oplogsCursor.Err(); err != nil {
-				// some internal error. need rebuild the oplogsIterator
-				or.releaseIterator()
+				// some internal error. need rebuild the oplogsCursor
+				or.releaseCursor()
 				if utils.IsCollectionCappedError(err) { // print it
 					LOG.Error("oplog collection capped may happen: %v", err)
 					or.oplogChan <- &retOplog{nil, CollectionCappedError}
@@ -191,7 +191,7 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 		}
 	}
 
-	findOptions := options.Find().SetBatchSize(8192).
+	findOptions := options.Find().SetBatchSize(int32(BatchSize)).
 		SetNoCursorTimeout(true).
 		SetCursorType(options.Tailable).
 		SetOplogReplay(true)
@@ -247,7 +247,7 @@ func (or *OplogReader) getOldestTimestamp() int64 {
 	return ts
 }
 
-func (or *OplogReader) releaseIterator() {
+func (or *OplogReader) releaseCursor() {
 	if or.oplogsCursor != nil {
 		or.oplogsCursor.Close(context.Background())
 	}
