@@ -36,7 +36,7 @@ func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoCommunityConn)
 		source = "replica"
 	}
 
-	err := toConn.Client.Database("config").Collection("version").FindOne(nil, bson.M{})
+	err := toConn.Client.Database("config").Collection("version").FindOne(nil, bson.M{}).Err()
 	if err != nil {
 		target = "replica"
 	} else {
@@ -113,7 +113,6 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoCommunit
 	if err != nil {
 		return err
 	}
-	//dbSpecIter := fromConn.Session.DB("config").C("databases").Find(bson.M{}).Iter()
 	for docCursor.Next(nil) {
 		err = bson.Unmarshal(docCursor.Current, &dbSpecDoc)
 		if err != nil {
@@ -160,7 +159,6 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoCommunit
 	// enable sharding for db(shardCollection)
 	colDocCursor, err = fromConn.Client.Database("config").Collection(
 		"collections").Find(nil, bson.D{})
-	//colSpecIter := fromConn.Session.DB("config").C("collections").Find(bson.M{}).Iter()
 	for colDocCursor.Next(nil) {
 		err = bson.Unmarshal(colDocCursor.Current, &colSpecDoc)
 		if err != nil {

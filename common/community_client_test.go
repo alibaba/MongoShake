@@ -63,7 +63,7 @@ func TestCommonFunctions(t *testing.T) {
 			}
 		}
 
-		uniqueOk, _, _ := conn.HasUniqueIndex()
+		uniqueOk := conn.HasUniqueIndex()
 		assert.Equal(t, uniqueOk, false, "")
 
 		_, err = conn.Client.Database(testDb).Collection(testCollection).InsertOne(context.Background(),
@@ -84,8 +84,7 @@ func TestCommonFunctions(t *testing.T) {
 		assert.Equal(t, err, nil, "")
 		fmt.Printf("Create index:%v\n", str)
 
-		uniqueOk, uniqueDb, uniqueCollection := conn.HasUniqueIndex()
+		uniqueOk = conn.HasUniqueIndex()
 		assert.Equal(t, uniqueOk, true, "")
-		fmt.Printf("unique_db:%v unique_collection:%v\n", uniqueDb, uniqueCollection)
 	}
 }

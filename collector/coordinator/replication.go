@@ -108,7 +108,6 @@ func (coordinator *ReplicationCoordinator) Run() error {
 
 func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	var conn *utils.MongoCommunityConn
-	//var conn *utils.MongoConn
 	var err error
 	var hasUniqIndex = false
 	rs := map[string]int{}
@@ -167,7 +166,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 
 		// look around if there has unique index
 		if !hasUniqIndex && conf.Options.IncrSyncShardKey == oplog.ShardAutomatic {
-			hasUniqIndex, _, _ = conn.HasUniqueIndex()
+			hasUniqIndex = conn.HasUniqueIndex()
 		}
 		// doesn't reuse current connection
 		conn.Close()
@@ -247,19 +246,6 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs int
 			return
 		}
 		LOG.Info("------------------------full sync done!------------------------")
-		/*
-			// get current newest timestamp
-			endAllTsMap, _, _, _, _, err := utils.GetAllTimestamp(coordinator.Sources)
-			if err != nil {
-				docError = LOG.Critical("document replication get end timestamp failed[%v]", err)
-				return
-			}
-			for replset, endTs := range endAllTsMap {
-				beginTs := beginTsMap[replset]
-				LOG.Info("document replication replset %v beginTs[%v] endTs[%v]",
-					replset, utils.ExtractTs32(beginTs), utils.ExtractTs32(endTs.Newest))
-				docEndTsMap[replset] = endTs.Newest
-			}*/
 	})
 	// during document replication, oplog syncer fetch oplog and store on disk, in order to avoid oplog roll up
 	// fullSyncFinishPosition means no need to check the end time to disable DDL

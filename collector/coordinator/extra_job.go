@@ -97,9 +97,9 @@ func (cui *CheckUniqueIndexExistsJob) Run() {
 				cursor, _ := conns[i].Client.Database(ns.Database).Collection(ns.Collection).Indexes().List(nil)
 				for cursor.Next(context.Background()) {
 
-					name, nerr := cursor.Current.LookupErr("name")
-					unique, uerr := cursor.Current.LookupErr("unique")
-					if uerr == nil && nerr == nil &&
+					name, nErr := cursor.Current.LookupErr("name")
+					unique, uErr := cursor.Current.LookupErr("unique")
+					if uErr == nil && nErr == nil &&
 						!strings.HasPrefix(name.String(), "_id") && unique.Boolean() == true {
 						LOG.Crashf("extra job[%s] with source[%v] query index[%s - %s] find unique",
 							cui.Name(), source.URL, ns.Database, ns.Collection)

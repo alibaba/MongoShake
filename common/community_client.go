@@ -205,13 +205,13 @@ func (conn *MongoCommunityConn) AcquireReplicaSetName() string {
 	return id
 }
 
-func (conn *MongoCommunityConn) HasUniqueIndex() (bool, string, string) {
+func (conn *MongoCommunityConn) HasUniqueIndex() bool {
 	checkNs := make([]NS, 0, 128)
 	var databases []string
 	var err error
 	if databases, err = conn.Client.ListDatabaseNames(nil, bson.M{}); err != nil {
 		LOG.Critical("Couldn't get databases from remote server: %v", err)
-		return false, "", ""
+		return false
 	}
 
 	for _, db := range databases {
@@ -234,12 +234,12 @@ func (conn *MongoCommunityConn) HasUniqueIndex() (bool, string, string) {
 			if uerr == nil && unique.Boolean() == true {
 				LOG.Info("Found unique index %s on %s.%s in auto shard mode",
 					cursor.Current.Lookup("name").StringValue(), ns.Database, ns.Collection)
-				return true, ns.Database, ns.Collection
+				return true
 			}
 		}
 	}
 
-	return false, "", ""
+	return false
 }
 
 func (conn *MongoCommunityConn) CurrentDate() primitive.Timestamp {

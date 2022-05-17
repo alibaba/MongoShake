@@ -60,13 +60,13 @@ func NewCollectionExecutor(id int, mongoUrl string, ns utils.NS, syncer *DBSynce
 func (colExecutor *CollectionExecutor) Start() error {
 	var err error
 	if !conf.Options.FullSyncExecutorDebug {
-		writeContern := utils.ReadWriteConcernDefault
+		writeConcern := utils.ReadWriteConcernDefault
 		if conf.Options.FullSyncExecutorMajorityEnable {
-			writeContern = utils.ReadWriteConcernDefault
+			writeConcern = utils.ReadWriteConcernMajority
 		}
 		if colExecutor.conn, err = utils.NewMongoCommunityConn(colExecutor.mongoUrl,
 			utils.VarMongoConnectModePrimary, true,
-			utils.ReadWriteConcernDefault, writeContern,
+			utils.ReadWriteConcernDefault, writeConcern,
 			colExecutor.sslRootFile); err != nil {
 			return err
 		}
@@ -210,8 +210,11 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 	}
 
 	if conf.Options.LogLevel == utils.VarLogLevelDebug {
+		var docBeg, docEnd bson.M
+		bson.Unmarshal(*docs[0], &docBeg)
+		bson.Unmarshal(*docs[len(docs)-1], &docEnd)
 		LOG.Debug("DBSyncer id[%v] doSync BulkWrite with table[%v] batch _id interval [%v, %v]", exec.syncer.id, ns,
-			docs[0], docs[len(docs)-1])
+			docBeg, docEnd)
 	}
 
 	opts := options.BulkWrite().SetOrdered(false)

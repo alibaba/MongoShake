@@ -329,11 +329,9 @@ func TestStartDropDestCollection(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		list, err := conn.Client.Database("test").ListCollectionNames(nil, bson.M{})
-		conn.Client.Database("test").ListCollections(nil, bson.M{})
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 1, len(list), "should be equal")
 		assert.Equal(t, "c2", list[0], "should be equal")
-		// sort.Strings(list)
 
 	}
 
@@ -456,68 +454,68 @@ func TestStartIndexSync(t *testing.T) {
 		assert.Equal(t, isEqual(indexInput, indexes), true, "should be equal")
 	}
 
-	// serverless
-	{
-		fmt.Printf("TestStartIndexSync case %d.\n", nr)
-		nr++
-
-		conf.Options.FullSyncReaderCollectionParallel = 4
-
-		conn, err := utils.NewMongoCommunityConn(testMongoAddressServerless, utils.VarMongoConnectModePrimary, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, "")
-		assert.Equal(t, nil, err, "should be equal")
-
-		// drop old db
-		err = conn.Client.Database("test_db").Drop(nil)
-		assert.Equal(t, nil, err, "should be equal")
-
-		indexInput := []bson.M{
-			{
-				"key": bson.M{
-					"_id": int32(1),
-				},
-				"name": "_id_",
-				//"ns":   "test_db.test_coll",
-			},
-			{
-				"key": bson.M{
-					"hello": "hashed",
-				},
-				"name": "hello_hashed",
-				//"ns":   "test_db.test_coll",
-			},
-			{
-				"key": bson.M{
-					"x": int32(1),
-					"y": int32(1),
-				},
-				"name": "x_1_y_1",
-				//"ns":   "test_db.test_coll",
-			},
-			{
-				"key": bson.M{
-					"z": int32(1),
-				},
-				"name": "z_1",
-				//"ns":   "test_db.test_coll",
-			},
-		}
-		indexMap := map[utils.NS][]bson.M{
-			utils.NS{"test_db", "test_coll"}: indexInput,
-		}
-		err = StartIndexSync(indexMap, testMongoAddressServerless, nil, true)
-		assert.Equal(t, nil, err, "should be equal")
-
-		cursor, err := conn.Client.Database("test_db").Collection("test_coll").Indexes().List(nil)
-		assert.Equal(t, nil, err, "should be equal")
-
-		indexes := make([]bson.M, 0)
-
-		cursor.All(nil, &indexes)
-		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, len(indexes), len(indexInput), "should be equal")
-		assert.Equal(t, isEqual(indexInput, indexes), true, "should be equal")
-	}
+	// serverless deprecate
+	//{
+	//	fmt.Printf("TestStartIndexSync case %d.\n", nr)
+	//	nr++
+	//
+	//	conf.Options.FullSyncReaderCollectionParallel = 4
+	//
+	//	conn, err := utils.NewMongoCommunityConn(testMongoAddressServerless, utils.VarMongoConnectModePrimary, true,
+	//		utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, "")
+	//	assert.Equal(t, nil, err, "should be equal")
+	//
+	//	// drop old db
+	//	err = conn.Client.Database("test_db").Drop(nil)
+	//	assert.Equal(t, nil, err, "should be equal")
+	//
+	//	indexInput := []bson.M{
+	//		{
+	//			"key": bson.M{
+	//				"_id": int32(1),
+	//			},
+	//			"name": "_id_",
+	//			//"ns":   "test_db.test_coll",
+	//		},
+	//		{
+	//			"key": bson.M{
+	//				"hello": "hashed",
+	//			},
+	//			"name": "hello_hashed",
+	//			//"ns":   "test_db.test_coll",
+	//		},
+	//		{
+	//			"key": bson.M{
+	//				"x": int32(1),
+	//				"y": int32(1),
+	//			},
+	//			"name": "x_1_y_1",
+	//			//"ns":   "test_db.test_coll",
+	//		},
+	//		{
+	//			"key": bson.M{
+	//				"z": int32(1),
+	//			},
+	//			"name": "z_1",
+	//			//"ns":   "test_db.test_coll",
+	//		},
+	//	}
+	//	indexMap := map[utils.NS][]bson.M{
+	//		utils.NS{"test_db", "test_coll"}: indexInput,
+	//	}
+	//	err = StartIndexSync(indexMap, testMongoAddressServerless, nil, true)
+	//	assert.Equal(t, nil, err, "should be equal")
+	//
+	//	cursor, err := conn.Client.Database("test_db").Collection("test_coll").Indexes().List(nil)
+	//	assert.Equal(t, nil, err, "should be equal")
+	//
+	//	indexes := make([]bson.M, 0)
+	//
+	//	cursor.All(nil, &indexes)
+	//	assert.Equal(t, nil, err, "should be equal")
+	//	assert.Equal(t, len(indexes), len(indexInput), "should be equal")
+	//	assert.Equal(t, isEqual(indexInput, indexes), true, "should be equal")
+	//}
 }
 
 func isEqual(x, y []bson.M) bool {

@@ -122,7 +122,8 @@ func TestGetDbNamespace(t *testing.T) {
 		// drop all old table
 		conn, err := NewMongoCommunityConn(testUrlServerless, "primary", true, "", "", "")
 		assert.Equal(t, nil, err, "should be equal")
-		conn.Client.Database(testDb).Drop(nil)
+		err = conn.Client.Database(testDb).Drop(nil)
+		assert.Equal(t, nil, err, "should be equal")
 
 		// create index
 		index1, err := conn.Client.Database(testDb).Collection("c1").Indexes().
