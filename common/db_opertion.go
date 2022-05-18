@@ -2,6 +2,7 @@ package utils
 
 import (
 	"fmt"
+	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -218,6 +219,12 @@ func GetAllTimestamp(sources []*MongoSource, sslRootFile string) (map[string]Tim
 			smallestOld = oldest
 		}
 	}
+
+	LOG.Info("GetAllTimestamp biggestNew:%v, smallestNew:%v, biggestOld:%v, smallestOld:%v,"+
+		" MongoSource:%v, tsMap:%v",
+		Int64ToTimestamp(biggestNew), Int64ToTimestamp(smallestNew),
+		Int64ToTimestamp(biggestOld), Int64ToTimestamp(smallestOld),
+		sources, tsMap)
 	return tsMap, biggestNew, smallestNew, biggestOld, smallestOld, nil
 }
 

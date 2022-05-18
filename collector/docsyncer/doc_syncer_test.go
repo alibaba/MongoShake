@@ -50,6 +50,7 @@ func TestDbSync(t *testing.T) {
 	// test doSync
 
 	utils.InitialLogger("", "", "debug", true, 1)
+	conf.Options.LogLevel = "debug"
 
 	conn, err := utils.NewMongoCommunityConn(testMongoAddress, utils.VarMongoConnectModePrimary, false,
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")

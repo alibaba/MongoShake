@@ -170,3 +170,28 @@ func TestGetDbNamespace(t *testing.T) {
 		assert.Equal(t, 3, len(nsMap[testDb]), "should be equal")
 	}
 }
+
+func TestGetAllNamespace(t *testing.T) {
+	var nr int
+
+	InitialLogger("", "", "debug", true, 1)
+
+	{
+		fmt.Printf("TestGetAllNamespace case %d.\n", nr)
+		nr++
+
+		mgoSources := []*MongoSource{
+			&MongoSource{
+				URL:         testMongoAddress,
+				ReplicaName: "replica",
+			},
+		}
+
+		tsMap, biggestNew, smallestNew, biggestOld, smallestOld, err := GetAllTimestamp(mgoSources, "")
+		assert.Equal(t, nil, err, "should be equal")
+		fmt.Printf("TestGetAllNamespace biggestNew:%v, smallestNew:%v, biggestOld:%v, smallestOld:%v,"+
+			", tsMap:%v\n",
+			Int64ToTimestamp(biggestNew), Int64ToTimestamp(smallestNew),
+			Int64ToTimestamp(biggestOld), Int64ToTimestamp(smallestOld), tsMap)
+	}
+}
