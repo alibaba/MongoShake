@@ -146,7 +146,7 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 
 func (exec *Executor) errorIgnore(err error) bool {
 	if err == nil {
-		return true
+		return false
 	}
 
 	er, ok := err.(mongo.ServerError)

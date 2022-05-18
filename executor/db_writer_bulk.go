@@ -146,10 +146,10 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 			models = append(models, model)
 		}
 
-		LOG.Debug("bulk_writer: update %v", log.original.partialLog.Object)
+		LOG.Debug("bulk_writer: update %v org_doc:%v", log.original.partialLog.Object, log.original.partialLog)
 	}
 
-	LOG.Debug("bulk_writer: update %v", models)
+	LOG.Debug("bulk_writer: update models len %v", len(models))
 
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(
 		context.Background(), models, nil)
