@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -71,7 +72,7 @@ func (cui *CheckUniqueIndexExistsJob) Name() string {
 	return NameCheckUniqueIndexExistsJob
 }
 
-func (cui *CheckUniqueIndexExistsJob) Run() {
+func (cui *CheckUniqueIndexExistsJob) innerRun() error {
 	var err error
 	conns := make([]*utils.MongoCommunityConn, len(cui.urls))
 	for i, source := range cui.urls {
@@ -79,7 +80,7 @@ func (cui *CheckUniqueIndexExistsJob) Run() {
 			utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			LOG.Error("extra job[%s] connect source[%v] failed: %v", cui.Name(), source.URL, err)
-			return
+			return nil
 		}
 	}
 
@@ -101,11 +102,22 @@ func (cui *CheckUniqueIndexExistsJob) Run() {
 					unique, uErr := cursor.Current.LookupErr("unique")
 					if uErr == nil && nErr == nil &&
 						!strings.HasPrefix(name.String(), "_id") && unique.Boolean() == true {
-						LOG.Crashf("extra job[%s] with source[%v] query index[%s - %s] find unique",
-							cui.Name(), source.URL, ns.Database, ns.Collection)
+						return fmt.Errorf("extra job[%s] with source[%v] query "+
+							"collection[%s - %s] find unique[%v]",
+							cui.Name(), source.URL, ns.Database, ns.Collection, cursor.Current)
 					}
 				}
 			}
 		}
+	}
+
+	return nil
+}
+
+func (cui *CheckUniqueIndexExistsJob) Run() {
+	var err error
+	err = cui.innerRun()
+	if err != nil {
+		LOG.Crashf("%v", err)
 	}
 }
