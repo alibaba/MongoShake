@@ -229,7 +229,7 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 		or.query, findOptions)
 	if or.oplogsCursor == nil || err != nil {
 		err = fmt.Errorf("oplog_reader Find mongo instance [%s] error. %s", or.src, err.Error())
-		LOG.Warn("oplog_reader failed %v", err)
+		LOG.Warn("oplog_reader failed err[%v] or.query[%v]", err, or.query)
 		return err
 	}
 	return
