@@ -81,6 +81,9 @@ func loadCert(data []byte) ([]byte, error) {
 func NewMongoCommunityConn(url string, connectMode string, timeout bool, readConcern,
 	writeConcern string, sslRootFile string) (*MongoCommunityConn, error) {
 
+	if connectMode == VarMongoConnectModeStandalone {
+		url += "?connect=direct"
+	}
 	clientOps := options.Client().ApplyURI(url)
 
 	// tls tlsInsecure + tlsCaFile
