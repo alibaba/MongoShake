@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"sync"
@@ -87,11 +88,11 @@ func (or *OplogReader) SetQueryTimestampOnEmpty(ts interface{}) {
 }
 
 func (or *OplogReader) UpdateQueryTimestamp(ts int64) {
-	or.query[QueryTs] = bson.M{QueryOpGT: ts}
+	or.query[QueryTs] = bson.M{QueryOpGT: utils.Int64ToTimestamp(ts)}
 }
 
 func (or *OplogReader) getQueryTimestamp() int64 {
-	return or.query[QueryTs].(bson.M)[QueryOpGT].(int64)
+	return utils.TimeStampToInt64(or.query[QueryTs].(bson.M)[QueryOpGT].(primitive.Timestamp))
 }
 
 // Next returns an oplog by raw bytes which is []byte
@@ -138,9 +139,9 @@ func (or *OplogReader) StartFetcher() {
 
 // fetch oplog tp store disk queue or memory
 func (or *OplogReader) fetcher() {
-	LOG.Info("start fetcher with src[%v] replica-name[%v] query-ts[%v]",
-		utils.BlockMongoUrlPassword(or.src, "***"), or.replset,
-		utils.ExtractTimestampForLog(or.query[QueryTs].(bson.M)[QueryOpGT].(int64)))
+	LOG.Info("start %s fetcher with src[%v] replica-name[%v] query-ts[%v]",
+		or.String(), utils.BlockMongoUrlPassword(or.src, "***"), or.replset,
+		or.query[QueryTs].(bson.M)[QueryOpGT].(primitive.Timestamp))
 	for {
 		if err := or.EnsureNetwork(); err != nil {
 			or.oplogChan <- &retOplog{nil, err}
