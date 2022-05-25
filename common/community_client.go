@@ -80,10 +80,7 @@ func loadCert(data []byte) ([]byte, error) {
 
 func NewMongoCommunityConn(url string, connectMode string, timeout bool, readConcern,
 	writeConcern string, sslRootFile string) (*MongoCommunityConn, error) {
-
-	if connectMode == VarMongoConnectModeStandalone {
-		url += "?connect=direct"
-	}
+	
 	clientOps := options.Client().ApplyURI(url)
 
 	// tls tlsInsecure + tlsCaFile
@@ -154,7 +151,10 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 
 	// ping
 	if err = client.Ping(ctx, clientOps.ReadPreference); err != nil {
-		return nil, fmt.Errorf("ping to %v failed: %v", BlockMongoUrlPassword(url, "***"), err)
+		return nil, fmt.Errorf("ping to %v failed: %v\n"+
+			"If Mongo Server is standalone(single node) Or conn address is different with mongo server address"+
+			" try atandalone mode by mongodb://ip:port/admin?connect=direct",
+			BlockMongoUrlPassword(url, "***"), err)
 	}
 
 	LOG.Info("New session to %s successfully", BlockMongoUrlPassword(url, "***"))
