@@ -116,7 +116,13 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// enable shard if sharding -> sharding
 	shardingSync := docsyncer.IsShardingToSharding(fromIsSharding, toConn)
 	if shardingSync {
-		if err := docsyncer.StartNamespaceSpecSyncForSharding(conf.Options.MongoSUrl, toConn, trans); err != nil {
+		var connString string
+		if len(conf.Options.MongoSUrl) > 0 {
+			connString = conf.Options.MongoSUrl
+		} else {
+			connString = conf.Options.MongoCsUrl
+		}
+		if err := docsyncer.StartNamespaceSpecSyncForSharding(connString, toConn, trans); err != nil {
 			return err
 		}
 	}
