@@ -42,10 +42,10 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 
 	startTsMap = make(map[string]int64, len(tsMap)+1)
 
-	LOG.Info("all node timestamp map: %v", tsMap)
-
 	confTs32 := conf.Options.CheckpointStartPosition
 	confTsMongoTs := confTs32 << 32
+
+	LOG.Info("all node timestamp map: %v CheckpointStartPosition:%v", tsMap, utils.Int64ToTimestamp(confTsMongoTs))
 
 	// fetch mongos checkpoint when using change stream
 	var mongosCkpt *ckpt.CheckpointContext
