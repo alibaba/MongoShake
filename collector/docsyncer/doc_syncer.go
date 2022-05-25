@@ -95,6 +95,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoCommunit
 	if fromConn, err = utils.NewMongoCommunityConn(csUrl, utils.VarMongoConnectModePrimary, true,
 		utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault,
 		conf.Options.MongoSslRootCaFile); err != nil {
+		LOG.Info("Connect to [%s] failed. err[%v]", csUrl, err)
 		return err
 	}
 	defer fromConn.Close()

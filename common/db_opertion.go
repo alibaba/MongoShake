@@ -274,7 +274,11 @@ func FindFirstErrorIndexAndMessageN(err error) (int, string, bool) {
 		return 0, "", false
 	}
 
-	wError := (err.(mongo.BulkWriteException)).WriteErrors
+	bwError, ok := err.(mongo.BulkWriteException)
+	if ok == false {
+		return 0, "", false
+	}
+	wError := bwError.WriteErrors
 	if len(wError) == 0 {
 		return 0, "", false
 	}
