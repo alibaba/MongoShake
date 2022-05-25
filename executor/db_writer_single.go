@@ -157,8 +157,12 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 		for _, log := range oplogs {
 			var update bson.D
 			if oplog.FindFiledPrefix(log.original.partialLog.Object, "$") {
+				var oplogErr error
 				log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-				update = log.original.partialLog.Object
+				if update, oplogErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); oplogErr != nil {
+					LOG.Error("doUpdate run Faild err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
+					return oplogErr
+				}
 			} else {
 				update = bson.D{{"$set", log.original.partialLog.Object}}
 			}
@@ -201,7 +205,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 				}
 			}
 
-			LOG.Debug("single_writer: upsert %v", log.original.partialLog)
+			LOG.Debug("single_writer: upsert %v update[%v]", log.original.partialLog, update)
 		}
 	} else {
 		for _, log := range oplogs {

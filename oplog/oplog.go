@@ -258,3 +258,36 @@ func GatherApplyOps(input []*PartialLog) (*GenericOplog, error) {
 		}, nil
 	}
 }
+
+// Oplog from mongod(5.0) in sharding&replica
+// {"ts":{"T":1653449035,"I":3},"v":2,"op":"u","ns":"test.bar",
+//  "o":[{"Key":"diff","Value":[{"Key":"d","Value":[{"Key":"ok","Value":false}]},
+//                              {"Key":"i","Value":[{"Key":"plus_field","Value":2}]}]}],
+//  "o2":[{"Key":"_id","Value":"628da11482387c117d4e9e45"}]}
+
+// "o" : { "$v" : 2, "diff" : { "d" : { "count" : false }, "u" : { "name" : "orange" }, "i" : { "c" : 11 } } }
+func DiffUpdateOplogToNormal(diffOplog bson.D) (bson.D, error) {
+	var result bson.D
+	for _, ele := range diffOplog {
+		if ele.Key != "diff" {
+			continue
+		}
+		if diffValue, ok := ele.Value.(bson.D); ok {
+			for _, valueEle := range diffValue {
+				if valueEle.Key == "d" {
+					result = append(result, primitive.E{Key: "$unset", Value: valueEle.Value})
+				} else if valueEle.Key == "i" || valueEle.Key == "u" {
+					result = append(result, primitive.E{Key: "$set", Value: valueEle.Value})
+				} else {
+					return diffOplog, fmt.Errorf("unknow Key[%v]", valueEle)
+				}
+			}
+		}
+	}
+
+	if len(result) > 0 {
+		return result, nil
+	} else {
+		return diffOplog, nil
+	}
+}

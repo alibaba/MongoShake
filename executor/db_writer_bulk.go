@@ -122,8 +122,12 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 	for _, log := range oplogs {
 		var newObject bson.D
 		if oplog.FindFiledPrefix(log.original.partialLog.Object, "$") {
+			var oplogErr error
 			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-			newObject = log.original.partialLog.Object
+			if newObject, oplogErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); oplogErr != nil {
+				LOG.Error("doUpdate run Faild err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
+				return oplogErr
+			}
 		} else {
 			newObject = bson.D{{"$set", log.original.partialLog.Object}}
 		}
@@ -146,7 +150,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 			models = append(models, model)
 		}
 
-		LOG.Debug("bulk_writer: update %v org_doc:%v", log.original.partialLog.Object, log.original.partialLog)
+		LOG.Debug("bulk_writer: update %v org_doc:%v", newObject, log.original.partialLog)
 	}
 
 	LOG.Debug("bulk_writer: update models len %v", len(models))
