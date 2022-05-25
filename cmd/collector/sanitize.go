@@ -351,10 +351,7 @@ func checkConflict() error {
 		} else if len(conf.Options.MongoSUrl) > 0 {
 			conf.Options.CheckpointStorageUrl = conf.Options.MongoSUrl
 		} else {
-			return fmt.Errorf("mongo_s_url should be given when source is sharding")
-			// deprecated.
-			// sharding
-			conf.Options.CheckpointStorageUrl = conf.Options.MongoCsUrl
+			return fmt.Errorf("checkpoint.storage.url should be given when source is sharding")
 		}
 	}
 	// avoid the typo of mongo urls
