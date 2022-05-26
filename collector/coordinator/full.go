@@ -128,7 +128,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 
 	// fetch all indexes
-	var indexMap map[utils.NS][]bson.M
+	var indexMap map[utils.NS][]bson.D
 	if conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexNone {
 		if indexMap, err = fetchIndexes(coordinator.RealSourceFullSync, filterList.IterateFilter); err != nil {
 			return fmt.Errorf("fetch index failed[%v]", err)

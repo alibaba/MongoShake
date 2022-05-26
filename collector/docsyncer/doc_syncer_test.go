@@ -6,6 +6,7 @@ import (
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	"github.com/alibaba/MongoShake/v2/collector/transform"
 	"github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/oplog"
 	"github.com/alibaba/MongoShake/v2/sharding"
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 	"sort"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
-	"reflect"
 )
 
 const (
@@ -407,38 +407,28 @@ func TestStartIndexSync(t *testing.T) {
 		err = conn.Client.Database("test_db").Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		indexInput := []bson.M{
+		indexInput := []bson.D{
 			{
-				"key": bson.M{
-					"_id": int32(1),
-				},
-				"name": "_id_",
-				"ns":   "test_db.test_coll",
+				{"key", bson.D{{"_id", int32(1)}}},
+				{"name", "_id_"},
 			},
 			{
-				"key": bson.M{
-					"hello": "hashed",
-				},
-				"name": "hello_hashed",
-				"ns":   "test_db.test_coll",
+				{"key", bson.D{{"hello", "hashed"}}},
+				{"name", "hello_hashed"},
 			},
 			{
-				"key": bson.M{
-					"x": int32(1),
-					"y": int32(1),
-				},
-				"name": "x_1_y_1",
-				"ns":   "test_db.test_coll",
+				{"key", bson.D{
+					{"x", int32(1)},
+					{"y", int32(1)},
+				}},
+				{"name", "x_1_y_1"},
 			},
 			{
-				"key": bson.M{
-					"z": int32(1),
-				},
-				"name": "z_1",
-				"ns":   "test_db.test_coll",
+				{"key", bson.D{{"z", int32(1)}}},
+				{"name", "z_1"},
 			},
 		}
-		indexMap := map[utils.NS][]bson.M{
+		indexMap := map[utils.NS][]bson.D{
 			utils.NS{"test_db", "test_coll"}: indexInput,
 		}
 		err = StartIndexSync(indexMap, testMongoAddress, nil, true)
@@ -447,12 +437,12 @@ func TestStartIndexSync(t *testing.T) {
 		cursor, err := conn.Client.Database("test_db").Collection("test_coll").Indexes().List(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		indexes := make([]bson.M, 0)
+		indexes := make([]bson.D, 0)
 
 		cursor.All(nil, &indexes)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, len(indexes), len(indexInput), "should be equal")
-		assert.Equal(t, isEqual(indexInput, indexes), true, "should be equal")
+		isEqual(indexInput, indexes, t)
 	}
 
 	// serverless deprecate
@@ -519,32 +509,18 @@ func TestStartIndexSync(t *testing.T) {
 	//}
 }
 
-func isEqual(x, y []bson.M) bool {
-	sort.Slice(x, func(i, j int) bool {
-		if x[i]["name"].(string) < x[j]["name"].(string) {
-			return true
-		}
-		return false
-	})
-	sort.Slice(y, func(i, j int) bool {
-		if y[i]["name"].(string) < y[j]["name"].(string) {
-			return true
-		}
-		return false
-	})
+func isEqual(x, y []bson.D, t *testing.T) {
+	assert.Equal(t, len(x), len(y), "should be equal")
 
-	removeField(x)
-	removeField(y)
+	for i := 0; i < len(x); i += 1 {
+		xKey := oplog.GetKey(x[i], "key")
+		yKey := oplog.GetKey(y[i], "key")
+		xName := oplog.GetKey(x[i], "name")
+		yName := oplog.GetKey(y[i], "name")
 
-	fmt.Println(x)
-	fmt.Println(y)
-
-	for i := range x {
-		if !reflect.DeepEqual(x[i], y[i]) {
-			return false
-		}
+		assert.Equal(t, xKey, yKey, "should be equal")
+		assert.Equal(t, xName, yName, "should be equal")
 	}
-	return true
 }
 
 func removeField(x []bson.M) {

@@ -189,9 +189,9 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
  * fetch all indexes.
  * the cost is low so that no need to run in parallel.
  */
-func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) bool) (map[utils.NS][]bson.M, error) {
+func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) bool) (map[utils.NS][]bson.D, error) {
 	var mutex sync.Mutex
-	indexMap := make(map[utils.NS][]bson.M)
+	indexMap := make(map[utils.NS][]bson.D)
 	for _, src := range sourceList {
 		LOG.Info("source[%v %v] start fetching index", src.ReplicaName, utils.BlockMongoUrlPassword(src.URL, "***"))
 		// 1. fetch namespace
@@ -217,7 +217,7 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 				return nil, fmt.Errorf("source[%v %v] fetch index failed: %v", src.ReplicaName, src.URL, err)
 			}
 
-			indexes := make([]bson.M, 0)
+			indexes := make([]bson.D, 0)
 			if err = cursor.All(nil, &indexes); err != nil {
 				return nil, fmt.Errorf("index cursor fetch all indexes fail: %v", err)
 			}

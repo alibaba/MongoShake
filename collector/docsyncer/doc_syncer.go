@@ -3,6 +3,7 @@ package docsyncer
 import (
 	"errors"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"sync"
 	"sync/atomic"
@@ -191,7 +192,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoCommunit
 	return nil
 }
 
-func StartIndexSync(indexMap map[utils.NS][]bson.M, toUrl string,
+func StartIndexSync(indexMap map[utils.NS][]bson.D, toUrl string,
 	nsTrans *transform.NamespaceTransform, background bool) (syncError error) {
 	if conf.Options.FullSyncExecutorDebug {
 		LOG.Info("full_sync.executor.debug set, no need to sync index")
@@ -200,7 +201,7 @@ func StartIndexSync(indexMap map[utils.NS][]bson.M, toUrl string,
 
 	type IndexNS struct {
 		ns        utils.NS
-		indexList []bson.M
+		indexList []bson.D
 	}
 
 	LOG.Info("start writing index with background[%v], indexMap length[%v]", background, len(indexMap))
@@ -245,14 +246,21 @@ func StartIndexSync(indexMap map[utils.NS][]bson.M, toUrl string,
 
 				for _, index := range indexNs.indexList {
 					// ignore _id
-					if _, ok := index["key"].(bson.M)["_id"]; ok {
+					if utils.HaveIdIndexKey(index) {
 						continue
 					}
 
-					index["background"] = background
+					newIndex := bson.D{}
+					for _, v := range index {
+						if v.Key == "ns" || v.Key == "v" || v.Key == "background" {
+							continue
+						}
+						newIndex = append(newIndex, v)
+					}
+					newIndex = append(newIndex, primitive.E{Key: "background", Value: background})
 					if out := conn.Client.Database(toNS.Database).RunCommand(nil, bson.D{
 						{"createIndexes", toNS.Collection},
-						{"indexes", []bson.M{index}},
+						{"indexes", []bson.D{newIndex}},
 					}); out.Err() != nil {
 						LOG.Warn("Create indexes for ns %v of dest mongodb failed. %v", ns, out.Err())
 					}

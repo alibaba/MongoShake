@@ -3,6 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"os"
 	"strings"
@@ -192,4 +193,29 @@ func MarshalStruct(input interface{}) string {
 
 func DuplicateKey(err error) bool {
 	return mongo.IsDuplicateKeyError(err)
+}
+
+// Return true only Indexe only have key _id
+func HaveIdIndexKey(obj bson.D) bool {
+	for _, ele := range obj {
+		if ele.Key != "key" {
+			continue
+		}
+
+		keyValue, ok := ele.Value.(bson.D)
+		if !ok {
+			continue
+		}
+		if len(keyValue) > 1 {
+			continue
+		}
+
+		for _, fieldEle := range keyValue {
+			if fieldEle.Key == "_id" {
+				return true
+			}
+		}
+	}
+
+	return false
 }
