@@ -3,6 +3,7 @@ package oplog
 import (
 	"encoding/json"
 	"fmt"
+	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -447,5 +448,6 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 		oplog.Query = bson.D{}
 	}
 
+	LOG.Debug("ConvertEvent2Oplog Event[%v] to Oplog[%v]", event, oplog)
 	return oplog, nil
 }
