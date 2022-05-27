@@ -3,6 +3,7 @@ package filter
 import (
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
+	"reflect"
 	"strings"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
@@ -20,6 +21,7 @@ type OplogFilterChain []OplogFilter
 func (chain OplogFilterChain) IterateFilter(log *oplog.PartialLog) bool {
 	for _, filter := range chain {
 		if filter.Filter(log) {
+			LOG.Debug("%v filter oplog[%v]", reflect.TypeOf(filter), log)
 			return true
 		}
 	}

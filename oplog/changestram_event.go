@@ -79,6 +79,7 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 	if err := bson.Unmarshal(input, event); err != nil {
 		return nil, fmt.Errorf("unmarshal raw bson[%s] failed: %v", input, err)
 	}
+	LOG.Info("zhangst ConvertEvent2Oplog event[%v]", event)
 
 	oplog := new(PartialLog)
 
