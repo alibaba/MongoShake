@@ -57,6 +57,14 @@ type AutologousFilter struct {
 }
 
 func (filter *AutologousFilter) Filter(log *oplog.PartialLog) bool {
+
+	// Filter out unnecessary commands
+	if operation, found := oplog.ExtraCommandName(log.Object); found {
+		if oplog.IsNeedFilterCommand(operation) {
+			return true
+		}
+	}
+
 	// for namespace. we filter noop operation and collection name
 	// that are admin, local, mongoshake, mongoshake_conflict
 	return filter.FilterNs(log.Namespace)
@@ -160,6 +168,14 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 		}
 
 		switch operation {
+		// startIndexBuild,abortIndexBuild,commitIndexBuild waw introduced in 4.4, first two command are ignored
+		// commitIndexBuild may have mutil indexes which need change to CreateIndexes command
+		case "startIndexBuild":
+			fallthrough
+		case "abortIndexBuild":
+			return true
+		case "commitIndexBuild":
+			fallthrough
 		case "create":
 			fallthrough
 		case "createIndexes":

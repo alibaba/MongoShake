@@ -298,6 +298,8 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			fallthrough
 		case "createIndexes":
 			fallthrough
+		case "commitIndexBuild":
+			fallthrough
 		case "collMod":
 			fallthrough
 		case "drop":

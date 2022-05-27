@@ -85,6 +85,42 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 			},
 		})
 		err = dbHandler.RunCommand(nil, indexes).Err()
+	case "commitIndexBuild":
+		/*
+			If multiple indexes are created, commitIndexBuild only generate one oplog, CreateIndexes multiple oplogs
+			{ "op" : "c", "ns" : "test.$cmd", "ui" : UUID("617ffe90-6dac-4e71-b570-1825422c1896"),
+			  "o" : { "commitIndexBuild" : "car", "indexBuildUUID" : UUID("4e9b7457-b612-42bb-bbad-bd6e9a2d63a7"),
+			          "indexes" : [
+			                      { "v" : 2, "key" : { "count" : 1 }, "name" : "count_1" },
+			                      { "v" : 2, "key" : { "type" : 1 }, "name" : "type_1" }
+			                      ]},
+			  "ts" : Timestamp(1653620229, 6), "t" : NumberLong(1), "v" : NumberLong(2), "wall" : ISODate("2022-05-27T02:57:09.187Z") }
+
+			CreateIndexes Command: db.car.createIndexes([{"count":1},{"type":1}])
+			{ "ts" : Timestamp(1653620582, 3), "t" : NumberLong(2), "h" : NumberLong(0), "v" : 2, "op" : "c", "ns" : "test.$cmd", "ui" : UUID("51d35827-e8b5-4891-8818-41326718505d"), "wall" : ISODate("2022-05-27T03:03:02.282Z"), "o" : { "createIndexes" : "car", "v" : 2, "key" : { "type" : 1 }, "name" : "type_1" } }
+			{ "ts" : Timestamp(1653620582, 2), "t" : NumberLong(2), "h" : NumberLong(0), "v" : 2, "op" : "c", "ns" : "test.$cmd", "ui" : UUID("51d35827-e8b5-4891-8818-41326718505d"), "wall" : ISODate("2022-05-27T03:03:02.281Z"), "o" : { "createIndexes" : "car", "v" : 2, "key" : { "count" : 1 }, "name" : "count_1" } }
+		*/
+		var indexes bson.D
+		for i, ele := range log.Object {
+			if i == 0 {
+				indexes = append(indexes, primitive.E{
+					Key:   "createIndexes",
+					Value: ele.Value.(string),
+				})
+				nimo.AssertTrue(ele.Key == "commitIndexBuild", "should panic when ele.Name != 'commitIndexBuild'")
+			} else {
+				if ele.Key == "indexes" {
+					indexes = append(indexes, primitive.E{
+						Key:   "indexes",
+						Value: ele.Value,
+					})
+				}
+			}
+		}
+
+		nimo.AssertTrue(len(indexes) >= 2, "indexes must at least have two elements")
+		LOG.Debug("RunCommand commitIndexBuild oplog after conversion[%v]", indexes)
+		err = dbHandler.RunCommand(nil, indexes).Err()
 	case "applyOps":
 		/*
 		 * Strictly speaking, we should handle applysOps nested case, but it is

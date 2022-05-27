@@ -1769,6 +1769,139 @@ func TestRunCommand(t *testing.T) {
 		}
 		assert.Equal(t, true, exist, "should be equal")
 	}
+
+	// bulkWrite create index by commitIndexBuild
+	{
+		fmt.Printf("TestRunCommand case %d.\n", nr)
+		nr++
+
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		assert.Equal(t, nil, err, "should be equal")
+
+		// drop database
+		err = conn.Client.Database("hh").Drop(nil)
+		assert.Equal(t, nil, err, "should be equal")
+
+		_, err = conn.Client.Database("hh").Collection("y").InsertOne(context.Background(), bson.M{"x": 1})
+		assert.Equal(t, nil, err, "should be equal")
+
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "c",
+				Namespace: "hh.$cmd",
+				Object: bson.D{
+					bson.E{
+						Key:   "commitIndexBuild",
+						Value: "y",
+					},
+					bson.E{
+						Key: "indexes",
+						Value: []bson.D{
+							{
+								{"unique", "true"},
+								{"v", 2},
+								{"name", "x_1"},
+								{"key", bson.D{{"x", 1}}},
+							},
+							{
+								{"unique", "true"},
+								{"v", 2},
+								{"name", "id_x_1"},
+								{"key", bson.D{{"_id", 1}, {"x", 1}}},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		err = RunCommand("hh", "commitIndexBuild", log, conn.Client)
+		assert.Equal(t, nil, err, "should be equal")
+
+		cursor, err := conn.Client.Database("hh").Collection("y").Indexes().List(context.Background())
+		assert.Equal(t, nil, err, "should be equal")
+
+		indexes := make([]bson.M, 0)
+		cursor.All(nil, &indexes)
+		fmt.Printf("indexes:%v\n", indexes)
+
+		exist := false
+		for _, index := range indexes {
+			if index["name"] == "x_1" && index["unique"] == true {
+				exist = true
+				break
+			}
+		}
+		assert.Equal(t, true, exist, "should be equal")
+	}
+
+	// commandWrite create index by commitIndexBuild
+	{
+		fmt.Printf("TestRunCommand case %d.\n", nr)
+		nr++
+
+		conf.Options.FilterDDLEnable = true
+
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		assert.Equal(t, nil, err, "should be equal")
+
+		writer := NewDbWriter(conn, bson.M{"g": 1}, true, 0)
+
+		// drop database
+		err = conn.Client.Database("hh").Drop(nil)
+		assert.Equal(t, nil, err, "should be equal")
+
+		_, err = conn.Client.Database("hh").Collection("y").InsertOne(context.Background(), bson.M{"x": 1})
+		assert.Equal(t, nil, err, "should be equal")
+
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "c",
+				Namespace: "hh.$cmd",
+				Object: bson.D{
+					bson.E{
+						Key:   "commitIndexBuild",
+						Value: "y",
+					},
+					bson.E{
+						Key: "indexes",
+						Value: []bson.D{
+							{
+								{"unique", "true"},
+								{"v", 2},
+								{"name", "x_1"},
+								{"key", bson.D{{"x", 1}}},
+							},
+						},
+					},
+				},
+			},
+		}
+		oplogRecord := &OplogRecord{original: &PartialLogWithCallbak{
+			partialLog: log,
+		}}
+
+		err = writer.doCommand("hh", bson.M{}, []*OplogRecord{oplogRecord})
+		assert.Equal(t, nil, err, "should be equal")
+
+		cursor, err := conn.Client.Database("hh").Collection("y").Indexes().List(context.Background())
+		assert.Equal(t, nil, err, "should be equal")
+
+		indexes := make([]bson.M, 0)
+		cursor.All(nil, &indexes)
+		fmt.Printf("indexes:%v\n", indexes)
+
+		exist := false
+		for _, index := range indexes {
+			if index["name"] == "x_1" && index["unique"] == true {
+				exist = true
+				break
+			}
+		}
+		assert.Equal(t, true, exist, "should be equal")
+	}
 }
 
 func TestIgnoreError(t *testing.T) {
