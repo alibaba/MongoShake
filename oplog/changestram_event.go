@@ -437,7 +437,7 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 		 */
 		return nil, fmt.Errorf("invalidate event happen, should be handle manually: %s", event)
 	default:
-		return nil, fmt.Errorf("unknown event[%v]", event.OperationType)
+		return nil, fmt.Errorf("unknown event type[%v] org_event[%v]", event.OperationType, event)
 	}
 
 	// set default for "o", "o2"
