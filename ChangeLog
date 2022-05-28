@@ -1,3 +1,8 @@
+2022-05-28 Alibaba Cloud.
+    * version: 2.7.1(pre version)
+    * IMPROVE: fix index order #708
+    * IMPROVE: commitIndexBuild & TTL Index
+    * IMPROVE: adapt oplog update mechanism in Mongodb5.0
 2022-05-18 Alibaba Cloud.
     * version: 2.7.0(pre version)
     * IMPROVE: use mongo-go-driver instead of mgo to support mongodb5.0
