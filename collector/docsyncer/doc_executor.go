@@ -261,7 +261,7 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 			if err != nil {
 				return fmt.Errorf("bulk run updateForInsert failed[%v]", err)
 			}
-			fmt.Printf("updateForInsert succ updateModels.len:%d updateModules[0]:%v\n",
+			LOG.Debug("updateForInsert succ updateModels.len:%d updateModules[0]:%v\n",
 				len(updateModels), updateModels[0])
 		} else {
 			return fmt.Errorf("bulk run failed[%v]", err)

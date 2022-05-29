@@ -3,19 +3,23 @@
     * IMPROVE: fix index order #708
     * IMPROVE: commitIndexBuild & TTL Index
     * IMPROVE: adapt oplog update mechanism in Mongodb5.0
+
 2022-05-18 Alibaba Cloud.
     * version: 2.7.0(pre version)
     * IMPROVE: use mongo-go-driver instead of mgo to support mongodb5.0
+
 2021-11-26 Alibaba Cloud.
 	* version: 2.6.6
 	* BUGFIX: fix ssl conn string #668 #628
 	* BUGFIX: fix password print in log #612
 	* BUGFIX: fix connection leak #693
 	* BUGFIX: fix bug about whiteRule
+
 2021-10-27 Alibaba Cloud.
 	* version: 2.6.5
 	* IMPROVE: support kafka channel ssl
 	* IMPROVE: support only have mongo_s_url
+
 2021-04-13 Alibaba Cloud.
 	* version: 2.6.4
 	* IMPROVE: parse configuration failed because of column length is bigger
