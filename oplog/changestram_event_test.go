@@ -690,7 +690,7 @@ func TestConvertEvent2Oplog(t *testing.T) {
 				"coll": "testColl",
 			},
 			TxnNumber: 1,
-			Lsid: bson.M{
+			LSID: bson.M{
 				"id":  "70c47e76-7f48-46cb-ad07-cbeefd29d664",
 				"uid": "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
 			},
@@ -712,7 +712,7 @@ func TestConvertEvent2Oplog(t *testing.T) {
 				"db": "testDb",
 			},
 			TxnNumber: 2,
-			Lsid: bson.M{
+			LSID: bson.M{
 				"id":  "70c47e76-7f48-46cb-ad07-cbeefd29d664",
 				"uid": "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
 			},

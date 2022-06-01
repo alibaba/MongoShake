@@ -57,7 +57,7 @@ func mockOplogs(length int, ddlGiven []int, noopGiven []int, sameTsGiven []int, 
 					Operation: op,
 					Timestamp: utils.TimeToTimestamp(startTs + int64(i)),
 					TxnNumber: 1,
-					Lsid: bson.M{
+					LSID: bson.M{
 						"id":  "xx",
 						"uid": "xx2",
 					},
@@ -1315,7 +1315,7 @@ func TestNeedMergeTransaction(t *testing.T) {
 		x := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Timestamp: primitive.Timestamp{T: 0, I: 123},
-				Lsid: bson.M{
+				LSID: bson.M{
 					"id":  "70c47e76-7f48-46cb-ad07-cbeefd29d664",
 					"uid": "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
 				},
@@ -1337,7 +1337,7 @@ func TestNeedMergeTransaction(t *testing.T) {
 		x := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Timestamp: primitive.Timestamp{T: 0, I: 123},
-				Lsid: bson.M{
+				LSID: bson.M{
 					"id":  "70c47e76-7f48-46cb-ad07-cbeefd29d664",
 					"uid": "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
 				},
@@ -1346,7 +1346,7 @@ func TestNeedMergeTransaction(t *testing.T) {
 		y := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Timestamp: primitive.Timestamp{T: 0, I: 123},
-				Lsid: bson.M{
+				LSID: bson.M{
 					"id":  "xxx",
 					"uid": "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
 				},
@@ -1363,7 +1363,7 @@ func TestNeedMergeTransaction(t *testing.T) {
 		x := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Timestamp: primitive.Timestamp{T: 0, I: 123},
-				Lsid: bson.M{
+				LSID: bson.M{
 					"id":  "70c47e76-7f48-46cb-ad07-cbeefd29d664",
 					"uid": "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
 				},
@@ -1372,7 +1372,7 @@ func TestNeedMergeTransaction(t *testing.T) {
 		y := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Timestamp: primitive.Timestamp{T: 0, I: 123},
-				Lsid: bson.M{
+				LSID: bson.M{
 					"id":  "70c47e76-7f48-46cb-ad07-cbeefd29d664",
 					"uid": "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
 				},
@@ -1389,7 +1389,7 @@ func TestNeedMergeTransaction(t *testing.T) {
 		x := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Timestamp: primitive.Timestamp{T: 0, I: 123},
-				Lsid: bson.M{
+				LSID: bson.M{
 					"id":  "70c47e76-7f48-46cb-ad07-cbeefd29d664",
 					"uid": "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
 				},
@@ -1399,7 +1399,7 @@ func TestNeedMergeTransaction(t *testing.T) {
 		y := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Timestamp: primitive.Timestamp{T: 0, I: 123},
-				Lsid: bson.M{
+				LSID: bson.M{
 					"id":  "70c47e76-7f48-46cb-ad07-cbeefd29d664",
 					"uid": "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
 				},
@@ -1417,7 +1417,7 @@ func TestNeedMergeTransaction(t *testing.T) {
 		x := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Timestamp: primitive.Timestamp{T: 0, I: 123},
-				Lsid: bson.M{
+				LSID: bson.M{
 					"id":  "70c47e76-7f48-46cb-ad07-cbeefd29d664",
 					"uid": "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
 				},
@@ -1427,7 +1427,7 @@ func TestNeedMergeTransaction(t *testing.T) {
 		y := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Timestamp: primitive.Timestamp{T: 0, I: 123},
-				Lsid: bson.M{
+				LSID: bson.M{
 					"id":  "70c47e76-7f48-46cb-ad07-cbeefd29d664",
 					"uid": "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
 				},

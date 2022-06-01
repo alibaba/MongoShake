@@ -459,7 +459,7 @@ func (batcher *Batcher) needMergeTransaction(x, y *oplog.PartialLog) bool {
 	}
 
 	return x.Timestamp == y.Timestamp &&
-		x.Lsid != nil && len(x.Lsid) >= 1 && reflect.DeepEqual(x.Lsid, y.Lsid) &&
+		x.LSID != nil && len(x.LSID) >= 1 && reflect.DeepEqual(x.LSID, y.LSID) &&
 		x.TxnNumber == y.TxnNumber
 }
 

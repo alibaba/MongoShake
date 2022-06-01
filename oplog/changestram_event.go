@@ -62,8 +62,8 @@ type Event struct {
 	DocumentKey       bson.D              `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists on "insert", "replace", "delete", "update"
 	UpdateDescription bson.M              `bson:"updateDescription,omitempty" json:"updateDescription,omitempty"`
 	ClusterTime       primitive.Timestamp `bson:"clusterTime,omitempty" json:"clusterTime,omitempty"`
-	TxnNumber         int64               `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`
-	Lsid              bson.M              `bson:"lsid,omitempty" json:"lsid,omitempty"`
+	TxnNumber         *int64              `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`
+	LSID              bson.Raw            `bson:"lsid,omitempty" json:"lsid,omitempty"`
 }
 
 func (e *Event) String() string {
@@ -86,7 +86,7 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 	// transaction number
 	oplog.TxnNumber = event.TxnNumber
 	// lsid
-	oplog.Lsid = event.Lsid
+	oplog.LSID = event.LSID
 	// documentKey
 	if len(event.DocumentKey) > 0 {
 		oplog.DocumentKey = event.DocumentKey

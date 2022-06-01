@@ -21,7 +21,8 @@ type GenericOplog struct {
 
 type ParsedLog struct {
 	Timestamp     primitive.Timestamp `bson:"ts" json:"ts"`
-	HistoryId     int64               `bson:"h,omitempty" json:"h,omitempty"`
+	Term          *int64              `bson:"t,omitempty" json:"t,omitempty"`
+	Hash          *int64              `bson:"h" json:"h"`
 	Version       int                 `bson:"v,omitempty" json:"v,omitempty"`
 	Operation     string              `bson:"op" json:"op"`
 	Gid           string              `bson:"g,omitempty" json:"g,omitempty"`
@@ -29,11 +30,12 @@ type ParsedLog struct {
 	Object        bson.D              `bson:"o" json:"o"`
 	Query         bson.D              `bson:"o2" json:"o2"`                                       // update condition
 	UniqueIndexes bson.M              `bson:"uk,omitempty" json:"uk,omitempty"`                   //
-	Lsid          bson.M              `bson:"lsid,omitempty" json:"lsid,omitempty"`               // mark the session id, used in transaction
+	LSID          bson.Raw            `bson:"lsid,omitempty" json:"lsid,omitempty"`               // mark the session id, used in transaction
 	FromMigrate   bool                `bson:"fromMigrate,omitempty" json:"fromMigrate,omitempty"` // move chunk
-	TxnNumber     int64               `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`     // transaction number in session
+	TxnNumber     *int64              `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`     // transaction number in session
 	DocumentKey   bson.D              `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists when source collection is sharded, only including shard key and _id
-	// Ui            bson.Binary         `bson:"ui,omitempty" json:"ui,omitempty"` // do not enable currently
+	PrevOpTime    bson.Raw            `bson:"prevOpTime,omitempty"`
+	UI            *primitive.Binary   `bson:"ui,omitempty" json:"ui,omitempty"` // do not enable currently
 }
 
 type PartialLog struct {
@@ -228,7 +230,7 @@ func GatherApplyOps(input []*PartialLog) (*GenericOplog, error) {
 			Gid:           input[0].Gid,
 			Namespace:     "admin.$cmd",
 			UniqueIndexes: input[0].UniqueIndexes,
-			Lsid:          input[0].Lsid,
+			LSID:          input[0].LSID,
 			FromMigrate:   input[0].FromMigrate,
 		},
 	}
