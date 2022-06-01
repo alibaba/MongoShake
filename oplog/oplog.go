@@ -21,9 +21,9 @@ type GenericOplog struct {
 
 type ParsedLog struct {
 	Timestamp     primitive.Timestamp `bson:"ts" json:"ts"`
-	Term          *int64              `bson:"t,omitempty" json:"t,omitempty"`
+	Term          *int64              `bson:"t" json:"t"`
 	Hash          *int64              `bson:"h" json:"h"`
-	Version       int                 `bson:"v,omitempty" json:"v,omitempty"`
+	Version       int                 `bson:"v" json:"v"`
 	Operation     string              `bson:"op" json:"op"`
 	Gid           string              `bson:"g,omitempty" json:"g,omitempty"`
 	Namespace     string              `bson:"ns" json:"ns"`
