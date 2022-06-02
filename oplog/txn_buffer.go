@@ -74,6 +74,10 @@ func NewBuffer() *TxnBuffer {
 	}
 }
 
+func (b *TxnBuffer) Size() int {
+	return len(b.txns)
+}
+
 // Concurrency notes:
 //
 // We require that AddOp, GetTxnStream and PurgeTxn be called serially as part
