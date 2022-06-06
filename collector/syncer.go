@@ -172,6 +172,10 @@ func (sync *OplogSyncer) Init() {
 	sync.persister.RestAPI()
 }
 
+func (sync *OplogSyncer) Fini() {
+	sync.batcher.Fini()
+}
+
 func (sync *OplogSyncer) String() string {
 	return fmt.Sprintf("Syncer[%s]", sync.Replset)
 }

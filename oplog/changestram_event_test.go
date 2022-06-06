@@ -25,6 +25,17 @@ var (
 	client *mongo.Client
 )
 
+func marshalData(input bson.M) bson.Raw {
+	var dataRaw bson.Raw
+	if data, err := bson.Marshal(input); err != nil {
+		return nil
+	} else {
+		dataRaw = data[:]
+	}
+
+	return dataRaw
+}
+
 func newMongoClient(url string) (*mongo.Client, error) {
 	clientOps := options.Client().ApplyURI(url)
 
@@ -665,6 +676,7 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		fmt.Printf("TestConvertEvent2Oplog case %d.\n", nr)
 		nr++
 
+		txnN := []int64{0, 1, 2}
 		var err error
 		client, err = newMongoClient(testUrl)
 		assert.Equal(t, nil, err, "should be equal")
@@ -689,11 +701,11 @@ func TestConvertEvent2Oplog(t *testing.T) {
 				"db":   "testDb",
 				"coll": "testColl",
 			},
-			TxnNumber: 1,
-			LSID: bson.M{
+			TxnNumber: &txnN[1],
+			LSID: marshalData(bson.M{
 				"id":  "70c47e76-7f48-46cb-ad07-cbeefd29d664",
 				"uid": "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
-			},
+			}),
 		}
 		out, err := bson.Marshal(eventInsert1)
 		assert.Equal(t, nil, err, "should be equal")
@@ -711,11 +723,11 @@ func TestConvertEvent2Oplog(t *testing.T) {
 			Ns: bson.M{
 				"db": "testDb",
 			},
-			TxnNumber: 2,
-			LSID: bson.M{
+			TxnNumber: &txnN[2],
+			LSID: marshalData(bson.M{
 				"id":  "70c47e76-7f48-46cb-ad07-cbeefd29d664",
 				"uid": "Y5mrDaxi8gv8RmdTsQ+1j7fmkr7JUsabhNmXAheU0fg=",
-			},
+			}),
 		}
 		out, err = bson.Marshal(eventRename1)
 		assert.Equal(t, nil, err, "should be equal")

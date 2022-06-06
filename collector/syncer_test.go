@@ -23,7 +23,7 @@ func mockLog(ns string, ts int64, withDefault bool, gid string) *oplog.ParsedLog
 			Object:        bson.D{},
 			Query:         bson.D{},
 			UniqueIndexes: bson.M{},
-			LSID:          bson.M{},
+			LSID:          bson.Raw{},
 			Gid:           gid,
 		}
 	case false:
