@@ -3,6 +3,7 @@ package executor
 import (
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -233,6 +234,14 @@ func (exec *Executor) doSync(logs []*OplogRecord) error {
 	count := len(logs)
 
 	transLogs := transformLogs(logs, exec.batchExecutor.NsTrans, conf.Options.IncrSyncDBRef)
+
+	// eventual consistency
+	// only sort CURD now for effective bulk insert
+	if len(logs) > 0 && logs[0].original.partialLog.Operation != "c" {
+		sort.SliceStable(transLogs, func(i, j int) bool {
+			return transLogs[i].original.partialLog.Namespace < transLogs[j].original.partialLog.Namespace
+		})
+	}
 
 	// split batched oplogRecords into (ns, op) groups. individual group
 	// can be accomplished in single MongoDB request. groups
