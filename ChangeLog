@@ -1,3 +1,7 @@
+2022-06-12 Alibaba Cloud.
+    * version: 2.7.3(pre version)
+    * IMPROVE: incremental sync performance improvement
+
 2022-06-03 Alibaba Cloud.
     * version: 2.7.2(pre version)
     * IMPROVE: support multi-transaction sync
