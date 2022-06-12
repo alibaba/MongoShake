@@ -25,10 +25,10 @@ const (
 	// AdaptiveBatchingMaxSize = 16384 // 16k
 
 	// bson deserialize workload is CPU-intensive task
-	PipelineQueueMaxNr    = 6
+	PipelineQueueMaxNr    = 8
 	PipelineQueueMiddleNr = 4
 	PipelineQueueMinNr    = 1
-	PipelineQueueLen      = 64
+	PipelineQueueLen      = 64 * 2
 
 	DurationTime                  = 6000 // unit: ms.
 	DDLCheckpointInterval         = 300  // unit: ms.
