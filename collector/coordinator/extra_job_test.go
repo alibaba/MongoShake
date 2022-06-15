@@ -36,6 +36,18 @@ func TestExtraJob(t *testing.T) {
 		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
+		// drop database
+		err = conn.Client.Database("test").Drop(nil)
+		assert.Equal(t, nil, err, "should be equal")
+
+		// insert data
+		_, err = conn.Client.Database("test").Collection("c1").InsertOne(context.Background(),
+			bson.M{"x": 1, "y": 2})
+		assert.Equal(t, nil, err, "should be equal")
+		_, err = conn.Client.Database("test").Collection("c2").InsertOne(context.Background(),
+			bson.M{"x": 1, "y": 2})
+		assert.Equal(t, nil, err, "should be equal")
+
 		// build index
 		indexOptions := options.Index().SetUnique(true)
 		_, err = conn.Client.Database("test").Collection("c2").Indexes().CreateOne(context.Background(),
