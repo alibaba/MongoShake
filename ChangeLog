@@ -1,3 +1,7 @@
+2022-06-15 Alibaba Cloud.
+    * version: 2.7.4(pre version)
+    * BUGFIX: fix issue #729
+
 2022-06-12 Alibaba Cloud.
     * version: 2.7.3(pre version)
     * IMPROVE: incremental sync performance improvement
