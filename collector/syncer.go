@@ -3,6 +3,7 @@ package collector
 import (
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"sync/atomic"
 	"time"
 
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
@@ -304,11 +305,28 @@ func (sync *OplogSyncer) startBatcher() {
 			sync.checkCheckpointUpdate(barrier, newestTs) // check if need
 		} else {
 			// if log is nil, check whether filterLog is empty
+
+			// update checkpoint for oplog which insert before that have acked
+			// The scenario of this logic is oplog write(have ack but not update to checkpoint) follow by a continuous
+			// filterOplog, There is a problem with updating the filterOplog ts before the oplog ts.
+			lsnCkpt := atomic.LoadInt64(&sync.replMetric.LSNCheckpoint)
+			lsnAck := atomic.LoadInt64(&sync.replMetric.LSNAck)
+			if lsnCkpt != lsnAck {
+				sync.checkpoint(barrier, 0)
+				LOG.Debug("%s update checkpoint when only encounter filterlog [%v][%v] -> [%v][%v]", sync,
+					utils.ExtractTimestampForLog(lsnCkpt), utils.ExtractTimestampForLog(lsnAck),
+					utils.ExtractTimestampForLog(atomic.LoadInt64(&sync.replMetric.LSNCheckpoint)),
+					utils.ExtractTimestampForLog(atomic.LoadInt64(&sync.replMetric.LSNAck)))
+			}
+
 			if filterLog == nil {
 				// no need to update
+				LOG.Debug("%s filterLog is nil", sync)
 				return
 			} else if utils.TimeStampToInt64(filterLog.Timestamp) <= sync.ckptManager.GetInMemory().Timestamp {
 				// no need to update
+				LOG.Debug("%s filterLogTs[%v] is small than ckptTs[%v], skip this filterLogTs", sync,
+					filterLog.Timestamp, utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp))
 				return
 			} else {
 				now := time.Now()
@@ -335,6 +353,9 @@ func (sync *OplogSyncer) startBatcher() {
 						utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp),
 						filterLog.Timestamp)
 				} else {
+					LOG.Debug("%s filterLogTs[%v] not bigger than checkpoint[%v]",
+						sync, filterLog.Timestamp,
+						utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp))
 					return
 				}
 			}

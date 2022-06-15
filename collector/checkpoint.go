@@ -83,6 +83,7 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs int64) {
 
 	// do checkpoint every once in a while
 	if !flush && sync.ckptTime.Add(time.Duration(conf.Options.CheckpointInterval)*time.Millisecond).After(now) {
+		LOG.Debug("do not repeat update checkpoint in %v milliseconds", conf.Options.CheckpointInterval)
 		return
 	}
 	// we force update the ckpt time even failed
@@ -108,6 +109,8 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs int64) {
 	} else {
 		lowest, err = sync.calculateWorkerLowestCheckpoint()
 	}
+	LOG.Debug("checkpoint func lowest:%v inMemoryTs:%v flush:%v inputTs:%v",
+		utils.ExtractTimestampForLog(lowest), utils.ExtractTimestampForLog(inMemoryTs), flush, inputTs)
 
 	lowestInt64 := lowest
 	// if all oplogs from disk has been replayed successfully, store the newest oplog timestamp

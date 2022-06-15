@@ -79,6 +79,7 @@ func (manager *CheckpointManager) GetInMemory() *CheckpointContext {
 	return manager.ctx
 }
 
+// Update checkpoint update memory & persistence(db or file)
 func (manager *CheckpointManager) Update(ts int64) error {
 	if manager.ctx == nil || len(manager.ctx.Name) == 0 {
 		// must run Get() first

@@ -134,7 +134,7 @@ func (ckpt *MongoCheckpoint) Insert(updates *CheckpointContext) error {
 		return err
 	}
 
-	LOG.Info("%s Record new checkpoint success [%d]", ckpt.Name,
+	LOG.Info("%s Record new checkpoint in MongoDB success [%d]", ckpt.Name,
 		utils.ExtractMongoTimestamp(updates.Timestamp))
 	return nil
 }
@@ -181,6 +181,6 @@ func (ckpt *HttpApiCheckpoint) Insert(insert *CheckpointContext) error {
 		return err
 	}
 
-	LOG.Info("%s Record new checkpoint success [%d]", ckpt.Name, utils.ExtractMongoTimestamp(insert.Timestamp))
+	LOG.Info("%s Record new checkpoint in HttpApi success [%d]", ckpt.Name, utils.ExtractMongoTimestamp(insert.Timestamp))
 	return nil
 }
