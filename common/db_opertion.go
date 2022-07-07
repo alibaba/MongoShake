@@ -315,7 +315,7 @@ func GetDbNamespace(url string, filterFunc func(name string) bool, sslRootFile s
 
 	nsList := make([]NS, 0, 128)
 	for _, db := range dbNames {
-		colNames, err := conn.Client.Database(db).ListCollectionNames(nil, bson.M{})
+		colNames, err := conn.Client.Database(db).ListCollectionNames(nil, bson.M{"type": "collection"})
 		if err != nil {
 			err = fmt.Errorf("get collection names of mongodb[%s] db[%v] error: %v", url, db, err)
 			return nil, nil, err

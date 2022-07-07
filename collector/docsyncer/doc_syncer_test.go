@@ -329,7 +329,7 @@ func TestStartDropDestCollection(t *testing.T) {
 		err = StartDropDestCollection(nsSet, conn, nsTrans)
 		assert.Equal(t, nil, err, "should be equal")
 
-		list, err := conn.Client.Database("test").ListCollectionNames(nil, bson.M{})
+		list, err := conn.Client.Database("test").ListCollectionNames(nil, bson.M{"type": "collection"})
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 1, len(list), "should be equal")
 		assert.Equal(t, "c2", list[0], "should be equal")
@@ -375,7 +375,7 @@ func TestStartDropDestCollection(t *testing.T) {
 		err = StartDropDestCollection(nsSet, conn, nsTrans)
 		assert.Equal(t, nil, err, "should be equal")
 
-		list, err := conn.Client.Database("test").ListCollectionNames(nil, bson.M{})
+		list, err := conn.Client.Database("test").ListCollectionNames(nil, bson.M{"type": "collection"})
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 3, len(list), "should be equal")
 		sort.Strings(list)

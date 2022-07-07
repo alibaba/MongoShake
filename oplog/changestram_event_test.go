@@ -540,7 +540,7 @@ func TestConvertEvent2Oplog(t *testing.T) {
 
 		err = runByte(out)
 		assert.Equal(t, nil, err, "should be equal")
-		list, err := client.Database("testDb").ListCollectionNames(context.Background(), bson.M{})
+		list, err := client.Database("testDb").ListCollectionNames(context.Background(), bson.M{"type": "collection"})
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 0, len(list), "should be equal")
 	}
@@ -604,7 +604,7 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		err = runByte(out)
 		assert.Equal(t, nil, err, "should be equal")
 
-		list, err := client.Database("testDb").ListCollectionNames(context.Background(), bson.M{})
+		list, err := client.Database("testDb").ListCollectionNames(context.Background(), bson.M{"type": "collection"})
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 0, len(list), "should be equal")
 
@@ -666,7 +666,7 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		err = runByte(out)
 		assert.Equal(t, nil, err, "should be equal")
 
-		list, err := client.Database("testDb").ListCollectionNames(context.Background(), bson.M{})
+		list, err := client.Database("testDb").ListCollectionNames(context.Background(), bson.M{"type": "collection"})
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 0, len(list), "should be equal")
 	}
@@ -735,7 +735,7 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		err = runByte(out)
 		assert.Equal(t, nil, err, "should be equal")
 
-		list, err := client.Database("testDb").ListCollectionNames(context.Background(), bson.M{})
+		list, err := client.Database("testDb").ListCollectionNames(context.Background(), bson.M{"type": "collection"})
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 0, len(list), "should be equal")
 	}

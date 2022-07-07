@@ -80,7 +80,7 @@ func loadCert(data []byte) ([]byte, error) {
 
 func NewMongoCommunityConn(url string, connectMode string, timeout bool, readConcern,
 	writeConcern string, sslRootFile string) (*MongoCommunityConn, error) {
-	
+
 	clientOps := options.Client().ApplyURI(url)
 
 	// tls tlsInsecure + tlsCaFile
@@ -179,7 +179,7 @@ func (conn *MongoCommunityConn) IsGood() bool {
 }
 
 func (conn *MongoCommunityConn) HasOplogNs() bool {
-	if ns, err := conn.Client.Database("local").ListCollectionNames(nil, bson.M{}); err == nil {
+	if ns, err := conn.Client.Database("local").ListCollectionNames(nil, bson.M{"type": "collection"}); err == nil {
 		for _, table := range ns {
 			if table == OplogNS {
 				return true
@@ -219,7 +219,7 @@ func (conn *MongoCommunityConn) HasUniqueIndex() bool {
 
 	for _, db := range databases {
 		if db != "admin" && db != "local" {
-			coll, _ := conn.Client.Database(db).ListCollectionNames(nil, bson.M{})
+			coll, _ := conn.Client.Database(db).ListCollectionNames(nil, bson.M{"type": "collection"})
 			for _, c := range coll {
 				if c != "system.profile" {
 					// push all collections
