@@ -134,11 +134,7 @@ func NewOplogSyncer(
 	}
 
 	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter), filter.NewGidFilter(gids)}
-
-	// DDL filter
-	if !conf.Options.FilterDDLEnable {
-		filterList = append(filterList, new(filter.DDLFilter))
-	}
+	
 	// namespace filter, heavy operation
 	if len(conf.Options.FilterNamespaceWhite) != 0 || len(conf.Options.FilterNamespaceBlack) != 0 {
 		namespaceFilter := filter.NewNamespaceFilter(conf.Options.FilterNamespaceWhite,

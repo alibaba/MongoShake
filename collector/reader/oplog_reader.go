@@ -89,6 +89,7 @@ func (or *OplogReader) SetQueryTimestampOnEmpty(ts interface{}) {
 
 func (or *OplogReader) UpdateQueryTimestamp(ts int64) {
 	or.query[QueryTs] = bson.M{QueryOpGT: utils.Int64ToTimestamp(ts)}
+	LOG.Info("update or.query to %v", or.query)
 }
 
 func (or *OplogReader) getQueryTimestamp() int64 {
@@ -233,6 +234,9 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 		LOG.Warn("oplog_reader failed err[%v] or.query[%v]", err, or.query)
 		return err
 	}
+
+	LOG.Info("%s generates new cursor query[%v]", or.String(), or.query)
+
 	return
 }
 
