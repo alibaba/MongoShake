@@ -5,9 +5,9 @@ import (
 	"sync"
 
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
-	"github.com/alibaba/MongoShake/v2/collector/configure"
-	"github.com/alibaba/MongoShake/v2/collector/reader"
-	"github.com/alibaba/MongoShake/v2/common"
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	sourceReader "github.com/alibaba/MongoShake/v2/collector/reader"
+	utils "github.com/alibaba/MongoShake/v2/common"
 
 	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
@@ -211,6 +211,15 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 
 		// 3. fetch all indexes
 		for _, ns := range nsList {
+			collSpecs, err := conn.Client.Database(ns.Database).ListCollectionSpecifications(nil, bson.M{"name": ns.Collection})
+			if err != nil {
+				return nil, fmt.Errorf("source[%v %v] get collection specification: %v", src.ReplicaName, src.URL, err)
+			}
+			if collSpecs[0].Type == "view" {
+				LOG.Info("skipped view[%v]", ns)
+				continue
+			}
+
 			// indexes, err := conn.Session.DB(ns.Database).C(ns.Collection).Indexes()
 			cursor, err := conn.Client.Database(ns.Database).Collection(ns.Collection).Indexes().List(nil)
 			if err != nil {
