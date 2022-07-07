@@ -134,7 +134,7 @@ LOOP:
 		case t := <-state.ingestChan:
 			if t.meta.IsData() {
 				// process it
-				innerOps, err := extractInnerOps(&t.op)
+				innerOps, err := ExtractInnerOps(&t.op)
 				if err != nil {
 					state.ingestErr = err
 					break LOOP
@@ -311,11 +311,11 @@ func findValueByKey(keyName string, document *bson.D) (interface{}, error) {
 
 const extractErrorFmt = "error extracting transaction ops: %s: %v"
 
-// extractInnerOps
+// ExtractInnerOps
 // doc.applyOps[i].ts（Let ckpt use the last ts to judge complete）
 //     applyOps[0 - n-1].ts = doc.ts - 1
 //     applyOps[n-1].ts = doc.ts
-func extractInnerOps(tranOp *ParsedLog) ([]ParsedLog, error) {
+func ExtractInnerOps(tranOp *ParsedLog) ([]ParsedLog, error) {
 	doc := tranOp.Object
 	rawAO, err := findValueByKey("applyOps", &doc)
 	if err != nil {
@@ -327,6 +327,8 @@ func extractInnerOps(tranOp *ParsedLog) ([]ParsedLog, error) {
 		return nil, fmt.Errorf(extractErrorFmt, "applyOps field", "not a BSON array")
 	}
 
+	tmpTimestamp := tranOp.Timestamp
+	tmpTimestamp.I = tmpTimestamp.I - 1
 	ops := make([]ParsedLog, len(ao))
 	for i, v := range ao {
 		opDoc, ok := v.(bson.D)
@@ -340,12 +342,13 @@ func extractInnerOps(tranOp *ParsedLog) ([]ParsedLog, error) {
 
 		// The inner ops doesn't have these fields and they are required by lastAppliedTime.Latest in Mongomirror,
 		// so we are assigning them from the parent transaction op
-		op.Timestamp = tranOp.Timestamp
+		op.Timestamp = tmpTimestamp
 		op.Term = tranOp.Term
 		op.Hash = tranOp.Hash
 
 		ops[i] = *op
 	}
+	ops[len(ops)-1].Timestamp = tranOp.Timestamp
 
 	return ops, nil
 }

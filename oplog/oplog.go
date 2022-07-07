@@ -3,6 +3,7 @@ package oplog
 import (
 	"encoding/json"
 	"fmt"
+	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"reflect"
@@ -55,7 +56,15 @@ func LogEntryEncode(logs []*GenericOplog) [][]byte {
 	encodedLogs := make([][]byte, 0, len(logs))
 	// log entry encode
 	for _, log := range logs {
-		encodedLogs = append(encodedLogs, log.Raw)
+		if log.Raw == nil {
+			if out, err := bson.Marshal(log.Parsed); err != nil {
+				LOG.Crashf("LogEntryEncode marshal Oplog[%v] failed[%v]", log.Parsed, err)
+			} else {
+				encodedLogs = append(encodedLogs, out)
+			}
+		} else {
+			encodedLogs = append(encodedLogs, log.Raw)
+		}
 	}
 	return encodedLogs
 }

@@ -111,6 +111,11 @@ func (m TxnMeta) IsFinal() bool {
 	return m.IsCommit() || m.IsAbort()
 }
 
+// IsCommitOp is commitTransaction oplog
+func (m TxnMeta) IsCommitOp() bool {
+	return m.commit
+}
+
 // IsMultiOp is true if the oplog entry is part of a prepared and/or large
 // transaction.
 func (m TxnMeta) IsMultiOp() bool {

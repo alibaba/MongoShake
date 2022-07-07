@@ -31,6 +31,10 @@ var (
 			},
 		},
 	}
+	emptyPrevRaw = bson.Raw{
+		28, 0, 0, 0, 17, 116, 115, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		18, 116, 0, 255, 255, 255, 255, 255, 255, 255, 255, 0,
+	}
 )
 
 func getTargetDelay() int64 {
@@ -282,6 +286,15 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 	// Have barrier Oplogs to performed
 	if len(batcher.barrierOplogs) > 0 {
 		for _, v := range batcher.barrierOplogs {
+			if batcher.filter(v.Parsed) {
+				batcher.lastFilterOplog = v.Parsed
+				continue
+			}
+			if ddlFilter.Filter(v.Parsed) && !conf.Options.FilterDDLEnable {
+				batcher.lastFilterOplog = v.Parsed
+				continue
+			}
+
 			batcher.addIntoBatchGroup(v, true)
 			//LOG.Info("%s transfer barrierOplogs into batchGroup, i[%d], oplog[%v]", batcher.syncer, i, v.Parsed)
 		}
@@ -300,7 +313,7 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 	//LOG.Info("^^^^^^^^ len[%d] %v %v", len(mergeBatch), mergeBatch[0].Parsed, mergeBatch[len(mergeBatch) - 1].Parsed)
 	// we have data
 	for i, genericLog := range mergeBatch {
-		//LOG.Info("~~~~~~~~~ %v %v\n", i, genericLog.Parsed)
+		//LOG.Info("~~~~~~~~~enter_input %v %v\n", i, genericLog.Parsed)
 
 		// filter oplog such like Noop or Gid-filtered
 		// PAY ATTENTION: we can't handle the oplog in transaction that has been filtered
@@ -314,15 +327,48 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		// Transactoin
 		if txnMeta, txnOk := batcher.isTransaction(genericLog.Parsed); txnOk {
 			//LOG.Info("~~~~~~~~~transaction %v %v", i, genericLog.Parsed)
-			if isRet := batcher.handleTransaction(txnMeta, genericLog); !isRet {
+			isRet, mustIndividual, _, deliveredOps := batcher.handleTransaction(txnMeta, genericLog)
+			if !isRet {
 				continue
 			}
+			if mustIndividual {
+				batcher.barrierOplogs = deliveredOps
 
-			batcher.remainLogs = mergeBatch[i+1:]
+				batcher.remainLogs = mergeBatch[i+1:]
 
-			allEmpty := batcher.setLastOplog()
-			nimo.AssertTrue(allEmpty == true, "batcher.batchGroup don't be empty")
-			return batcher.batchGroup, true, allEmpty, false
+				allEmpty := batcher.setLastOplog()
+				nimo.AssertTrue(allEmpty == true, "batcher.batchGroup don't be empty")
+				return batcher.batchGroup, true, allEmpty, false
+			} else {
+
+				// TODO need do filter
+				for _, ele := range deliveredOps {
+					batcher.addIntoBatchGroup(ele, false)
+				}
+				continue
+			}
+		}
+
+		// no transaction applyOps
+		if genericLog.Parsed.Operation == "c" {
+			operation, _ := oplog.ExtraCommandName(genericLog.Parsed.Object)
+			if operation == "applyOps" {
+				deliveredOps, err := oplog.ExtractInnerOps(&genericLog.Parsed.ParsedLog)
+				if err != nil {
+					LOG.Crashf("applyOps extract failed. err[%v] oplog[%v]",
+						err, genericLog.Parsed.ParsedLog)
+				}
+
+				// TODO need do filter
+				for _, ele := range deliveredOps {
+					batcher.addIntoBatchGroup(&oplog.GenericOplog{
+						Raw: nil,
+						Parsed: &oplog.PartialLog{
+							ParsedLog: ele,
+						},
+					}, false)
+				}
+			}
 		}
 
 		// current is ddl
@@ -387,8 +433,8 @@ func (batcher *Batcher) addIntoBatchGroup(genericLog *oplog.GenericOplog, isBarr
 }
 
 func (batcher *Batcher) isTransaction(partialLog *oplog.PartialLog) (oplog.TxnMeta, bool) {
-	// LOG.Info("isTransaction input oplog:%v lsid[%v] TxnNumber[%v] Object[%v]", partialLog,
-	// partialLog.ParsedLog.Lsid, partialLog.ParsedLog.TxnNumber, partialLog.ParsedLog.Object)
+	//LOG.Info("isTransaction input oplog:%v lsid[%v] TxnNumber[%v] Object[%v]", partialLog,
+	//	partialLog.ParsedLog.LSID, partialLog.ParsedLog.TxnNumber, partialLog.ParsedLog.Object)
 	if partialLog.Operation == "c" {
 		txnMeta, err := oplog.NewTxnMeta(partialLog.ParsedLog)
 		if err != nil {
@@ -401,8 +447,9 @@ func (batcher *Batcher) isTransaction(partialLog *oplog.PartialLog) (oplog.TxnMe
 	return oplog.TxnMeta{}, false
 }
 
-// flush previous buffered oplog, true means should add barrier
-func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta, genericLog *oplog.GenericOplog) (isRet bool) {
+func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta,
+	genericLog *oplog.GenericOplog) (isRet bool, mustIndividual bool, mustSerial bool,
+	deliveredOps []*oplog.GenericOplog) {
 	err := batcher.txnBuffer.AddOp(txnMeta, genericLog.Parsed.ParsedLog)
 	if err != nil {
 		LOG.Crashf("%s add oplog to txnbuffer failed, err[%v] oplog[%v]",
@@ -419,14 +466,17 @@ func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta, genericLog *opl
 
 		batcher.syncer.replMetric.AddFilter(1)
 		batcher.lastFilterOplog = genericLog.Parsed
-		return false
+		return false, false, false, nil
 	}
 
 	if !txnMeta.IsCommit() {
 		// transaction can not be commit
-		return false
+		return false, false, false, nil
 	}
 
+	haveCommandInTransaction := false
+	mustIndividual = true
+	mustSerial = false
 	// transaction can be commit now
 	ops, errs := batcher.txnBuffer.GetTxnStream(txnMeta)
 Loop:
@@ -439,16 +489,17 @@ Loop:
 			newOplog := &oplog.PartialLog{
 				ParsedLog: o,
 			}
-			if out, err := bson.Marshal(newOplog); err != nil {
-				LOG.Crashf("marshal Oplog[%v] failed[%v]", newOplog, err)
-			} else {
-				batcher.barrierOplogs = append(batcher.barrierOplogs,
-					&oplog.GenericOplog{
-						Raw:    out,
-						Parsed: newOplog,
-					})
-				//LOG.Info("%s put into barrierOplogs, oplog[%v]", batcher.syncer, newOplog)
+
+			if newOplog.Operation == "c" {
+				haveCommandInTransaction = true
 			}
+
+			// Raw will be filling in Send->LogEntryEncode
+			deliveredOps = append(deliveredOps,
+				&oplog.GenericOplog{
+					Raw:    nil,
+					Parsed: newOplog,
+				})
 		case err := <-errs:
 			if err != nil {
 				LOG.Crashf("error replaying transaction, err[%v]", err)
@@ -457,12 +508,22 @@ Loop:
 		}
 	}
 
+	// Individual transaction that do not have commamnd can run run with other curd
+	if !txnMeta.IsCommitOp() && !haveCommandInTransaction &&
+		genericLog.Parsed.PrevOpTime.String() == emptyPrevRaw.String() {
+		mustIndividual = false
+	}
+	// transaction applyOps that do not have command can run parallelly
+	if haveCommandInTransaction {
+		mustSerial = true
+	}
+
 	err = batcher.txnBuffer.PurgeTxn(txnMeta)
 	if err != nil {
 		LOG.Crashf("error cleaning up transaction buffer, err[%v]", err)
 	}
 
-	return true
+	return true, mustIndividual, mustSerial, deliveredOps
 }
 
 func (batcher *Batcher) moveToNextQueue() {
