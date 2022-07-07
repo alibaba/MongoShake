@@ -167,6 +167,9 @@ func checkDefaultValue() error {
 	if conf.Options.FullSyncReaderDocumentBatchSize <= 0 {
 		conf.Options.FullSyncReaderDocumentBatchSize = 128
 	}
+	if conf.Options.FullSyncReaderFetchBatchSize <= 0 {
+		conf.Options.FullSyncReaderFetchBatchSize = 1024
+	}
 	if conf.Options.FullSyncCreateIndex == "" {
 		conf.Options.FullSyncCreateIndex = utils.VarFullSyncCreateIndexForeground
 	} else if conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexNone &&
@@ -228,6 +231,9 @@ func checkDefaultValue() error {
 	}
 	if conf.Options.IncrSyncFetcherBufferCapacity <= 0 {
 		conf.Options.IncrSyncFetcherBufferCapacity = 256
+	}
+	if conf.Options.IncrSyncReaderFetchBatchSize <= 0 {
+		conf.Options.IncrSyncReaderFetchBatchSize = 1024
 	}
 	if conf.Options.Tunnel == "" {
 		conf.Options.Tunnel = utils.VarTunnelDirect
