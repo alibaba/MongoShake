@@ -288,7 +288,7 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	findOptions.SetSort(map[string]interface{}{
 		"_id": 1,
 	})
-	findOptions.SetBatchSize(8192) // set big for test
+	findOptions.SetBatchSize(int32(conf.Options.FullSyncReaderFetchBatchSize)) // set big for test
 	findOptions.SetHint(map[string]interface{}{
 		"_id": 1,
 	})
