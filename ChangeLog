@@ -2,6 +2,7 @@
     * version: 2.7.5(pre version)
     * IMPROVE: add new parameter fetch_batch_size
     * IMPROVE: improve transaction oplog sync speed
+    * BUGFIX: fix bug about election & view collection #739 #735
 
 2022-06-15 Alibaba Cloud.
     * version: 2.7.4(pre version)
