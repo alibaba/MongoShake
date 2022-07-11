@@ -218,7 +218,7 @@ func (conn *MongoCommunityConn) HasUniqueIndex() bool {
 	}
 
 	for _, db := range databases {
-		if db != "admin" && db != "local" {
+		if db != "admin" && db != "local" && db != "config" {
 			coll, _ := conn.Client.Database(db).ListCollectionNames(nil, bson.M{"type": "collection"})
 			for _, c := range coll {
 				if c != "system.profile" {
@@ -228,6 +228,7 @@ func (conn *MongoCommunityConn) HasUniqueIndex() bool {
 			}
 		}
 	}
+	LOG.Info("HasUniqueIndex checkNs:%v", checkNs)
 
 	for _, ns := range checkNs {
 		cursor, _ := conn.Client.Database(ns.Database).Collection(ns.Collection).Indexes().List(nil)
