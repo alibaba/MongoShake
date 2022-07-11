@@ -147,7 +147,7 @@ func NewNamespaceFilter(white, black []string) *NamespaceFilter {
 func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 	var result bool
 
-	LOG.Info("NamespaceFilter check oplog:%v", log.Object)
+	LOG.Debug("NamespaceFilter check oplog:%v", log.Object)
 
 	db := strings.SplitN(log.Namespace, ".", 2)[0]
 	if log.Operation != "c" {
