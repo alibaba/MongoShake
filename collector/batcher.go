@@ -310,8 +310,6 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		return batcher.batchGroup, false, batcher.setLastOplog(), exit
 	}
 
-	//LOG.Info("^^^^^^^^ len[%d] %v %v", len(mergeBatch), mergeBatch[0].Parsed, mergeBatch[len(mergeBatch) - 1].Parsed)
-	// we have data
 	for i, genericLog := range mergeBatch {
 		//LOG.Info("~~~~~~~~~enter_input %v %v\n", i, genericLog.Parsed)
 
@@ -508,7 +506,7 @@ Loop:
 		}
 	}
 
-	// Individual transaction that do not have commamnd can run run with other curd
+	// Individual transaction that do not have commamnd can run run with other curd oplog
 	if !txnMeta.IsCommitOp() && !haveCommandInTransaction &&
 		genericLog.Parsed.PrevOpTime.String() == emptyPrevRaw.String() {
 		mustIndividual = false
