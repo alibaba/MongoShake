@@ -51,7 +51,9 @@ func NewChangeStreamConn(src string,
 			if (val >> 32) > 1 {
 				startTime := &primitive.Timestamp{
 					T: uint32(val >> 32),
-					I: uint32(val & Int32max),
+					// oplog reader query is QueryOpGT , not QueryOpGTE .
+					// StartAtOperationTime should GT stored Timestamp .
+					I: uint32((val + 1) & Int32max),
 				}
 				ops.SetStartAtOperationTime(startTime)
 			}
