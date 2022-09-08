@@ -299,11 +299,20 @@ func FindFirstErrorIndexAndMessageN(err error) (int, string, bool) {
 func GetDbNamespace(url string, filterFunc func(name string) bool, sslRootFile string) ([]NS, map[string][]string, error) {
 	var err error
 	var conn *MongoCommunityConn
+	var versionOk bool
 	if conn, err = NewMongoCommunityConn(url, VarMongoConnectModePrimary, true,
 		ReadWriteConcernLocal, ReadWriteConcernDefault, sslRootFile); conn == nil || err != nil {
 		return nil, nil, err
 	}
 	defer conn.Close()
+
+	// "collection", "timeseries", 3.4 start to support views
+	versionOk, _ = GetAndCompareVersion(conn, "3.4.0", "")
+	queryConditon := bson.M{}
+	if versionOk {
+		// 改成 not
+		queryConditon = bson.M{"type": bson.M{"$in": bson.A{"collection", "timeseries"}}}
+	}
 
 	var dbNames []string
 	if dbNames, err = conn.Client.ListDatabaseNames(nil, bson.M{}); err != nil {
@@ -312,23 +321,24 @@ func GetDbNamespace(url string, filterFunc func(name string) bool, sslRootFile s
 	}
 	// sort by db names
 	sort.Strings(dbNames)
+	LOG.Debug("dbNames:%v queryConditon:%v", dbNames, queryConditon)
 
 	nsList := make([]NS, 0, 128)
 	for _, db := range dbNames {
-		colNames, err := conn.Client.Database(db).ListCollectionNames(nil, bson.M{"type": "collection"})
+		colNames, err := conn.Client.Database(db).ListCollectionNames(nil, queryConditon)
 		if err != nil {
 			err = fmt.Errorf("get collection names of mongodb[%s] db[%v] error: %v", url, db, err)
 			return nil, nil, err
 		}
 
-		// LOG.Info("db[%v] colNames: %v", db, colNames)
+		LOG.Debug("db[%v] colNames: %v queryConditon:%v", db, colNames, queryConditon)
 		for _, col := range colNames {
 			ns := NS{Database: db, Collection: col}
 			if strings.HasPrefix(col, "system.") {
 				continue
 			}
 			if filterFunc != nil && filterFunc(ns.Str()) {
-				// LOG.Debug("Namespace is filtered. %v", ns.Str())
+				LOG.Debug("Namespace is filtered. %v", ns.Str())
 				continue
 			}
 			nsList = append(nsList, ns)

@@ -156,6 +156,7 @@ func (p *Persister) Inject(input []byte) {
 			}
 
 			// store local
+			// TODO unlock?
 			p.diskQueueMutex.Lock()
 			if p.DiskQueue != nil { // double check
 				// should send to diskQueue
