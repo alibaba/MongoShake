@@ -221,6 +221,10 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 	res, err := exec.conn.Client.Database(ns.Database).Collection(ns.Collection).BulkWrite(nil, models, opts)
 
 	if err != nil {
+		if _, ok := err.(mongo.BulkWriteException); !ok {
+			return fmt.Errorf("bulk run failed[%v]", err)
+		}
+
 		LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
 			len(models), ns, (err.(mongo.BulkWriteException)).WriteErrors[0], res)
 
