@@ -138,7 +138,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		if conf.Options.SyncMode != utils.VarSyncModeFull &&
 			// conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog &&
 			conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog &&
-			!conn.HasOplogNs() {
+			!conn.HasOplogNs(utils.GetListCollectionQueryCondition(conn)) {
 
 			LOG.Critical("There has no oplog collection in mongo db server")
 			conn.Close()
@@ -166,7 +166,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 
 		// look around if there has unique index
 		if !hasUniqIndex && conf.Options.IncrSyncShardKey == oplog.ShardAutomatic {
-			hasUniqIndex = conn.HasUniqueIndex()
+			hasUniqIndex = conn.HasUniqueIndex(utils.GetListCollectionQueryCondition(conn))
 		}
 		// doesn't reuse current connection
 		conn.Close()

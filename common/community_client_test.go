@@ -45,7 +45,7 @@ func TestCommonFunctions(t *testing.T) {
 		ok := conn.IsGood()
 		assert.Equal(t, ok, true, "")
 
-		ok = conn.HasOplogNs()
+		ok = conn.HasOplogNs(bson.M{"type": "collection"})
 		assert.Equal(t, ok, true, "")
 
 		name := conn.AcquireReplicaSetName()
@@ -63,7 +63,7 @@ func TestCommonFunctions(t *testing.T) {
 			}
 		}
 
-		uniqueOk := conn.HasUniqueIndex()
+		uniqueOk := conn.HasUniqueIndex(bson.M{"type": "collection"})
 		assert.Equal(t, uniqueOk, false, "")
 
 		_, err = conn.Client.Database(testDb).Collection(testCollection).InsertOne(context.Background(),
@@ -84,7 +84,7 @@ func TestCommonFunctions(t *testing.T) {
 		assert.Equal(t, err, nil, "")
 		fmt.Printf("Create index:%v\n", str)
 
-		uniqueOk = conn.HasUniqueIndex()
+		uniqueOk = conn.HasUniqueIndex(bson.M{"type": "collection"})
 		assert.Equal(t, uniqueOk, true, "")
 	}
 }

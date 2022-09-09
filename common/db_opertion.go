@@ -290,6 +290,18 @@ func FindFirstErrorIndexAndMessageN(err error) (int, string, bool) {
 	return wError[0].Index, wError[0].Message, false
 }
 
+func GetListCollectionQueryCondition(conn *MongoCommunityConn) bson.M {
+	// "collection", "timeseries", 3.4 start to support views
+	versionOk, _ := GetAndCompareVersion(conn, "3.4.0", "")
+	queryConditon := bson.M{}
+	if versionOk {
+		// 改成 not
+		queryConditon = bson.M{"type": bson.M{"$in": bson.A{"collection", "timeseries"}}}
+	}
+
+	return queryConditon
+}
+
 /**
  * return db namespace. return:
  *     @[]NS: namespace list, e.g., []{"a.b", "a.c"}
@@ -299,21 +311,13 @@ func FindFirstErrorIndexAndMessageN(err error) (int, string, bool) {
 func GetDbNamespace(url string, filterFunc func(name string) bool, sslRootFile string) ([]NS, map[string][]string, error) {
 	var err error
 	var conn *MongoCommunityConn
-	var versionOk bool
 	if conn, err = NewMongoCommunityConn(url, VarMongoConnectModePrimary, true,
 		ReadWriteConcernLocal, ReadWriteConcernDefault, sslRootFile); conn == nil || err != nil {
 		return nil, nil, err
 	}
 	defer conn.Close()
 
-	// "collection", "timeseries", 3.4 start to support views
-	versionOk, _ = GetAndCompareVersion(conn, "3.4.0", "")
-	queryConditon := bson.M{}
-	if versionOk {
-		// 改成 not
-		queryConditon = bson.M{"type": bson.M{"$in": bson.A{"collection", "timeseries"}}}
-	}
-
+	queryConditon := GetListCollectionQueryCondition(conn)
 	var dbNames []string
 	if dbNames, err = conn.Client.ListDatabaseNames(nil, bson.M{}); err != nil {
 		err = fmt.Errorf("get database names of mongodb[%s] error: %v", url, err)

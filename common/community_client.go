@@ -178,8 +178,8 @@ func (conn *MongoCommunityConn) IsGood() bool {
 	return true
 }
 
-func (conn *MongoCommunityConn) HasOplogNs() bool {
-	if ns, err := conn.Client.Database("local").ListCollectionNames(nil, bson.M{"type": "collection"}); err == nil {
+func (conn *MongoCommunityConn) HasOplogNs(queryConditon bson.M) bool {
+	if ns, err := conn.Client.Database("local").ListCollectionNames(nil, queryConditon); err == nil {
 		for _, table := range ns {
 			if table == OplogNS {
 				return true
@@ -208,7 +208,7 @@ func (conn *MongoCommunityConn) AcquireReplicaSetName() string {
 	return id
 }
 
-func (conn *MongoCommunityConn) HasUniqueIndex() bool {
+func (conn *MongoCommunityConn) HasUniqueIndex(queryConditon bson.M) bool {
 	checkNs := make([]NS, 0, 128)
 	var databases []string
 	var err error
@@ -219,7 +219,7 @@ func (conn *MongoCommunityConn) HasUniqueIndex() bool {
 
 	for _, db := range databases {
 		if db != "admin" && db != "local" && db != "config" {
-			coll, _ := conn.Client.Database(db).ListCollectionNames(nil, bson.M{"type": "collection"})
+			coll, _ := conn.Client.Database(db).ListCollectionNames(nil, queryConditon)
 			for _, c := range coll {
 				if c != "system.profile" {
 					// push all collections

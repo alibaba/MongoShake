@@ -63,7 +63,7 @@ func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoCom
 		if !conf.Options.FullSyncCollectionDrop {
 			// do not drop
 			colNames, err := toConn.Client.Database(toNS.Database).ListCollectionNames(nil,
-				bson.M{"type": "collection"})
+				utils.GetListCollectionQueryCondition(toConn))
 			if err != nil {
 				LOG.Critical("Get collection names of db %v of dest mongodb failed. %v", toNS.Database, err)
 				return err
