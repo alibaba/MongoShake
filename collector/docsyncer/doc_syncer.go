@@ -226,8 +226,8 @@ func StartIndexSync(indexMap map[utils.NS][]bson.D, toUrl string,
 		nimo.GoRoutine(func() {
 			var conn *utils.MongoCommunityConn
 			var err error
-			if conn, err = utils.NewMongoCommunityConn(toUrl, utils.VarMongoConnectModePrimary, false,
-				utils.ReadWriteConcernDefault, utils.ReadWriteConcernMajority, conf.Options.MongoSslRootCaFile); err != nil {
+			if conn, err = utils.NewMongoCommunityConn(toUrl, utils.VarMongoConnectModePrimary, true,
+				utils.ReadWriteConcernLocal, utils.ReadWriteConcernMajority, conf.Options.TunnelMongoSslRootCaFile); err != nil {
 				LOG.Error("write index but create client fail: %v", err)
 				return
 			}
