@@ -1,6 +1,7 @@
 2022-09-22 Alibaba Cloud.
-    * version: 2.8.0
+    * version: 2.8.1
     * BUGFIX: fix bug that mongodb ver3.2 sync + index sync in full mode
+
 2022-07-20 Alibaba Cloud.
     * version: 2.8.0
     * IMPROVE: use mongo-go-driver instead of mgo to support mongodb5.0c
