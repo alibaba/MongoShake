@@ -113,7 +113,7 @@ func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 	}
 
 	ckpt.close()
-	LOG.Warn("%s Reload ckpt find context fail. %v", ckpt.Name, err)
+	LOG.Error("%s Reload ckpt find context fail. %v", ckpt.Name, err)
 	return nil, false
 }
 

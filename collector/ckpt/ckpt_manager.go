@@ -61,7 +61,7 @@ func (manager *CheckpointManager) Get() (*CheckpointContext, bool, error) {
 	var exist bool
 	manager.ctx, exist = manager.delegate.Get()
 	if manager.ctx == nil {
-		return nil, exist, fmt.Errorf("get by checkpoint manager[%v] failed", manager.Type)
+		return nil, exist, fmt.Errorf("get by checkpoint info from db or api failed, please see err log")
 	}
 
 	// check fcv
