@@ -1,6 +1,7 @@
 2022-09-22 Alibaba Cloud.
     * version: 2.8.1
-    * BUGFIX: fix bug that mongodb ver3.2 sync + index sync in full mode
+    * BUGFIX: fix bug that namespace is empty when sync from ver3.2 mongodb
+    * BUGFIX: fix bug that index sync failed in full mode when from ver5.0 to ver5.0
 
 2022-07-20 Alibaba Cloud.
     * version: 2.8.0
