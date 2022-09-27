@@ -115,12 +115,19 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 	return nil
 }
 
+/*
+ replacement oplog:
+	{"ts":{"T":1664192510,"I":1},"t":1,"h":null,"v":2,"op":"u","ns":"test.car","o":[{"Key":"_id","Value":"63318f67024749a30fc12af6"},{"Key":"b","Value":3}],"o2":[{"Key":"_id","Value":"63318f67024749a30fc12af6"}],"PrevOpTime":null,"ui":{"Subtype":4,"Data":"3p7boGbmTvqYSWp42PaZnw=="}}
+*/
 func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 	oplogs []*OplogRecord, upsert bool) error {
 
 	var models []mongo.WriteModel
 	for _, log := range oplogs {
 		var newObject bson.D
+
+		updateCmd := "update"
+		LOG.Debug("bulk_writer: org_doc:%v", log.original.partialLog)
 		if oplog.FindFiledPrefix(log.original.partialLog.Object, "$") {
 			var oplogErr error
 			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
@@ -128,29 +135,45 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 				LOG.Error("doUpdate run Faild err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
 				return oplogErr
 			}
+
+			if upsert && len(log.original.partialLog.DocumentKey) > 0 {
+				models = append(models, mongo.NewUpdateOneModel().
+					SetFilter(log.original.partialLog.DocumentKey).
+					SetUpdate(newObject).SetUpsert(true))
+			} else {
+				if upsert {
+					LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
+				}
+
+				model := mongo.NewUpdateOneModel().
+					SetFilter(log.original.partialLog.Query).
+					SetUpdate(newObject)
+				if upsert {
+					model.SetUpsert(true)
+				}
+				models = append(models, model)
+			}
 		} else {
-			newObject = bson.D{{"$set", log.original.partialLog.Object}}
+			newObject = log.original.partialLog.Object
+
+			if upsert && len(log.original.partialLog.DocumentKey) > 0 {
+				models = append(models, mongo.NewReplaceOneModel().
+					SetFilter(log.original.partialLog.DocumentKey).
+					SetReplacement(log.original.partialLog.Object).
+					SetUpsert(true))
+			} else {
+				model := mongo.NewReplaceOneModel().
+					SetFilter(log.original.partialLog.Query).
+					SetReplacement(log.original.partialLog.Object)
+				if upsert {
+					model.SetUpsert(true)
+				}
+				models = append(models, model)
+			}
+			updateCmd = "replace"
 		}
 
-		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
-			models = append(models, mongo.NewUpdateOneModel().
-				SetFilter(log.original.partialLog.DocumentKey).
-				SetUpdate(newObject).SetUpsert(true))
-		} else {
-			if upsert {
-				LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
-			}
-
-			model := mongo.NewUpdateOneModel().
-				SetFilter(log.original.partialLog.Query).
-				SetUpdate(newObject)
-			if upsert {
-				model.SetUpsert(true)
-			}
-			models = append(models, model)
-		}
-
-		LOG.Debug("bulk_writer: update %v org_doc:%v", newObject, log.original.partialLog)
+		LOG.Debug("bulk_writer: %s %v aftermodify_doc:%v", updateCmd, newObject, log.original.partialLog)
 	}
 
 	LOG.Debug("bulk_writer: update models len %v", len(models))

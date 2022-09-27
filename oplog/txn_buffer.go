@@ -348,7 +348,10 @@ func ExtractInnerOps(tranOp *ParsedLog) ([]ParsedLog, error) {
 
 		ops[i] = *op
 	}
-	ops[len(ops)-1].Timestamp = tranOp.Timestamp
+	if len(ops) > 0 {
+		// applyOps maybe empty : https://jira.mongodb.org/browse/SERVER-50769
+		ops[len(ops)-1].Timestamp = tranOp.Timestamp
+	}
 
 	return ops, nil
 }

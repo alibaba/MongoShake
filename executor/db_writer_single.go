@@ -153,23 +153,26 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 	oplogs []*OplogRecord, upsert bool) error {
 	collectionHandle := sw.conn.Client.Database(database).Collection(collection)
-	if upsert {
-		for _, log := range oplogs {
-			var update bson.D
-			if oplog.FindFiledPrefix(log.original.partialLog.Object, "$") {
-				var oplogErr error
-				log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-				if update, oplogErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); oplogErr != nil {
-					LOG.Error("doUpdate run Faild err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
-					return oplogErr
-				}
-			} else {
-				update = bson.D{{"$set", log.original.partialLog.Object}}
+
+	for _, log := range oplogs {
+		var update bson.D
+		var err error
+		var res *mongo.UpdateResult
+
+		updateCmd := "update"
+		LOG.Debug("single_writer: org_doc %v", log.original.partialLog)
+		if oplog.FindFiledPrefix(log.original.partialLog.Object, "$") {
+			var oplogErr error
+			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+			if update, oplogErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); oplogErr != nil {
+				LOG.Error("doUpdate run Faild err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
+				return oplogErr
 			}
 
-			var err error
-			var res *mongo.UpdateResult
-			opts := options.Update().SetUpsert(true)
+			opts := options.Update()
+			if upsert {
+				opts.SetUpsert(true)
+			}
 			if upsert && len(log.original.partialLog.DocumentKey) > 0 {
 				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.DocumentKey,
 					update, opts)
@@ -181,62 +184,57 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.Query,
 					update, opts)
 			}
-			if err != nil {
-				// error can be ignored
-				if IgnoreError(err, "u",
-					utils.TimeStampToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
-					continue
-				}
+		} else {
+			update = log.original.partialLog.Object
 
-				if utils.DuplicateKey(err) {
-					RecordDuplicatedOplog(sw.conn, collection, oplogs)
-					continue
-				}
-
-				LOG.Error("doUpdate[upsert] old-data[%v] with new-data[%v] failed[%v]",
-					log.original.partialLog.Query, log.original.partialLog.Object, err)
-				return err
+			opts := options.Replace()
+			if upsert {
+				opts.SetUpsert(true)
 			}
-			if res != nil {
+			if upsert && len(log.original.partialLog.DocumentKey) > 0 {
+				res, err = collectionHandle.ReplaceOne(context.Background(), log.original.partialLog.DocumentKey,
+					update, opts)
+			} else {
+				res, err = collectionHandle.ReplaceOne(context.Background(), log.original.partialLog.Query,
+					update, opts)
+			}
+
+			updateCmd = "replace"
+		}
+
+		if err != nil {
+			// error can be ignored
+			if IgnoreError(err, "u",
+				utils.TimeStampToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
+				continue
+			}
+
+			if utils.DuplicateKey(err) {
+				RecordDuplicatedOplog(sw.conn, collection, oplogs)
+				continue
+			}
+
+			LOG.Error("doUpdate[upsert] old-data[%v] with new-data[%v] failed[%v]",
+				log.original.partialLog.Query, log.original.partialLog.Object, err)
+			return err
+		}
+		if res != nil {
+			if upsert {
 				if res.MatchedCount != 1 && res.UpsertedCount != 1 {
 					return fmt.Errorf("Update fail(MatchedCount:%d ModifiedCount:%d UpsertedCount:%d) old-data[%v] with new-data[%v]",
 						res.MatchedCount, res.ModifiedCount, res.UpsertedCount,
 						log.original.partialLog.Query, log.original.partialLog.Object)
 				}
-			}
-
-			LOG.Debug("single_writer: upsert %v update[%v]", log.original.partialLog, update)
-		}
-	} else {
-		for _, log := range oplogs {
-			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-			res, err := collectionHandle.UpdateOne(context.Background(), log.original.partialLog.Query,
-				bson.D{{"$set", log.original.partialLog.Object}}, nil)
-			if err != nil {
-				// error can be ignored
-				if IgnoreError(err, "u",
-					utils.TimeStampToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
-					continue
-				}
-
-				if utils.DuplicateKey(err) {
-					RecordDuplicatedOplog(sw.conn, collection, oplogs)
-				} else {
-					LOG.Error("doUpdate[update] old-data[%v] with new-data[%v] failed[%v]",
-						log.original.partialLog.Query, log.original.partialLog.Object, err)
-					return err
-				}
-			}
-			if res != nil {
+			} else {
 				if res.MatchedCount != 1 {
 					return fmt.Errorf("Update fail(MatchedCount:%d ModifiedCount:%d MatchedCount:%d) old-data[%v] with new-data[%v]",
 						res.MatchedCount, res.ModifiedCount, res.MatchedCount,
 						log.original.partialLog.Query, log.original.partialLog.Object)
 				}
 			}
-
-			LOG.Debug("single_writer: update %v", log.original.partialLog)
 		}
+
+		LOG.Debug("single_writer: aftermodify_doc %v %s[%v]", log.original.partialLog, updateCmd, update)
 	}
 
 	return nil
