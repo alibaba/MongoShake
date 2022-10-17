@@ -366,6 +366,7 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 						},
 					}, false)
 				}
+				continue
 			}
 		}
 

@@ -134,7 +134,7 @@ func NewOplogSyncer(
 	}
 
 	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter), filter.NewGidFilter(gids)}
-	
+
 	// namespace filter, heavy operation
 	if len(conf.Options.FilterNamespaceWhite) != 0 || len(conf.Options.FilterNamespaceBlack) != 0 {
 		namespaceFilter := filter.NewNamespaceFilter(conf.Options.FilterNamespaceWhite,
@@ -361,7 +361,7 @@ func (sync *OplogSyncer) startBatcher() {
 			if log != nil {
 				newestTsLog := utils.ExtractTimestampForLog(newestTs)
 				if newestTs < utils.TimeStampToInt64(log.Timestamp) {
-					LOG.Crashf("%s filter newestTs[%v] smaller than previous timestamp[%v]",
+					LOG.Error("%s filter newestTs[%v] smaller than previous timestamp[%v]",
 						sync, newestTsLog, log.Timestamp)
 				}
 
