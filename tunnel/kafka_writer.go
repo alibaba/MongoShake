@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"sync/atomic"
+	"time"
 
 	"github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/common"
@@ -95,7 +96,8 @@ func (tunnel *KafkaWriter) Send(message *WMessage) int64 {
 	encoderId := atomic.AddInt64(&tunnel.pushIdx, 1)
 	tunnel.inputChan[encoderId%tunnel.encoderNr] <- message
 
-	return tunnel.state
+	// for transfer() not into default branch and then endless loop
+	return 0
 }
 
 // KafkaWriter.AckRequired() is always false, return 0 directly
@@ -219,10 +221,16 @@ func (tunnel *KafkaWriter) writeKafka() {
 				}
 				debugF.Write([]byte{10})
 			} else {
-				if err = tunnel.writer.SimpleWrite(data.log); err != nil {
-					LOG.Error("%s send [%v] with type[%v] error[%v]", tunnel, tunnel.RemoteAddr,
-						conf.Options.TunnelMessage, err)
-					tunnel.state = ReplyError
+				for {
+					if err = tunnel.writer.SimpleWrite(data.log); err != nil {
+						LOG.Error("%s send [%v] with type[%v] error[%v]", tunnel, tunnel.RemoteAddr,
+							conf.Options.TunnelMessage, err)
+
+						tunnel.state = ReplyError
+						time.Sleep(time.Second)
+					} else {
+						break
+					}
 				}
 			}
 
