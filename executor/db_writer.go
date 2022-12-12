@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	versionMark = "$v"
-	uuidMark    = "ui"
+	versionMark       = "$v"
+	uuidMark          = "ui"
+	shardKeyupdateErr = "Document shard key value updates that cause the doc to move shards must be sent with write batch of size 1"
 )
 
 type BasicWriter interface {
