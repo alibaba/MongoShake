@@ -290,7 +290,7 @@ func DiffUpdateOplogToNormal(diffOplog bson.D) (bson.D, error) {
 				} else if valueEle.Key == "i" || valueEle.Key == "u" {
 					result = append(result, primitive.E{Key: "$set", Value: valueEle.Value})
 				} else {
-					return diffOplog, fmt.Errorf("unknow Key[%v]", valueEle)
+					return diffOplog, fmt.Errorf("unknow Key[%v] diffOplog:[%v]", valueEle, diffOplog)
 				}
 			}
 		}
