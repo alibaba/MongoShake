@@ -82,7 +82,7 @@ add tag when releasing: "release-v{version}-{date}". for example: "release-v1.0.
 ---
 Run `./bin/collector.darwin` or `collector.linux` which is built in OSX and Linux respectively.
 
-Or you can build mongo-shake yourself according to the following steps:
+Or you can build mongo-shake yourself according to the following steps(go version needs >= 15.10):
 
 *  git clone https://github.com/alibaba/MongoShake.git
 *  cd MongoShake

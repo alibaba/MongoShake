@@ -1,3 +1,8 @@
+2022-12-12 Alibaba Cloud.
+    * version: 2.8.2
+    * BUGFIX: #771, fix bug that duplicate data when write kafka failed
+    * BUGFIX: #764, fix bug when multi oplog are updating shardkey
+
 2022-09-22 Alibaba Cloud.
     * version: 2.8.1
     * BUGFIX: fix bug that namespace is empty when sync from ver3.2 mongodb
