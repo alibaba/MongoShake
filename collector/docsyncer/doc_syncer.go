@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -46,6 +47,15 @@ func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoCommunityConn)
 
 	LOG.Info("replication from [%s] to [%s]", source, target)
 	if source == "sharding" && target == "sharding" {
+		return true
+	}
+	return false
+}
+
+func in(target string, str_array []string) bool {
+	sort.Strings(str_array)
+	index := sort.SearchStrings(str_array, target)
+	if index < len(str_array) && str_array[index] == target {
 		return true
 	}
 	return false
@@ -177,7 +187,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoCommunit
 			toNs := nsTrans.Transform(colSpecDoc.Ns)
 			err = toConn.Client.Database("admin").RunCommand(nil, bson.D{{"shardCollection", toNs},
 				{"key", colSpecDoc.Key}, {"unique", colSpecDoc.Unique}}).Err()
-			if err != nil {
+			if err != nil && !in(toNs, conf.Options.SkipNSShareKeyVerify) {
 				LOG.Critical("Shard collection for ns %v of dest mongodb failed. %v", toNs, err)
 				return errors.New(fmt.Sprintf("Shard collection for ns %v of dest mongodb failed. %v",
 					toNs, err))
