@@ -99,8 +99,13 @@ func NewChangeStreamConn(src string,
 		}
 	} else {
 		LOG.Info("new change stream with options: %v", printCsOption(ops))
+
 		csHandler, err = conn.Client.Watch(conn.ctx, mongo.Pipeline{}, ops)
 		if err != nil {
+			if conn != nil {
+				conn.Close()
+			}
+			LOG.Error("client[%v] create change stream handler failed[%v]", src, err)
 			return nil, fmt.Errorf("client[%v] create change stream handler failed[%v]", src, err)
 		}
 	}
