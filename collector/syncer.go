@@ -687,16 +687,28 @@ func (sync *OplogSyncer) RestAPI() {
 			LogsRepl:    sync.replMetric.Apply(),
 			LogsSuccess: sync.replMetric.Success(),
 			Tps:         sync.replMetric.Tps(),
-			Lsn: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSN),
-				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSN),
-					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSN))}},
-			LsnCkpt: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSNCheckpoint),
-				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSNCheckpoint),
-					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSNCheckpoint))}},
-			LsnAck: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSNAck),
-				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSNAck),
-					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSNAck))}},
-			Now:      &Time{TimestampUnix: time.Now().Unix(), TimestampTime: utils.TimestampToString(time.Now().Unix())},
+			Lsn: &MongoTime{
+				TimestampMongo: utils.Int64ToString(sync.replMetric.LSN),
+				Time: Time{
+					TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSN),
+					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSN)),
+				}},
+			LsnCkpt: &MongoTime{
+				TimestampMongo: utils.Int64ToString(sync.replMetric.LSNCheckpoint),
+				Time: Time{
+					TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSNCheckpoint),
+					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSNCheckpoint)),
+				}},
+			LsnAck: &MongoTime{
+				TimestampMongo: utils.Int64ToString(sync.replMetric.LSNAck),
+				Time: Time{
+					TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSNAck),
+					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSNAck)),
+				}},
+			Now: &Time{
+				TimestampUnix: time.Now().Unix(),
+				TimestampTime: utils.TimestampToString(time.Now().Unix()),
+			},
 			OplogAvg: utils.GetMetricWithSize(sync.replMetric.OplogAvgSize),
 			OplogMax: utils.GetMetricWithSize(sync.replMetric.OplogMaxSize),
 		}
