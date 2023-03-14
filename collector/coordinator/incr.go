@@ -17,18 +17,25 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	fullSyncFinishPosition int64,
 	startTsMap map[string]int64) error {
 
-	// prepare all syncer. only one syncer while source is ReplicaSet
+	// prepare all syncer. only one syncer while source is ReplicaSet or mongos
 	// otherwise one syncer connects to one shard
 	LOG.Info("start incr replication")
 	for i, src := range coordinator.RealSourceIncrSync {
 		var syncerTs interface{}
-		if val, ok := oplogStartPosition.(int64); ok && val == 0 {
-			if v, ok := startTsMap[src.ReplicaName]; !ok {
-				return fmt.Errorf("replia[%v] not exists on startTsMap[%v]", src.ReplicaName, startTsMap)
+
+		if len(coordinator.MongoD) > 0 {
+			// read from shard or replicaset
+			if val, ok := oplogStartPosition.(int64); ok && val == 0 {
+				if v, ok := startTsMap[src.ReplicaName]; !ok {
+					return fmt.Errorf("replia[%v] not exists on startTsMap[%v]", src.ReplicaName, startTsMap)
+				} else {
+					syncerTs = v
+				}
 			} else {
-				syncerTs = v
+				syncerTs = oplogStartPosition
 			}
 		} else {
+			// read from mongos
 			syncerTs = oplogStartPosition
 		}
 
