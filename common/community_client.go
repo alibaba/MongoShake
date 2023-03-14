@@ -259,3 +259,12 @@ func (conn *MongoCommunityConn) CurrentDate() primitive.Timestamp {
 
 	return primitive.Timestamp{T: t, I: i}
 }
+
+func (conn *MongoCommunityConn) IsTimeSeriesCollection(dbName string, collName string) bool {
+	res, _ := conn.Client.Database(dbName).
+		RunCommand(conn.ctx, bson.D{{"collStats", collName}}).DecodeBytes()
+
+	_, timeseries := res.Lookup("timeseries").DocumentOK()
+
+	return timeseries
+}

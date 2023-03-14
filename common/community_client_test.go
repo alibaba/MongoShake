@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"fmt"
+	"github.com/alibaba/MongoShake/v2/unit_test_common"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -11,7 +12,8 @@ import (
 )
 
 const (
-	testCollection = "test"
+	testCollection          = "test"
+	testTimeSeriesCollecion = "weather"
 )
 
 func TestCommonFunctions(t *testing.T) {
@@ -86,5 +88,43 @@ func TestCommonFunctions(t *testing.T) {
 
 		uniqueOk = conn.HasUniqueIndex(bson.M{"type": "collection"})
 		assert.Equal(t, uniqueOk, true, "")
+	}
+
+	{
+		fmt.Printf("TestCommonFunctions case %d.\n", nr)
+		nr++
+
+		conn, err := NewMongoCommunityConn(unit_test_common.TestUrl5_0, VarMongoConnectModeSecondaryPreferred, true,
+			ReadWriteConcernDefault, ReadWriteConcernDefault, "")
+		assert.Equal(t, err, nil, "")
+
+		err = conn.Client.Database(testDb).Drop(context.Background())
+		assert.Equal(t, err, nil, "")
+
+		// create normal collection
+		_, err = conn.Client.Database(testDb).Collection(testCollection).InsertOne(context.Background(),
+			bson.D{{"x", 11}, {"y", 12}})
+		assert.Equal(t, err, nil, "")
+
+		result := conn.IsTimeSeriesCollection(testDb, testCollection)
+		assert.Equal(t, result, false, "")
+
+		// create time series collecion testTimeSeriesCollecion
+		var cco options.CreateCollectionOptions
+		tso := options.TimeSeries()
+		tso.SetTimeField("ts")
+		tso.SetMetaField("meta")
+		tso.SetGranularity("seconds")
+		cco.SetTimeSeriesOptions(tso)
+		err = conn.Client.Database(testDb).CreateCollection(context.Background(), testTimeSeriesCollecion, &cco)
+		assert.Equal(t, err, nil, "")
+
+		result = conn.IsTimeSeriesCollection(testDb, testTimeSeriesCollecion)
+		assert.Equal(t, result, true, "")
+
+		err = conn.Client.Database(testDb).Drop(context.Background())
+		assert.Equal(t, err, nil, "")
+
+		conn.Close()
 	}
 }
