@@ -501,7 +501,8 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 	return nil
 }
 
-func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *CollectionExecutor, collectionMetric *CollectionMetric) error {
+func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *CollectionExecutor,
+	collectionMetric *CollectionMetric) error {
 	bufferSize := conf.Options.FullSyncReaderDocumentBatchSize
 	buffer := make([]*bson.Raw, 0, bufferSize)
 	bufferByteSize := 0

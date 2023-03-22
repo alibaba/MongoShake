@@ -88,6 +88,7 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs int64) {
 	}
 	// we force update the ckpt time even failed
 	sync.ckptTime = now
+	LOG.Info("checkpoint update sync.ckptTime to:%v", sync.ckptTime)
 
 	// we delayed a few minutes to tolerate the receiver's flush buffer
 	// in AckRequired() tunnel. such as "rpc". While collector is restarted,
@@ -95,7 +96,7 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs int64) {
 	// the unack offset...
 	if !flush && conf.Options.Tunnel != utils.VarTunnelDirect &&
 		now.Before(sync.startTime.Add(1*time.Minute)) {
-		// LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
+		LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
 		return
 	}
 
@@ -109,7 +110,7 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs int64) {
 	} else {
 		lowest, err = sync.calculateWorkerLowestCheckpoint()
 	}
-	LOG.Debug("checkpoint func lowest:%v inMemoryTs:%v flush:%v inputTs:%v",
+	LOG.Info("checkpoint func lowest:%v inMemoryTs:%v flush:%v inputTs:%v",
 		utils.ExtractTimestampForLog(lowest), utils.ExtractTimestampForLog(inMemoryTs), flush, inputTs)
 
 	lowestInt64 := lowest

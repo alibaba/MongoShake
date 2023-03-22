@@ -49,7 +49,8 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 
 	// fetch mongos checkpoint when using change stream
 	var mongosCkpt *ckpt.CheckpointContext
-	if coordinator.MongoS != nil && conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
+	if coordinator.MongoS != nil &&
+		conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
 		LOG.Info("try to fetch mongos checkpoint")
 		ckptManager := ckpt.NewCheckpointManager(coordinator.MongoS.ReplicaName, 0)
 		ckptVar, exist, err := ckptManager.Get()
@@ -140,7 +141,8 @@ func (coordinator *ReplicationCoordinator) isCheckpointExist() (bool, interface{
 }
 
 // if the oplog of checkpoint timestamp exist in all source db, then only do oplog replication instead of document replication
-func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, map[string]int64, interface{}, error) {
+func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, map[string]int64,
+	interface{}, error) {
 	if syncMode != utils.VarSyncModeAll && syncMode != utils.VarSyncModeIncr {
 		return syncMode, nil, int64(0), nil
 	}
