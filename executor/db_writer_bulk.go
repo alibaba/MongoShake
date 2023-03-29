@@ -127,13 +127,22 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 		var newObject bson.D
 
 		updateCmd := "update"
-		LOG.Debug("bulk_writer: org_doc:%v", log.original.partialLog)
+		LOG.Debug("bulk_writer doUpdate: org_doc:%v", log.original.partialLog)
 		if oplog.FindFiledPrefix(log.original.partialLog.Object, "$") {
 			var oplogErr error
-			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-			if newObject, oplogErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); oplogErr != nil {
-				LOG.Error("doUpdate run Faild err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
-				return oplogErr
+
+			oplogVer, ok := oplog.GetKey(log.original.partialLog.Object, versionMark).(int32)
+			LOG.Debug("bulk_writer doUpdate: have $, org_object:%v "+
+				"object_ver:%v\n", log.original.partialLog.Object, oplogVer)
+
+			if ok && oplogVer == 2 {
+				if newObject, oplogErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); oplogErr != nil {
+					LOG.Error("doUpdate run Faild err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
+					return oplogErr
+				}
+			} else {
+				log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+				newObject = log.original.partialLog.Object
 			}
 
 			if upsert && len(log.original.partialLog.DocumentKey) > 0 {

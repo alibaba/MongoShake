@@ -248,7 +248,8 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 				delayBoundary := time.Now().Unix() - delay + 3 // 3 is for NTP drift
 
 				if utils.ExtractMongoTimestamp(firstOplog.Timestamp) > delayBoundary {
-					LOG.Info("%s --- wait target delay[%v seconds]: first oplog timestamp[%v] > delayBoundary[%v], fullSyncFinishPosition[%v]",
+					LOG.Info("%s --- wait target delay[%v seconds]: "+
+						"first oplog timestamp[%v] > delayBoundary[%v], fullSyncFinishPosition[%v]",
 						batcher.syncer, delay, firstOplog.Timestamp, delayBoundary,
 						batcher.syncer.fullSyncFinishPosition)
 					time.Sleep(5 * time.Second)

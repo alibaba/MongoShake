@@ -568,3 +568,120 @@ func TestConvertBson(t *testing.T) {
 		assert.Equal(t, output, input, "should be equal")
 	}
 }
+
+func TestDelteOplog(t *testing.T) {
+	/*
+		{
+		    "op": "u",
+		    "ns": "test.arr5",
+		    "ui": UUID("8ba5a264-1475-4686-ae59-3c331a5655f3"),
+		    "o": {
+		        "$v": 2,
+		        "diff": {
+		            "d": {
+		                "info": false
+		            },
+		            "i": {
+		                "extra": "c"
+		            },
+		            "sarrname": {
+		                "a": true,
+		                "s0": {
+		                    "u": {
+		                        "count": 5,
+		                        "nm": "c"
+		                    },
+		                    "i": {
+		                        "extra": "ps"
+		                    }
+		                },
+		                "s1": {
+		                    "u": {
+		                        "count": 6
+		                    }
+		                }
+		            },
+		            "snestobj": {
+		                "sm1": {
+		                    "d": {
+		                        "n": false
+		                    }
+		                },
+		                "sn1": {
+		                    "i": {
+		                        "1": 2
+		                    }
+		                }
+		            }
+		        }
+		    },
+		    "o2": {
+		        "_id": ObjectId("642295e8bd4ab3cbd9632f7e")
+		    },
+		    "ts": Timestamp(1679988204,
+		    1),
+		    "t": NumberLong(1),
+		    "v": NumberLong(2),
+		    "wall": ISODate("2023-03-28T07:23:24.902Z")
+		}
+	*/
+	object := bson.D{
+		bson.E{Key: "$v", Value: 2},
+		bson.E{
+			Key: "diff",
+			Value: bson.D{
+				bson.E{Key: "d", Value: bson.E{Key: "info", Value: false}},
+				bson.E{Key: "i", Value: bson.E{Key: "extra", Value: "c"}},
+				bson.E{Key: "sarrname", Value: bson.D{
+					bson.E{Key: "a", Value: true},
+					bson.E{Key: "s0", Value: bson.D{
+						bson.E{Key: "u", Value: bson.D{
+							bson.E{Key: "count", Value: 5},
+							bson.E{Key: "nm", Value: "c"},
+						}},
+						bson.E{Key: "i", Value: bson.D{
+							bson.E{Key: "extra", Value: "ps"},
+						}},
+					}},
+					bson.E{Key: "s1", Value: bson.D{
+						bson.E{Key: "u", Value: bson.D{
+							bson.E{Key: "count", Value: 6},
+						}},
+					}},
+				}},
+				bson.E{Key: "sarrname", Value: bson.D{
+					bson.E{Key: "sm1", Value: bson.D{
+						bson.E{Key: "d", Value: bson.D{
+							bson.E{Key: "n", Value: false},
+						}},
+					}},
+					bson.E{Key: "sn1", Value: bson.D{
+						bson.E{Key: "i", Value: bson.D{
+							bson.E{Key: "l", Value: 2},
+						}},
+					}},
+				}},
+			},
+		},
+	}
+
+	result, err := DiffUpdateOplogToNormal(object)
+	fmt.Printf("result:%v\n", result)
+	assert.Equal(t, nil, err, "should be equal")
+	assert.Equal(t, "$unset", result[0].Key, "should be equal")
+	assert.Equal(t, bson.E{"info", false}, result[0].Value, "should be equal")
+	assert.Equal(t, "$set", result[1].Key, "should be equal")
+	assert.Equal(t, bson.E{"extra", "c"}, result[1].Value, "should be equal")
+	assert.Equal(t, "$set", result[2].Key, "should be equal")
+	assert.Equal(t, bson.D{
+		{"arrname.0.count", 5},
+		{"arrname.0.nm", "c"}}, result[2].Value, "should be equal")
+	assert.Equal(t, "$set", result[3].Key, "should be equal")
+	assert.Equal(t, bson.D{{"arrname.0.extra", "ps"}}, result[3].Value, "should be equal")
+	assert.Equal(t, "$set", result[4].Key, "should be equal")
+	assert.Equal(t, bson.D{{"arrname.1.count", 6}}, result[4].Value, "should be equal")
+	assert.Equal(t, "$unset", result[5].Key, "should be equal")
+	assert.Equal(t, bson.D{{"arrname.m1.n", false}}, result[5].Value, "should be equal")
+	assert.Equal(t, "$set", result[6].Key, "should be equal")
+	assert.Equal(t, bson.D{{"arrname.n1.l", 2}}, result[6].Value, "should be equal")
+}

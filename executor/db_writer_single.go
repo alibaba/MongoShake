@@ -163,10 +163,19 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 		LOG.Debug("single_writer: org_doc %v", log.original.partialLog)
 		if oplog.FindFiledPrefix(log.original.partialLog.Object, "$") {
 			var oplogErr error
-			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-			if update, oplogErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); oplogErr != nil {
-				LOG.Error("doUpdate run Faild err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
-				return oplogErr
+
+			oplogVer, ok := oplog.GetKey(log.original.partialLog.Object, versionMark).(int32)
+			LOG.Debug("single_writer doUpdate: have $, org_object:%v "+
+				"object_ver:%v\n", log.original.partialLog.Object, oplogVer)
+
+			if ok && oplogVer == 2 {
+				if update, oplogErr = oplog.DiffUpdateOplogToNormal(update); oplogErr != nil {
+					LOG.Error("doUpdate run Faild err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
+					return oplogErr
+				}
+			} else {
+				log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+				update = log.original.partialLog.Object
 			}
 
 			opts := options.Update()
@@ -201,6 +210,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 
 			updateCmd = "replace"
 		}
+		LOG.Debug("single_writer: %s %v aftermodify_doc:%v", updateCmd, update, log.original.partialLog)
 
 		if err != nil {
 			// error can be ignored
