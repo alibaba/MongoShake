@@ -132,7 +132,7 @@ func TestNamespaceFilter(t *testing.T) {
 			},
 		}
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
-		assert.Equal(t, 2, len(log.Object[0].Value.([]interface{})), "should be equal")
+		assert.Equal(t, 2, len(log.Object[0].Value.([]bson.D)), "should be equal")
 	}
 
 	{
@@ -170,7 +170,7 @@ func TestNamespaceFilter(t *testing.T) {
 			},
 		}
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
-		assert.Equal(t, 1, len(log.Object[0].Value.([]interface{})), "should be equal")
+		assert.Equal(t, 1, len(log.Object[0].Value.([]bson.D)), "should be equal")
 	}
 }
 
