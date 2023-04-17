@@ -85,7 +85,7 @@ func (worker *Worker) AllAcked(allAcked bool) {
 
 func (worker *Worker) Offer(batch []*oplog.GenericOplog) {
 	if batch != nil {
-		atomic.StoreInt64(&worker.unack, utils.TimestampToInt64(batch[len(batch)-1].Parsed.Timestamp))
+		atomic.StoreInt64(&worker.unack, utils.TimeStampToInt64(batch[len(batch)-1].Parsed.Timestamp))
 	}
 	worker.queue <- batch
 }
@@ -234,12 +234,13 @@ func (worker *Worker) probe() {
 
 func (worker *Worker) retain(batch []*oplog.GenericOplog) {
 	worker.listUnACK = append(worker.listUnACK, batch...)
-	LOG.Debug("%s copy batch oplogs [%d] to listUnACK count. UnACK remained [%d]", worker, len(batch), len(worker.listUnACK))
+	LOG.Debug("%s copy batch oplogs [%d] to listUnACK count. UnACK remained [%d]",
+		worker, len(batch), len(worker.listUnACK))
 }
 
 func (worker *Worker) purgeACK() {
 	bigger := sort.Search(len(worker.listUnACK), func(i int) bool {
-		return utils.TimestampToInt64(worker.listUnACK[i].Parsed.Timestamp) > worker.ack
+		return utils.TimeStampToInt64(worker.listUnACK[i].Parsed.Timestamp) > worker.ack
 	})
 
 	if bigger != 0 {

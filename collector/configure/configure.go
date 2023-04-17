@@ -45,11 +45,13 @@ type Configuration struct {
 	CheckpointStartPosition                int64    `config:"checkpoint.start_position" type:"date"`
 	TransformNamespace                     []string `config:"transform.namespace"`
 	SpecialSourceDBFlag                    string   `config:"special.source.db.flag" type:"string"` // add v2.4.20
+	SkipNSShareKeyVerify                   []string `config:"skip.nsshardkey.verify"`               //add v2.8.2
 
 	// 2. full sync
 	FullSyncReaderCollectionParallel     int    `config:"full_sync.reader.collection_parallel"`
 	FullSyncReaderWriteDocumentParallel  int    `config:"full_sync.reader.write_document_parallel"`
 	FullSyncReaderDocumentBatchSize      int    `config:"full_sync.reader.document_batch_size"`
+	FullSyncReaderFetchBatchSize         int    `config:"full_sync.reader.fetch_batch_size"`
 	FullSyncReaderParallelThread         int    `config:"full_sync.reader.parallel_thread"` // add v2.6.4
 	FullSyncReaderParallelIndex          string `config:"full_sync.reader.parallel_index"`  // add v2.6.4
 	FullSyncCollectionDrop               bool   `config:"full_sync.collection_exist_drop"`
@@ -63,6 +65,7 @@ type Configuration struct {
 	// 3. incr sync
 	IncrSyncMongoFetchMethod              string   `config:"incr_sync.mongo_fetch_method"`
 	IncrSyncChangeStreamWatchFullDocument bool     `config:"incr_sync.change_stream.watch_full_document"`
+	IncrSyncReaderFetchBatchSize          int      `config:"incr_sync.reader.fetch_batch_size"`
 	IncrSyncOplogGIDS                     []string `config:"incr_sync.oplog.gids"`
 	IncrSyncShardKey                      string   `config:"incr_sync.shard_key"`
 	IncrSyncShardByObjectIdWhiteList      []string `config:"incr_sync.shard_by_object_id_whitelist"`

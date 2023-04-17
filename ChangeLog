@@ -1,3 +1,65 @@
+2023-03-10 Alibaba Cloud.
+    * version: 2.8.3
+    * BUGFIX: #803, fix changestream connection leak
+    * BUGFIX: #804, fix startTime check logic
+    * BUGFIX: #784, don't use nocursortimeout when src collection is timeseries
+    * BUGFIX: #777,#778, compatible with delta oplog greater than mongodb 5.0
+
+2022-12-12 Alibaba Cloud.
+    * version: 2.8.2
+    * BUGFIX: #771, fix bug that duplicate data when write kafka failed
+    * BUGFIX: #764, fix bug when multi oplog are updating shardkey
+
+2022-09-22 Alibaba Cloud.
+    * version: 2.8.1
+    * BUGFIX: fix bug that namespace is empty when sync from ver3.2 mongodb
+    * BUGFIX: fix bug that index sync failed in full mode when from ver5.0 to ver5.0
+
+2022-07-20 Alibaba Cloud.
+    * version: 2.8.0
+    * IMPROVE: use mongo-go-driver instead of mgo to support mongodb5.0c
+    * IMPROVE: incremental incr sync performance improvement, include transaction
+
+2022-07-06 Alibaba Cloud.
+    * version: 2.7.5(pre version)
+    * IMPROVE: add new parameter fetch_batch_size
+    * IMPROVE: improve transaction oplog sync speed
+    * BUGFIX: fix bug about election & view collection #739 #735
+
+2022-06-15 Alibaba Cloud.
+    * version: 2.7.4(pre version)
+    * BUGFIX: fix issue #729
+
+2022-06-12 Alibaba Cloud.
+    * version: 2.7.3(pre version)
+    * IMPROVE: incremental sync performance improvement
+
+2022-06-03 Alibaba Cloud.
+    * version: 2.7.2(pre version)
+    * IMPROVE: support multi-transaction sync
+
+2022-05-28 Alibaba Cloud.
+    * version: 2.7.1(pre version)
+    * IMPROVE: fix index order #708
+    * IMPROVE: commitIndexBuild & TTL Index
+    * IMPROVE: adapt oplog update mechanism in Mongodb5.0
+
+2022-05-18 Alibaba Cloud.
+    * version: 2.7.0(pre version)
+    * IMPROVE: use mongo-go-driver instead of mgo to support mongodb5.0
+
+2021-11-26 Alibaba Cloud.
+	* version: 2.6.6
+	* BUGFIX: fix ssl conn string #668 #628
+	* BUGFIX: fix password print in log #612
+	* BUGFIX: fix connection leak #693
+	* BUGFIX: fix bug about whiteRule
+
+2021-10-27 Alibaba Cloud.
+	* version: 2.6.5
+	* IMPROVE: support kafka channel ssl
+	* IMPROVE: support only have mongo_s_url
+
 2021-04-13 Alibaba Cloud.
 	* version: 2.6.4
 	* IMPROVE: parse configuration failed because of column length is bigger

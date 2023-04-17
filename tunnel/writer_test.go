@@ -2,28 +2,24 @@ package tunnel
 
 import (
 	"fmt"
-	"testing"
-	"math"
-	"github.com/alibaba/MongoShake/v2/oplog"
-	"github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/collector/configure"
+	"github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/oplog"
+	"go.mongodb.org/mongo-driver/bson"
+	"math"
+	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/vinllen/mgo/bson"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
 )
 
 // return $nr oplog inside
 func generateWMessage(val, nr int) *WMessage {
 	parsedLogs := make([]*oplog.PartialLog, 0, nr)
-	for i := val; i < val + nr; i++ {
+	for i := val; i < val+nr; i++ {
 		parsedLogs = append(parsedLogs, &oplog.PartialLog{
-			ParsedLog: oplog.ParsedLog {
+			ParsedLog: oplog.ParsedLog{
 				Operation: "i",
-				Object: bson.D{
-					// bson.DocElem{"_id", bson.ObjectId("123456789109")},
-					bson.DocElem{"val", i},
-				},
+				Object:    bson.D{{"val", i}},
 			},
 		})
 	}
@@ -31,7 +27,7 @@ func generateWMessage(val, nr int) *WMessage {
 	return &WMessage{
 		TMessage: &TMessage{ // meaningless
 			RawLogs: [][]byte{{123}},
-			Tag: 0,
+			Tag:     0,
 		},
 		ParsedLogs: parsedLogs,
 	}
@@ -39,12 +35,13 @@ func generateWMessage(val, nr int) *WMessage {
 
 func parseJsonValue(input []byte) (interface{}, error) {
 	jsonParsedMap := make(map[string]interface{})
-	err := bson2.UnmarshalExtJSON(input, true, &jsonParsedMap)
+	err := bson.UnmarshalExtJSON(input, true, &jsonParsedMap)
 	if err != nil {
 		return 0, err
 	}
 
-	return jsonParsedMap["o"].(bson2.A)[0].(map[string]interface{})["value"], nil
+	fmt.Printf("jsonParsedMap:%v\n", jsonParsedMap)
+	return jsonParsedMap["o"].(map[string]interface{})["val"], nil
 }
 
 func TestKafkaWriter(t *testing.T) {
@@ -117,7 +114,7 @@ func TestKafkaWriter(t *testing.T) {
 		}
 
 		// pay attention: unitTestWriteKafkaChan may not be drain when run next case
-		for i := 0; i < writeNr + batchSize; i++ {
+		for i := 0; i < writeNr+batchSize; i++ {
 			data := <-unitTestWriteKafkaChan
 
 			outVal, err := parseJsonValue(data)
@@ -126,7 +123,8 @@ func TestKafkaWriter(t *testing.T) {
 		}
 
 		// drain all
-		X: for {
+	X:
+		for {
 			select {
 			case <-unitTestWriteKafkaChan:
 			default:
@@ -157,14 +155,14 @@ func TestKafkaWriter(t *testing.T) {
 		msg := &WMessage{
 			TMessage: &TMessage{
 				RawLogs: [][]byte{{123}},
-				Tag: 0,
+				Tag:     0,
 			},
-			ParsedLogs: []*oplog.PartialLog {
+			ParsedLogs: []*oplog.PartialLog{
 				{
-					ParsedLog: oplog.ParsedLog {
+					ParsedLog: oplog.ParsedLog{
 						Object: bson.D{
-							bson.DocElem{"$v", 1},
-							bson.DocElem{"$set", bson.M{
+							bson.E{Key: "$v", Value: 1},
+							bson.E{Key: "$set", Value: bson.M{
 								"sale_qty":   0,
 								"sale_value": math.NaN(),
 							}},
@@ -179,10 +177,10 @@ func TestKafkaWriter(t *testing.T) {
 
 		data := <-unitTestWriteKafkaChan
 		jsonParsedMap := make(map[string]interface{})
-		err := bson2.UnmarshalExtJSON(data, true, &jsonParsedMap)
+		err := bson.UnmarshalExtJSON(data, true, &jsonParsedMap)
 		assert.Equal(t, nil, err, "should be equal")
 		fmt.Println(jsonParsedMap)
-		output := jsonParsedMap["o"].(bson2.A)[1].(map[string]interface{})["value"].(map[string]interface{})
+		output := jsonParsedMap["o"].(map[string]interface{})["$set"].(map[string]interface{})
 		assert.Equal(t, int32(0), output["sale_qty"], "should be equal")
 		assert.Equal(t, true, math.IsNaN(output["sale_value"].(float64)), "should be equal")
 	}

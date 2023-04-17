@@ -23,7 +23,7 @@ var IncrSentinelOptions struct {
 	Pause          bool
 	TPS            int64
 	TargetDelay    int64
-	ExitPoint      int64 // 32 bits timestamp
+	ExitPoint      int64 // store 64 bit full timestamp
 	Shutdown       bool  // close shake
 }
 

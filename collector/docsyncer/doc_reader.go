@@ -5,22 +5,21 @@ import (
 	"fmt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
+	"go.mongodb.org/mongo-driver/bson"
 	"sync/atomic"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
-	"github.com/vinllen/mongo-go-driver/mongo"
-	"github.com/vinllen/mongo-go-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 /*************************************************/
 // splitter: pre-split the collection into several pieces
 type DocumentSplitter struct {
-	src           string               // source mongo address url
-	sslRootCaFile string               // source root ca ssl
-	ns            utils.NS             // namespace
-	conn          *utils.MongoConn     // connection
+	src           string   // source mongo address url
+	sslRootCaFile string   // source root ca ssl
+	ns            utils.NS // namespace
+	client        *utils.MongoCommunityConn
 	readerChan    chan *DocumentReader // reader chan
 	pieceByteSize uint64               // each piece max byte size
 	count         uint64               // total document number
@@ -37,7 +36,7 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 	// create connection
 	var err error
 	// disable timeout
-	ds.conn, err = utils.NewMongoConn(ds.src, conf.Options.MongoConnectMode, false,
+	ds.client, err = utils.NewMongoCommunityConn(ds.src, conf.Options.MongoConnectMode, false,
 		utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, sslRootCaFile)
 	if err != nil {
 		LOG.Error("splitter[%s] connection mongo[%v] failed[%v]", ds,
@@ -51,7 +50,9 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 		Size        float64 `bson:"size"`
 		StorageSize float64 `bson:"storageSize"`
 	}
-	if err := ds.conn.Session.DB(ds.ns.Database).Run(bson.M{"collStats": ds.ns.Collection}, &res); err != nil {
+	if err := ds.client.Client.Database(ds.ns.Database).RunCommand(nil,
+		bson.D{{"collStats", ds.ns.Collection}}).Decode(&res); err != nil {
+
 		LOG.Error("splitter[%s] connection mongo[%v] failed[%v]", ds,
 			utils.BlockMongoUrlPassword(ds.src, "***"), err)
 		return nil
@@ -62,6 +63,9 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 		// at most 8GB per chunk
 		ds.pieceByteSize = 8 * utils.GB
 	}
+
+	LOG.Info("NewDocumentSplitter db[%v] col[%v] res[%v], pieceByteSize[%v]",
+		ds.ns.Database, ds.ns.Collection, res, ds.pieceByteSize)
 
 	if conf.Options.FullSyncReaderParallelThread <= 1 {
 		ds.readerChan = make(chan *DocumentReader, 1)
@@ -78,7 +82,7 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 }
 
 func (ds *DocumentSplitter) Close() {
-	ds.conn.Close()
+	ds.client.Close()
 }
 
 func (ds *DocumentSplitter) String() string {
@@ -102,12 +106,12 @@ func (ds *DocumentSplitter) Run() error {
 	LOG.Info("splitter[%s] enable split, waiting splitVector return...", ds)
 
 	var res bson.M
-	err := ds.conn.Session.DB(ds.ns.Database).Run(bson.D{
+	err := ds.client.Client.Database(ds.ns.Database).RunCommand(nil, bson.D{
 		{"splitVector", ds.ns.Str()},
 		{"keyPattern", bson.M{conf.Options.FullSyncReaderParallelIndex: 1}},
 		// {"maxSplitPoints", ds.pieceNumber - 1},
 		{"maxChunkSize", ds.pieceByteSize / utils.MB},
-	}, &res)
+	}).Decode(res)
 	// if failed, do not panic, run single thread fetching
 	if err != nil {
 		LOG.Warn("splitter[%s] run splitVector failed[%v], give up parallel fetching", ds, err)
@@ -179,11 +183,6 @@ func parseDocKeyValue(x interface{}) (string, interface{}, error) {
 	return key, val, nil
 }
 
-// @deprecated
-func (ds *DocumentSplitter) GetIndexes() ([]mgo.Index, error) {
-	return ds.conn.Session.DB(ds.ns.Database).C(ds.ns.Collection).Indexes()
-}
-
 /*************************************************/
 // DocumentReader: the reader of single piece
 type DocumentReader struct {
@@ -198,10 +197,6 @@ type DocumentReader struct {
 	ctx         context.Context
 	rebuild     int   // rebuild times
 	concurrency int32 // for test only
-
-	// deprecate, used for mgo
-	conn        *utils.MongoConn
-	docIterator *mgo.Iter
 
 	// query statement and current max cursor
 	query bson.M
@@ -246,7 +241,8 @@ func (reader *DocumentReader) String() string {
 }
 
 // NextDoc returns an document by raw bytes which is []byte
-func (reader *DocumentReader) NextDoc() (doc *bson.Raw, err error) {
+// reader.docCursor.Current is valid only before next docCursor.Next(), So must be copy
+func (reader *DocumentReader) NextDoc() (doc bson.Raw, err error) {
 	if err := reader.ensureNetwork(); err != nil {
 		return nil, err
 	}
@@ -264,43 +260,7 @@ func (reader *DocumentReader) NextDoc() (doc *bson.Raw, err error) {
 		}
 	}
 
-	doc = new(bson.Raw)
-	err = bson.Unmarshal(reader.docCursor.Current, doc)
-	if err != nil {
-		return nil, err
-	}
-
-	/*if conf.Options.LogLevel == utils.VarLogLevelDebug {
-		var docParsed bson.M
-		bson.Unmarshal(doc.Data, &docParsed)
-		LOG.Debug("reader[%v] read doc[%v] concurrency[%d] ts[%v]", reader.ns, docParsed["_id"],
-			atomic.LoadInt32(&reader.concurrency), time.Now().Unix())
-	}*/
-	// err = reader.docCursor.Decode(doc)
-	return doc, err
-}
-
-// deprecate, used for mgo
-func (reader *DocumentReader) NextDocMgo() (doc *bson.Raw, err error) {
-	if err := reader.ensureNetworkMgo(); err != nil {
-		return nil, err
-	}
-
-	atomic.AddInt32(&reader.concurrency, 1)
-	defer atomic.AddInt32(&reader.concurrency, -1)
-
-	doc = new(bson.Raw)
-
-	if !reader.docIterator.Next(doc) {
-		if err := reader.docIterator.Err(); err != nil {
-			// some internal error. need rebuild the oplogsIterator
-			reader.releaseIteratorMgo()
-			return nil, err
-		} else {
-			return nil, nil
-		}
-	}
-	return doc, nil
+	return reader.docCursor.Current, err
 }
 
 // ensureNetwork establish the mongodb connection at first
@@ -313,7 +273,7 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	if reader.client == nil {
 		LOG.Info("reader[%s] client is empty, create one", reader.String())
 		reader.client, err = utils.NewMongoCommunityConn(reader.src, conf.Options.MongoConnectMode, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return err
 		}
@@ -328,12 +288,15 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	findOptions.SetSort(map[string]interface{}{
 		"_id": 1,
 	})
-	findOptions.SetBatchSize(8192) // set big for test
+	findOptions.SetBatchSize(int32(conf.Options.FullSyncReaderFetchBatchSize)) // set big for test
 	findOptions.SetHint(map[string]interface{}{
 		"_id": 1,
 	})
-	// enable noCursorTimeout anyway! #451
-	findOptions.SetNoCursorTimeout(true)
+
+	// enable noCursorTimeout anyway! #451 #784
+	if reader.client.IsTimeSeriesCollection(reader.ns.Database, reader.ns.Collection) == false {
+		findOptions.SetNoCursorTimeout(true)
+	}
 	findOptions.SetComment(fmt.Sprintf("mongo-shake full sync: ns[%v] query[%v] rebuid-times[%v]",
 		reader.ns, reader.query, reader.rebuild))
 
@@ -348,36 +311,6 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	return nil
 }
 
-// deprecate, used for mgo
-func (reader *DocumentReader) ensureNetworkMgo() (err error) {
-	if reader.docIterator != nil {
-		return nil
-	}
-	if reader.conn == nil || (reader.conn != nil && !reader.conn.IsGood()) {
-		if reader.conn != nil {
-			reader.conn.Close()
-		}
-		// reconnect
-		if reader.conn, err = utils.NewMongoConn(reader.src, conf.Options.MongoConnectMode, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, reader.sslRootCaFile); reader.conn == nil || err != nil {
-			return err
-		}
-	}
-
-	reader.rebuild += 1
-	if reader.rebuild > 1 {
-		return fmt.Errorf("reader[%s] rebuild illegal", reader.String())
-	}
-
-	// rebuild syncerGroup condition statement with current checkpoint timestamp
-	reader.conn.Session.SetBatch(8192)
-	reader.conn.Session.SetPrefetch(0.2)
-	reader.conn.Session.SetCursorTimeout(0)
-	reader.docIterator = reader.conn.Session.DB(reader.ns.Database).C(reader.ns.Collection).
-		Find(reader.query).Iter()
-	return nil
-}
-
 func (reader *DocumentReader) releaseCursor() {
 	if reader.docCursor != nil {
 		LOG.Info("reader[%s] closes cursor[%v]", reader, reader.docCursor.ID())
@@ -389,14 +322,6 @@ func (reader *DocumentReader) releaseCursor() {
 	reader.docCursor = nil
 }
 
-// deprecate, used for mgo
-func (reader *DocumentReader) releaseIteratorMgo() {
-	if reader.docIterator != nil {
-		_ = reader.docIterator.Close()
-	}
-	reader.docIterator = nil
-}
-
 func (reader *DocumentReader) Close() {
 	LOG.Info("reader[%s] close", reader)
 	if reader.docCursor != nil {
@@ -406,13 +331,5 @@ func (reader *DocumentReader) Close() {
 	if reader.client != nil {
 		reader.client.Client.Disconnect(reader.ctx)
 		reader.client = nil
-	}
-}
-
-// deprecate, used for mgo
-func (reader *DocumentReader) CloseMgo() {
-	if reader.conn != nil {
-		reader.conn.Close()
-		reader.conn = nil
 	}
 }

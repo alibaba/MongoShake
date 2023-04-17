@@ -5,6 +5,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"os"
 	"strconv"
 	"syscall"
@@ -16,7 +17,6 @@ import (
 
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 type Exit struct{ Code int }
@@ -102,11 +102,13 @@ func main() {
 	}
 	//fmt.Printf("%+v",conf.Options)
 
-	if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogFlush, *verbose); err != nil {
+	if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName,
+		conf.Options.LogLevel, conf.Options.LogFlush, *verbose); err != nil {
 		crash(fmt.Sprintf("initial log.dir[%v] log.name[%v] failed[%v].", conf.Options.LogDirectory,
 			conf.Options.LogFileName, err), -2)
 	} else {
-		LOG.Info("log init succ. log.dir[%v] log.name[%v] log.level[%v]", conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel)
+		LOG.Info("log init succ. log.dir[%v] log.name[%v] log.level[%v]",
+			conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel)
 	}
 	LOG.Info("MongoDB Version Source[%v] Target[%v]", conf.Options.SourceDBVersion, conf.Options.TargetDBVersion)
 
@@ -199,7 +201,8 @@ func selectLeader() {
 	// first of all. ensure we are the Master
 	if conf.Options.MasterQuorum && conf.Options.CheckpointStorage == utils.VarCheckpointStorageDatabase {
 		// election become to Master. keep waiting if we are the candidate. election id is must fixed
-		quorum.UseElectionObjectId(bson.ObjectIdHex("5204af979955496907000001"))
+		objectId, _ := primitive.ObjectIDFromHex("5204af979955496907000001")
+		quorum.UseElectionObjectId(objectId)
 		go quorum.BecomeMaster(conf.Options.CheckpointStorageUrl, utils.VarCheckpointStorageDbReplicaDefault)
 
 		// wait until become to a real master

@@ -3,12 +3,14 @@ package filter
 import (
 	"crypto/md5"
 	"encoding/binary"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"math"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
 	"github.com/alibaba/MongoShake/v2/sharding"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -119,19 +121,10 @@ func ComputeHash(data interface{}) int64 {
 		buf = make([]byte, 8)
 		binary.LittleEndian.PutUint64(buf, rdu)
 		w.Write(buf)
-	case bson.ObjectId:
+	case primitive.ObjectID:
 		binary.LittleEndian.PutUint32(buf, uint32(BsonTypeOid))
 		w.Write(buf)
-		if len(rd) == 24 {
-			buf = make([]byte, 12)
-			bytes := []byte(rd)
-			for i, j := 0, 0; i < len(buf); i++ {
-				buf[i] = (fromHex(bytes[j]) << 4) | fromHex(bytes[j+1])
-				j += 2
-			}
-		} else {
-			buf = []byte(rd)
-		}
+		buf = rd[:]
 		w.Write(buf)
 	default:
 		LOG.Crashf("ComputeHash unsupported bson type %T %#v\n", data, data)
@@ -224,10 +217,10 @@ func chunkLt(x, y interface{}) bool {
 }
 
 func getBsonType(x interface{}) (int, interface{}) {
-	if x == bson.MinKey {
+	if x == int64(math.MinInt64) {
 		return BsonMinKey, nil
 	}
-	if x == bson.MaxKey {
+	if x == int64(math.MaxInt64) {
 		return BsonMaxKey, nil
 	}
 	switch rx := x.(type) {
@@ -243,8 +236,8 @@ func getBsonType(x interface{}) (int, interface{}) {
 		return BsonTypeNumber, float64(rx)
 	case string:
 		return BsonTypeString, rx
-	case bson.ObjectId:
-		return BsonTypeOid, string(rx)
+	case primitive.ObjectID:
+		return BsonTypeOid, rx.Hex()
 	default:
 		LOG.Crashf("chunkLt meet unknown type %T", x)
 	}

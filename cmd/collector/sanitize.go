@@ -166,9 +166,9 @@ func checkDefaultValue() error {
 	}
 	if conf.Options.FullSyncReaderDocumentBatchSize <= 0 {
 		conf.Options.FullSyncReaderDocumentBatchSize = 128
-	} else if conf.Options.FullSyncReaderDocumentBatchSize > 1000 {
-		// mgo driver restriction: batch size <= 1000
-		conf.Options.FullSyncReaderDocumentBatchSize = 1000
+	}
+	if conf.Options.FullSyncReaderFetchBatchSize <= 0 {
+		conf.Options.FullSyncReaderFetchBatchSize = 1024
 	}
 	if conf.Options.FullSyncCreateIndex == "" {
 		conf.Options.FullSyncCreateIndex = utils.VarFullSyncCreateIndexForeground
@@ -207,7 +207,7 @@ func checkDefaultValue() error {
 	}
 	if conf.Options.IncrSyncTunnelWriteThread == 0 {
 		conf.Options.IncrSyncTunnelWriteThread = conf.Options.IncrSyncWorker
-	} else if conf.Options.IncrSyncTunnelWriteThread % conf.Options.IncrSyncWorker != 0 {
+	} else if conf.Options.IncrSyncTunnelWriteThread%conf.Options.IncrSyncWorker != 0 {
 		return fmt.Errorf("incr_sync.tunnel.write_thread[%v] must be an interge multiple of incr_sync.worker[%v]",
 			conf.Options.IncrSyncTunnelWriteThread, conf.Options.IncrSyncWorker)
 	}
@@ -231,6 +231,9 @@ func checkDefaultValue() error {
 	}
 	if conf.Options.IncrSyncFetcherBufferCapacity <= 0 {
 		conf.Options.IncrSyncFetcherBufferCapacity = 256
+	}
+	if conf.Options.IncrSyncReaderFetchBatchSize <= 0 {
+		conf.Options.IncrSyncReaderFetchBatchSize = 1024
 	}
 	if conf.Options.Tunnel == "" {
 		conf.Options.Tunnel = utils.VarTunnelDirect
@@ -277,19 +280,19 @@ func checkDefaultValue() error {
 func checkConnection() error {
 	// check mongo_urls
 	for _, mongo := range conf.Options.MongoUrls {
-		_, err := utils.NewMongoConn(mongo, conf.Options.MongoConnectMode, true,
+		_, err := utils.NewMongoCommunityConn(mongo, conf.Options.MongoConnectMode, true,
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
-			return fmt.Errorf("connect source mongodb[%v] failed[%v]", mongo, err)
+			return fmt.Errorf("connect source mongodb[%v] failed[%v]", utils.BlockMongoUrlPassword(mongo, "***"), err)
 		}
 	}
 
 	// check mongo_cs_url
 	if conf.Options.MongoCsUrl != "" {
-		_, err := utils.NewMongoConn(conf.Options.MongoCsUrl, utils.VarMongoConnectModeSecondaryPreferred, true,
-			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
+		_, err := utils.NewMongoCommunityConn(conf.Options.MongoCsUrl, utils.VarMongoConnectModeSecondaryPreferred,
+			true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
-			return fmt.Errorf("connect config-server[%v] failed[%v]", conf.Options.MongoCsUrl, err)
+			return fmt.Errorf("connect config-server[%v] failed[%v]", utils.BlockMongoUrlPassword(conf.Options.MongoCsUrl, "***"), err)
 		}
 	}
 
@@ -299,15 +302,15 @@ func checkConnection() error {
 		!conf.Options.FullSyncExecutorDebug &&
 		!conf.Options.IncrSyncExecutorDebug {
 		for i, mongo := range conf.Options.TunnelAddress {
-			targetConn, err := utils.NewMongoConn(mongo, conf.Options.MongoConnectMode, true,
+			targetConn, err := utils.NewMongoCommunityConn(mongo, conf.Options.MongoConnectMode, true,
 				utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.TunnelMongoSslRootCaFile)
 			if err != nil {
-				return fmt.Errorf("connect target tunnel mongodb[%v] failed[%v]", mongo, err)
+				return fmt.Errorf("connect target tunnel mongodb[%v] failed[%v]", utils.BlockMongoUrlPassword(mongo, "***"), err)
 			}
 
 			// set target version
 			if i == 0 {
-				conf.Options.TargetDBVersion, _ = utils.GetDBVersion(targetConn.Session)
+				conf.Options.TargetDBVersion, _ = utils.GetDBVersion(targetConn)
 			}
 		}
 	}
@@ -318,11 +321,12 @@ func checkConnection() error {
 		return err
 	}
 
-	sourceConn, _ := utils.NewMongoConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
+	sourceConn, _ := utils.NewMongoCommunityConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 	// ignore error
-	conf.Options.SourceDBVersion, _ = utils.GetDBVersion(sourceConn.Session)
-	if ok, err := utils.GetAndCompareVersion(sourceConn.Session, "2.6.0", conf.Options.SourceDBVersion); err != nil {
+	conf.Options.SourceDBVersion, _ = utils.GetDBVersion(sourceConn)
+	if ok, err := utils.GetAndCompareVersion(sourceConn, "2.6.0",
+		conf.Options.SourceDBVersion); err != nil {
 		return err
 	} else if !ok {
 		return fmt.Errorf("source MongoDB version[%v] should >= 3.0", conf.Options.SourceDBVersion)
@@ -353,10 +357,7 @@ func checkConflict() error {
 		} else if len(conf.Options.MongoSUrl) > 0 {
 			conf.Options.CheckpointStorageUrl = conf.Options.MongoSUrl
 		} else {
-			return fmt.Errorf("mongo_s_url should be given when source is sharding")
-			// deprecated.
-			// sharding
-			conf.Options.CheckpointStorageUrl = conf.Options.MongoCsUrl
+			return fmt.Errorf("checkpoint.storage.url should be given when source is sharding")
 		}
 	}
 	// avoid the typo of mongo urls
@@ -432,12 +433,12 @@ func checkConflict() error {
 			return err
 		}
 
-		conn, err := utils.NewMongoConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
+		conn, err := utils.NewMongoCommunityConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
-			return fmt.Errorf("connect source[%v] failed[%v]", source, err)
+			return fmt.Errorf("connect source[%v] failed[%v]", utils.BlockMongoUrlPassword(source, "***"), err)
 		}
-		if isOk, err := utils.GetAndCompareVersion(conn.Session, "4.0.1", conf.Options.SourceDBVersion); err != nil {
+		if isOk, err := utils.GetAndCompareVersion(conn, "4.0.1", conf.Options.SourceDBVersion); err != nil {
 			return fmt.Errorf("compare source[%v] to v4.0.1 failed[%v]", source, err)
 		} else if !isOk {
 			return fmt.Errorf("source[%v] version should >= 4.0.1 when incr_sync.mongo_fetch_method == %v",

@@ -4,22 +4,21 @@ package sourceReader
 
 import (
 	"fmt"
-
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 var (
-	BatchSize       = 8192
-	PrefetchPercent = 0.2
+	BatchSize   = conf.Options.IncrSyncReaderFetchBatchSize
+	ChannelSize = BatchSize * 10
 )
 
 type Reader interface {
 	Name() string                               // reader name
 	StartFetcher()                              // start fetcher
 	SetQueryTimestampOnEmpty(interface{})       // set query timestamp when first start
-	UpdateQueryTimestamp(bson.MongoTimestamp)   // update query timestamp
+	UpdateQueryTimestamp(int64)                 // update query timestamp
 	Next() ([]byte, error)                      // fetch next oplog/event
 	EnsureNetwork() error                       // ensure network
 	FetchNewestTimestamp() (interface{}, error) // only used in EventReader that fetch PBRT

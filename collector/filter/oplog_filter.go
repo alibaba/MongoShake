@@ -2,12 +2,12 @@ package filter
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 // OplogFilter: AutologousFilter, NamespaceFilter, GidFilter, NoopFilter, DDLFilter
@@ -20,6 +20,7 @@ type OplogFilterChain []OplogFilter
 func (chain OplogFilterChain) IterateFilter(log *oplog.PartialLog) bool {
 	for _, filter := range chain {
 		if filter.Filter(log) {
+			LOG.Debug("%v filter oplog[%v]", reflect.TypeOf(filter), log)
 			return true
 		}
 	}
@@ -57,6 +58,14 @@ type AutologousFilter struct {
 }
 
 func (filter *AutologousFilter) Filter(log *oplog.PartialLog) bool {
+
+	// Filter out unnecessary commands
+	if operation, found := oplog.ExtraCommandName(log.Object); found {
+		if oplog.IsNeedFilterCommand(operation) {
+			return true
+		}
+	}
+
 	// for namespace. we filter noop operation and collection name
 	// that are admin, local, mongoshake, mongoshake_conflict
 	return filter.FilterNs(log.Namespace)
@@ -73,7 +82,8 @@ type DDLFilter struct {
 }
 
 func (filter *DDLFilter) Filter(log *oplog.PartialLog) bool {
-	return log.Operation == "c" || strings.HasSuffix(log.Namespace, "system.indexes")
+	operation, _ := oplog.ExtraCommandName(log.Object)
+	return log.Operation == "c" && operation != "applyOps" || strings.HasSuffix(log.Namespace, "system.indexes")
 }
 
 type MigrateFilter struct {
@@ -136,6 +146,9 @@ func NewNamespaceFilter(white, black []string) *NamespaceFilter {
 
 func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 	var result bool
+
+	LOG.Debug("NamespaceFilter check oplog:%v", log.Object)
+
 	db := strings.SplitN(log.Namespace, ".", 2)[0]
 	if log.Operation != "c" {
 		// DML
@@ -152,7 +165,6 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 		return result
 	} else {
 		// DDL
-		LOG.Info("NamespaceFilter check %v", log.Object)
 		operation, found := oplog.ExtraCommandName(log.Object)
 		if !found {
 			LOG.Warn("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
@@ -160,6 +172,14 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 		}
 
 		switch operation {
+		// startIndexBuild,abortIndexBuild,commitIndexBuild waw introduced in 4.4, first two command are ignored
+		// commitIndexBuild may have mutil indexes which need change to CreateIndexes command
+		case "startIndexBuild":
+			fallthrough
+		case "abortIndexBuild":
+			return true
+		case "commitIndexBuild":
+			fallthrough
 		case "create":
 			fallthrough
 		case "createIndexes":
@@ -196,36 +216,68 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 			log.Namespace = ns
 			return filter.filter(log)
 		case "applyOps":
-			var ops []bson.D
-			var remainOps []interface{} // return []interface{}
+			return false
 
-			// it's very strange, some documents are []interface, some are []bson.D
-			switch v := oplog.GetKey(log.Object, "applyOps").(type) {
-			case []interface{}:
-				for _, ele := range v {
-					ops = append(ops, ele.(bson.D))
-				}
-			case []bson.D:
-				ops = v
-			default:
-			}
-
-			// except field 'o'
-			except := map[string]struct{}{
-				"o": {},
-			}
-
-			for _, ele := range ops {
-				m, _ := oplog.ConvertBsonD2MExcept(ele, except)
-				subLog := oplog.NewPartialLog(m)
-				if ok := filter.Filter(subLog); !ok {
-					remainOps = append(remainOps, ele)
-				}
-			}
-			oplog.SetFiled(log.Object, "applyOps", remainOps)
-
-			LOG.Info("NamespaceFilter applyOps filter?[%v], remainOps: %v", len(remainOps) == 0, remainOps)
-			return len(remainOps) == 0
+			// TODO move all extra and filter to individual func
+			//var ops []bson.D
+			//var remainOps []interface{} // return []interface{}
+			//
+			//LOG.Info("log.Object:%v , type:%v", log.Object, reflect.TypeOf(oplog.GetKey(log.Object, "applyOps")))
+			//// it's very strange, some documents are []interface, some are []bson.D
+			//switch v := oplog.GetKey(log.Object, "applyOps").(type) {
+			//case []interface{}:
+			//	LOG.Info("Fiter interface %v\n", v)
+			//	for _, ele := range v {
+			//		ops = append(ops, ele.(bson.D))
+			//	}
+			//case []bson.D:
+			//	LOG.Info("Fiter bson.D %v\n", v)
+			//	ops = v
+			//case primitive.A:
+			//	for i, ele := range v {
+			//		ops = append(ops, ele.(bson.D))
+			//
+			//		LOG.Info("Fiter primitive.A type %v, ele:%v", reflect.TypeOf(ele), ele)
+			//		is_filter := false
+			//		for _, ele1 := range ele.(bson.D) {
+			//			if ele1.Key == "ns" && filter.FilterNs(ele1.Value.(string)) {
+			//				LOG.Info("Fiter primitive.A  fitler:%v", ele1.Value)
+			//				is_filter = true
+			//				break
+			//			}
+			//		}
+			//		if is_filter {
+			//			for j, ele1 := range ele.(bson.D) {
+			//				if ele1.Key == "op" {
+			//					//ele1.Value = "n"
+			//					v[i].(bson.D)[j].Value = "n"
+			//				}
+			//			}
+			//
+			//			LOG.Info("Fiter zhangst  result:%v", ele)
+			//		}
+			//	}
+			//default:
+			//	LOG.Error("unknow applyOps type, log:%v", log.Object)
+			//}
+			//
+			//LOG.Info("Fiter primitive.A ops:%v", ops)
+			//// except field 'o'
+			//except := map[string]struct{}{
+			//	"o": {},
+			//}
+			//
+			//for _, ele := range ops {
+			//	m, _ := oplog.ConvertBsonD2MExcept(ele, except)
+			//	subLog := oplog.NewPartialLog(m)
+			//	if ok := filter.Filter(subLog); !ok {
+			//		remainOps = append(remainOps, ele)
+			//	}
+			//}
+			//oplog.SetFiled(log.Object, "applyOps", remainOps)
+			//
+			//LOG.Info("NamespaceFilter applyOps filter?[%v], remainOps: %v", len(remainOps) == 0, remainOps)
+			//return len(remainOps) == 0
 		default:
 			// such as: dropDatabase
 			return filter.filter(log)

@@ -3,6 +3,8 @@ package executor
 import (
 	"bytes"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"reflect"
 	"strings"
 
@@ -10,7 +12,6 @@ import (
 
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 const MultiColumnIndexSplitter = "|"
@@ -179,7 +180,7 @@ func calculateSignature(object interface{}) (sign float64) {
 		for _, v := range o {
 			sign += calculateSignature(v)
 		}
-	case bson.Binary: // byte array
+	case primitive.Binary: // byte array
 		for _, c := range o.Data {
 			// consult from Java String.hashcode()
 			sign = 31.0*sign + float64(c)
@@ -194,8 +195,8 @@ func calculateSignature(object interface{}) (sign float64) {
 			// consult from Java String.hashcode()
 			sign = 31.0*sign + float64(c)
 		}
-	case bson.MongoTimestamp: // numbers
-		sign = float64(o)
+	case primitive.Timestamp: // numbers
+		sign = float64(int64(o.T<<32) + int64(o.I))
 	case int, uint, int8, uint8, int16, uint16, int32, uint32, int64, uint64, float32, float64:
 		if v, ok := object.(float64); ok {
 			sign = float64(v)
@@ -253,18 +254,16 @@ func ExactlyMatch(first, second interface{}) bool {
 		if v, ok := second.([]byte); ok {
 			return bytes.Compare(o, v) == 0
 		}
-	case bson.Binary:
-		if v, ok := second.(bson.Binary); ok {
+	case primitive.Binary:
+		if v, ok := second.(primitive.Binary); ok {
 			return bytes.Compare(o.Data, v.Data) == 0
 		}
 	case string:
 		if v, ok := second.(string); ok {
 			return o == v
 		}
-	case bson.MongoTimestamp: // numbers
-		if v, ok := second.(bson.MongoTimestamp); ok {
-			return uint64(o) == uint64(v)
-		}
+	case primitive.Timestamp: // numbers
+		return (first.(primitive.Timestamp)).Equal(second.(primitive.Timestamp))
 	case int, uint, int8, uint8, int16, uint16, int32, uint32, int64, uint64, float32, float64:
 		if v1, ok := first.(float64); ok {
 			if v2, ok := second.(float64); ok {
@@ -312,10 +311,10 @@ func haveMutualIndex(first, second *oplog.PartialLog) bool {
 		return false
 	}
 
-	var firstId, secondId bson.ObjectId
+	var firstId, secondId primitive.ObjectID
 	var got bool
-	firstId, got = oplog.GetIdOrNSFromOplog(first).(bson.ObjectId)
-	secondId, got = oplog.GetIdOrNSFromOplog(second).(bson.ObjectId)
+	firstId, got = oplog.GetIdOrNSFromOplog(first).(primitive.ObjectID)
+	secondId, got = oplog.GetIdOrNSFromOplog(second).(primitive.ObjectID)
 
 	if got && firstId.Hex() == secondId.Hex() {
 		// oplogs operate the single MongoDB record. they should be serialized by executor

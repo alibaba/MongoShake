@@ -3,8 +3,9 @@ package oplog
 import (
 	"encoding/json"
 	"fmt"
-
-	"github.com/vinllen/mgo/bson"
+	LOG "github.com/vinllen/log4go"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 const (
@@ -58,11 +59,11 @@ type Event struct {
 	FullDocument      bson.D              `bson:"fullDocument,omitempty" json:"fullDocument,omitempty"` // exists on "insert", "replace", "delete", "update"
 	Ns                bson.M              `bson:"ns" json:"ns"`
 	To                bson.M              `bson:"to,omitempty" json:"to,omitempty"`
-	DocumentKey       bson.M              `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists on "insert", "replace", "delete", "update"
+	DocumentKey       bson.D              `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists on "insert", "replace", "delete", "update"
 	UpdateDescription bson.M              `bson:"updateDescription,omitempty" json:"updateDescription,omitempty"`
-	ClusterTime       bson.MongoTimestamp `bson:"clusterTime,omitempty" json:"clusterTime,omitempty"`
-	TxnNumber         uint64              `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`
-	Lsid              bson.M              `bson:"lsid,omitempty" json:"lsid,omitempty"`
+	ClusterTime       primitive.Timestamp `bson:"clusterTime,omitempty" json:"clusterTime,omitempty"`
+	TxnNumber         *int64              `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`
+	LSID              bson.Raw            `bson:"lsid,omitempty" json:"lsid,omitempty"`
 }
 
 func (e *Event) String() string {
@@ -80,13 +81,12 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 	}
 
 	oplog := new(PartialLog)
-
 	// ts
 	oplog.Timestamp = event.ClusterTime
 	// transaction number
 	oplog.TxnNumber = event.TxnNumber
 	// lsid
-	oplog.Lsid = event.Lsid
+	oplog.LSID = event.LSID
 	// documentKey
 	if len(event.DocumentKey) > 0 {
 		oplog.DocumentKey = event.DocumentKey
@@ -173,7 +173,7 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 		*/
 		oplog.Namespace = fmt.Sprintf("%s.%s", ns["db"], ns["coll"])
 		oplog.Operation = "d"
-		oplog.Object = ConvertBsonM2D(event.DocumentKey)
+		oplog.Object = event.DocumentKey
 	case "replace":
 		// db.test.update({"kick":1}, {"kick":10, "ok":true})
 		/* event
@@ -220,7 +220,7 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 		oplog.Namespace = fmt.Sprintf("%s.%s", ns["db"], ns["coll"])
 		oplog.Operation = "u"
 		oplog.Query = event.DocumentKey
-		oplog.Object = event.FullDocument
+		oplog.Object = bson.D{{"$set", event.FullDocument}}
 	case "update":
 		/*
 		 * mgset-xxx:PRIMARY> db.test.find()
@@ -280,22 +280,22 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 		oplog.Query = event.DocumentKey
 
 		if fulldoc && event.FullDocument != nil && len(event.FullDocument) > 0 {
-			oplog.Object = event.FullDocument
+			oplog.Object = bson.D{{"$set", event.FullDocument}}
 		} else {
 			oplog.Object = make(bson.D, 0, 2)
 			if updatedFields, ok := event.UpdateDescription["updatedFields"]; ok && len(updatedFields.(bson.M)) > 0 {
-				oplog.Object = append(oplog.Object, bson.DocElem{
-					Name:  "$set",
+				oplog.Object = append(oplog.Object, primitive.E{
+					Key:   "$set",
 					Value: updatedFields,
 				})
 			}
-			if removedFields, ok := event.UpdateDescription["removedFields"]; ok && len(removedFields.([]interface{})) > 0 {
+			if removedFields, ok := event.UpdateDescription["removedFields"]; ok && len(removedFields.(primitive.A)) > 0 {
 				removedFieldsMap := make(bson.M)
-				for _, ele := range removedFields.([]interface{}) {
+				for _, ele := range removedFields.(primitive.A) {
 					removedFieldsMap[ele.(string)] = 1
 				}
-				oplog.Object = append(oplog.Object, bson.DocElem{
-					Name:  "$unset",
+				oplog.Object = append(oplog.Object, primitive.E{
+					Key:   "$unset",
 					Value: removedFieldsMap,
 				})
 			}
@@ -337,8 +337,8 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 		oplog.Namespace = fmt.Sprintf("%s.$cmd", ns["db"])
 		oplog.Operation = "c"
 		oplog.Object = bson.D{
-			bson.DocElem{
-				Name:  "drop",
+			primitive.E{
+				Key:   "drop",
 				Value: ns["coll"],
 			},
 		}
@@ -383,12 +383,12 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 		oplog.Namespace = fmt.Sprintf("%s.$cmd", ns["db"])
 		oplog.Operation = "c"
 		oplog.Object = bson.D{ // should enable drop_database option on the replayer by default
-			bson.DocElem{
-				Name:  "renameCollection",
+			primitive.E{
+				Key:   "renameCollection",
 				Value: fmt.Sprintf("%s.%s", ns["db"], ns["coll"]),
 			},
-			bson.DocElem{
-				Name:  "to",
+			primitive.E{
+				Key:   "to",
 				Value: fmt.Sprintf("%s.%s", event.To["db"], event.To["coll"]),
 			},
 		}
@@ -424,8 +424,8 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 		oplog.Namespace = fmt.Sprintf("%s.$cmd", ns["db"])
 		oplog.Operation = "c"
 		oplog.Object = bson.D{
-			bson.DocElem{
-				Name:  "dropDatabase",
+			primitive.E{
+				Key:   "dropDatabase",
 				Value: 1,
 			},
 		}
@@ -436,7 +436,7 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 		 */
 		return nil, fmt.Errorf("invalidate event happen, should be handle manually: %s", event)
 	default:
-		return nil, fmt.Errorf("unknown event[%v]", event.OperationType)
+		return nil, fmt.Errorf("unknown event type[%v] org_event[%v]", event.OperationType, event)
 	}
 
 	// set default for "o", "o2"
@@ -444,8 +444,9 @@ func ConvertEvent2Oplog(input []byte, fulldoc bool) (*PartialLog, error) {
 		oplog.Object = bson.D{}
 	}
 	if oplog.Query == nil {
-		oplog.Query = bson.M{}
+		oplog.Query = bson.D{}
 	}
 
+	LOG.Debug("ConvertEvent2Oplog Event[%v] to Oplog[%v]", event, oplog)
 	return oplog, nil
 }

@@ -1,6 +1,8 @@
 package tunnel
 
 import (
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"math/rand"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
@@ -9,7 +11,6 @@ import (
 	"time"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -42,7 +43,7 @@ func (tunnel *MockReader) Link(replayer []Replayer) error {
 }
 
 func (generator *FakeGenerator) start() {
-	existIds := make(map[string]bson.ObjectId, 10000000)
+	existIds := make(map[string]primitive.ObjectID, 10000000)
 	for {
 		var batch []*oplog.GenericOplog
 		var partialLog *oplog.PartialLog
@@ -50,7 +51,7 @@ func (generator *FakeGenerator) start() {
 		for i := 0; i != BatchSize; i++ {
 			partialLog = &oplog.PartialLog{
 				ParsedLog: oplog.ParsedLog{
-					Timestamp: bson.MongoTimestamp(time.Now().Unix() << 32),
+					Timestamp: primitive.Timestamp{T: uint32(time.Now().Unix()), I: 0},
 					Namespace: fmt.Sprintf("%s_%d", TableName, generator.index),
 				},
 			}
@@ -59,13 +60,13 @@ func (generator *FakeGenerator) start() {
 				// noop 0.1%
 				partialLog.Operation = "n"
 				partialLog.Gid = "mock-noop"
-				partialLog.Object = bson.D{bson.DocElem{"mongoshake-mock", "ApsaraDB"}}
+				partialLog.Object = bson.D{bson.E{"mongoshake-mock", "ApsaraDB"}}
 			case nr%100 == 0:
 				// delete 1%
 				for k, oid := range existIds {
 					partialLog.Operation = "d"
 					partialLog.Gid = "mock-delete"
-					partialLog.Object = bson.D{bson.DocElem{"_id", oid}}
+					partialLog.Object = bson.D{bson.E{"_id", oid}}
 					delete(existIds, k)
 					break
 				}
@@ -76,25 +77,25 @@ func (generator *FakeGenerator) start() {
 					partialLog.Gid = "mock-update"
 					// partialLog.Object = bson.M{"$set": bson.M{"updates": nr}}
 					partialLog.Object = bson.D{
-						bson.DocElem{
-							Name: "$set",
+						bson.E{
+							Key: "$set",
 							Value: bson.D{
-								bson.DocElem{"updates", nr},
+								bson.E{"updates", nr},
 							},
 						},
 					}
-					partialLog.Query = bson.M{"_id": oid}
+					partialLog.Query = bson.D{{"_id", oid}}
 					break
 				}
 			default:
 				// insert 70%
-				oid := bson.NewObjectId()
+				oid := primitive.NewObjectID()
 				partialLog.Operation = "i"
 				partialLog.Gid = "mock-insert"
 				partialLog.Object = bson.D{
-					bson.DocElem{"_id", oid},
-					bson.DocElem{"test", "1"},
-					bson.DocElem{"abc", nr},
+					bson.E{"_id", oid},
+					bson.E{"test", "1"},
+					bson.E{"abc", nr},
 				}
 				existIds[oid.Hex()] = oid
 			}

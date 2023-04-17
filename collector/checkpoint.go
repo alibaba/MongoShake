@@ -12,7 +12,6 @@ import (
 	utils "github.com/alibaba/MongoShake/v2/common"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 func (sync *OplogSyncer) newCheckpointManager(name string, startPosition interface{}) {
@@ -79,15 +78,17 @@ func (sync *OplogSyncer) loadCheckpoint() error {
  * calculate and update current checkpoint value. `flush` means whether force calculate & update checkpoint.
  * if inputTs is given(> 0), use this value to update checkpoint, otherwise, calculate from workers.
  */
-func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
+func (sync *OplogSyncer) checkpoint(flush bool, inputTs int64) {
 	now := time.Now()
 
 	// do checkpoint every once in a while
 	if !flush && sync.ckptTime.Add(time.Duration(conf.Options.CheckpointInterval)*time.Millisecond).After(now) {
+		LOG.Debug("do not repeat update checkpoint in %v milliseconds", conf.Options.CheckpointInterval)
 		return
 	}
 	// we force update the ckpt time even failed
 	sync.ckptTime = now
+	LOG.Info("checkpoint update sync.ckptTime to:%v", sync.ckptTime)
 
 	// we delayed a few minutes to tolerate the receiver's flush buffer
 	// in AckRequired() tunnel. such as "rpc". While collector is restarted,
@@ -95,7 +96,7 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 	// the unack offset...
 	if !flush && conf.Options.Tunnel != utils.VarTunnelDirect &&
 		now.Before(sync.startTime.Add(1*time.Minute)) {
-		// LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
+		LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
 		return
 	}
 
@@ -105,12 +106,14 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs bson.MongoTimestamp) {
 	var err error
 	if inputTs > 0 {
 		// use inputTs if inputTs is > 0
-		lowest = utils.TimestampToInt64(inputTs)
+		lowest = inputTs
 	} else {
 		lowest, err = sync.calculateWorkerLowestCheckpoint()
 	}
+	LOG.Info("checkpoint func lowest:%v inMemoryTs:%v flush:%v inputTs:%v",
+		utils.ExtractTimestampForLog(lowest), utils.ExtractTimestampForLog(inMemoryTs), flush, inputTs)
 
-	lowestInt64 := bson.MongoTimestamp(lowest)
+	lowestInt64 := lowest
 	// if all oplogs from disk has been replayed successfully, store the newest oplog timestamp
 	if conf.Options.FullSyncReaderOplogStoreDisk && sync.persister.diskQueueLastTs > 0 {
 		if lowestInt64 >= sync.persister.diskQueueLastTs {

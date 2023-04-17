@@ -3,6 +3,9 @@ package docsyncer
 import (
 	"errors"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,16 +18,14 @@ import (
 
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 const (
 	MAX_BUFFER_BYTE_SIZE = 12 * 1024 * 1024
 )
 
-func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
+func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoCommunityConn) bool {
 	if conf.Options.FullSyncExecutorDebug {
 		LOG.Info("full_sync.executor.debug set, no need to check IsShardingToSharding")
 		return false
@@ -37,8 +38,7 @@ func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
 		source = "replica"
 	}
 
-	var result interface{}
-	err := toConn.Session.DB("config").C("version").Find(bson.M{}).One(&result)
+	err := toConn.Client.Database("config").Collection("version").FindOne(nil, bson.M{}).Err()
 	if err != nil {
 		target = "replica"
 	} else {
@@ -52,7 +52,16 @@ func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoConn) bool {
 	return false
 }
 
-func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoConn,
+func in(target string, str_array []string) bool {
+	sort.Strings(str_array)
+	index := sort.SearchStrings(str_array, target)
+	if index < len(str_array) && str_array[index] == target {
+		return true
+	}
+	return false
+}
+
+func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoCommunityConn,
 	nsTrans *transform.NamespaceTransform) error {
 	if conf.Options.FullSyncExecutorDebug {
 		LOG.Info("full_sync.executor.debug set, no need to drop collection")
@@ -63,7 +72,8 @@ func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoCon
 		toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
 		if !conf.Options.FullSyncCollectionDrop {
 			// do not drop
-			colNames, err := toConn.Session.DB(toNS.Database).CollectionNames()
+			colNames, err := toConn.Client.Database(toNS.Database).ListCollectionNames(nil,
+				utils.GetListCollectionQueryCondition(toConn))
 			if err != nil {
 				LOG.Critical("Get collection names of db %v of dest mongodb failed. %v", toNS.Database, err)
 				return err
@@ -78,7 +88,7 @@ func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoCon
 			}
 		} else {
 			// need drop
-			err := toConn.Session.DB(toNS.Database).C(toNS.Collection).DropCollection()
+			err := toConn.Client.Database(toNS.Database).Collection(toNS.Collection).Drop(nil)
 			if err != nil && err.Error() != "ns not found" {
 				LOG.Critical("Drop collection ns %v of dest mongodb failed. %v", toNS, err)
 				return errors.New(fmt.Sprintf("Drop collection ns %v of dest mongodb failed. %v", toNS, err))
@@ -88,14 +98,16 @@ func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoCon
 	return nil
 }
 
-func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
+func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoCommunityConn,
 	nsTrans *transform.NamespaceTransform) error {
 	LOG.Info("document syncer namespace spec for sharding begin")
 
-	var fromConn *utils.MongoConn
+	var fromConn *utils.MongoCommunityConn
 	var err error
-	if fromConn, err = utils.NewMongoConn(csUrl, utils.VarMongoConnectModePrimary, true,
-		utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile); err != nil {
+	if fromConn, err = utils.NewMongoCommunityConn(csUrl, utils.VarMongoConnectModePrimary, true,
+		utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault,
+		conf.Options.MongoSslRootCaFile); err != nil {
+		LOG.Info("Connect to [%s] failed. err[%v]", csUrl, err)
 		return err
 	}
 	defer fromConn.Close()
@@ -108,9 +120,18 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 		Partitioned bool   `bson:"partitioned"`
 	}
 	var dbSpecDoc dbSpec
+	var docCursor *mongo.Cursor
 	// enable sharding for db
-	dbSpecIter := fromConn.Session.DB("config").C("databases").Find(bson.M{}).Iter()
-	for dbSpecIter.Next(&dbSpecDoc) {
+	docCursor, err = fromConn.Client.Database("config").Collection("databases").Find(nil, bson.M{})
+	if err != nil {
+		return err
+	}
+	for docCursor.Next(nil) {
+		err = bson.Unmarshal(docCursor.Current, &dbSpecDoc)
+		if err != nil {
+			LOG.Error("parse docCursor.Current[%v] failed", docCursor.Current)
+			continue
+		}
 		if dbSpecDoc.Partitioned {
 			if filterList.IterateFilter(dbSpecDoc.Db + ".$cmd") {
 				LOG.Debug("DB is filtered. %v", dbSpecDoc.Db)
@@ -119,12 +140,14 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 			var todbSpecDoc dbSpec
 			todbList := dbTrans.Transform(dbSpecDoc.Db)
 			for _, todb := range todbList {
-				err = toConn.Session.DB("config").C("databases").
-					Find(bson.D{{"_id", todb}}).One(&todbSpecDoc)
+
+				err = toConn.Client.Database("config").Collection("databases").FindOne(nil,
+					bson.D{{"_id", todb}}).Decode(&todbSpecDoc)
 				if err == nil && todbSpecDoc.Partitioned {
 					continue
 				}
-				err = toConn.Session.DB("admin").Run(bson.D{{"enablesharding", todb}}, nil)
+				err = toConn.Client.Database("admin").RunCommand(nil,
+					bson.D{{"enablesharding", todb}}).Err()
 				if err != nil {
 					LOG.Critical("Enable sharding for db %v of dest mongodb failed. %v", todb, err)
 					return errors.New(fmt.Sprintf("Enable sharding for db %v of dest mongodb failed. %v",
@@ -134,7 +157,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 			}
 		}
 	}
-	if err := dbSpecIter.Close(); err != nil {
+	if err := docCursor.Close(nil); err != nil {
 		LOG.Critical("Close iterator of config.database failed. %v", err)
 	}
 
@@ -145,18 +168,26 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 		Dropped bool      `bson:"dropped"`
 	}
 	var colSpecDoc colSpec
-	// enable sharding for db
-	colSpecIter := fromConn.Session.DB("config").C("collections").Find(bson.M{}).Iter()
-	for colSpecIter.Next(&colSpecDoc) {
+	var colDocCursor *mongo.Cursor
+	// enable sharding for db(shardCollection)
+	colDocCursor, err = fromConn.Client.Database("config").Collection(
+		"collections").Find(nil, bson.D{})
+	for colDocCursor.Next(nil) {
+		err = bson.Unmarshal(colDocCursor.Current, &colSpecDoc)
+		if err != nil {
+			LOG.Error("parse colDocCursor.Current[%v] failed", colDocCursor.Current)
+			continue
+		}
+
 		if !colSpecDoc.Dropped {
 			if filterList.IterateFilter(colSpecDoc.Ns) {
 				LOG.Debug("Namespace is filtered. %v", colSpecDoc.Ns)
 				continue
 			}
 			toNs := nsTrans.Transform(colSpecDoc.Ns)
-			err = toConn.Session.DB("admin").Run(bson.D{{"shardCollection", toNs},
-				{"key", colSpecDoc.Key}, {"unique", colSpecDoc.Unique}}, nil)
-			if err != nil {
+			err = toConn.Client.Database("admin").RunCommand(nil, bson.D{{"shardCollection", toNs},
+				{"key", colSpecDoc.Key}, {"unique", colSpecDoc.Unique}}).Err()
+			if err != nil && !in(toNs, conf.Options.SkipNSShareKeyVerify) {
 				LOG.Critical("Shard collection for ns %v of dest mongodb failed. %v", toNs, err)
 				return errors.New(fmt.Sprintf("Shard collection for ns %v of dest mongodb failed. %v",
 					toNs, err))
@@ -164,7 +195,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 			LOG.Info("Shard collection for ns %v of dest mongodb successful", toNs)
 		}
 	}
-	if err = colSpecIter.Close(); err != nil {
+	if err = docCursor.Close(nil); err != nil {
 		LOG.Critical("Close iterator of config.collections failed. %v", err)
 	}
 
@@ -172,7 +203,7 @@ func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoConn,
 	return nil
 }
 
-func StartIndexSync(indexMap map[utils.NS][]bson2.M, toUrl string,
+func StartIndexSync(indexMap map[utils.NS][]bson.D, toUrl string,
 	nsTrans *transform.NamespaceTransform, background bool) (syncError error) {
 	if conf.Options.FullSyncExecutorDebug {
 		LOG.Info("full_sync.executor.debug set, no need to sync index")
@@ -181,7 +212,7 @@ func StartIndexSync(indexMap map[utils.NS][]bson2.M, toUrl string,
 
 	type IndexNS struct {
 		ns        utils.NS
-		indexList []bson2.M
+		indexList []bson.D
 	}
 
 	LOG.Info("start writing index with background[%v], indexMap length[%v]", background, len(indexMap))
@@ -205,8 +236,8 @@ func StartIndexSync(indexMap map[utils.NS][]bson2.M, toUrl string,
 		nimo.GoRoutine(func() {
 			var conn *utils.MongoCommunityConn
 			var err error
-			if conn, err = utils.NewMongoCommunityConn(toUrl, utils.VarMongoConnectModePrimary, false,
-				utils.ReadWriteConcernDefault, utils.ReadWriteConcernMajority); err != nil {
+			if conn, err = utils.NewMongoCommunityConn(toUrl, utils.VarMongoConnectModePrimary, true,
+				utils.ReadWriteConcernLocal, utils.ReadWriteConcernMajority, conf.Options.TunnelMongoSslRootCaFile); err != nil {
 				LOG.Error("write index but create client fail: %v", err)
 				return
 			}
@@ -226,14 +257,21 @@ func StartIndexSync(indexMap map[utils.NS][]bson2.M, toUrl string,
 
 				for _, index := range indexNs.indexList {
 					// ignore _id
-					if _, ok := index["key"].(bson2.M)["_id"]; ok {
+					if utils.HaveIdIndexKey(index) {
 						continue
 					}
 
-					index["background"] = background
-					if out := conn.Client.Database(toNS.Database).RunCommand(nil, bson2.D{
+					newIndex := bson.D{}
+					for _, v := range index {
+						if v.Key == "ns" || v.Key == "v" || v.Key == "background" {
+							continue
+						}
+						newIndex = append(newIndex, v)
+					}
+					newIndex = append(newIndex, primitive.E{Key: "background", Value: background})
+					if out := conn.Client.Database(toNS.Database).RunCommand(nil, bson.D{
 						{"createIndexes", toNS.Collection},
-						{"indexes", []bson2.M{index}},
+						{"indexes", []bson.D{newIndex}},
 					}); out.Err() != nil {
 						LOG.Warn("Create indexes for ns %v of dest mongodb failed. %v", ns, out.Err())
 					}
@@ -269,8 +307,6 @@ type DBSyncer struct {
 	fromReplset  string
 	// destination mongodb url
 	ToMongoUrl string
-	// index of namespace
-	indexMap map[utils.NS][]mgo.Index
 	// start time of sync
 	startTime time.Time
 	// source is sharding?
@@ -334,11 +370,6 @@ func (syncer *DBSyncer) Close() {
 	time.Sleep(1 * time.Second)
 }
 
-// @deprecated
-func (syncer *DBSyncer) GetIndexMap() map[utils.NS][]mgo.Index {
-	return syncer.indexMap
-}
-
 func (syncer *DBSyncer) Start() (syncError error) {
 	syncer.startTime = time.Now()
 	var wg sync.WaitGroup
@@ -346,7 +377,8 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	filterList := filter.NewDocFilterList()
 
 	// get all namespace
-	nsList, _, err := utils.GetDbNamespace(syncer.FromMongoUrl, filterList.IterateFilter)
+	nsList, _, err := utils.GetDbNamespace(syncer.FromMongoUrl, filterList.IterateFilter,
+		conf.Options.MongoSslRootCaFile)
 	if err != nil {
 		return err
 	}
@@ -469,7 +501,8 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 	return nil
 }
 
-func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *CollectionExecutor, collectionMetric *CollectionMetric) error {
+func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *CollectionExecutor,
+	collectionMetric *CollectionMetric) error {
 	bufferSize := conf.Options.FullSyncReaderDocumentBatchSize
 	buffer := make([]*bson.Raw, 0, bufferSize)
 	bufferByteSize := 0
@@ -488,7 +521,7 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 
 		syncer.replMetric.AddGet(1)
 
-		if bufferByteSize+len(doc.Data) > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
+		if bufferByteSize+len(doc) > MAX_BUFFER_BYTE_SIZE || len(buffer) >= bufferSize {
 			atomic.AddUint64(&collectionMetric.FinishCount, uint64(len(buffer)))
 			colExecutor.Sync(buffer)
 			syncer.replMetric.AddSuccess(uint64(len(buffer))) // only used to calculate the tps which is extract from "success"
@@ -499,19 +532,20 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 		// transform dbref for document
 		if len(conf.Options.TransformNamespace) > 0 && conf.Options.IncrSyncDBRef {
 			var docData bson.D
-			if err := bson.Unmarshal(doc.Data, docData); err != nil {
-				LOG.Error("splitter reader[%v] do bson unmarshal %v failed. %v", reader, doc.Data, err)
+			if err := bson.Unmarshal(doc, &docData); err != nil {
+				LOG.Error("splitter reader[%v] do bson unmarshal %v failed. %v", reader, doc, err)
 			} else {
 				docData = transform.TransformDBRef(docData, reader.ns.Database, syncer.nsTrans)
 				if v, err := bson.Marshal(docData); err != nil {
 					LOG.Warn("splitter reader[%v] do bson marshal %v failed. %v", reader, docData, err)
 				} else {
-					doc.Data = v
+					doc = v
 				}
 			}
 		}
-		buffer = append(buffer, doc)
-		bufferByteSize += len(doc.Data)
+
+		buffer = append(buffer, &doc)
+		bufferByteSize += len(doc)
 	}
 
 	LOG.Info("splitter reader finishes: %v", reader)

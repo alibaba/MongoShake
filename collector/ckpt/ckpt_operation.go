@@ -5,30 +5,32 @@ import (
 	"encoding/json"
 	"fmt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+
 	"io/ioutil"
 	"net/http"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
 	// we can't insert Timestamp(0, 0) that will be treat as Now() inserted
 	// into mongo. so we use Timestamp(0, 1)
-	InitCheckpoint  = bson.MongoTimestamp(1)
-	EmptyCheckpoint = bson.MongoTimestamp(0)
+	InitCheckpoint  = int64(1)
+	EmptyCheckpoint = int64(0)
 )
 
 type CheckpointContext struct {
-	Name                   string              `bson:"name" json:"name"`
-	Timestamp              bson.MongoTimestamp `bson:"ckpt" json:"ckpt"`
-	Version                int                 `bson:"version" json:"version"`
-	FetchMethod            string              `bson:"fetch_method" json:"fetch_method"`
-	OplogDiskQueue         string              `bson:"oplog_disk_queue" json:"oplog_disk_queue"`
-	OplogDiskQueueFinishTs bson.MongoTimestamp `bson:"oplog_disk_queue_apply_finish_ts" json:"oplog_disk_queue_apply_finish_ts"`
+	Name                   string `bson:"name" json:"name"`
+	Timestamp              int64  `bson:"ckpt" json:"ckpt"`
+	Version                int    `bson:"version" json:"version"`
+	FetchMethod            string `bson:"fetch_method" json:"fetch_method"`
+	OplogDiskQueue         string `bson:"oplog_disk_queue" json:"oplog_disk_queue"`
+	OplogDiskQueueFinishTs int64  `bson:"oplog_disk_queue_apply_finish_ts" json:"oplog_disk_queue_apply_finish_ts"`
 }
 
 func (cc *CheckpointContext) String() string {
@@ -56,8 +58,7 @@ type CheckpointOperation interface {
 type MongoCheckpoint struct {
 	CheckpointContext
 
-	Conn        *utils.MongoConn
-	QueryHandle *mgo.Collection
+	client *utils.MongoCommunityConn
 
 	// connection info
 	URL       string
@@ -65,12 +66,12 @@ type MongoCheckpoint struct {
 }
 
 func (ckpt *MongoCheckpoint) ensureNetwork() bool {
-	// make connection if we haven't already established one
-	if ckpt.Conn == nil {
-		if conn, err := utils.NewMongoConn(ckpt.URL, utils.VarMongoConnectModePrimary, true,
-			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority, conf.Options.CheckpointStorageUrlMongoSslRootCaFile); err == nil {
-			ckpt.Conn = conn
-			ckpt.QueryHandle = conn.Session.DB(ckpt.DB).C(ckpt.Table)
+	if ckpt.client == nil {
+		if client, err := utils.NewMongoCommunityConn(ckpt.URL, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority,
+			conf.Options.CheckpointStorageUrlMongoSslRootCaFile); err == nil {
+			ckpt.client = client
+
 		} else {
 			LOG.Warn("%s CheckpointOperation manager connect mongo cluster failed. %v", ckpt.Name, err)
 			return false
@@ -81,22 +82,24 @@ func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 }
 
 func (ckpt *MongoCheckpoint) close() {
-	ckpt.Conn.Close()
-	ckpt.Conn = nil
+	ckpt.client.Close()
+	ckpt.client = nil
 }
 
 func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 	if !ckpt.ensureNetwork() {
-		LOG.Warn("%s Reload ckpt ensure network failed. %v", ckpt.Name, ckpt.Conn)
+		LOG.Warn("%s Reload ckpt ensure network failed. %v", ckpt.Name, ckpt.client)
 		return nil, false
 	}
 
 	var err error
 	value := new(CheckpointContext)
-	if err = ckpt.QueryHandle.Find(bson.M{CheckpointName: ckpt.Name}).One(value); err == nil {
+	if err = ckpt.client.Client.Database(ckpt.DB).Collection(ckpt.Table).FindOne(nil,
+		bson.M{CheckpointName: ckpt.Name}).Decode(value); err == nil {
+
 		LOG.Info("%s Load exist checkpoint. content %v", ckpt.Name, value)
 		return value, true
-	} else if err == mgo.ErrNotFound {
+	} else if err == mongo.ErrNoDocuments {
 		if InitCheckpoint > ckpt.Timestamp {
 			ckpt.Timestamp = InitCheckpoint
 		}
@@ -106,29 +109,33 @@ func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 		value.OplogDiskQueue = ckpt.OplogDiskQueue
 		value.OplogDiskQueueFinishTs = ckpt.OplogDiskQueueFinishTs
 		LOG.Info("%s Regenerate checkpoint but won't persist. content: %s", ckpt.Name, value)
-		// insert current ckpt snapshot in memory
-		// ckpt.QueryHandle.Insert(value)
 		return value, false
 	}
 
 	ckpt.close()
-	LOG.Warn("%s Reload ckpt find context fail. %v", ckpt.Name, err)
+	LOG.Error("%s Reload ckpt find context fail. %v", ckpt.Name, err)
 	return nil, false
 }
 
 func (ckpt *MongoCheckpoint) Insert(updates *CheckpointContext) error {
 	if !ckpt.ensureNetwork() {
-		LOG.Warn("%s Record ckpt ensure network failed. %v", ckpt.Name, ckpt.Conn)
+		LOG.Warn("%s Record ckpt ensure network failed. %v", ckpt.Name, ckpt.client)
 		return fmt.Errorf("%s record ckpt network failed", ckpt.Name)
 	}
 
-	if _, err := ckpt.QueryHandle.Upsert(bson.M{CheckpointName: ckpt.Name}, bson.M{"$set": updates}); err != nil {
+	opts := options.Update().SetUpsert(true)
+	filter := bson.M{CheckpointName: ckpt.Name}
+	update := bson.M{"$set": updates}
+
+	_, err := ckpt.client.Client.Database(ckpt.DB).Collection(ckpt.Table).UpdateOne(nil, filter, update, opts)
+	if err != nil {
 		LOG.Warn("%s Record checkpoint %v upsert error %v", ckpt.Name, updates, err)
 		ckpt.close()
 		return err
 	}
 
-	LOG.Info("%s Record new checkpoint success [%d]", ckpt.Name, int64(utils.ExtractMongoTimestamp(updates.Timestamp)))
+	LOG.Info("%s Record new checkpoint in MongoDB success [%d]", ckpt.Name,
+		utils.ExtractMongoTimestamp(updates.Timestamp))
 	return nil
 }
 
@@ -174,6 +181,6 @@ func (ckpt *HttpApiCheckpoint) Insert(insert *CheckpointContext) error {
 		return err
 	}
 
-	LOG.Info("%s Record new checkpoint success [%d]", ckpt.Name, int64(utils.ExtractMongoTimestamp(insert.Timestamp)))
+	LOG.Info("%s Record new checkpoint in HttpApi success [%d]", ckpt.Name, utils.ExtractMongoTimestamp(insert.Timestamp))
 	return nil
 }

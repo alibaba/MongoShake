@@ -3,11 +3,12 @@ package oplog
 import (
 	"encoding/json"
 	"fmt"
+	LOG "github.com/vinllen/log4go"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"reflect"
 
 	"strings"
-
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -20,20 +21,22 @@ type GenericOplog struct {
 }
 
 type ParsedLog struct {
-	Timestamp     bson.MongoTimestamp `bson:"ts" json:"ts"`
-	HistoryId     int64               `bson:"h,omitempty" json:"h,omitempty"`
-	Version       int                 `bson:"v,omitempty" json:"v,omitempty"`
+	Timestamp     primitive.Timestamp `bson:"ts" json:"ts"`
+	Term          *int64              `bson:"t" json:"t"`
+	Hash          *int64              `bson:"h" json:"h"`
+	Version       int                 `bson:"v" json:"v"`
 	Operation     string              `bson:"op" json:"op"`
 	Gid           string              `bson:"g,omitempty" json:"g,omitempty"`
 	Namespace     string              `bson:"ns" json:"ns"`
 	Object        bson.D              `bson:"o" json:"o"`
-	Query         bson.M              `bson:"o2" json:"o2"`
-	UniqueIndexes bson.M              `bson:"uk,omitempty" json:"uk,omitempty"`
-	Lsid          bson.M              `bson:"lsid,omitempty" json:"lsid,omitempty"`               // mark the session id, used in transaction
+	Query         bson.D              `bson:"o2" json:"o2"`                                       // update condition
+	UniqueIndexes bson.M              `bson:"uk,omitempty" json:"uk,omitempty"`                   //
+	LSID          bson.Raw            `bson:"lsid,omitempty" json:"lsid,omitempty"`               // mark the session id, used in transaction
 	FromMigrate   bool                `bson:"fromMigrate,omitempty" json:"fromMigrate,omitempty"` // move chunk
-	TxnNumber     uint64              `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`     // transaction number in session
-	DocumentKey   bson.M              `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists when source collection is sharded, only including shard key and _id
-	// Ui            bson.Binary         `bson:"ui,omitempty" json:"ui,omitempty"` // do not enable currently
+	TxnNumber     *int64              `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`     // transaction number in session
+	DocumentKey   bson.D              `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists when source collection is sharded, only including shard key and _id
+	PrevOpTime    bson.Raw            `bson:"prevOpTime,omitempty"`
+	UI            *primitive.Binary   `bson:"ui,omitempty" json:"ui,omitempty"` // do not enable currently
 }
 
 type PartialLog struct {
@@ -53,7 +56,15 @@ func LogEntryEncode(logs []*GenericOplog) [][]byte {
 	encodedLogs := make([][]byte, 0, len(logs))
 	// log entry encode
 	for _, log := range logs {
-		encodedLogs = append(encodedLogs, log.Raw)
+		if log.Raw == nil {
+			if out, err := bson.Marshal(log.Parsed); err != nil {
+				LOG.Crashf("LogEntryEncode marshal Oplog[%v] failed[%v]", log.Parsed, err)
+			} else {
+				encodedLogs = append(encodedLogs, out)
+			}
+		} else {
+			encodedLogs = append(encodedLogs, log.Raw)
+		}
 	}
 	return encodedLogs
 }
@@ -67,7 +78,6 @@ func LogParsed(logs []*GenericOplog) []*PartialLog {
 }
 
 func NewPartialLog(data bson.M) *PartialLog {
-	// partialLog := new(PartialLog)
 	parsedLog := new(ParsedLog)
 	logType := reflect.TypeOf(*parsedLog)
 	for i := 0; i < logType.NumField(); i++ {
@@ -104,7 +114,7 @@ func (partialLog *PartialLog) Dump(keys map[string]struct{}, all bool) bson.D {
 					continue
 				}
 			}
-			out = append(out, bson.DocElem{tagName, value})
+			out = append(out, primitive.E{tagName, value})
 		}
 	}
 
@@ -123,7 +133,7 @@ func GetKeyWithIndex(log bson.D, wanted string) (interface{}, int) {
 
 	// "_id" is always the first field
 	for id, ele := range log {
-		if ele.Name == wanted {
+		if ele.Key == wanted {
 			return ele.Value, id
 		}
 	}
@@ -137,17 +147,17 @@ func ConvertBsonD2MExcept(input bson.D, except map[string]struct{}) (bson.M, map
 	for _, ele := range input {
 		switch ele.Value.(type) {
 		case bson.D:
-			if _, ok := except[ele.Name]; ok {
-				m[ele.Name] = ele.Value
+			if _, ok := except[ele.Key]; ok {
+				m[ele.Key] = ele.Value
 			} else {
 				son, _ := ConvertBsonD2M(ele.Value.(bson.D))
-				m[ele.Name] = son
+				m[ele.Key] = son
 			}
 		default:
-			m[ele.Name] = ele.Value
+			m[ele.Key] = ele.Value
 		}
 
-		keys[ele.Name] = struct{}{}
+		keys[ele.Key] = struct{}{}
 	}
 
 	return m, keys
@@ -158,15 +168,15 @@ func ConvertBsonD2M(input bson.D) (bson.M, map[string]struct{}) {
 	m := bson.M{}
 	keys := make(map[string]struct{}, len(input))
 	for _, ele := range input {
-		m[ele.Name] = ele.Value
+		m[ele.Key] = ele.Value
 		switch ele.Value.(type) {
 		case bson.D:
 			son, _ := ConvertBsonD2M(ele.Value.(bson.D))
-			m[ele.Name] = son
+			m[ele.Key] = son
 		default:
-			m[ele.Name] = ele.Value
+			m[ele.Key] = ele.Value
 		}
-		keys[ele.Name] = struct{}{}
+		keys[ele.Key] = struct{}{}
 	}
 
 	return m, keys
@@ -175,8 +185,8 @@ func ConvertBsonD2M(input bson.D) (bson.M, map[string]struct{}) {
 func ConvertBsonM2D(input bson.M) bson.D {
 	output := make(bson.D, 0, len(input))
 	for key, val := range input {
-		output = append(output, bson.DocElem{
-			Name:  key,
+		output = append(output, primitive.E{
+			Key:   key,
 			Value: val,
 		})
 	}
@@ -187,7 +197,7 @@ func ConvertBsonM2D(input bson.M) bson.D {
 func RemoveFiled(input bson.D, key string) bson.D {
 	flag := -1
 	for id := range input {
-		if input[id].Name == key {
+		if input[id].Key == key {
 			flag = id
 			break
 		}
@@ -199,20 +209,22 @@ func RemoveFiled(input bson.D, key string) bson.D {
 	return input
 }
 
+func FindFiledPrefix(input bson.D, prefix string) bool {
+	for id := range input {
+		if strings.HasPrefix(input[id].Key, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func SetFiled(input bson.D, key string, value interface{}) {
 	for i, ele := range input {
-		if ele.Name == key {
+		if ele.Key == key {
 			input[i].Value = value
 		}
 	}
-}
-
-func ParseTimestampFromBson(intput []byte) bson.MongoTimestamp {
-	log := new(PartialLog)
-	if err := bson.Unmarshal(intput, log); err != nil {
-		return -1
-	}
-	return log.Timestamp
 }
 
 func GatherApplyOps(input []*PartialLog) (*GenericOplog, error) {
@@ -227,7 +239,7 @@ func GatherApplyOps(input []*PartialLog) (*GenericOplog, error) {
 			Gid:           input[0].Gid,
 			Namespace:     "admin.$cmd",
 			UniqueIndexes: input[0].UniqueIndexes,
-			Lsid:          input[0].Lsid,
+			LSID:          input[0].LSID,
 			FromMigrate:   input[0].FromMigrate,
 		},
 	}
@@ -242,8 +254,8 @@ func GatherApplyOps(input []*PartialLog) (*GenericOplog, error) {
 		})
 	}
 	newOplog.Object = bson.D{
-		bson.DocElem{
-			Name:  "applyOps",
+		primitive.E{
+			Key:   "applyOps",
 			Value: applyOpsList,
 		},
 	}
@@ -256,4 +268,91 @@ func GatherApplyOps(input []*PartialLog) (*GenericOplog, error) {
 			Parsed: newOplog,
 		}, nil
 	}
+}
+
+// Oplog from mongod(5.0) in sharding&replica
+// {"ts":{"T":1653449035,"I":3},"v":2,"op":"u","ns":"test.bar",
+//  "o":[{"Key":"diff","Value":[{"Key":"d","Value":[{"Key":"ok","Value":false}]},
+//                              {"Key":"i","Value":[{"Key":"plus_field","Value":2}]}]}],
+//  "o2":[{"Key":"_id","Value":"628da11482387c117d4e9e45"}]}
+
+// "o" : { "$v" : 2, "diff" : { "d" : { "count" : false }, "u" : { "name" : "orange" }, "i" : { "c" : 11 } } }
+func DiffUpdateOplogToNormal(updateObj bson.D) (bson.D, error) {
+
+	diffObj := GetKey(updateObj, "diff")
+	if diffObj == nil {
+		return updateObj, fmt.Errorf("don't have diff field updateObj:[%v]", updateObj)
+	}
+
+	bsonDiffObj, ok := diffObj.(bson.D)
+	if !ok {
+		return updateObj, fmt.Errorf("diff field is not bson.D updateObj:[%v]", updateObj)
+	}
+
+	result, err := BuildUpdateDelteOplog("", bsonDiffObj)
+	if err != nil {
+		return updateObj, fmt.Errorf("parse diffOplog failed updateObj:[%v] err[%v]", updateObj, err)
+	}
+
+	return result, nil
+
+}
+
+func BuildUpdateDelteOplog(prefixField string, obj bson.D) (bson.D, error) {
+	var result bson.D
+
+	for _, ele := range obj {
+		if ele.Key == "d" {
+			result = append(result, primitive.E{
+				Key:   "$unset",
+				Value: combinePrefixField(prefixField, ele.Value)})
+		} else if ele.Key == "i" || ele.Key == "u" {
+			result = append(result, primitive.E{
+				Key:   "$set",
+				Value: combinePrefixField(prefixField, ele.Value)})
+		} else if len(ele.Key) > 1 && ele.Key[0] == 's' {
+			// s means subgroup field(array or nest)
+			tmpPrefixField := ""
+			if len(prefixField) == 0 {
+				tmpPrefixField = ele.Key[1:]
+			} else {
+				tmpPrefixField = prefixField + "." + ele.Key[1:]
+			}
+
+			nestObj, err := BuildUpdateDelteOplog(tmpPrefixField, ele.Value.(bson.D))
+			if err != nil {
+				return obj, fmt.Errorf("parse ele[%v] failed, updateObj:[%v]", ele, obj)
+			}
+
+			for _, nestObjEle := range nestObj {
+				result = append(result, nestObjEle)
+			}
+		} else if ele.Key == "a" && ele.Value == true {
+			continue
+		} else {
+			return obj, fmt.Errorf("unknow Key[%v] updateObj:[%v]", ele, obj)
+		}
+	}
+
+	return result, nil
+}
+
+func combinePrefixField(prefixField string, obj interface{}) interface{} {
+	if len(prefixField) == 0 {
+		return obj
+	}
+
+	tmpObj, ok := obj.(bson.D)
+	if !ok {
+		return obj
+	}
+
+	var result bson.D
+	for _, ele := range tmpObj {
+		result = append(result, primitive.E{
+			Key:   prefixField + "." + ele.Key,
+			Value: ele.Value})
+	}
+
+	return result
 }

@@ -2,7 +2,8 @@ package oplog
 
 import (
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 const (
@@ -109,13 +110,21 @@ func (wloi *WhiteListObjectIdHasher) DistributeOplogByMod(log *PartialLog, mod i
 }
 
 /*********************************************/
+func getValueFromBsonD(obj bson.D, key string) (interface{}, bool) {
+	for _, ele := range obj {
+		if ele.Key == key {
+			return ele.Value, true
+		}
+	}
 
+	return nil, false
+}
 func GetIdOrNSFromOplog(log *PartialLog) interface{} {
 	switch log.Operation {
 	case "i", "d":
 		return GetKey(log.Object, "")
 	case "u":
-		if id, ok := log.Query["_id"]; ok {
+		if id, ok := getValueFromBsonD(log.Query, "_id"); ok {
 			return id
 		} else {
 			return GetKey(log.Object, "")
@@ -144,7 +153,7 @@ func stringHashValue(s string) uint32 {
 
 func Hash(hashObject interface{}) uint32 {
 	switch object := hashObject.(type) {
-	case bson.ObjectId:
+	case primitive.ObjectID:
 		return stringHashValue(object.Hex())
 	case string:
 		return stringHashValue(object)

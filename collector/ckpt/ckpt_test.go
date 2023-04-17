@@ -2,6 +2,7 @@ package ckpt
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
 	"testing"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
@@ -9,7 +10,6 @@ import (
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/vinllen/mgo/bson"
 )
 
 var (
@@ -31,12 +31,12 @@ func TestMongoCheckpoint(t *testing.T) {
 		conf.Options.CheckpointStorage = utils.VarCheckpointStorageDatabase
 
 		name := "ut_tet"
-		conn, err := utils.NewMongoConn(testUrl, utils.VarMongoConnectModePrimary, true,
+		conn, err := utils.NewMongoCommunityConn(testUrl, utils.VarMongoConnectModePrimary, true,
 			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop test db
-		err = conn.Session.DB(utils.VarCheckpointStorageDbReplicaDefault).DropDatabase()
+		err = conn.Client.Database(utils.VarCheckpointStorageDbReplicaDefault).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
 		ckptManager := NewCheckpointManager(name, 100)
@@ -57,12 +57,12 @@ func TestMongoCheckpoint(t *testing.T) {
 		conf.Options.CheckpointStorageDb = utils.VarCheckpointStorageDbReplicaDefault
 
 		name := "ut_tet"
-		conn, err := utils.NewMongoConn(testUrl, utils.VarMongoConnectModePrimary, true,
+		conn, err := utils.NewMongoCommunityConn(testUrl, utils.VarMongoConnectModePrimary, true,
 			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop test db
-		err = conn.Session.DB(utils.VarCheckpointStorageDbReplicaDefault).DropDatabase()
+		err = conn.Client.Database(utils.VarCheckpointStorageDbReplicaDefault).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
 		ckptManager := NewCheckpointManager(name, 100)
@@ -74,12 +74,12 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, false, exist, "should be equal")
 		assert.Equal(t, name, ctx.Name, "should be equal")
 		assert.Equal(t, utils.FcvCheckpoint.CurrentVersion, ctx.Version, "should be equal")
-		assert.Equal(t, bson.MongoTimestamp(100), ctx.Timestamp, "should be equal")
+		assert.Equal(t, int64(100), ctx.Timestamp, "should be equal")
 		assert.Equal(t, "", ctx.OplogDiskQueue, "should be equal")
 		assert.Equal(t, InitCheckpoint, ctx.OplogDiskQueueFinishTs, "should be equal")
 
 		// update
-		newTime := bson.MongoTimestamp(200)
+		newTime := int64(200)
 		err = ckptManager.Update(newTime)
 
 		// get again
@@ -104,23 +104,25 @@ func TestMongoCheckpoint(t *testing.T) {
 		conf.Options.CheckpointStorageDb = utils.VarCheckpointStorageDbReplicaDefault
 
 		name := "ut_tet"
-		conn, err := utils.NewMongoConn(testUrl, utils.VarMongoConnectModePrimary, true,
+		conn, err := utils.NewMongoCommunityConn(testUrl, utils.VarMongoConnectModePrimary, true,
 			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop test db
-		err = conn.Session.DB(utils.VarCheckpointStorageDbReplicaDefault).DropDatabase()
+		err = conn.Client.Database(utils.VarCheckpointStorageDbReplicaDefault).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// insert remote with startTs == 300
-		remoteTime := bson.MongoTimestamp(300)
-		conn.Session.DB(utils.VarCheckpointStorageDbReplicaDefault).C(conf.Options.CheckpointStorageCollection).Insert(bson.M{
-			"name":                             name,
-			"ckpt":                             remoteTime,
-			"oplog_disk_queue":                 "",
-			"oplog_disk_queue_apply_finish_ts": nil,
-			"version":                          0,
-		})
+		remoteTime := int64(300)
+		conn.Client.Database(utils.VarCheckpointStorageDbReplicaDefault).
+			Collection(conf.Options.CheckpointStorageCollection).
+			InsertOne(nil, bson.M{
+				"name":                             name,
+				"ckpt":                             remoteTime,
+				"oplog_disk_queue":                 "",
+				"oplog_disk_queue_apply_finish_ts": nil,
+				"version":                          0,
+			})
 
 		ckptManager := NewCheckpointManager(name, 100)
 		assert.NotEqual(t, nil, ckptManager, "should be equal")
@@ -143,23 +145,25 @@ func TestMongoCheckpoint(t *testing.T) {
 		utils.FcvCheckpoint.CurrentVersion = 1
 
 		name := "ut_tet"
-		conn, err := utils.NewMongoConn(testUrl, utils.VarMongoConnectModePrimary, true,
+		conn, err := utils.NewMongoCommunityConn(testUrl, utils.VarMongoConnectModePrimary, true,
 			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop test db
-		err = conn.Session.DB(utils.VarCheckpointStorageDbReplicaDefault).DropDatabase()
+		err = conn.Client.Database(utils.VarCheckpointStorageDbReplicaDefault).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// insert remote with startTs == 300
-		remoteTime := bson.MongoTimestamp(300)
-		conn.Session.DB(utils.VarCheckpointStorageDbReplicaDefault).C(conf.Options.CheckpointStorageCollection).Insert(bson.M{
-			"name":                             name,
-			"ckpt":                             remoteTime,
-			"oplog_disk_queue":                 "",
-			"oplog_disk_queue_apply_finish_ts": nil,
-			"version":                          1,
-		})
+		remoteTime := int64(300)
+		conn.Client.Database(utils.VarCheckpointStorageDbReplicaDefault).
+			Collection(conf.Options.CheckpointStorageCollection).
+			InsertOne(nil, bson.M{
+				"name":                             name,
+				"ckpt":                             remoteTime,
+				"oplog_disk_queue":                 "",
+				"oplog_disk_queue_apply_finish_ts": nil,
+				"version":                          1,
+			})
 
 		ckptManager := NewCheckpointManager(name, 100)
 		assert.NotEqual(t, nil, ckptManager, "should be equal")
@@ -175,7 +179,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		// assert.Equal(t, InitCheckpoint, ctx.OplogDiskQueueFinishTs, "should be equal")
 
 		// update with 400
-		updateTime := bson.MongoTimestamp(400)
+		updateTime := int64(400)
 		err = ckptManager.Update(updateTime)
 
 		// get again
@@ -201,18 +205,18 @@ func TestMongoCheckpoint(t *testing.T) {
 		utils.FcvCheckpoint.CurrentVersion = 1
 
 		name := "ut_tet"
-		conn, err := utils.NewMongoConn(testUrl, utils.VarMongoConnectModePrimary, true,
+		conn, err := utils.NewMongoCommunityConn(testUrl, utils.VarMongoConnectModePrimary, true,
 			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop test db
-		err = conn.Session.DB(utils.VarCheckpointStorageDbReplicaDefault).DropDatabase()
+		err = conn.Client.Database(utils.VarCheckpointStorageDbReplicaDefault).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
 		ckptManager := NewCheckpointManager(name, 100)
 		assert.NotEqual(t, nil, ckptManager, "should be equal")
 
-		startTime := bson.MongoTimestamp(100)
+		startTime := int64(100)
 
 		// get remote
 		ctx, exist, err := ckptManager.Get()
@@ -241,7 +245,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, "", ctx.OplogDiskQueue, "should be equal")
 
 		// update
-		updateTime := bson.MongoTimestamp(200)
+		updateTime := int64(200)
 		ckptManager.Update(updateTime)
 
 		// get again
@@ -257,7 +261,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		ckptManager.SetOplogDiskQueueName("ut_test_disk_queue_name_2")
 
 		// update again
-		updateTime = bson.MongoTimestamp(300)
+		updateTime = int64(300)
 		ckptManager.Update(updateTime)
 
 		// get again
@@ -270,7 +274,7 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, "ut_test_disk_queue_name_2", ctx.OplogDiskQueue, "should be equal")
 
 		// update again, test ctx.OplogDiskQueue is not clear
-		updateTime = bson.MongoTimestamp(400)
+		updateTime = int64(400)
 		ckptManager.Update(updateTime)
 
 		// get again
@@ -283,11 +287,11 @@ func TestMongoCheckpoint(t *testing.T) {
 		assert.Equal(t, "ut_test_disk_queue_name_2", ctx.OplogDiskQueue, "should be equal")
 
 		// call SetOplogDiskFinishTs
-		diskFinishTs := bson.MongoTimestamp(450)
+		diskFinishTs := int64(450)
 		ckptManager.SetOplogDiskFinishTs(diskFinishTs)
 
 		// update again
-		updateTime = bson.MongoTimestamp(500)
+		updateTime = int64(500)
 		ckptManager.Update(updateTime)
 
 		// get again

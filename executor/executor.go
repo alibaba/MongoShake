@@ -2,6 +2,8 @@ package executor
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,14 +16,11 @@ import (
 
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
-	DumpConflictToDB  = "db"
-	DumpConflictToSDK = "sdk"
-	NoDumpConflict    = "none"
+	DumpConflictToDB = "db"
+	NoDumpConflict   = "none"
 
 	ExecuteOrdered = false
 
@@ -179,7 +178,7 @@ type Executor struct {
 	finisher   *sync.WaitGroup
 
 	// mongo connection
-	session *mgo.Session
+	conn *utils.MongoCommunityConn
 
 	// bulk insert or single insert
 	bulkInsert bool
@@ -235,6 +234,14 @@ func (exec *Executor) doSync(logs []*OplogRecord) error {
 	count := len(logs)
 
 	transLogs := transformLogs(logs, exec.batchExecutor.NsTrans, conf.Options.IncrSyncDBRef)
+
+	// eventual consistency
+	// only sort CURD now for effective bulk insert
+	if len(logs) > 0 && logs[0].original.partialLog.Operation != "c" {
+		sort.SliceStable(transLogs, func(i, j int) bool {
+			return transLogs[i].original.partialLog.Namespace < transLogs[j].original.partialLog.Namespace
+		})
+	}
 
 	// split batched oplogRecords into (ns, op) groups. individual group
 	// can be accomplished in single MongoDB request. groups
@@ -299,6 +306,8 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			}
 			fallthrough
 		case "createIndexes":
+			fallthrough
+		case "commitIndexBuild":
 			fallthrough
 		case "collMod":
 			fallthrough

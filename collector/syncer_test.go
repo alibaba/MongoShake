@@ -9,30 +9,30 @@ import (
 	"github.com/alibaba/MongoShake/v2/oplog"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/vinllen/mgo/bson"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 // mock oplog with different namespace
-func mockLog(ns string, ts bson.MongoTimestamp, withDefault bool, gid string) *oplog.ParsedLog {
+func mockLog(ns string, ts int64, withDefault bool, gid string) *oplog.ParsedLog {
 	switch withDefault {
 	case true:
 		return &oplog.ParsedLog{
-			Timestamp:     ts,
+			Timestamp:     utils.Int64ToTimestamp(ts),
 			Operation:     "i",
 			Namespace:     ns,
 			Object:        bson.D{},
-			Query:         bson.M{},
+			Query:         bson.D{},
 			UniqueIndexes: bson.M{},
-			Lsid:          bson.M{},
+			LSID:          bson.Raw{},
 			Gid:           gid,
 		}
 	case false:
 		return &oplog.ParsedLog{
-			Timestamp: ts,
+			Timestamp: utils.Int64ToTimestamp(ts),
 			Operation: "i",
 			Namespace: ns,
 			Object:    bson.D{},
-			Query:     bson.M{},
+			Query:     bson.D{},
 			Gid:       gid,
 		}
 	}
@@ -40,19 +40,21 @@ func mockLog(ns string, ts bson.MongoTimestamp, withDefault bool, gid string) *o
 }
 
 // mock change stream event
-func mockEvent(nsCollection string, ts bson.MongoTimestamp) *oplog.Event {
+func mockEvent(nsCollection string, ts int64) *oplog.Event {
 	return &oplog.Event{
 		Ns: bson.M{
 			"db":   "testDB",
 			"coll": nsCollection,
 		},
 		OperationType: "insert",
-		ClusterTime:   ts,
+		ClusterTime:   utils.Int64ToTimestamp(ts),
 	}
 }
 
 func TestDeserializer(t *testing.T) {
 	// test deserializer
+
+	utils.InitialLogger("", "", "debug", true, 1)
 
 	var nr int
 	// normal

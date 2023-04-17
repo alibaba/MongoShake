@@ -2,6 +2,7 @@ package collector
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"time"
 
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
@@ -16,7 +17,7 @@ import (
 
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 const (
@@ -24,10 +25,10 @@ const (
 	// AdaptiveBatchingMaxSize = 16384 // 16k
 
 	// bson deserialize workload is CPU-intensive task
-	PipelineQueueMaxNr    = 6
+	PipelineQueueMaxNr    = 8
 	PipelineQueueMiddleNr = 4
 	PipelineQueueMinNr    = 1
-	PipelineQueueLen      = 64
+	PipelineQueueLen      = 64 * 2
 
 	DurationTime                  = 6000 // unit: ms.
 	DDLCheckpointInterval         = 300  // unit: ms.
@@ -50,9 +51,7 @@ type OplogSyncer struct {
 	// oplog start position of source mongodb
 	startPosition interface{}
 	// full sync finish position, used to check DDL between full sync and incr sync
-	fullSyncFinishPosition bson.MongoTimestamp
-	// pass from coordinator
-	rateController *nimo.SimpleRateController
+	fullSyncFinishPosition primitive.Timestamp
 
 	ckptManager *ckpt.CheckpointManager
 
@@ -65,7 +64,7 @@ type OplogSyncer struct {
 	// buffer            []*bson.Raw // move to persister
 	PendingQueue []chan [][]byte
 	logsQueue    []chan []*oplog.GenericOplog
-	LastFetchTs  bson.MongoTimestamp // the previous last fetch timestamp
+	LastFetchTs  primitive.Timestamp // the previous last fetch timestamp
 	// nextQueuePosition uint64 // move to persister
 
 	// source mongo oplog/event reader
@@ -104,8 +103,7 @@ func NewOplogSyncer(
 	startPosition interface{},
 	fullSyncFinishPosition int64,
 	mongoUrl string,
-	gids []string,
-	rateController *nimo.SimpleRateController) *OplogSyncer {
+	gids []string) *OplogSyncer {
 
 	reader, err := sourceReader.CreateReader(conf.Options.IncrSyncMongoFetchMethod, mongoUrl, replset)
 	if err != nil {
@@ -116,8 +114,7 @@ func NewOplogSyncer(
 	syncer := &OplogSyncer{
 		Replset:                replset,
 		startPosition:          startPosition,
-		fullSyncFinishPosition: bson.MongoTimestamp(fullSyncFinishPosition),
-		rateController:         rateController,
+		fullSyncFinishPosition: utils.Int64ToTimestamp(fullSyncFinishPosition),
 		journal: utils.NewJournal(utils.JournalFileName(
 			fmt.Sprintf("%s.%s", conf.Options.Id, replset))),
 		reader: reader,
@@ -137,10 +134,6 @@ func NewOplogSyncer(
 
 	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter), filter.NewGidFilter(gids)}
 
-	// DDL filter
-	if !conf.Options.FilterDDLEnable {
-		filterList = append(filterList, new(filter.DDLFilter))
-	}
 	// namespace filter, heavy operation
 	if len(conf.Options.FilterNamespaceWhite) != 0 || len(conf.Options.FilterNamespaceBlack) != 0 {
 		namespaceFilter := filter.NewNamespaceFilter(conf.Options.FilterNamespaceWhite,
@@ -173,6 +166,10 @@ func (sync *OplogSyncer) Init() {
 
 	sync.RestAPI()
 	sync.persister.RestAPI()
+}
+
+func (sync *OplogSyncer) Fini() {
+	sync.batcher.Fini()
 }
 
 func (sync *OplogSyncer) String() string {
@@ -257,23 +254,23 @@ func (sync *OplogSyncer) startBatcher() {
 			}
 		}
 
-		var newestTs bson.MongoTimestamp
+		var newestTs int64
 		if exit {
 			LOG.Info("%s find exit signal", sync)
 			// should exit now, make sure the checkpoint is updated before that
 			lastLog, lastFilterLog := batcher.getLastOplog()
-			var newestTs bson.MongoTimestamp = 1 // default is 1
-			if lastLog != nil && lastLog.Timestamp > newestTs {
-				newestTs = lastLog.Timestamp
+			newestTs = 1 // default is 1
+			if lastLog != nil && utils.TimeStampToInt64(lastLog.Timestamp) > newestTs {
+				newestTs = utils.TimeStampToInt64(lastLog.Timestamp)
 			} else if newestTs == 1 && lastFilterLog != nil {
 				// only set to the lastFilterLog timestamp if all before oplog filtered.
-				newestTs = lastFilterLog.Timestamp
+				newestTs = utils.TimeStampToInt64(lastFilterLog.Timestamp)
 			}
 
 			if lastLog != nil && !allEmpty {
 				// push to worker
 				if worked := batcher.dispatchBatches(batchedOplog); worked {
-					sync.replMetric.SetLSN(utils.TimestampToInt64(newestTs))
+					sync.replMetric.SetLSN(newestTs)
 					// update latest fetched timestamp in memory
 					sync.reader.UpdateQueryTimestamp(newestTs)
 				}
@@ -287,11 +284,11 @@ func (sync *OplogSyncer) startBatcher() {
 			select {} // block forever, wait outer routine exits
 		} else if log, filterLog := batcher.getLastOplog(); log != nil && !allEmpty {
 			// if all filtered, still update checkpoint
-			newestTs = log.Timestamp
+			newestTs = utils.TimeStampToInt64(log.Timestamp)
 
 			// push to worker
 			if worked := batcher.dispatchBatches(batchedOplog); worked {
-				sync.replMetric.SetLSN(utils.TimestampToInt64(newestTs))
+				sync.replMetric.SetLSN(newestTs)
 				// update latest fetched timestamp in memory
 				sync.reader.UpdateQueryTimestamp(newestTs)
 			}
@@ -305,9 +302,12 @@ func (sync *OplogSyncer) startBatcher() {
 			// if log is nil, check whether filterLog is empty
 			if filterLog == nil {
 				// no need to update
+				LOG.Debug("%s filterLog is nil", sync)
 				return
-			} else if filterLog.Timestamp <= sync.ckptManager.GetInMemory().Timestamp {
+			} else if utils.TimeStampToInt64(filterLog.Timestamp) <= sync.ckptManager.GetInMemory().Timestamp {
 				// no need to update
+				LOG.Debug("%s filterLogTs[%v] is small than ckptTs[%v], skip this filterLogTs", sync,
+					filterLog.Timestamp, utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp))
 				return
 			} else {
 				now := time.Now()
@@ -329,11 +329,14 @@ func (sync *OplogSyncer) startBatcher() {
 				if filterNewestTs-FilterCheckpointGap > checkpointTs {
 					// if checkpoint has not been update for {FilterCheckpointGap} seconds, update
 					// checkpoint mandatory.
-					newestTs = filterLog.Timestamp
+					newestTs = utils.TimeStampToInt64(filterLog.Timestamp)
 					LOG.Info("%s try to update checkpoint mandatory from %v to %v", sync,
 						utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp),
-						utils.ExtractTimestampForLog(filterLog.Timestamp))
+						filterLog.Timestamp)
 				} else {
+					LOG.Debug("%s filterLogTs[%v] not bigger than checkpoint[%v]",
+						sync, filterLog.Timestamp,
+						utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp))
 					return
 				}
 			}
@@ -342,15 +345,15 @@ func (sync *OplogSyncer) startBatcher() {
 
 			if log != nil {
 				newestTsLog := utils.ExtractTimestampForLog(newestTs)
-				if newestTs < log.Timestamp {
-					LOG.Crashf("%s filter newestTs[%v] smaller than previous timestamp[%v]",
-						sync, newestTsLog, utils.ExtractTimestampForLog(log.Timestamp))
+				if newestTs < utils.TimeStampToInt64(log.Timestamp) {
+					LOG.Error("%s filter newestTs[%v] smaller than previous timestamp[%v]",
+						sync, newestTsLog, log.Timestamp)
 				}
 
 				LOG.Info("%s waiting last checkpoint[%v] updated", sync, newestTsLog)
 				// check last checkpoint updated
 
-				status := sync.checkCheckpointUpdate(true, log.Timestamp)
+				status := sync.checkCheckpointUpdate(true, utils.TimeStampToInt64(log.Timestamp))
 				LOG.Info("%s last checkpoint[%v] updated [%v]", sync, newestTsLog, status)
 			} else {
 				LOG.Info("%s last log is empty, skip waiting checkpoint updated", sync)
@@ -365,11 +368,12 @@ func (sync *OplogSyncer) startBatcher() {
 	})
 }
 
-func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.MongoTimestamp) bool {
+// wait for checkpoint reach newestTs which mean oplog is written to dest db when barrier is true, maxtime is 3 second
+func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) bool {
 	// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
 	if barrier && newestTs > 0 {
 		LOG.Info("%s find barrier", sync)
-		var checkpointTs bson.MongoTimestamp
+		var checkpointTs int64
 		for i := 0; i < CheckCheckpointUpdateTimes; i++ {
 			// checkpointTs := sync.ckptManager.GetInMemory().Timestamp
 			checkpoint, _, err := sync.ckptManager.Get()
@@ -384,7 +388,7 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs bson.Mongo
 			LOG.Info("%s compare remote checkpoint[%v] to local newestTs[%v]", sync,
 				utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
 			if checkpointTs >= newestTs {
-				LOG.Info("%s barrier checkpoint updated to newest[%v]", sync, utils.ExtractTimestampForLog(newestTs))
+				LOG.Info("%s barrier checkpoint has updated to newest[%v]", sync, utils.ExtractTimestampForLog(newestTs))
 				return true
 			}
 			utils.YieldInMs(DDLCheckpointInterval)
@@ -578,7 +582,7 @@ func (sync *OplogSyncer) checkShutdown() {
 
 	nimo.GoRoutine(func() {
 		if utils.IncrSentinelOptions.Shutdown {
-			utils.IncrSentinelOptions.ExitPoint = utils.ExtractMongoTimestamp(sync.LastFetchTs)
+			utils.IncrSentinelOptions.ExitPoint = utils.TimeStampToInt64(sync.LastFetchTs)
 		}
 
 		LOG.Info("%s check shutdown, set exit-point[%v]", sync, utils.IncrSentinelOptions.ExitPoint)
@@ -669,16 +673,28 @@ func (sync *OplogSyncer) RestAPI() {
 			LogsRepl:    sync.replMetric.Apply(),
 			LogsSuccess: sync.replMetric.Success(),
 			Tps:         sync.replMetric.Tps(),
-			Lsn: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSN),
-				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSN),
-					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSN))}},
-			LsnCkpt: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSNCheckpoint),
-				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSNCheckpoint),
-					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSNCheckpoint))}},
-			LsnAck: &MongoTime{TimestampMongo: utils.Int64ToString(sync.replMetric.LSNAck),
-				Time: Time{TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSNAck),
-					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSNAck))}},
-			Now:      &Time{TimestampUnix: time.Now().Unix(), TimestampTime: utils.TimestampToString(time.Now().Unix())},
+			Lsn: &MongoTime{
+				TimestampMongo: utils.Int64ToString(sync.replMetric.LSN),
+				Time: Time{
+					TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSN),
+					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSN)),
+				}},
+			LsnCkpt: &MongoTime{
+				TimestampMongo: utils.Int64ToString(sync.replMetric.LSNCheckpoint),
+				Time: Time{
+					TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSNCheckpoint),
+					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSNCheckpoint)),
+				}},
+			LsnAck: &MongoTime{
+				TimestampMongo: utils.Int64ToString(sync.replMetric.LSNAck),
+				Time: Time{
+					TimestampUnix: utils.ExtractMongoTimestamp(sync.replMetric.LSNAck),
+					TimestampTime: utils.TimestampToString(utils.ExtractMongoTimestamp(sync.replMetric.LSNAck)),
+				}},
+			Now: &Time{
+				TimestampUnix: time.Now().Unix(),
+				TimestampTime: utils.TimestampToString(time.Now().Unix()),
+			},
 			OplogAvg: utils.GetMetricWithSize(sync.replMetric.OplogAvgSize),
 			OplogMax: utils.GetMetricWithSize(sync.replMetric.OplogMaxSize),
 		}

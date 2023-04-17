@@ -2,10 +2,11 @@ package oplog
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/vinllen/mgo/bson"
 )
 
 func TestRemoveFiled(t *testing.T) {
@@ -17,28 +18,28 @@ func TestRemoveFiled(t *testing.T) {
 		nr++
 
 		input := bson.D{
-			bson.DocElem{
-				Name:  "w",
+			bson.E{
+				Key:   "w",
 				Value: 1,
 			},
-			bson.DocElem{
-				Name:  "$v",
+			bson.E{
+				Key:   "$v",
 				Value: 2,
 			},
-			bson.DocElem{
-				Name:  "a",
+			bson.E{
+				Key:   "a",
 				Value: 3,
 			},
 		}
 
 		ret := RemoveFiled(input, "w")
 		assert.Equal(t, bson.D{
-			bson.DocElem{
-				Name:  "$v",
+			bson.E{
+				Key:   "$v",
 				Value: 2,
 			},
-			bson.DocElem{
-				Name:  "a",
+			bson.E{
+				Key:   "a",
 				Value: 3,
 			},
 		}, ret, "should be equal")
@@ -49,28 +50,28 @@ func TestRemoveFiled(t *testing.T) {
 		nr++
 
 		input := bson.D{
-			bson.DocElem{
-				Name:  "w",
+			bson.E{
+				Key:   "w",
 				Value: 1,
 			},
-			bson.DocElem{
-				Name:  "$v",
+			bson.E{
+				Key:   "$v",
 				Value: 2,
 			},
-			bson.DocElem{
-				Name:  "a",
+			bson.E{
+				Key:   "a",
 				Value: 3,
 			},
 		}
 
 		ret := RemoveFiled(input, "$v")
 		assert.Equal(t, bson.D{
-			bson.DocElem{
-				Name:  "w",
+			bson.E{
+				Key:   "w",
 				Value: 1,
 			},
-			bson.DocElem{
-				Name:  "a",
+			bson.E{
+				Key:   "a",
 				Value: 3,
 			},
 		}, ret, "should be equal")
@@ -81,28 +82,28 @@ func TestRemoveFiled(t *testing.T) {
 		nr++
 
 		input := bson.D{
-			bson.DocElem{
-				Name:  "w",
+			bson.E{
+				Key:   "w",
 				Value: 1,
 			},
-			bson.DocElem{
-				Name:  "$v",
+			bson.E{
+				Key:   "$v",
 				Value: 2,
 			},
-			bson.DocElem{
-				Name:  "a",
+			bson.E{
+				Key:   "a",
 				Value: 3,
 			},
 		}
 
 		ret := RemoveFiled(input, "a")
 		assert.Equal(t, bson.D{
-			bson.DocElem{
-				Name:  "w",
+			bson.E{
+				Key:   "w",
 				Value: 1,
 			},
-			bson.DocElem{
-				Name:  "$v",
+			bson.E{
+				Key:   "$v",
 				Value: 2,
 			},
 		}, ret, "should be equal")
@@ -113,16 +114,16 @@ func TestRemoveFiled(t *testing.T) {
 		nr++
 
 		input := bson.D{
-			bson.DocElem{
-				Name:  "w",
+			bson.E{
+				Key:   "w",
 				Value: 1,
 			},
-			bson.DocElem{
-				Name:  "$v",
+			bson.E{
+				Key:   "$v",
 				Value: 2,
 			},
-			bson.DocElem{
-				Name:  "a",
+			bson.E{
+				Key:   "a",
 				Value: 3,
 			},
 		}
@@ -136,30 +137,30 @@ func TestRemoveFiled(t *testing.T) {
 		nr++
 
 		input := bson.D{
-			bson.DocElem{
-				Name:  "$v",
+			bson.E{
+				Key:   "$v",
 				Value: 1,
 			},
-			bson.DocElem{
-				Name: "$set",
+			bson.E{
+				Key: "$set",
 				Value: bson.D{
-					bson.DocElem{
-						Name:  "web_list.0.utime",
+					bson.E{
+						Key:   "web_list.0.utime",
 						Value: "2019-12-24 17:05:41",
 					},
 				},
 			},
-			bson.DocElem{
-				Name: "$set",
+			bson.E{
+				Key: "$set",
 				Value: bson.M{
 					"web_list.0.utime": "2019-12-24 17:05:41",
 				},
 			},
-			bson.DocElem{
-				Name: "$set",
+			bson.E{
+				Key: "$set",
 				Value: bson.D{
-					bson.DocElem{
-						Name:  "web_list.0.utime",
+					bson.E{
+						Key:   "web_list.0.utime",
 						Value: "2019-12-24 17:05:41",
 					},
 				},
@@ -168,26 +169,26 @@ func TestRemoveFiled(t *testing.T) {
 
 		ret := RemoveFiled(input, "$v")
 		assert.Equal(t, ret, bson.D{
-			bson.DocElem{
-				Name: "$set",
+			bson.E{
+				Key: "$set",
 				Value: bson.D{
-					bson.DocElem{
-						Name:  "web_list.0.utime",
+					bson.E{
+						Key:   "web_list.0.utime",
 						Value: "2019-12-24 17:05:41",
 					},
 				},
 			},
-			bson.DocElem{
-				Name: "$set",
+			bson.E{
+				Key: "$set",
 				Value: bson.M{
 					"web_list.0.utime": "2019-12-24 17:05:41",
 				},
 			},
-			bson.DocElem{
-				Name: "$set",
+			bson.E{
+				Key: "$set",
 				Value: bson.D{
-					bson.DocElem{
-						Name:  "web_list.0.utime",
+					bson.E{
+						Key:   "web_list.0.utime",
 						Value: "2019-12-24 17:05:41",
 					},
 				},
@@ -200,15 +201,15 @@ func TestRemoveFiled(t *testing.T) {
 		nr++
 
 		input := bson.D{
-			bson.DocElem{
-				Name:  "$v",
+			bson.E{
+				Key:   "$v",
 				Value: 1,
 			},
-			bson.DocElem{
-				Name: "$set",
+			bson.E{
+				Key: "$set",
 				Value: bson.D{
-					bson.DocElem{
-						Name:  "web_list.0.utime",
+					bson.E{
+						Key:   "web_list.0.utime",
 						Value: "2019-12-24 17:05:41",
 					},
 				},
@@ -224,15 +225,15 @@ func TestRemoveFiled(t *testing.T) {
 		nr++
 
 		input := bson.D{
-			bson.DocElem{
-				Name:  "$v",
+			bson.E{
+				Key:   "$v",
 				Value: 1,
 			},
-			bson.DocElem{
-				Name: "$set",
+			bson.E{
+				Key: "$set",
 				Value: bson.D{
-					bson.DocElem{
-						Name:  "workFlowNodeList.3.nodePersonList.0.attitude",
+					bson.E{
+						Key:   "workFlowNodeList.3.nodePersonList.0.attitude",
 						Value: "2",
 					},
 				},
@@ -241,11 +242,11 @@ func TestRemoveFiled(t *testing.T) {
 
 		ret := RemoveFiled(input, "$v")
 		assert.Equal(t, ret, bson.D{
-			bson.DocElem{
-				Name: "$set",
+			bson.E{
+				Key: "$set",
 				Value: bson.D{
-					bson.DocElem{
-						Name:  "workFlowNodeList.3.nodePersonList.0.attitude",
+					bson.E{
+						Key:   "workFlowNodeList.3.nodePersonList.0.attitude",
 						Value: "2",
 					},
 				},
@@ -264,16 +265,16 @@ func TestGatherApplyOps(t *testing.T) {
 		input := []*PartialLog{
 			{
 				ParsedLog: ParsedLog{
-					Timestamp: bson.MongoTimestamp(1),
+					Timestamp: primitive.Timestamp{T: 0, I: 1},
 					Operation: "i",
 					Namespace: "db1.c1",
 					Object: bson.D{
-						bson.DocElem{
-							Name:  "x",
+						bson.E{
+							Key:   "x",
 							Value: 1,
 						},
-						bson.DocElem{
-							Name:  "y",
+						bson.E{
+							Key:   "y",
 							Value: 2,
 						},
 					},
@@ -281,16 +282,16 @@ func TestGatherApplyOps(t *testing.T) {
 			},
 			{
 				ParsedLog: ParsedLog{
-					Timestamp: bson.MongoTimestamp(1),
+					Timestamp: primitive.Timestamp{T: 0, I: 1},
 					Operation: "i",
 					Namespace: "db1.c2",
 					Object: bson.D{
-						bson.DocElem{
-							Name:  "x",
+						bson.E{
+							Key:   "x",
 							Value: 10,
 						},
-						bson.DocElem{
-							Name:  "y",
+						bson.E{
+							Key:   "y",
 							Value: 20,
 						},
 					},
@@ -298,16 +299,16 @@ func TestGatherApplyOps(t *testing.T) {
 			},
 			{
 				ParsedLog: ParsedLog{
-					Timestamp: bson.MongoTimestamp(1),
+					Timestamp: primitive.Timestamp{T: 0, I: 1},
 					Operation: "i",
 					Namespace: "db2.c2",
 					Object: bson.D{
-						bson.DocElem{
-							Name:  "x",
+						bson.E{
+							Key:   "x",
 							Value: 100,
 						},
-						bson.DocElem{
-							Name:  "y",
+						bson.E{
+							Key:   "y",
 							Value: 200,
 						},
 					},
@@ -315,22 +316,22 @@ func TestGatherApplyOps(t *testing.T) {
 			},
 			{
 				ParsedLog: ParsedLog{
-					Timestamp: bson.MongoTimestamp(1),
+					Timestamp: primitive.Timestamp{T: 0, I: 1},
 					Operation: "u",
 					Namespace: "db3.c3",
 					Object: bson.D{
-						bson.DocElem{
-							Name:  "x",
+						bson.E{
+							Key:   "x",
 							Value: 100,
 						},
-						bson.DocElem{
-							Name:  "y",
+						bson.E{
+							Key:   "y",
 							Value: 200,
 						},
 					},
-					Query: bson.M{
-						"x": 1,
-						"y": 1,
+					Query: bson.D{
+						{"x", 1},
+						{"y", 1},
 					},
 				},
 			},
@@ -340,11 +341,11 @@ func TestGatherApplyOps(t *testing.T) {
 		gather, err := GatherApplyOps(input)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, len(gather.Raw) > 0, "should be equal")
-		assert.Equal(t, bson.MongoTimestamp(1), gather.Parsed.Timestamp, "should be equal")
+		assert.Equal(t, primitive.Timestamp{T: 0, I: 1}, gather.Parsed.Timestamp, "should be equal")
 		assert.Equal(t, "admin.$cmd", gather.Parsed.Namespace, "should be equal")
 		assert.Equal(t, "c", gather.Parsed.Operation, "should be equal")
-		assert.Equal(t, bson.M(nil), gather.Parsed.Query, "should be equal")
-		assert.Equal(t, "applyOps", gather.Parsed.Object[0].Name, "should be equal")
+		assert.Equal(t, bson.D(nil), gather.Parsed.Query, "should be equal")
+		assert.Equal(t, "applyOps", gather.Parsed.Object[0].Key, "should be equal")
 		assert.Equal(t, 4, len(gather.Parsed.Object[0].Value.([]bson.M)), "should be equal")
 		assert.Equal(t, "i", gather.Parsed.Object[0].Value.([]bson.M)[0]["op"], "should be equal")
 		assert.Equal(t, "db1.c1", gather.Parsed.Object[0].Value.([]bson.M)[0]["ns"], "should be equal")
@@ -360,20 +361,20 @@ func TestPartialLog(t *testing.T) {
 		nr++
 
 		input := bson.M{
-			"ts": bson.MongoTimestamp(1),
+			"ts": primitive.Timestamp{T: 0, I: 1},
 			"ns": "a.b",
 			"o": bson.D{
-				bson.DocElem{
-					Name:  "key1",
+				bson.E{
+					Key:   "key1",
 					Value: "value1",
 				},
-				bson.DocElem{
-					Name:  "key2",
+				bson.E{
+					Key:   "key2",
 					Value: "value2",
 				},
 			},
-			"o2": bson.M{
-				"_id": "123",
+			"o2": bson.D{
+				{"_id", "123"},
 			},
 			"useless": "can't see me",
 		}
@@ -381,20 +382,20 @@ func TestPartialLog(t *testing.T) {
 		output := NewPartialLog(input)
 		assert.Equal(t, &PartialLog{
 			ParsedLog: ParsedLog{
-				Timestamp: bson.MongoTimestamp(1),
+				Timestamp: primitive.Timestamp{T: 0, I: 1},
 				Namespace: "a.b",
 				Object: bson.D{
-					bson.DocElem{
-						Name:  "key1",
+					bson.E{
+						Key:   "key1",
 						Value: "value1",
 					},
-					bson.DocElem{
-						Name:  "key2",
+					bson.E{
+						Key:   "key2",
 						Value: "value2",
 					},
 				},
-				Query: bson.M{
-					"_id": "123",
+				Query: bson.D{
+					{"_id", "123"},
 				},
 			},
 		}, output, "should be equal")
@@ -408,27 +409,27 @@ func TestPartialLog(t *testing.T) {
 			"o2": {},
 		}, false)
 		assert.Equal(t, bson.D{
-			bson.DocElem{
-				Name:  "ts",
-				Value: bson.MongoTimestamp(1),
+			bson.E{
+				Key:   "ts",
+				Value: primitive.Timestamp{T: 0, I: 1},
 			},
-			bson.DocElem{
-				Name: "o",
+			bson.E{
+				Key: "o",
 				Value: bson.D{
-					bson.DocElem{
-						Name:  "key1",
+					bson.E{
+						Key:   "key1",
 						Value: "value1",
 					},
-					bson.DocElem{
-						Name:  "key2",
+					bson.E{
+						Key:   "key2",
 						Value: "value2",
 					},
 				},
 			},
-			bson.DocElem{
-				Name: "o2",
-				Value: bson.M{
-					"_id": "123",
+			bson.E{
+				Key: "o2",
+				Value: bson.D{
+					{"_id", "123"},
 				},
 			},
 		}, bsonDOutput, "should be equal")
@@ -443,12 +444,12 @@ func TestGetKey(t *testing.T) {
 		nr++
 
 		input := bson.D{
-			bson.DocElem{
-				Name:  "_id",
+			bson.E{
+				Key:   "_id",
 				Value: "value1",
 			},
-			bson.DocElem{
-				Name:  "key2",
+			bson.E{
+				Key:   "key2",
 				Value: "value2",
 			},
 		}
@@ -494,11 +495,11 @@ func TestConvertBson(t *testing.T) {
 			},
 			"r": bson.D{
 				{
-					Name:  "xxx",
+					Key:   "xxx",
 					Value: "yyy",
 				},
 				{
-					Name:  "aaa",
+					Key:   "aaa",
 					Value: "bbb",
 				},
 			},
@@ -535,11 +536,11 @@ func TestConvertBson(t *testing.T) {
 			},
 			"r": bson.D{
 				{
-					Name:  "xxx",
+					Key:   "xxx",
 					Value: "yyy",
 				},
 				{
-					Name:  "aaa",
+					Key:   "aaa",
 					Value: "bbb",
 				},
 			},
@@ -566,4 +567,121 @@ func TestConvertBson(t *testing.T) {
 		})
 		assert.Equal(t, output, input, "should be equal")
 	}
+}
+
+func TestDelteOplog(t *testing.T) {
+	/*
+		{
+		    "op": "u",
+		    "ns": "test.arr5",
+		    "ui": UUID("8ba5a264-1475-4686-ae59-3c331a5655f3"),
+		    "o": {
+		        "$v": 2,
+		        "diff": {
+		            "d": {
+		                "info": false
+		            },
+		            "i": {
+		                "extra": "c"
+		            },
+		            "sarrname": {
+		                "a": true,
+		                "s0": {
+		                    "u": {
+		                        "count": 5,
+		                        "nm": "c"
+		                    },
+		                    "i": {
+		                        "extra": "ps"
+		                    }
+		                },
+		                "s1": {
+		                    "u": {
+		                        "count": 6
+		                    }
+		                }
+		            },
+		            "snestobj": {
+		                "sm1": {
+		                    "d": {
+		                        "n": false
+		                    }
+		                },
+		                "sn1": {
+		                    "i": {
+		                        "1": 2
+		                    }
+		                }
+		            }
+		        }
+		    },
+		    "o2": {
+		        "_id": ObjectId("642295e8bd4ab3cbd9632f7e")
+		    },
+		    "ts": Timestamp(1679988204,
+		    1),
+		    "t": NumberLong(1),
+		    "v": NumberLong(2),
+		    "wall": ISODate("2023-03-28T07:23:24.902Z")
+		}
+	*/
+	object := bson.D{
+		bson.E{Key: "$v", Value: 2},
+		bson.E{
+			Key: "diff",
+			Value: bson.D{
+				bson.E{Key: "d", Value: bson.E{Key: "info", Value: false}},
+				bson.E{Key: "i", Value: bson.E{Key: "extra", Value: "c"}},
+				bson.E{Key: "sarrname", Value: bson.D{
+					bson.E{Key: "a", Value: true},
+					bson.E{Key: "s0", Value: bson.D{
+						bson.E{Key: "u", Value: bson.D{
+							bson.E{Key: "count", Value: 5},
+							bson.E{Key: "nm", Value: "c"},
+						}},
+						bson.E{Key: "i", Value: bson.D{
+							bson.E{Key: "extra", Value: "ps"},
+						}},
+					}},
+					bson.E{Key: "s1", Value: bson.D{
+						bson.E{Key: "u", Value: bson.D{
+							bson.E{Key: "count", Value: 6},
+						}},
+					}},
+				}},
+				bson.E{Key: "sarrname", Value: bson.D{
+					bson.E{Key: "sm1", Value: bson.D{
+						bson.E{Key: "d", Value: bson.D{
+							bson.E{Key: "n", Value: false},
+						}},
+					}},
+					bson.E{Key: "sn1", Value: bson.D{
+						bson.E{Key: "i", Value: bson.D{
+							bson.E{Key: "l", Value: 2},
+						}},
+					}},
+				}},
+			},
+		},
+	}
+
+	result, err := DiffUpdateOplogToNormal(object)
+	fmt.Printf("result:%v\n", result)
+	assert.Equal(t, nil, err, "should be equal")
+	assert.Equal(t, "$unset", result[0].Key, "should be equal")
+	assert.Equal(t, bson.E{"info", false}, result[0].Value, "should be equal")
+	assert.Equal(t, "$set", result[1].Key, "should be equal")
+	assert.Equal(t, bson.E{"extra", "c"}, result[1].Value, "should be equal")
+	assert.Equal(t, "$set", result[2].Key, "should be equal")
+	assert.Equal(t, bson.D{
+		{"arrname.0.count", 5},
+		{"arrname.0.nm", "c"}}, result[2].Value, "should be equal")
+	assert.Equal(t, "$set", result[3].Key, "should be equal")
+	assert.Equal(t, bson.D{{"arrname.0.extra", "ps"}}, result[3].Value, "should be equal")
+	assert.Equal(t, "$set", result[4].Key, "should be equal")
+	assert.Equal(t, bson.D{{"arrname.1.count", 6}}, result[4].Value, "should be equal")
+	assert.Equal(t, "$unset", result[5].Key, "should be equal")
+	assert.Equal(t, bson.D{{"arrname.m1.n", false}}, result[5].Value, "should be equal")
+	assert.Equal(t, "$set", result[6].Key, "should be equal")
+	assert.Equal(t, bson.D{{"arrname.n1.l", 2}}, result[6].Value, "should be equal")
 }

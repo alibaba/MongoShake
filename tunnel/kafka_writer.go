@@ -7,13 +7,14 @@ import (
 	"fmt"
 	"math"
 	"sync/atomic"
+	"time"
 
 	"github.com/alibaba/MongoShake/v2/collector/configure"
-	"github.com/alibaba/MongoShake/v2/tunnel/kafka"
 	"github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/tunnel/kafka"
 
 	LOG "github.com/vinllen/log4go"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 	"os"
 	"strings"
 )
@@ -53,7 +54,7 @@ func (tunnel *KafkaWriter) Prepare() bool {
 	var writer *kafka.SyncWriter
 	var err error
 	if !unitTestWriteKafkaFlag && conf.Options.IncrSyncTunnelKafkaDebug == "" {
-		writer, err = kafka.NewSyncWriter(tunnel.RemoteAddr, tunnel.PartitionId)
+		writer, err = kafka.NewSyncWriter(conf.Options.TunnelMongoSslRootCaFile, tunnel.RemoteAddr, tunnel.PartitionId)
 		if err != nil {
 			LOG.Critical("KafkaWriter prepare[%v] create writer error[%v]", tunnel.RemoteAddr, err)
 			return false
@@ -95,7 +96,8 @@ func (tunnel *KafkaWriter) Send(message *WMessage) int64 {
 	encoderId := atomic.AddInt64(&tunnel.pushIdx, 1)
 	tunnel.inputChan[encoderId%tunnel.encoderNr] <- message
 
-	return tunnel.state
+	// for transfer() not into default branch and then endless loop
+	return 0
 }
 
 // KafkaWriter.AckRequired() is always false, return 0 directly
@@ -120,7 +122,7 @@ func (tunnel *KafkaWriter) encode(id int) {
 			// write the raw oplog directly
 			for i, log := range message.RawLogs {
 				tunnel.outputChan[id] <- outputLog{
-					isEnd: i == len(log) - 1,
+					isEnd: i == len(log)-1,
 					log:   log,
 				}
 			}
@@ -143,7 +145,7 @@ func (tunnel *KafkaWriter) encode(id int) {
 						}
 					}
 				} else if conf.Options.TunnelJsonFormat == "canonical_extended_json" {
-					encode, err = bson2.MarshalExtJSON(log.ParsedLog, true, true)
+					encode, err = bson.MarshalExtJSON(log.ParsedLog, true, true)
 					if err != nil {
 						// should panic
 						LOG.Crashf("%s json marshal data[%v] error[%v]", tunnel, log.ParsedLog, err)
@@ -154,7 +156,7 @@ func (tunnel *KafkaWriter) encode(id int) {
 				}
 
 				tunnel.outputChan[id] <- outputLog{
-					isEnd: i == len(message.ParsedLogs) - 1,
+					isEnd: i == len(message.ParsedLogs)-1,
 					log:   encode,
 				}
 			}
@@ -177,7 +179,7 @@ func (tunnel *KafkaWriter) encode(id int) {
 				binary.Write(byteBuffer, binary.BigEndian, log)
 
 				tunnel.outputChan[id] <- outputLog{
-					isEnd: i == len(message.ParsedLogs) - 1,
+					isEnd: i == len(message.ParsedLogs)-1,
 					log:   byteBuffer.Bytes(),
 				}
 			}
@@ -219,10 +221,16 @@ func (tunnel *KafkaWriter) writeKafka() {
 				}
 				debugF.Write([]byte{10})
 			} else {
-				if err = tunnel.writer.SimpleWrite(data.log); err != nil {
-					LOG.Error("%s send [%v] with type[%v] error[%v]", tunnel, tunnel.RemoteAddr,
-						conf.Options.TunnelMessage, err)
-					tunnel.state = ReplyError
+				for {
+					if err = tunnel.writer.SimpleWrite(data.log); err != nil {
+						LOG.Error("%s send [%v] with type[%v] error[%v]", tunnel, tunnel.RemoteAddr,
+							conf.Options.TunnelMessage, err)
+
+						tunnel.state = ReplyError
+						time.Sleep(time.Second)
+					} else {
+						break
+					}
 				}
 			}
 

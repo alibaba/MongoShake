@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/alibaba/MongoShake/v2/common"
-	"github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
+	"github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/reader"
+	"github.com/alibaba/MongoShake/v2/common"
 
-	"github.com/vinllen/mgo/bson"
 	LOG "github.com/vinllen/log4go"
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 /*
@@ -21,11 +20,11 @@ import (
  *     bool: can run incremental sync directly?
  *     error: error
  */
-func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll bool) (bson.MongoTimestamp, map[string]int64, bool, error) {
+func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll bool) (int64, map[string]int64, bool, error) {
 	var (
 		tsMap       map[string]utils.TimestampNode
 		startTsMap  map[string]int64 // replica-set name => timestamp
-		smallestNew bson.MongoTimestamp
+		smallestNew int64
 		err         error
 	)
 
@@ -43,14 +42,15 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 
 	startTsMap = make(map[string]int64, len(tsMap)+1)
 
-	LOG.Info("all node timestamp map: %v", tsMap)
-
 	confTs32 := conf.Options.CheckpointStartPosition
-	confTsMongoTs := bson.MongoTimestamp(confTs32 << 32)
+	confTsMongoTs := confTs32 << 32
+
+	LOG.Info("all node timestamp map: %v CheckpointStartPosition:%v", tsMap, utils.Int64ToTimestamp(confTsMongoTs))
 
 	// fetch mongos checkpoint when using change stream
 	var mongosCkpt *ckpt.CheckpointContext
-	if coordinator.MongoS != nil && conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
+	if coordinator.MongoS != nil &&
+		conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
 		LOG.Info("try to fetch mongos checkpoint")
 		ckptManager := ckpt.NewCheckpointManager(coordinator.MongoS.ReplicaName, 0)
 		ckptVar, exist, err := ckptManager.Get()
@@ -91,7 +91,7 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 		}
 
 		if ckptRemote == nil {
-			if syncModeAll || confTsMongoTs > bson.MongoTimestamp(1<<32) && ts.Oldest >= confTsMongoTs {
+			if syncModeAll || confTsMongoTs > (1<<32) && ts.Oldest >= confTsMongoTs {
 				LOG.Info("%s syncModeAll[%v] ts.Oldest[%v], confTsMongoTs[%v]", replName, syncModeAll, ts.Oldest,
 					confTsMongoTs)
 				return smallestNew, nil, false, nil
@@ -137,11 +137,12 @@ func (coordinator *ReplicationCoordinator) isCheckpointExist() (bool, interface{
 		LOG.Info("isCheckpointExist change stream resumeToken: %v", resumeToken)
 		return false, resumeToken, nil
 	}
-	return true, utils.TimestampToInt64(ckptVar.Timestamp), nil
+	return true, ckptVar.Timestamp, nil
 }
 
 // if the oplog of checkpoint timestamp exist in all source db, then only do oplog replication instead of document replication
-func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, map[string]int64, interface{}, error) {
+func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, map[string]int64,
+	interface{}, error) {
 	if syncMode != utils.VarSyncModeAll && syncMode != utils.VarSyncModeIncr {
 		return syncMode, nil, int64(0), nil
 	}
@@ -182,7 +183,7 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 		// bugfix v2.4.12: return error when tunnel != "direct"
 		return "", nil, int64(0), fmt.Errorf("start time illegal, can't run incr sync")
 	} else {
-		return utils.VarSyncModeAll, nil, utils.TimestampToInt64(smallestNewTs), nil
+		return utils.VarSyncModeAll, nil, smallestNewTs, nil
 	}
 }
 
@@ -190,13 +191,13 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
  * fetch all indexes.
  * the cost is low so that no need to run in parallel.
  */
-func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) bool) (map[utils.NS][]bson2.M, error) {
+func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) bool) (map[utils.NS][]bson.D, error) {
 	var mutex sync.Mutex
-	indexMap := make(map[utils.NS][]bson2.M)
+	indexMap := make(map[utils.NS][]bson.D)
 	for _, src := range sourceList {
 		LOG.Info("source[%v %v] start fetching index", src.ReplicaName, utils.BlockMongoUrlPassword(src.URL, "***"))
 		// 1. fetch namespace
-		nsList, _, err := utils.GetDbNamespace(src.URL, filterFunc)
+		nsList, _, err := utils.GetDbNamespace(src.URL, filterFunc, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return nil, fmt.Errorf("source[%v %v] get namespace failed: %v", src.ReplicaName, src.URL, err)
 		}
@@ -204,7 +205,7 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 		LOG.Info("index namespace list: %v", nsList)
 		// 2. build connection
 		conn, err := utils.NewMongoCommunityConn(src.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
-			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault)
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return nil, fmt.Errorf("source[%v %v] build connection failed: %v", src.ReplicaName, src.URL, err)
 		}
@@ -218,7 +219,7 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 				return nil, fmt.Errorf("source[%v %v] fetch index failed: %v", src.ReplicaName, src.URL, err)
 			}
 
-			indexes := make([]bson2.M, 0)
+			indexes := make([]bson.D, 0)
 			if err = cursor.All(nil, &indexes); err != nil {
 				return nil, fmt.Errorf("index cursor fetch all indexes fail: %v", err)
 			}

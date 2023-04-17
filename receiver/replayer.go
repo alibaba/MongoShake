@@ -5,9 +5,9 @@ import (
 	module "github.com/alibaba/MongoShake/v2/modules"
 	"github.com/alibaba/MongoShake/v2/oplog"
 	"github.com/alibaba/MongoShake/v2/tunnel"
+	"go.mongodb.org/mongo-driver/bson"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -136,7 +136,7 @@ func (er *ExampleReplayer) handler() {
 
 		// get the newest timestamp
 		n := len(oplogs)
-		lastTs := utils.TimestampToInt64(oplogs[n-1].Timestamp)
+		lastTs := utils.TimeStampToInt64(oplogs[n-1].Timestamp)
 		er.Ack = lastTs
 
 		LOG.Debug("handle ack[%v]", er.Ack)

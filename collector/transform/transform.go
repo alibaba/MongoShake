@@ -2,11 +2,12 @@ package transform
 
 import (
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"regexp"
 	"strings"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 type NamespaceTransform struct {
@@ -74,10 +75,10 @@ func TransformDBRef(logObject bson.D, db string, nsTrans *NamespaceTransform) bs
 		return logObject
 	}
 
-	if logObject[0].Name == "$ref" {
+	if logObject[0].Key == "$ref" {
 		// if has DBRef, [0] must be "$ref"
 		collection := logObject[0].Value.(string)
-		if len(logObject) > 2 && logObject[2].Name == "$db" {
+		if len(logObject) > 2 && logObject[2].Key == "$db" {
 			db = logObject[2].Value.(string)
 		}
 
@@ -88,7 +89,7 @@ func TransformDBRef(logObject bson.D, db string, nsTrans *NamespaceTransform) bs
 		if len(logObject) > 2 {
 			logObject[2].Value = tuple[0]
 		} else {
-			logObject = append(logObject, bson.DocElem{"$db", tuple[0]})
+			logObject = append(logObject, primitive.E{"$db", tuple[0]})
 		}
 		return logObject
 	}

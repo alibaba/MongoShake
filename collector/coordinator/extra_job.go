@@ -1,6 +1,9 @@
 package coordinator
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -69,15 +72,15 @@ func (cui *CheckUniqueIndexExistsJob) Name() string {
 	return NameCheckUniqueIndexExistsJob
 }
 
-func (cui *CheckUniqueIndexExistsJob) Run() {
+func (cui *CheckUniqueIndexExistsJob) innerRun() error {
 	var err error
-	conns := make([]*utils.MongoConn, len(cui.urls))
+	conns := make([]*utils.MongoCommunityConn, len(cui.urls))
 	for i, source := range cui.urls {
-		conns[i], err = utils.NewMongoConn(source.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
+		conns[i], err = utils.NewMongoCommunityConn(source.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
 			utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			LOG.Error("extra job[%s] connect source[%v] failed: %v", cui.Name(), source.URL, err)
-			return
+			return nil
 		}
 	}
 
@@ -91,17 +94,31 @@ func (cui *CheckUniqueIndexExistsJob) Run() {
 		LOG.Debug("extra job[%s] check", cui.Name())
 		for i, source := range cui.urls {
 			for _, ns := range nsList {
-				index, err := conns[i].Session.DB(ns.Database).C(ns.Collection).Indexes()
-				if err != nil {
-					LOG.Warn("extra job[%s] with source[%v] query index[%v] failed: %v", cui.Name(), source.URL,
-						ns.Str(), err)
-				}
 
-				if utils.HasUniqueIndex(index) {
-					LOG.Crashf("extra job[%s] with source[%v] query index[%v] find unique index: %v",
-						cui.Name(), source.URL, ns.Str(), index)
+				LOG.Debug("extra job[%s] check[%v]", cui.Name(), ns)
+				cursor, _ := conns[i].Client.Database(ns.Database).Collection(ns.Collection).Indexes().List(nil)
+				for cursor.Next(context.Background()) {
+
+					name, nErr := cursor.Current.LookupErr("name")
+					unique, uErr := cursor.Current.LookupErr("unique")
+					if uErr == nil && nErr == nil &&
+						!strings.HasPrefix(name.String(), "_id") && unique.Boolean() == true {
+						return fmt.Errorf("extra job[%s] with source[%v] query "+
+							"collection[%s - %s] find unique[%v]",
+							cui.Name(), source.URL, ns.Database, ns.Collection, cursor.Current)
+					}
 				}
 			}
 		}
+	}
+
+	return nil
+}
+
+func (cui *CheckUniqueIndexExistsJob) Run() {
+	var err error
+	err = cui.innerRun()
+	if err != nil {
+		LOG.Crashf("%v", err)
 	}
 }

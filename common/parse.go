@@ -1,15 +1,15 @@
 package utils
 
 import (
-	bson2 "github.com/vinllen/mongo-go-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
-func GetKey(log bson2.D, wanted string) interface{} {
+func GetKey(log bson.D, wanted string) interface{} {
 	ret, _ := GetKeyWithIndex(log, wanted)
 	return ret
 }
 
-func GetKeyWithIndex(log bson2.D, wanted string) (interface{}, int) {
+func GetKeyWithIndex(log bson.D, wanted string) (interface{}, int) {
 	if wanted == "" {
 		wanted = "_id"
 	}
@@ -24,7 +24,7 @@ func GetKeyWithIndex(log bson2.D, wanted string) (interface{}, int) {
 	return nil, 0
 }
 
-func SetFiled(input bson2.D, key string, value interface{}, upsert bool) {
+func SetFiled(input bson.D, key string, value interface{}, upsert bool) {
 	for i, ele := range input {
 		if ele.Key == key {
 			input[i].Value = value
@@ -32,7 +32,7 @@ func SetFiled(input bson2.D, key string, value interface{}, upsert bool) {
 	}
 
 	if upsert {
-		input = append(input, bson2.E{
+		input = append(input, bson.E{
 			Key:   key,
 			Value: value})
 	}

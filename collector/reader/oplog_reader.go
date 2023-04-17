@@ -3,8 +3,13 @@ package sourceReader
 // read oplog from source mongodb
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"sync"
 	"time"
 
@@ -13,8 +18,6 @@ import (
 	"github.com/alibaba/MongoShake/v2/oplog"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -40,8 +43,8 @@ type OplogReader struct {
 	replset string
 
 	// mongo oplog reader
-	conn           *utils.MongoConn
-	oplogsIterator *mgo.Iter
+	conn         *utils.MongoCommunityConn
+	oplogsCursor *mongo.Cursor
 
 	// query statement and current max cursor
 	query bson.M
@@ -57,11 +60,10 @@ type OplogReader struct {
 // NewOplogReader creates reader with mongodb url
 func NewOplogReader(src string, replset string) *OplogReader {
 	return &OplogReader{
-		src:     src,
-		replset: replset,
-		query:   bson.M{},
-		// the mgo driver already has cache mechanism(prefetch), so there is no need to buffer here again
-		oplogChan: make(chan *retOplog, 0),
+		src:       src,
+		replset:   replset,
+		query:     bson.M{},
+		oplogChan: make(chan *retOplog, ChannelSize), // ten times of batchSize
 		firstRead: true,
 	}
 }
@@ -78,19 +80,20 @@ func (or *OplogReader) Name() string {
 // SetQueryTimestampOnEmpty set internal timestamp if
 // not exist in this or. initial stage most of the time
 func (or *OplogReader) SetQueryTimestampOnEmpty(ts interface{}) {
-	tsB := ts.(bson.MongoTimestamp)
+	tsB := ts.(int64)
 	if _, exist := or.query[QueryTs]; !exist {
 		LOG.Info("set query timestamp: %v", utils.ExtractTimestampForLog(tsB))
 		or.UpdateQueryTimestamp(tsB)
 	}
 }
 
-func (or *OplogReader) UpdateQueryTimestamp(ts bson.MongoTimestamp) {
-	or.query[QueryTs] = bson.M{QueryOpGT: ts}
+func (or *OplogReader) UpdateQueryTimestamp(ts int64) {
+	or.query[QueryTs] = bson.M{QueryOpGT: utils.Int64ToTimestamp(ts)}
+	LOG.Info("update or.query to %v", or.query)
 }
 
-func (or *OplogReader) getQueryTimestamp() bson.MongoTimestamp {
-	return or.query[QueryTs].(bson.M)[QueryOpGT].(bson.MongoTimestamp)
+func (or *OplogReader) getQueryTimestamp() int64 {
+	return utils.TimeStampToInt64(or.query[QueryTs].(bson.M)[QueryOpGT].(primitive.Timestamp))
 }
 
 // Next returns an oplog by raw bytes which is []byte
@@ -137,21 +140,19 @@ func (or *OplogReader) StartFetcher() {
 
 // fetch oplog tp store disk queue or memory
 func (or *OplogReader) fetcher() {
-	LOG.Info("start fetcher with src[%v] replica-name[%v] query-ts[%v]",
-		utils.BlockMongoUrlPassword(or.src, "***"), or.replset,
-		utils.ExtractTimestampForLog(or.query[QueryTs].(bson.M)[QueryOpGT].(bson.MongoTimestamp)))
-	var log *bson.Raw
+	LOG.Info("start %s fetcher with src[%v] replica-name[%v] query-ts[%v]",
+		or.String(), utils.BlockMongoUrlPassword(or.src, "***"), or.replset,
+		or.query[QueryTs].(bson.M)[QueryOpGT].(primitive.Timestamp))
 	for {
 		if err := or.EnsureNetwork(); err != nil {
 			or.oplogChan <- &retOplog{nil, err}
 			continue
 		}
 
-		log = new(bson.Raw)
-		if !or.oplogsIterator.Next(log) {
-			if err := or.oplogsIterator.Err(); err != nil {
-				// some internal error. need rebuild the oplogsIterator
-				or.releaseIterator()
+		if !or.oplogsCursor.Next(context.Background()) {
+			if err := or.oplogsCursor.Err(); err != nil {
+				// some internal error. need rebuild the oplogsCursor
+				or.releaseCursor()
 				if utils.IsCollectionCappedError(err) { // print it
 					LOG.Error("oplog collection capped may happen: %v", err)
 					or.oplogChan <- &retOplog{nil, CollectionCappedError}
@@ -167,14 +168,14 @@ func (or *OplogReader) fetcher() {
 			continue
 		}
 
-		or.oplogChan <- &retOplog{log.Data, nil}
+		or.oplogChan <- &retOplog{or.oplogsCursor.Current, nil}
 	}
 }
 
 // ensureNetwork establish the mongodb connection at first
 // if current connection is not ready or disconnected
 func (or *OplogReader) EnsureNetwork() (err error) {
-	if or.oplogsIterator != nil {
+	if or.oplogsCursor != nil {
 		return nil
 	}
 	LOG.Info("%s ensure network", or.String())
@@ -184,17 +185,20 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 			or.conn.Close()
 		}
 		// reconnect
-		if or.conn, err = utils.NewMongoConn(or.src, conf.Options.MongoConnectMode, true,
-			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile); or.conn == nil || err != nil {
+		if or.conn, err = utils.NewMongoCommunityConn(or.src, conf.Options.MongoConnectMode, true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault,
+			conf.Options.MongoSslRootCaFile); or.conn == nil || err != nil {
 			err = fmt.Errorf("oplog_reader reconnect mongo instance [%s] error. %s", or.src, err.Error())
 			return err
 		}
-
-		or.conn.Session.SetBatch(BatchSize)
-		or.conn.Session.SetPrefetch(PrefetchPercent)
 	}
 
-	var queryTs bson.MongoTimestamp
+	findOptions := options.Find().SetBatchSize(int32(BatchSize)).
+		SetNoCursorTimeout(true).
+		SetCursorType(options.Tailable).
+		SetOplogReplay(true)
+
+	var queryTs int64
 	// the given oplog timestamp shouldn't bigger than the newest
 	if or.firstRead == true {
 		// check whether the starting fetching timestamp is less than the newest timestamp exist in the oplog
@@ -223,29 +227,36 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 	}
 	or.firstRead = false
 
-	// rebuild syncerGroup condition statement with current checkpoint timestamp
-	or.oplogsIterator = or.conn.Session.DB(localDB).C(utils.OplogNS).
-		Find(or.query).LogReplay().Tail(time.Second * tailTimeout) // this timeout is useless
+	or.oplogsCursor, err = or.conn.Client.Database(localDB).Collection(utils.OplogNS).Find(context.Background(),
+		or.query, findOptions)
+	if or.oplogsCursor == nil || err != nil {
+		err = fmt.Errorf("oplog_reader Find mongo instance [%s] error. %s", or.src, err.Error())
+		LOG.Warn("oplog_reader failed err[%v] or.query[%v]", err, or.query)
+		return err
+	}
+
+	LOG.Info("%s generates new cursor query[%v]", or.String(), or.query)
+
 	return
 }
 
 // get newest oplog
-func (or *OplogReader) getNewestTimestamp() bson.MongoTimestamp {
-	ts, _ := utils.GetNewestTimestampBySession(or.conn.Session)
+func (or *OplogReader) getNewestTimestamp() int64 {
+	ts, _ := utils.GetNewestTimestampByConn(or.conn)
 	return ts
 }
 
 // get oldest oplog
-func (or *OplogReader) getOldestTimestamp() bson.MongoTimestamp {
-	ts, _ := utils.GetOldestTimestampBySession(or.conn.Session)
+func (or *OplogReader) getOldestTimestamp() int64 {
+	ts, _ := utils.GetOldestTimestampByConn(or.conn)
 	return ts
 }
 
-func (or *OplogReader) releaseIterator() {
-	if or.oplogsIterator != nil {
-		or.oplogsIterator.Close()
+func (or *OplogReader) releaseCursor() {
+	if or.oplogsCursor != nil {
+		or.oplogsCursor.Close(context.Background())
 	}
-	or.oplogsIterator = nil
+	or.oplogsCursor = nil
 }
 
 func (or *OplogReader) FetchNewestTimestamp() (interface{}, error) {

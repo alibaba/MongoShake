@@ -4,14 +4,14 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	"github.com/alibaba/MongoShake/v2/oplog"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
-	"reflect"
 	"time"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo/bson"
 )
 
 const (
@@ -25,10 +25,15 @@ var (
 		Raw: nil,
 		Parsed: &oplog.PartialLog{ // initial fake oplog only used in comparison
 			ParsedLog: oplog.ParsedLog{
-				Timestamp: bson.MongoTimestamp(-2), // fake timestamp,
+				// fake timestamp that doesn't appear in reality, must be the smallest ts for compare in SetLastLog
+				Timestamp: primitive.Timestamp{T: 0, I: 0},
 				Operation: "meaningless operation",
 			},
 		},
+	}
+	emptyPrevRaw = bson.Raw{
+		28, 0, 0, 0, 17, 116, 115, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+		18, 116, 0, 255, 255, 255, 255, 255, 255, 255, 255, 0,
 	}
 )
 
@@ -40,12 +45,13 @@ func getTargetDelay() int64 {
 	}
 }
 
-func getExitPoint() bson.MongoTimestamp {
+func getExitPoint() primitive.Timestamp {
 	if utils.IncrSentinelOptions.ExitPoint <= 0 {
-		return 0
+		return primitive.Timestamp{}
 	}
+
 	// change to timestamp
-	return bson.MongoTimestamp(utils.IncrSentinelOptions.ExitPoint << 32)
+	return utils.Int64ToTimestamp(utils.IncrSentinelOptions.ExitPoint)
 }
 
 /*
@@ -68,21 +74,19 @@ type Batcher struct {
 
 	// the last oplog in the batch
 	lastOplog *oplog.GenericOplog
-	// first oplog in the next batch
-	previousOplog *oplog.GenericOplog
 	// the last filtered oplog in the batch
 	lastFilterOplog *oplog.PartialLog
 
 	// remainLogs store the logs that split by barrier and haven't been consumed yet.
 	remainLogs []*oplog.GenericOplog
-	// we have already flush on the previous oplog?
-	previousFlush bool
-	// need flush barrier next generation
-	needBarrier bool
 
 	// batchMore inner usage
-	batchGroup        [][]*oplog.GenericOplog
-	transactionOplogs []*oplog.PartialLog
+	batchGroup [][]*oplog.GenericOplog
+	// Oplogs that need to be performed separately, like DDL(only one oplogs)、Transaction(some oplogs)
+	barrierOplogs []*oplog.GenericOplog
+
+	// transaction buffer
+	txnBuffer *oplog.TxnBuffer
 
 	// for ut only
 	utBatchesDelay struct {
@@ -99,11 +103,14 @@ func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
 		filterList:      filterList,
 		handler:         handler,
 		workerGroup:     workerGroup,
-		previousOplog:   fakeOplog, // initial fake oplog only used in comparison
 		lastOplog:       fakeOplog,
 		lastFilterOplog: fakeOplog.Parsed,
-		previousFlush:   false,
+		txnBuffer:       oplog.NewBuffer(),
 	}
+}
+
+func (batcher *Batcher) Fini() {
+	batcher.txnBuffer.Stop()
 }
 
 /*
@@ -124,17 +131,19 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 	}
 
 	if moveChunkFilter.Filter(log) {
-		LOG.Crashf("move chunk oplog found[%v]", log)
+		LOG.Critical("shake exit, must close balancer in sharding + oplog")
+		LOG.Crashf("move chunk oplog found, must close balancer in sharding + oplog [%v]", log)
 		return false
 	}
 
 	// DDL is disable when timestamp <= fullSyncFinishPosition
 	// v2.4.10: do not crash when "fetch_method" == "change_stream"
-	if ddlFilter.Filter(log) && log.Timestamp <= batcher.syncer.fullSyncFinishPosition &&
+	if ddlFilter.Filter(log) &&
+		primitive.CompareTimestamp(log.Timestamp, batcher.syncer.fullSyncFinishPosition) <= 0 &&
 		conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
 		LOG.Crashf("%s ddl oplog found[%v] when oplog timestamp[%v] less than fullSyncFinishPosition[%v]",
-			batcher.syncer, log, utils.ExtractTimestampForLog(log.Timestamp),
-			utils.ExtractTimestampForLog(batcher.syncer.fullSyncFinishPosition))
+			batcher.syncer, log, log.Timestamp,
+			batcher.syncer.fullSyncFinishPosition)
 		return false
 	}
 	return false
@@ -158,32 +167,12 @@ func (batcher *Batcher) getBatch() []*oplog.GenericOplog {
 	var mergeBatch []*oplog.GenericOplog
 	if len(batcher.remainLogs) == 0 {
 		// remainLogs is empty.
-		/*
-		 * first part of merge batch is from current logs queue.
-		 * we have 3 judgements:
-		 * 1. if logs queue isn't empty, we return immediately. if not, goto 2 or 3.
-		 * 2. if the previous log isn't empty which means this log needs to be flushed
-		 * as soon as possible, so we wait at most 1 second.
-		 * 3. if the previous log is empty, we wait 10s same as the noop oplog interval
-		 */
-		if batcher.previousOplog == fakeOplog {
-			// previous oplog is empty. rule 1, 3
-			select {
-			case mergeBatch = <-syncer.logsQueue[batcher.currentQueue()]:
-				break
-			case <-time.After(noopInterval * time.Second):
-				// return nil if timeout
-				return nil
-			}
-		} else {
-			// previous oplog isn't empty. rule 1, 2
-			select {
-			case mergeBatch = <-syncer.logsQueue[batcher.currentQueue()]:
-				break
-			case <-time.After(1 * time.Second):
-				// return nil if timeout
-				return nil
-			}
+		select {
+		case mergeBatch = <-syncer.logsQueue[batcher.currentQueue()]:
+			break
+		case <-time.After(noopInterval * time.Second):
+			// return nil if timeout
+			return nil
 		}
 
 		// move to next available logs queue
@@ -228,16 +217,18 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 	// judge should exit
 	exitPoint := getExitPoint()
 	lastOplog := mergeBatch[len(mergeBatch)-1].Parsed
-	if exitPoint > 0 && lastOplog.Timestamp > batcher.syncer.fullSyncFinishPosition && exitPoint < lastOplog.Timestamp {
+
+	if !exitPoint.IsZero() &&
+		primitive.CompareTimestamp(lastOplog.Timestamp, batcher.syncer.fullSyncFinishPosition) > 0 &&
+		primitive.CompareTimestamp(exitPoint, lastOplog.Timestamp) < 0 {
 		// only run detail judgement when exit point is bigger than the last one
-		LOG.Info("%s exitPoint[%v] < lastOplog.Timestamp[%v]", batcher.syncer,
-			utils.ExtractTimestampForLog(exitPoint), utils.ExtractTimestampForLog(lastOplog.Timestamp))
+		LOG.Info("%s exitPoint[%v] < lastOplog.Timestamp[%v]", batcher.syncer, exitPoint, lastOplog.Timestamp)
 		var i int
 		for i = range mergeBatch {
 			// fmt.Println(exitPoint, mergeBatch[i].Parsed.Timestamp)
-			if exitPoint < mergeBatch[i].Parsed.Timestamp {
+			if primitive.CompareTimestamp(exitPoint, mergeBatch[i].Parsed.Timestamp) < 0 {
 				LOG.Info("%s exitPoint[%v] < current.Timestamp[%v]", batcher.syncer,
-					utils.ExtractTimestampForLog(exitPoint), utils.ExtractTimestampForLog(mergeBatch[i].Parsed.Timestamp))
+					exitPoint, mergeBatch[i].Parsed.Timestamp)
 				break
 			}
 		}
@@ -249,7 +240,7 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 	if delay > 0 {
 		firstOplog := mergeBatch[0].Parsed
 		// do not wait delay when oplog time less than fullSyncFinishPosition
-		if firstOplog.Timestamp > batcher.syncer.fullSyncFinishPosition {
+		if primitive.CompareTimestamp(firstOplog.Timestamp, batcher.syncer.fullSyncFinishPosition) > 0 {
 			for {
 				// only run sleep if delay > 0
 				// re-fetch delay in every round
@@ -257,9 +248,10 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 				delayBoundary := time.Now().Unix() - delay + 3 // 3 is for NTP drift
 
 				if utils.ExtractMongoTimestamp(firstOplog.Timestamp) > delayBoundary {
-					LOG.Info("%s --- wait target delay[%v seconds]: first oplog timestamp[%v] > delayBoundary[%v], fullSyncFinishPosition[%v]",
-						batcher.syncer, delay, utils.ExtractTimestampForLog(firstOplog.Timestamp), delayBoundary,
-						utils.ExtractTimestampForLog(batcher.syncer.fullSyncFinishPosition))
+					LOG.Info("%s --- wait target delay[%v seconds]: "+
+						"first oplog timestamp[%v] > delayBoundary[%v], fullSyncFinishPosition[%v]",
+						batcher.syncer, delay, firstOplog.Timestamp, delayBoundary,
+						batcher.syncer.fullSyncFinishPosition)
 					time.Sleep(5 * time.Second)
 
 					// for ut only
@@ -274,6 +266,7 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 	return mergeBatch, false
 }
 
+// BatchMore
 /**
  * this function is used to gather oplogs together.
  * honestly speaking, it's complicate so that reading unit tests may help you
@@ -284,130 +277,123 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
  * i d i c u i
  *      | |
  */
-func (batcher *Batcher) BatchMore() ([][]*oplog.GenericOplog, bool, bool, bool) {
+func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barrier bool, allEmpty bool, exit bool) {
 	// picked raw oplogs and batching in sequence
 	batcher.batchGroup = make([][]*oplog.GenericOplog, len(batcher.workerGroup))
-
-	if batcher.transactionOplogs == nil {
-		batcher.transactionOplogs = make([]*oplog.PartialLog, 0)
+	if batcher.barrierOplogs == nil {
+		batcher.barrierOplogs = make([]*oplog.GenericOplog, 0)
 	}
-	barrier := false
+
+	// Have barrier Oplogs to performed
+	if len(batcher.barrierOplogs) > 0 {
+		for _, v := range batcher.barrierOplogs {
+			if batcher.filter(v.Parsed) {
+				batcher.lastFilterOplog = v.Parsed
+				continue
+			}
+			if ddlFilter.Filter(v.Parsed) && !conf.Options.FilterDDLEnable {
+				batcher.lastFilterOplog = v.Parsed
+				continue
+			}
+
+			batcher.addIntoBatchGroup(v, true)
+			//LOG.Info("%s transfer barrierOplogs into batchGroup, i[%d], oplog[%v]", batcher.syncer, i, v.Parsed)
+		}
+		batcher.barrierOplogs = nil
+
+		return batcher.batchGroup, true, batcher.setLastOplog(), false
+	}
 
 	// try to get batch
 	mergeBatch, exit := batcher.getBatchWithDelay()
 
-	// heartbeat
 	if mergeBatch == nil {
-		// we can't fetch any data currently
-		if batcher.previousOplog == fakeOplog {
-			// no cached data, set filterOplog and break.
-			// filterOplog is fake when == lastOplog.
-			// this is for flushing checkpoint only.
-			if batcher.lastOplog.Parsed.Timestamp > batcher.lastFilterOplog.Timestamp {
-				batcher.lastFilterOplog = batcher.lastOplog.Parsed
-			}
-			batcher.previousFlush = false
-			return batcher.batchGroup, false, batcher.setLastOplog(), exit
-		}
-
-		LOG.Info("%s batcher flushes cached oplog", batcher.syncer)
-		// we have cached previous data that need to flush
-		if batcher.flushBufferOplogs() {
-			barrier = true
-		}
-		batcher.previousFlush = barrier
-		return batcher.batchGroup, barrier, batcher.setLastOplog(), exit
+		return batcher.batchGroup, false, batcher.setLastOplog(), exit
 	}
 
-	// we have data
 	for i, genericLog := range mergeBatch {
+		//LOG.Info("~~~~~~~~~enter_input %v %v\n", i, genericLog.Parsed)
+
 		// filter oplog such like Noop or Gid-filtered
 		// PAY ATTENTION: we can't handle the oplog in transaction that has been filtered
 		if batcher.filter(genericLog.Parsed) {
 			// don't push to worker, set lastFilterOplog
 			batcher.lastFilterOplog = genericLog.Parsed
-			if batcher.flushBufferOplogs() {
-				barrier = true
-				batcher.remainLogs = mergeBatch[i+1:]
-				batcher.previousFlush = true
-				return batcher.batchGroup, true, batcher.setLastOplog(), exit
-			}
-			batcher.previousOplog = fakeOplog
+			//LOG.Info("~~~~~~~~~filter %v %v", i, genericLog.Parsed)
 			continue
+		}
+
+		// Transactoin
+		if txnMeta, txnOk := batcher.isTransaction(genericLog.Parsed); txnOk {
+			//LOG.Info("~~~~~~~~~transaction %v %v", i, genericLog.Parsed)
+			isRet, mustIndividual, _, deliveredOps := batcher.handleTransaction(txnMeta, genericLog)
+			if !isRet {
+				continue
+			}
+			if mustIndividual {
+				batcher.barrierOplogs = deliveredOps
+
+				batcher.remainLogs = mergeBatch[i+1:]
+
+				allEmpty := batcher.setLastOplog()
+				nimo.AssertTrue(allEmpty == true, "batcher.batchGroup don't be empty")
+				return batcher.batchGroup, true, allEmpty, false
+			} else {
+
+				// TODO need do filter
+				for _, ele := range deliveredOps {
+					batcher.addIntoBatchGroup(ele, false)
+				}
+				continue
+			}
+		}
+
+		// no transaction applyOps
+		if genericLog.Parsed.Operation == "c" {
+			operation, _ := oplog.ExtraCommandName(genericLog.Parsed.Object)
+			if operation == "applyOps" {
+				deliveredOps, err := oplog.ExtractInnerOps(&genericLog.Parsed.ParsedLog)
+				if err != nil {
+					LOG.Crashf("applyOps extract failed. err[%v] oplog[%v]",
+						err, genericLog.Parsed.ParsedLog)
+				}
+
+				// TODO need do filter
+				for _, ele := range deliveredOps {
+					batcher.addIntoBatchGroup(&oplog.GenericOplog{
+						Raw: nil,
+						Parsed: &oplog.PartialLog{
+							ParsedLog: ele,
+						},
+					}, false)
+				}
+				continue
+			}
 		}
 
 		// current is ddl
 		if ddlFilter.Filter(genericLog.Parsed) {
-			// enable ddl?
-			if conf.Options.FilterDDLEnable {
-				// store and handle in the next call
-				if batcher.previousFlush == true {
-					batcher.addIntoBatchGroup(batcher.previousOplog)
-					// we have flush before, add barrier after
-					batcher.addIntoBatchGroup(genericLog)
-					batcher.remainLogs = mergeBatch[i+1:]
-				} else {
-					// add barrier before, current oplog should be handled on the
-					// next iteration
-					batcher.flushBufferOplogs()
-					batcher.remainLogs = mergeBatch[i:]
-				}
 
-				barrier = true
-				batcher.previousOplog = fakeOplog
-				batcher.previousFlush = true
-				return batcher.batchGroup, true, batcher.setLastOplog(), exit
+			if conf.Options.FilterDDLEnable {
+				batcher.barrierOplogs = append(batcher.barrierOplogs, genericLog)
+
+				batcher.remainLogs = mergeBatch[i+1:]
+
+				return batcher.batchGroup, true, batcher.setLastOplog(), false
 			} else {
 				// filter
 				batcher.syncer.replMetric.AddFilter(1)
 				// doesn't push to worker, set lastFilterOplog
 				batcher.lastFilterOplog = genericLog.Parsed
-				if batcher.flushBufferOplogs() {
-					barrier = true
-					batcher.remainLogs = mergeBatch[i+1:]
-					return batcher.batchGroup, true, batcher.setLastOplog(), exit
-				}
-				batcher.previousOplog = fakeOplog
+
 				continue
 			}
 		}
 
-		// need merge transaction?
-		// if genericLog.Parsed.Timestamp == batcher.previousOplog.Parsed.Timestamp {
-		if batcher.needMergeTransaction(genericLog.Parsed, batcher.previousOplog.Parsed) {
-			if len(batcher.transactionOplogs) == 0 && batcher.previousFlush == false {
-				// no transaction before, flush batchGroup
-				batcher.transactionOplogs = append(batcher.transactionOplogs, batcher.previousOplog.Parsed)
-				batcher.previousOplog = genericLog
-				batcher.remainLogs = mergeBatch[i+1:]
-				batcher.previousFlush = false
-				return batcher.batchGroup, true, batcher.setLastOplog(), exit
-			} else {
-				// have transaction before, add previous
-				batcher.transactionOplogs = append(batcher.transactionOplogs, batcher.previousOplog.Parsed)
-			}
-		} else if len(batcher.transactionOplogs) != 0 {
-			batcher.transactionOplogs = append(batcher.transactionOplogs, batcher.previousOplog.Parsed)
-			gathered := batcher.gatherTransaction()
-
-			batcher.addIntoBatchGroup(gathered)
-			batcher.remainLogs = mergeBatch[i:]
-			batcher.previousOplog = fakeOplog
-
-			barrier = true
-			batcher.transactionOplogs = nil
-			batcher.previousFlush = true
-			return batcher.batchGroup, true, batcher.setLastOplog(), exit
-		} else {
-			batcher.addIntoBatchGroup(batcher.previousOplog)
-			batcher.previousFlush = false
-		}
-
-		batcher.previousOplog = genericLog
+		batcher.addIntoBatchGroup(genericLog, false)
 	}
 
-	batcher.previousFlush = barrier
-	return batcher.batchGroup, barrier, batcher.setLastOplog(), exit
+	return batcher.batchGroup, false, batcher.setLastOplog(), exit
 }
 
 func (batcher *Batcher) setLastOplog() bool {
@@ -417,7 +403,7 @@ func (batcher *Batcher) setLastOplog() bool {
 		if ele != nil && len(ele) > 0 {
 			allEmpty = false
 			rawLast := ele[len(ele)-1]
-			if rawLast.Parsed.Timestamp > batcher.lastOplog.Parsed.Timestamp {
+			if primitive.CompareTimestamp(rawLast.Parsed.Timestamp, batcher.lastOplog.Parsed.Timestamp) > 0 {
 				batcher.lastOplog = rawLast
 			}
 		}
@@ -425,68 +411,119 @@ func (batcher *Batcher) setLastOplog() bool {
 	return allEmpty
 }
 
-func (batcher *Batcher) addIntoBatchGroup(genericLog *oplog.GenericOplog) {
+// addIntoBatchGroup
+// isBarrier
+//     Barrier Oplogs(like DDL or Transaction) must execute sequentially and separately, send to batchGroup[0]
+func (batcher *Batcher) addIntoBatchGroup(genericLog *oplog.GenericOplog, isBarrier bool) {
 	if genericLog == fakeOplog {
 		return
 	}
 
 	batcher.handler.Handle(genericLog.Parsed)
-	which := batcher.syncer.hasher.DistributeOplogByMod(genericLog.Parsed, len(batcher.workerGroup))
+
+	var which uint32
+	if isBarrier {
+		which = 0
+	} else {
+		which = batcher.syncer.hasher.DistributeOplogByMod(genericLog.Parsed, len(batcher.workerGroup))
+	}
 	batcher.batchGroup[which] = append(batcher.batchGroup[which], genericLog)
 
 	// LOG.Debug("add into worker[%v]: %v", which, genericLog.Parsed.ParsedLog)
 }
 
-func (batcher *Batcher) gatherTransaction() *oplog.GenericOplog {
-	// transaction oplogs should gather into an applyOps operation and add barrier here
-	gathered, err := oplog.GatherApplyOps(batcher.transactionOplogs)
+func (batcher *Batcher) isTransaction(partialLog *oplog.PartialLog) (oplog.TxnMeta, bool) {
+	//LOG.Info("isTransaction input oplog:%v lsid[%v] TxnNumber[%v] Object[%v]", partialLog,
+	//	partialLog.ParsedLog.LSID, partialLog.ParsedLog.TxnNumber, partialLog.ParsedLog.Object)
+	if partialLog.Operation == "c" {
+		txnMeta, err := oplog.NewTxnMeta(partialLog.ParsedLog)
+		if err != nil {
+			return oplog.TxnMeta{}, false
+		}
+
+		return txnMeta, txnMeta.IsTxn()
+	}
+
+	return oplog.TxnMeta{}, false
+}
+
+func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta,
+	genericLog *oplog.GenericOplog) (isRet bool, mustIndividual bool, mustSerial bool,
+	deliveredOps []*oplog.GenericOplog) {
+	err := batcher.txnBuffer.AddOp(txnMeta, genericLog.Parsed.ParsedLog)
 	if err != nil {
-		LOG.Crashf("%s gather applyOps failed[%v]", batcher.syncer, err)
-	}
-	return gathered
-}
-
-func (batcher *Batcher) needMergeTransaction(x, y *oplog.PartialLog) bool {
-	// only run in change stream mode.
-	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
-		return false
+		LOG.Crashf("%s add oplog to txnbuffer failed, err[%v] oplog[%v]",
+			batcher.syncer, err, genericLog.Parsed.ParsedLog)
 	}
 
-	return x.Timestamp == y.Timestamp &&
-		x.Lsid != nil && len(x.Lsid) >= 1 && reflect.DeepEqual(x.Lsid, y.Lsid) &&
-		x.TxnNumber == y.TxnNumber
-}
-
-// flush previous buffered oplog, true means should add barrier
-func (batcher *Batcher) flushBufferOplogs() bool {
-	if batcher.previousOplog == fakeOplog {
-		return false
-	}
-
-	txLength := len(batcher.transactionOplogs)
-	if txLength > 0 {
-		if batcher.previousOplog == fakeOplog {
-			LOG.Crashf("%s previous is fakeOplog when transaction oplogs is empty", batcher.syncer)
-		}
-		//if batcher.previousOplog.Parsed.Timestamp != batcher.transactionOplogs[txLength - 1].Timestamp {
-		if !batcher.needMergeTransaction(batcher.previousOplog.Parsed, batcher.transactionOplogs[txLength-1]) {
-			LOG.Crashf("%s previous oplog timestamp[%v] != transaction oplog timestamp[%v]",
-				batcher.syncer, batcher.previousOplog.Parsed.Timestamp, batcher.transactionOplogs[txLength-1].Timestamp)
+	// distributed transaction is abort, ignore these Oplogs and clear buffer
+	if txnMeta.IsAbort() {
+		err := batcher.txnBuffer.PurgeTxn(txnMeta)
+		if err != nil {
+			LOG.Crashf("%s cleaning up txnBuffer failed, err[%v] oplog[%v]",
+				batcher.syncer, err, genericLog.Parsed.ParsedLog)
 		}
 
-		batcher.transactionOplogs = append(batcher.transactionOplogs, batcher.previousOplog.Parsed)
-		gathered := batcher.gatherTransaction()
-
-		batcher.addIntoBatchGroup(gathered)
-		batcher.previousOplog = fakeOplog
-
-		batcher.transactionOplogs = nil
-		return true
+		batcher.syncer.replMetric.AddFilter(1)
+		batcher.lastFilterOplog = genericLog.Parsed
+		return false, false, false, nil
 	}
 
-	batcher.addIntoBatchGroup(batcher.previousOplog)
-	batcher.previousOplog = fakeOplog
-	return false
+	if !txnMeta.IsCommit() {
+		// transaction can not be commit
+		return false, false, false, nil
+	}
+
+	haveCommandInTransaction := false
+	mustIndividual = true
+	mustSerial = false
+	// transaction can be commit now
+	ops, errs := batcher.txnBuffer.GetTxnStream(txnMeta)
+Loop:
+	for {
+		select {
+		case o, ok := <-ops:
+			if !ok {
+				break Loop
+			}
+			newOplog := &oplog.PartialLog{
+				ParsedLog: o,
+			}
+
+			if newOplog.Operation == "c" {
+				haveCommandInTransaction = true
+			}
+
+			// Raw will be filling in Send->LogEntryEncode
+			deliveredOps = append(deliveredOps,
+				&oplog.GenericOplog{
+					Raw:    nil,
+					Parsed: newOplog,
+				})
+		case err := <-errs:
+			if err != nil {
+				LOG.Crashf("error replaying transaction, err[%v]", err)
+			}
+			break Loop
+		}
+	}
+
+	// Individual transaction that do not have commamnd can run run with other curd oplog
+	if !txnMeta.IsCommitOp() && !haveCommandInTransaction &&
+		genericLog.Parsed.PrevOpTime.String() == emptyPrevRaw.String() {
+		mustIndividual = false
+	}
+	// transaction applyOps that do not have command can run parallelly
+	if haveCommandInTransaction {
+		mustSerial = true
+	}
+
+	err = batcher.txnBuffer.PurgeTxn(txnMeta)
+	if err != nil {
+		LOG.Crashf("error cleaning up transaction buffer, err[%v]", err)
+	}
+
+	return true, mustIndividual, mustSerial, deliveredOps
 }
 
 func (batcher *Batcher) moveToNextQueue() {

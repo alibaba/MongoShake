@@ -16,8 +16,11 @@ type SyncWriter struct {
 	config *Config
 }
 
-func NewSyncWriter(address string, partitionId int) (*SyncWriter, error) {
-	c := NewConfig()
+func NewSyncWriter(rootCaFile, address string, partitionId int) (*SyncWriter, error) {
+	c, err := NewConfig(rootCaFile)
+	if err != nil {
+		return nil, err
+	}
 
 	topic, brokers, err := parse(address)
 	if err != nil {

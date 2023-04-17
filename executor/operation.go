@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"go.mongodb.org/mongo-driver/mongo"
 	"reflect"
 	"strings"
 
@@ -12,8 +13,7 @@ import (
 	"sync/atomic"
 
 	LOG "github.com/vinllen/log4go"
-	"github.com/vinllen/mgo"
-	"github.com/vinllen/mgo/bson"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 var ErrorsShouldSkip = map[int]string{
@@ -22,18 +22,23 @@ var ErrorsShouldSkip = map[int]string{
 
 func (exec *Executor) ensureConnection() bool {
 	// reconnect if necessary
-	if exec.session == nil {
-		if conn, err := utils.NewMongoConn(exec.MongoUrl, utils.VarMongoConnectModePrimary, true,
-			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.TunnelMongoSslRootCaFile); err != nil {
+	if exec.conn == nil || !exec.conn.IsGood() {
+		writeContern := utils.ReadWriteConcernDefault
+		if conf.Options.FullSyncExecutorMajorityEnable {
+			writeContern = utils.ReadWriteConcernMajority
+		}
+
+		if conn, err := utils.NewMongoCommunityConn(exec.MongoUrl, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernDefault, writeContern,
+			conf.Options.TunnelMongoSslRootCaFile); err != nil {
+
 			LOG.Critical("Connect to mongo cluster failed. %v", err)
 			return false
 		} else {
-			exec.session = conn.Session
-			if exec.bulkInsert, err = utils.GetAndCompareVersion(exec.session, ThresholdVersion, conf.Options.TargetDBVersion); err != nil {
+			exec.conn = conn
+			if exec.bulkInsert, err = utils.GetAndCompareVersion(exec.conn, ThresholdVersion,
+				conf.Options.TargetDBVersion); err != nil {
 				LOG.Info("compare version with return[%v], bulkInsert disable", err)
-			}
-			if conf.Options.IncrSyncExecutorMajorityEnable {
-				exec.session.EnsureSafe(&mgo.Safe{WMode: utils.MajorityWriteConcern})
 			}
 		}
 	}
@@ -42,8 +47,8 @@ func (exec *Executor) ensureConnection() bool {
 }
 
 func (exec *Executor) dropConnection() {
-	exec.session.Close()
-	exec.session = nil
+	exec.conn.Close()
+	exec.conn = nil
 }
 
 func (exec *Executor) execute(group *OplogsGroup) error {
@@ -64,7 +69,7 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 		metadata := buildMetadata(group.oplogRecords[0].original.partialLog)
 		hasIndex := strings.Contains(group.ns, "system.indexes")
 		// LOG.Debug("fullFinishTs: %v", utils.ExtractTimestampForLog(exec.batchExecutor.FullFinishTs))
-		dbWriter := NewDbWriter(exec.session, metadata, exec.bulkInsert && !hasIndex, exec.batchExecutor.FullFinishTs)
+		dbWriter := NewDbWriter(exec.conn, metadata, exec.bulkInsert && !hasIndex, exec.batchExecutor.FullFinishTs)
 		var err error
 
 		LOG.Debug("Replay-%d oplog collection ns [%s] with command [%s] batch count %d, metadata %v",
@@ -140,11 +145,21 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 }
 
 func (exec *Executor) errorIgnore(err error) bool {
-	switch e := err.(type) {
-	case *mgo.LastError:
-		_, skip := ErrorsShouldSkip[e.Code]
-		return skip
+	if err == nil {
+		return false
 	}
+
+	er, ok := err.(mongo.ServerError)
+	if !ok {
+		return false
+	}
+
+	for k, _ := range ErrorsShouldSkip {
+		if er.HasErrorCode(k) {
+			return true
+		}
+	}
+
 	return false
 }
 
