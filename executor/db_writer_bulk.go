@@ -124,7 +124,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 
 	var models []mongo.WriteModel
 	for _, log := range oplogs {
-		var newObject bson.D
+		var newObject interface{}
 
 		updateCmd := "update"
 		LOG.Debug("bulk_writer doUpdate: org_doc:%v", log.original.partialLog)

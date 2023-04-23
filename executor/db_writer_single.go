@@ -155,7 +155,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 	collectionHandle := sw.conn.Client.Database(database).Collection(collection)
 
 	for _, log := range oplogs {
-		var update bson.D
+		var update interface{}
 		var err error
 		var res *mongo.UpdateResult
 
@@ -169,7 +169,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.M,
 				"object_ver:%v\n", log.original.partialLog.Object, oplogVer)
 
 			if ok && oplogVer == 2 {
-				if update, oplogErr = oplog.DiffUpdateOplogToNormal(update); oplogErr != nil {
+				if update, oplogErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); oplogErr != nil {
 					LOG.Error("doUpdate run Faild err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
 					return oplogErr
 				}

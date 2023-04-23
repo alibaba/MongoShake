@@ -6,6 +6,7 @@ import (
 	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"reflect"
 
 	"strings"
@@ -277,7 +278,7 @@ func GatherApplyOps(input []*PartialLog) (*GenericOplog, error) {
 //  "o2":[{"Key":"_id","Value":"628da11482387c117d4e9e45"}]}
 
 // "o" : { "$v" : 2, "diff" : { "d" : { "count" : false }, "u" : { "name" : "orange" }, "i" : { "c" : 11 } } }
-func DiffUpdateOplogToNormal(updateObj bson.D) (bson.D, error) {
+func DiffUpdateOplogToNormal(updateObj bson.D) (interface{}, error) {
 
 	diffObj := GetKey(updateObj, "diff")
 	if diffObj == nil {
@@ -298,7 +299,7 @@ func DiffUpdateOplogToNormal(updateObj bson.D) (bson.D, error) {
 
 }
 
-func BuildUpdateDelteOplog(prefixField string, obj bson.D) (bson.D, error) {
+func BuildUpdateDelteOplog(prefixField string, obj bson.D) (interface{}, error) {
 	var result bson.D
 
 	for _, ele := range obj {
@@ -306,10 +307,12 @@ func BuildUpdateDelteOplog(prefixField string, obj bson.D) (bson.D, error) {
 			result = append(result, primitive.E{
 				Key:   "$unset",
 				Value: combinePrefixField(prefixField, ele.Value)})
+
 		} else if ele.Key == "i" || ele.Key == "u" {
 			result = append(result, primitive.E{
 				Key:   "$set",
 				Value: combinePrefixField(prefixField, ele.Value)})
+
 		} else if len(ele.Key) > 1 && ele.Key[0] == 's' {
 			// s means subgroup field(array or nest)
 			tmpPrefixField := ""
@@ -323,10 +326,41 @@ func BuildUpdateDelteOplog(prefixField string, obj bson.D) (bson.D, error) {
 			if err != nil {
 				return obj, fmt.Errorf("parse ele[%v] failed, updateObj:[%v]", ele, obj)
 			}
-
-			for _, nestObjEle := range nestObj {
-				result = append(result, nestObjEle)
+			if _, ok := nestObj.(mongo.Pipeline); ok {
+				return nestObj, nil
+			} else if _, ok := nestObj.(bson.D); ok {
+				for _, nestObjEle := range nestObj.(bson.D) {
+					result = append(result, nestObjEle)
+				}
+			} else {
+				return obj, fmt.Errorf("unknown nest type ele[%v] updateObj:[%v] nestObj[%v]", ele, obj, nestObj)
 			}
+
+		} else if len(ele.Key) > 1 && ele.Key[0] == 'u' {
+			result = append(result, primitive.E{
+				Key: "$set",
+				Value: bson.D{
+					primitive.E{
+						Key:   prefixField + "." + ele.Key[1:],
+						Value: ele.Value,
+					},
+				},
+			})
+
+		} else if ele.Key == "l" {
+			if len(result) != 0 {
+				return obj, fmt.Errorf("len should be 0, Key[%v] updateObj:[%v], result:[%v]",
+					ele, obj, result)
+			}
+
+			return mongo.Pipeline{
+				{{"$set", bson.D{
+					{prefixField, bson.D{
+						{"$slice", []interface{}{"$" + prefixField, ele.Value}},
+					}},
+				}}},
+			}, nil
+
 		} else if ele.Key == "a" && ele.Value == true {
 			continue
 		} else {

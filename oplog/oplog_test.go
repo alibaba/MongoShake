@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -661,11 +662,19 @@ func TestDelteOplog(t *testing.T) {
 						}},
 					}},
 				}},
+				bson.E{Key: "sarrname", Value: bson.D{
+					bson.E{Key: "a", Value: true},
+					bson.E{Key: "u0", Value: bson.D{
+						bson.E{Key: "count", Value: 10},
+						bson.E{Key: "nm", Value: "e"},
+					}},
+				}},
 			},
 		},
 	}
 
-	result, err := DiffUpdateOplogToNormal(object)
+	resultInterface, err := DiffUpdateOplogToNormal(object)
+	result := resultInterface.(bson.D)
 	fmt.Printf("result:%v\n", result)
 	assert.Equal(t, nil, err, "should be equal")
 	assert.Equal(t, "$unset", result[0].Key, "should be equal")
@@ -684,4 +693,33 @@ func TestDelteOplog(t *testing.T) {
 	assert.Equal(t, bson.D{{"arrname.m1.n", false}}, result[5].Value, "should be equal")
 	assert.Equal(t, "$set", result[6].Key, "should be equal")
 	assert.Equal(t, bson.D{{"arrname.n1.l", 2}}, result[6].Value, "should be equal")
+	assert.Equal(t, "$set", result[7].Key, "should be equal")
+	assert.Equal(t, bson.D{{"arrname.0", bson.D{
+		{"count", 10},
+		{"nm", "e"},
+	}}}, result[7].Value, "should be equal")
+
+	object1 := bson.D{
+		bson.E{Key: "$v", Value: 2},
+		bson.E{
+			Key: "diff",
+			Value: bson.D{
+				bson.E{Key: "sarrname", Value: bson.D{
+					bson.E{Key: "a", Value: true},
+					bson.E{Key: "l", Value: 1},
+				}},
+			},
+		},
+	}
+	resultInterface1, err := DiffUpdateOplogToNormal(object1)
+	result1 := resultInterface1.(mongo.Pipeline)
+	fmt.Printf("result:%v\n", result1)
+
+	assert.Equal(t, mongo.Pipeline{
+		{{"$set", bson.D{
+			{"arrname", bson.D{
+				{"$slice", []interface{}{"$arrname", 1}},
+			}},
+		}}},
+	}, result1, "should be equal")
 }
