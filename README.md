@@ -7,7 +7,6 @@ This is a brief introduction of Mongo-Shake, please visit [english wiki](https:/
 *  [FAQ document](https://github.com/aliyun/mongo-shake/wiki/FAQ)
 *  [MongoShake最佳实践](https://yq.aliyun.com/articles/719704)
 *  [Performance test document](https://github.com/aliyun/mongo-shake/wiki/MongoShake-Performance-Document)
-*  [WeChat discuss group](https://github.com/aliyun/mongo-shake#shake-series-tool)
 
 # Mongo-Shake
 ---
@@ -98,8 +97,6 @@ We also provide some tools for synchronization in Shake series.<br>
 * [MongoShake](https://github.com/aliyun/MongoShake): mongodb data synchronization tool.
 * [RedisShake](https://github.com/aliyun/RedisShake): redis data synchronization tool.
 * [RedisFullCheck](https://github.com/aliyun/RedisFullCheck): redis data synchronization verification tool.
-
-Plus, we have a DingDing(钉钉) group so that users can join and discuss, group id（钉钉群号）: 23165540.
 
 # Thanks
 ---
