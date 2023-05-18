@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	LOG "github.com/vinllen/log4go"
 	"io/ioutil"
 	"strings"
@@ -58,6 +59,31 @@ func NewConfig(rootCaFile string) (*Config, error) {
 		config.Net.TLS.Config = sslConfig
 		config.Net.TLS.Enable = true
 	}
+	if conf.Options.TunnelKafkaSaslEnable {
+		user, pwd, _ := parseAuth(conf.Options.TunnelKafkaSaslAuth)
+		config.Metadata.Full = false
+		config.Net.SASL.Enable = true
+		config.Net.SASL.User = user
+		config.Net.SASL.Password = pwd
+		saslMechanismOption := conf.Options.TunnelKafkaSaslMechanism
+		if saslMechanismOption != "" {
+			saslMechanism := sarama.SASLMechanism(saslMechanismOption)
+			config.Net.SASL.Mechanism = saslMechanism
+			switch saslMechanism {
+			case sarama.SASLTypeSCRAMSHA256:
+				//sarama.SASLTypeSCRAMSHA256
+				config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+					return &XDGSCRAMClient{HashGeneratorFcn: SHA256}
+				}
+			case sarama.SASLTypeSCRAMSHA512:
+				config.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+					return &XDGSCRAMClient{HashGeneratorFcn: SHA512}
+				}
+			}
+
+		}
+
+	}
 
 	return &Config{
 		Config: config,
@@ -76,7 +102,16 @@ func parse(address string) (string, []string, error) {
 	if l == 2 {
 		topic = arr[0]
 	}
-
 	brokers := strings.Split(arr[l-1], brokersSplitter)
 	return topic, brokers, nil
+}
+
+// parse the auth (user@pwd)
+func parseAuth(auth string) (string, string, error) {
+	arr := strings.Split(auth, topicSplitter)
+	l := len(arr)
+	if l != 2 {
+		return "", "", fmt.Errorf("auth format error")
+	}
+	return arr[0], arr[1], nil
 }

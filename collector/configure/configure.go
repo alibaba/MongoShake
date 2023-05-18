@@ -31,6 +31,9 @@ type Configuration struct {
 	TunnelAddress                          []string `config:"tunnel.address"`
 	TunnelMessage                          string   `config:"tunnel.message"`
 	TunnelKafkaPartitionNumber             int      `config:"tunnel.kafka.partition_number"` // add v2.4.21
+	TunnelKafkaSaslEnable                  bool     `config:"tunnel.kafka.sasl.enable"`      //default:false
+	TunnelKafkaSaslAuth                    string   `config:"tunnel.kafka.sasl.auth"`        //username@pwd
+	TunnelKafkaSaslMechanism               string   `config:"tunnel.sasl.mechanism"`         // add
 	TunnelJsonFormat                       string   `config:"tunnel.json.format"`
 	TunnelMongoSslRootCaFile               string   `config:"tunnel.mongo_ssl_root_ca_file"` // add v2.6.2
 	FilterNamespaceBlack                   []string `config:"filter.namespace.black"`
@@ -138,6 +141,7 @@ func GetSafeOptions() Configuration {
 	for i := range Options.IncrSyncTunnelAddress {
 		polish.IncrSyncTunnelAddress[i] = utils.BlockMongoUrlPassword(Options.IncrSyncTunnelAddress[i], "***")
 	}
+	polish.TunnelKafkaSaslAuth = utils.BlockMongoUrlPassword(Options.TunnelKafkaSaslAuth, "***")
 	// modify storage url
 	polish.CheckpointStorageUrl = utils.BlockMongoUrlPassword(Options.CheckpointStorageUrl, "***")
 
