@@ -34,6 +34,8 @@ type Configuration struct {
 	TunnelKafkaSaslEnable                  bool     `config:"tunnel.kafka.sasl.enable"`      //default:false
 	TunnelKafkaSaslAuth                    string   `config:"tunnel.kafka.sasl.auth"`        //username@pwd
 	TunnelKafkaSaslMechanism               string   `config:"tunnel.sasl.mechanism"`         // add
+	TunnelKafkaCompression                 string   `config:"tunnel.kafka.compression"`      // default:none
+	KafkaProducerMaxMessage                int      `config:"tunnel.kafka.producer.maxmessagebytes"`
 	TunnelJsonFormat                       string   `config:"tunnel.json.format"`
 	TunnelMongoSslRootCaFile               string   `config:"tunnel.mongo_ssl_root_ca_file"` // add v2.6.2
 	FilterNamespaceBlack                   []string `config:"filter.namespace.black"`

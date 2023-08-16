@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"compress/gzip"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -42,7 +43,13 @@ func NewConfig(rootCaFile string) (*Config, error) {
 	config.Producer.Return.Successes = true
 	config.Producer.Partitioner = sarama.NewManualPartitioner
 	config.Producer.MaxMessageBytes = 16*utils.MB + 2*utils.MB // 2MB for the reserve gap
-
+	if conf.Options.KafkaProducerMaxMessage > 0 {
+		config.Producer.MaxMessageBytes = conf.Options.KafkaProducerMaxMessage
+	}
+	config.Producer.Compression = getKafkaCompression(conf.Options.TunnelKafkaCompression) // conf.Options.TunnelKafkaCompression
+	if config.Producer.Compression == sarama.CompressionGZIP {
+		config.Producer.CompressionLevel = gzip.BestCompression
+	}
 	// ssl
 	if rootCaFile != "" {
 		sslConfig := &tls.Config{
@@ -114,4 +121,20 @@ func parseAuth(auth string) (string, string, error) {
 		return "", "", fmt.Errorf("auth format error")
 	}
 	return arr[0], arr[1], nil
+}
+
+//getKafkaCompression 根据kafkaCompression值获取对应的枚举
+func getKafkaCompression(compression string) sarama.CompressionCodec {
+	compressions := map[string]sarama.CompressionCodec{
+		"none":   sarama.CompressionNone,
+		"gzip":   sarama.CompressionGZIP,
+		"snappy": sarama.CompressionSnappy,
+		"lz4":    sarama.CompressionLZ4,
+		"zstd":   sarama.CompressionZSTD,
+	}
+	if result, ok := compressions[compression]; !ok {
+		return sarama.CompressionNone
+	} else {
+		return result
+	}
 }
