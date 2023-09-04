@@ -117,7 +117,7 @@ def check(src, dst):
             srcColl = srcDb[coll]
             dstColl = dstDb[coll]
             # comparison collection records number
-            if srcColl.count() != dstColl.count():
+            if srcColl.count_documents({}) != dstColl.count_documents({}):
                 log_error("DIFF => collection [%s] record count not equals" % (coll))
                 return False
             else:
@@ -150,9 +150,9 @@ def data_comparison(srcColl, dstColl, mode):
         return True
     elif mode == "sample":
         # srcColl.count() mus::t equals to dstColl.count()
-        count = configure[COMPARISION_COUNT] if configure[COMPARISION_COUNT] <= srcColl.count() else srcColl.count()
+        count = configure[COMPARISION_COUNT] if configure[COMPARISION_COUNT] <= srcColl.count_documents({}) else srcColl.count_documents({})
     else: # all
-        count = srcColl.count()
+        count = srcColl.count_documents({})
 
     if count == 0:
         return True
