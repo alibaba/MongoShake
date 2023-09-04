@@ -68,6 +68,7 @@ fi
 
 for g in "${goos[@]}"; do
     export GOOS=$g
+    export GOARCH=amd64
     echo "try build goos=$g"
     if [ $g != "windows" ]; then
         build_info="$info -X $modulename/common.SIGNALPROFILE=31 -X $modulename/common.SIGNALSTACK=30"
