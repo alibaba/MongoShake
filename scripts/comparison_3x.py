@@ -95,8 +95,8 @@ def check(src, dst):
         #     log_info("EQUL => database [%s] stats equals" % db)
 
         # for collections in db
-        srcColls = srcDb.collection_names()
-        dstColls = dstDb.collection_names()
+        srcColls = srcDb.list_collection_names()
+        dstColls = dstDb.list_collection_names()
         srcColls = [coll for coll in srcColls if coll not in configure[EXCLUDE_COLLS] and srcColls.count(coll) > 0]
         dstColls = [coll for coll in dstColls if coll not in configure[EXCLUDE_COLLS] and dstColls.count(coll) > 0]
         if len(srcColls) != len(dstColls):
