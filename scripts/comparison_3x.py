@@ -116,13 +116,16 @@ def check(src, dst):
 
             srcColl = srcDb[coll]
             dstColl = dstDb[coll]
+
+            log_info("compare count for collection [%s]" % coll)
             # comparison collection records number
-            if srcColl.count_documents({}) != dstColl.count_documents({}):
+            if srcColl.estimated_document_count() != dstColl.estimated_document_count():
                 log_error("DIFF => collection [%s] record count not equals" % (coll))
                 return False
             else:
                 log_info("EQUL => collection [%s] record count equals" % (coll))
 
+            log_info("compare index for collection [%s]" % coll)
             # comparison collection index number
             src_index_length = len(srcColl.index_information())
             dst_index_length = len(dstColl.index_information())
@@ -132,6 +135,7 @@ def check(src, dst):
             else:
                 log_info("EQUL => collection [%s] index number equals" % (coll))
 
+            log_info("compare data sample for collection [%s]" % coll)
             # check sample data
             if not data_comparison(srcColl, dstColl, configure[COMPARISION_MODE]):
                 log_error("DIFF => collection [%s] data comparison not equals" % (coll))
@@ -150,7 +154,7 @@ def data_comparison(srcColl, dstColl, mode):
         return True
     elif mode == "sample":
         # srcColl.count() mus::t equals to dstColl.count()
-        count = configure[COMPARISION_COUNT] if configure[COMPARISION_COUNT] <= srcColl.count_documents({}) else srcColl.count_documents({})
+        count = configure[COMPARISION_COUNT] if configure[COMPARISION_COUNT] <= srcColl.estimated_document_count() else srcColl.estimated_document_count()
     else: # all
         count = srcColl.count_documents({})
 
