@@ -5,9 +5,9 @@ import (
 	"sync"
 
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
-	"github.com/alibaba/MongoShake/v2/collector/configure"
-	"github.com/alibaba/MongoShake/v2/collector/reader"
-	"github.com/alibaba/MongoShake/v2/common"
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	sourceReader "github.com/alibaba/MongoShake/v2/collector/reader"
+	utils "github.com/alibaba/MongoShake/v2/common"
 
 	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
@@ -153,7 +153,11 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 		(len(conf.Options.MongoSUrl) > 0 && len(conf.Options.MongoCsUrl) == 0 && len(conf.Options.MongoUrls) == 0) {
 		// for only mongo_s_url address exists
 		if syncMode == utils.VarSyncModeIncr {
-			return syncMode, nil, int64(0), nil
+
+			_, startTsMaptmp, _, _ := coordinator.compareCheckpointAndDbTs(syncMode == utils.VarSyncModeAll)
+			LOG.Info("for only mongo_s_url address exists startTsMap[%v]", startTsMaptmp)
+
+			return syncMode, startTsMaptmp, int64(0), nil
 		}
 
 		ok, token, err := coordinator.isCheckpointExist()

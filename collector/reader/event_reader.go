@@ -71,7 +71,7 @@ func (er *EventReader) Name() string {
 // not exist in this or. initial stage most of the time
 func (er *EventReader) SetQueryTimestampOnEmpty(ts interface{}) {
 	if er.startAtOperationTime == nil && ts != ckpt.InitCheckpoint {
-		LOG.Info("set query timestamp: %v", utils.ExtractTimestampForLog(ts))
+		LOG.Info("EventReader set query timestamp: %v", utils.ExtractTimestampForLog(ts))
 		if val, ok := ts.(int64); ok {
 			er.startAtOperationTime = val
 		} else if val2, ok := ts.(int64); ok {

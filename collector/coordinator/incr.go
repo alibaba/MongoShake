@@ -37,6 +37,13 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		} else {
 			// read from mongos
 			syncerTs = oplogStartPosition
+			LOG.Info("read from mongos src.ReplicaName:%s ts:%v", src.ReplicaName, startTsMap[src.ReplicaName])
+			if len(conf.Options.MongoSUrl) > 0 && len(conf.Options.MongoCsUrl) == 0 && len(conf.Options.MongoUrls) == 0 {
+				if v, ok := startTsMap[src.ReplicaName]; ok {
+					syncerTs = v
+					LOG.Info("read from mongos and set ts src.ReplicaName:%s ts:%v", src.ReplicaName, startTsMap[src.ReplicaName])
+				}
+			}
 		}
 
 		LOG.Info("RealSourceIncrSync[%d]: %s, startTimestamp[%v]", i, src, syncerTs)
