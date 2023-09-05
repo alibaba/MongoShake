@@ -10,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"os"
 	"sync"
 	"time"
 
@@ -149,8 +150,9 @@ func (or *OplogReader) fetcher() {
 			continue
 		}
 
-		if !or.oplogsCursor.Next(context.Background()) {
-			if err := or.oplogsCursor.Err(); err != nil {
+		if !or.oplogsCursor.TryNext(context.Background()) {
+			err := or.oplogsCursor.Err()
+			if (err != nil && !os.IsTimeout(err)) || or.oplogsCursor.ID() == 0 {
 				// some internal error. need rebuild the oplogsCursor
 				or.releaseCursor()
 				if utils.IsCollectionCappedError(err) { // print it
@@ -161,9 +163,12 @@ func (or *OplogReader) fetcher() {
 				}
 				// wait a moment
 				time.Sleep(1 * time.Second)
-			} else {
+			} else if err != nil && os.IsTimeout(err) {
 				// query timeout
 				or.oplogChan <- &retOplog{nil, TimeoutError}
+			} else {
+				// no new oplog, wait a moment
+				time.Sleep(1 * time.Second)
 			}
 			continue
 		}
