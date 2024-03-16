@@ -31,6 +31,11 @@ func IsShardingToSharding(fromIsSharding bool, toConn *utils.MongoCommunityConn)
 		return false
 	}
 
+	if conf.Options.FullSyncDoNotShardDest {
+		LOG.Info("full_sync.do_not_shard_destination set, no need to check IsShardingToSharding")
+		return false
+	}
+
 	var source, target string
 	if fromIsSharding {
 		source = "sharding"
