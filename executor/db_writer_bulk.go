@@ -20,8 +20,7 @@ type BulkWriter struct {
 	fullFinishTs int64
 }
 
-func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, oplogs []*OplogRecord,
-	dupUpdate bool) error {
+func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord, dupUpdate bool) error {
 
 	var models []mongo.WriteModel
 	for _, log := range oplogs {
@@ -52,8 +51,7 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.M, opl
 	return nil
 }
 
-func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bson.M,
-	oplogs []*OplogRecord, upsert bool) error {
+func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord, upsert bool) error {
 	var models []mongo.WriteModel
 
 	for _, log := range oplogs {
@@ -94,7 +92,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 
 		if utils.DuplicateKey(err) {
 			// create single writer to write one by one
-			sw := NewDbWriter(bw.conn, bson.M{}, false, bw.fullFinishTs)
+			sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
 			return sw.doUpdateOnInsert(database, collection, metadata, oplogs[index:], upsert)
 		}
 
@@ -116,11 +114,10 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 }
 
 /*
- replacement oplog:
-	{"ts":{"T":1664192510,"I":1},"t":1,"h":null,"v":2,"op":"u","ns":"test.car","o":[{"Key":"_id","Value":"63318f67024749a30fc12af6"},{"Key":"b","Value":3}],"o2":[{"Key":"_id","Value":"63318f67024749a30fc12af6"}],"PrevOpTime":null,"ui":{"Subtype":4,"Data":"3p7boGbmTvqYSWp42PaZnw=="}}
+	 replacement oplog:
+		{"ts":{"T":1664192510,"I":1},"t":1,"h":null,"v":2,"op":"u","ns":"test.car","o":[{"Key":"_id","Value":"63318f67024749a30fc12af6"},{"Key":"b","Value":3}],"o2":[{"Key":"_id","Value":"63318f67024749a30fc12af6"}],"PrevOpTime":null,"ui":{"Subtype":4,"Data":"3p7boGbmTvqYSWp42PaZnw=="}}
 */
-func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
-	oplogs []*OplogRecord, upsert bool) error {
+func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, oplogs []*OplogRecord, upsert bool) error {
 
 	var models []mongo.WriteModel
 	for _, log := range oplogs {
@@ -204,7 +201,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 		if utils.DuplicateKey(err) {
 			RecordDuplicatedOplog(bw.conn, collection, oplogs)
 			// create single writer to write one by one
-			sw := NewDbWriter(bw.conn, bson.M{}, false, bw.fullFinishTs)
+			sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
 			return sw.doUpdate(database, collection, metadata, oplogs[index:], upsert)
 		}
 
@@ -214,14 +211,14 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 				parseLastTimestamp(oplogs) <= bw.fullFinishTs)
 
 			// re-run (index, len(oplogs) - 1]
-			sw := NewDbWriter(bw.conn, bson.M{}, false, bw.fullFinishTs)
+			sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
 			return sw.doUpdate(database, collection, metadata, oplogs[index+1:], upsert)
 		}
 		if strings.Contains(err.Error(), shardKeyupdateErr) {
 			LOG.Error("multiUpdateShardKey err_string:%s, index:%d, redo update shardkey singly",
 				err.Error(), index)
 
-			sw := NewDbWriter(bw.conn, bson.M{}, false, bw.fullFinishTs)
+			sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
 			return sw.doUpdate(database, collection, metadata, oplogs[index:], upsert)
 		}
 
@@ -231,8 +228,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.M,
 	return nil
 }
 
-func (bw *BulkWriter) doDelete(database, collection string, metadata bson.M,
-	oplogs []*OplogRecord) error {
+func (bw *BulkWriter) doDelete(database, collection string, metadata bson.E, oplogs []*OplogRecord) error {
 	var models []mongo.WriteModel
 	for _, log := range oplogs {
 		models = append(models, mongo.NewDeleteOneModel().SetFilter(log.original.partialLog.Object))
@@ -256,7 +252,7 @@ func (bw *BulkWriter) doDelete(database, collection string, metadata bson.M,
 	return nil
 }
 
-func (bw *BulkWriter) doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error {
+func (bw *BulkWriter) doCommand(database string, metadata bson.E, oplogs []*OplogRecord) error {
 	var err error
 	for _, log := range oplogs {
 		newObject := log.original.partialLog.Object

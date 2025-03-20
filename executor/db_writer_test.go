@@ -99,7 +99,7 @@ func TestSingleWriter(t *testing.T) {
 		err = conn.Client.Database(testDb).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{}, false, 0)
+		writer := NewDbWriter(conn, bson.E{}, false, 0)
 
 		inserts := []*OplogRecord{mockOplogRecord(1, 1, -1)}
 
@@ -141,7 +141,7 @@ func TestSingleWriter(t *testing.T) {
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{}, false, 0)
+		writer := NewDbWriter(conn, bson.E{}, false, 0)
 
 		// drop database
 		err = conn.Client.Database(testDb).Drop(nil)
@@ -191,7 +191,7 @@ func TestSingleWriter(t *testing.T) {
 		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{}, false, 1)
+		writer := NewDbWriter(conn, bson.E{}, false, 1)
 
 		// drop database
 		err = conn.Client.Database(testDb).Drop(nil)
@@ -243,7 +243,7 @@ func TestSingleWriter(t *testing.T) {
 		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{}, false, 0)
+		writer := NewDbWriter(conn, bson.E{}, false, 0)
 
 		// drop database
 		err = conn.Client.Database(testDb).Drop(nil)
@@ -326,7 +326,7 @@ func TestSingleWriter(t *testing.T) {
 		err = conn.Client.Database(testDb).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{}, false, 100)
+		writer := NewDbWriter(conn, bson.E{}, false, 100)
 		inserts := []*OplogRecord{
 			mockOplogRecord(1, 1, -1),
 			mockOplogRecord(2, 2, -1),
@@ -411,7 +411,7 @@ func TestSingleWriter(t *testing.T) {
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{}, false, 0)
+		writer := NewDbWriter(conn, bson.E{}, false, 0)
 
 		// drop database
 		err = conn.Client.Database(testDb).Drop(nil)
@@ -510,7 +510,7 @@ func TestBulkWriter(t *testing.T) {
 		err = conn.Client.Database(testDb).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{}, true, -1)
+		writer := NewDbWriter(conn, bson.E{}, true, -1)
 
 		// 1-5
 		inserts := []*OplogRecord{
@@ -597,7 +597,7 @@ func TestBulkWriter(t *testing.T) {
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{}, true, 0)
+		writer := NewDbWriter(conn, bson.E{}, true, 0)
 
 		// drop database
 		err = conn.Client.Database(testDb).Drop(nil)
@@ -670,7 +670,7 @@ func TestBulkWriter(t *testing.T) {
 		err = conn.Client.Database(testDb).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{}, true, -1)
+		writer := NewDbWriter(conn, bson.E{}, true, -1)
 
 		// 1-5
 		inserts := []*OplogRecord{
@@ -748,7 +748,7 @@ func TestBulkWriter(t *testing.T) {
 		err = conn.Client.Database(testDb).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{}, true, -1)
+		writer := NewDbWriter(conn, bson.E{}, true, -1)
 
 		// 1-5
 		inserts := []*OplogRecord{
@@ -818,7 +818,7 @@ func TestBulkWriter(t *testing.T) {
 		err = conn.Client.Database(testDb).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{}, true, 100)
+		writer := NewDbWriter(conn, bson.E{}, true, 100)
 		inserts := []*OplogRecord{
 			mockOplogRecord(1, 1, -1),
 			mockOplogRecord(2, 2, -1),
@@ -900,7 +900,7 @@ func TestBulkWriter(t *testing.T) {
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{}, true, 0)
+		writer := NewDbWriter(conn, bson.E{}, true, 0)
 
 		// drop database
 		err = conn.Client.Database(testDb).Drop(nil)
@@ -1001,7 +1001,7 @@ func TestCommandWriter(t *testing.T) {
 		err = conn.Client.Database(testDb).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{"g": 1}, true, -1)
+		writer := NewDbWriter(conn, bson.E{Key: "g", Value: "1"}, true, -1)
 
 		// 1-5
 		inserts := []*OplogRecord{
@@ -1088,7 +1088,7 @@ func TestCommandWriter(t *testing.T) {
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{"g": 1}, true, 0)
+		writer := NewDbWriter(conn, bson.E{Key: "g", Value: "1"}, true, 0)
 
 		// drop database
 		err = conn.Client.Database(testDb).Drop(nil)
@@ -1163,7 +1163,7 @@ func TestCommandWriter(t *testing.T) {
 		err = conn.Client.Database(testDb).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{"g": 1}, true, -1)
+		writer := NewDbWriter(conn, bson.E{Key: "g", Value: "1"}, true, -1)
 
 		// 1-5
 		inserts := []*OplogRecord{
@@ -1241,7 +1241,7 @@ func TestCommandWriter(t *testing.T) {
 		err = conn.Client.Database(testDb).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{"g": 1}, true, -1)
+		writer := NewDbWriter(conn, bson.E{Key: "g", Value: "1"}, true, -1)
 
 		// 1-5
 		inserts := []*OplogRecord{
@@ -1311,7 +1311,7 @@ func TestCommandWriter(t *testing.T) {
 		err = conn.Client.Database(testDb).Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{"g": 1}, true, 100)
+		writer := NewDbWriter(conn, bson.E{Key: "g", Value: "1"}, true, 100)
 		inserts := []*OplogRecord{
 			mockOplogRecord(1, 1, -1),
 			mockOplogRecord(2, 2, -1),
@@ -1391,7 +1391,7 @@ func TestCommandWriter(t *testing.T) {
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{"g": 1}, true, 0)
+		writer := NewDbWriter(conn, bson.E{Key: "g", Value: "1"}, true, 0)
 
 		// drop database
 		err = conn.Client.Database(testDb).Drop(nil)
@@ -1707,7 +1707,7 @@ func TestRunCommand(t *testing.T) {
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{"g": 1}, true, 0)
+		writer := NewDbWriter(conn, bson.E{Key: "g", Value: "1"}, true, 0)
 
 		// drop database
 		err = conn.Client.Database("zz").Drop(nil)
@@ -1847,7 +1847,7 @@ func TestRunCommand(t *testing.T) {
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
-		writer := NewDbWriter(conn, bson.M{"g": 1}, true, 0)
+		writer := NewDbWriter(conn, bson.E{Key: "g", Value: "1"}, true, 0)
 
 		// drop database
 		err = conn.Client.Database("hh").Drop(nil)

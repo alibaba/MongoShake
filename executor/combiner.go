@@ -7,6 +7,7 @@ import (
 type OplogsGroup struct {
 	ns           string
 	op           string
+	gid          string
 	oplogRecords []*OplogRecord
 
 	completionList []func()
@@ -30,6 +31,7 @@ func (combiner LogsGroupCombiner) mergeToGroups(logs []*OplogRecord) (groups []*
 	for _, log := range logs {
 		op := log.original.partialLog.Operation
 		ns := log.original.partialLog.Namespace
+		gid := log.original.partialLog.Gid
 		// the equivalent oplog.op and oplog.ns can be merged together
 		last := len(groups) - 1
 
@@ -37,7 +39,7 @@ func (combiner LogsGroupCombiner) mergeToGroups(logs []*OplogRecord) (groups []*
 			len(groups) > 0 && // have one group existing at least
 			len(groups[last].oplogRecords) < combiner.maxGroupNr && // no more than max group number
 			sizeInGroup+log.original.partialLog.RawSize < combiner.maxGroupSize && // no more than one group size
-			groups[last].op == op && groups[last].ns == ns { // same op and ns
+			groups[last].op == op && groups[last].ns == ns && groups[last].gid == gid { // same op and ns and gid
 			// we can merge this oplog into the latest batched oplogRecords group
 			combiner.merge(groups[len(groups)-1], log)
 			sizeInGroup += log.original.partialLog.RawSize // add size
@@ -51,7 +53,7 @@ func (combiner LogsGroupCombiner) mergeToGroups(logs []*OplogRecord) (groups []*
 			sizeInGroup = log.original.partialLog.RawSize
 		}
 
-		// can't be merge more oplogRecords further. this log should be the end in this group
+		// can't merge more oplogRecords further. this log should be the end in this group
 		forceSplit = log.wait != nil
 	}
 
@@ -71,6 +73,7 @@ func (combiner *LogsGroupCombiner) startNewGroup(log *OplogRecord) *OplogsGroup 
 	group := &OplogsGroup{
 		op:           log.original.partialLog.Operation,
 		ns:           log.original.partialLog.Namespace,
+		gid:          log.original.partialLog.Gid,
 		oplogRecords: []*OplogRecord{log},
 	}
 	if log.original.callback == nil {
