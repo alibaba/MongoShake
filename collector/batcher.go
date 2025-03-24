@@ -342,7 +342,9 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 
 				// TODO need do filter
 				for _, ele := range deliveredOps {
-					batcher.addIntoBatchGroup(ele, false)
+					if !batcher.filter(ele.Parsed) {
+						batcher.addIntoBatchGroup(ele, false)
+					}
 				}
 				continue
 			}
@@ -360,12 +362,14 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 
 				// TODO need do filter
 				for _, ele := range deliveredOps {
-					batcher.addIntoBatchGroup(&oplog.GenericOplog{
-						Raw: nil,
-						Parsed: &oplog.PartialLog{
-							ParsedLog: ele,
-						},
-					}, false)
+					if !batcher.filter(&oplog.PartialLog{ParsedLog: ele}) {
+						batcher.addIntoBatchGroup(&oplog.GenericOplog{
+							Raw: nil,
+							Parsed: &oplog.PartialLog{
+								ParsedLog: ele,
+							},
+						}, false)
+					}
 				}
 				continue
 			}
