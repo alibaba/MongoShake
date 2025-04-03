@@ -18,20 +18,16 @@ const (
 
 type BasicWriter interface {
 	// insert operation
-	doInsert(database, collection string, metadata bson.M, oplogs []*OplogRecord,
-		dupUpdate bool) error
+	doInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord, dupUpdate bool) error
 
 	// update when insert duplicated
-	doUpdateOnInsert(database, collection string, metadata bson.M,
-		oplogs []*OplogRecord, upsert bool) error
+	doUpdateOnInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord, upsert bool) error
 
 	// update operation
-	doUpdate(database, collection string, metadata bson.M,
-		oplogs []*OplogRecord, upsert bool) error
+	doUpdate(database, collection string, metadata bson.E, oplogs []*OplogRecord, upsert bool) error
 
 	// delete operation
-	doDelete(database, collection string, metadata bson.M,
-		oplogs []*OplogRecord) error
+	doDelete(database, collection string, metadata bson.E, oplogs []*OplogRecord) error
 
 	/*
 	 * command operation
@@ -42,15 +38,15 @@ type BasicWriter interface {
 	 *    2. the oplog is near 16MB(the oplog max threshold), use `applyOps` command will
 	 *       make the oplog bigger than 16MB so that rejected by the target mongodb.
 	 */
-	doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error
+	doCommand(database string, metadata bson.E, oplogs []*OplogRecord) error
 }
 
 // oplog writer
-func NewDbWriter(conn *utils.MongoCommunityConn, metadata bson.M, bulkInsert bool, fullFinishTs int64) BasicWriter {
+func NewDbWriter(conn *utils.MongoCommunityConn, metadata bson.E, bulkInsert bool, fullFinishTs int64) BasicWriter {
 	if !bulkInsert { // bulk insertion disable
 		// LOG.Info("db writer create: SingleWriter")
 		return &SingleWriter{conn: conn, fullFinishTs: fullFinishTs}
-	} else if _, ok := metadata["g"]; ok { // has gid
+	} else if metadata.Key == "g" { // has gid
 		// LOG.Info("db writer create: CommandWriter")
 		return &CommandWriter{conn: conn, fullFinishTs: fullFinishTs}
 	}

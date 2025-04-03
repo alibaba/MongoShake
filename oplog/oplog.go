@@ -194,6 +194,19 @@ func ConvertBsonM2D(input bson.M) bson.D {
 	return output
 }
 
+// ConvertBsonM2E convert a bson.M with only 1 elem to bson.E, which can be added to other bson.D
+func ConvertBsonM2E(input bson.M) (bson.E, error) {
+	if len(input) > 1 {
+		return bson.E{}, fmt.Errorf("input bson.M has multi elems, can't convert to bson.E")
+	}
+	var e bson.E
+	for key, val := range input {
+		e = bson.E{Key: key, Value: val}
+		break
+	}
+	return e, nil
+}
+
 // pay attention: the input bson.D will be modified.
 func RemoveFiled(input bson.D, key string) bson.D {
 	flag := -1

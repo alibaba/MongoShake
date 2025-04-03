@@ -65,7 +65,8 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 			return fmt.Errorf("Replay-%d network connection lost . we would retry for next connecting",
 				exec.batchExecutor.ReplayerId)
 		}
-		// just use the first log. they has the same metadata
+		// just use the first log. they have the same metadata
+		// zhongli: ???
 		metadata := buildMetadata(group.oplogRecords[0].original.partialLog)
 		hasIndex := strings.Contains(group.ns, "system.indexes")
 		// LOG.Debug("fullFinishTs: %v", utils.ExtractTimestampForLog(exec.batchExecutor.FullFinishTs))
@@ -225,12 +226,12 @@ func (exec *Executor) addNsMapMetric(ns, op string, count int) {
 	atomic.AddUint64(metricSum, uint64(count))
 }
 
-func buildMetadata(oplog *oplog.PartialLog) bson.M {
+func buildMetadata(oplog *oplog.PartialLog) bson.E {
 	// with gid carried
 	if len(oplog.Gid) != 0 {
-		return bson.M{"g": oplog.Gid}
+		return bson.E{Key: "g", Value: oplog.Gid}
 	}
-	return bson.M{}
+	return bson.E{}
 }
 
 func lookupOpName(op string) string {

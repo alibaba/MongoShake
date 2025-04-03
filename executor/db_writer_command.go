@@ -18,7 +18,7 @@ type CommandWriter struct {
 	fullFinishTs int64
 }
 
-func (cw *CommandWriter) doInsert(database, collection string, metadata bson.M, oplogs []*OplogRecord,
+func (cw *CommandWriter) doInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord,
 	dupUpdate bool) error {
 
 	var inserts []bson.D
@@ -30,10 +30,16 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.M, 
 	dbHandle := cw.conn.Client.Database(database)
 
 	var err error
-	if err = dbHandle.RunCommand(context.Background(), bson.D{{"insert", collection},
+	insertCmd := bson.D{
+		{"insert", collection},
 		{"bypassDocumentValidation", false},
 		{"documents", inserts},
-		{"ordered", ExecuteOrdered}}).Err(); err == nil {
+		{"ordered", ExecuteOrdered},
+	}
+	if metadata.Key == "g" {
+		insertCmd = append(insertCmd, metadata)
+	}
+	if err = dbHandle.RunCommand(context.Background(), insertCmd).Err(); err == nil {
 		return nil
 	}
 
@@ -57,8 +63,8 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.M, 
 	return err
 }
 
-func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata bson.M,
-	oplogs []*OplogRecord, upsert bool) error {
+func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord,
+	upsert bool) error {
 
 	var updates []bson.D
 	for _, log := range oplogs {
@@ -77,11 +83,16 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 	}
 
 	var err error
-	if err = cw.conn.Client.Database(database).RunCommand(context.Background(),
-		bson.D{{"update", collection},
-			{"bypassDocumentValidation", false},
-			{"updates", updates},
-			{"ordered", ExecuteOrdered}}).Err(); err == nil {
+	updateCmd := bson.D{
+		{"update", collection},
+		{"bypassDocumentValidation", false},
+		{"updates", updates},
+		{"ordered", ExecuteOrdered},
+	}
+	if metadata.Key == "g" {
+		updateCmd = append(updateCmd, metadata)
+	}
+	if err = cw.conn.Client.Database(database).RunCommand(context.Background(), updateCmd).Err(); err == nil {
 		return nil
 	}
 
@@ -100,8 +111,8 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 	return err
 }
 
-func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.M,
-	oplogs []*OplogRecord, upsert bool) error {
+func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.E, oplogs []*OplogRecord,
+	upsert bool) error {
 
 	var updates []bson.D
 	for _, log := range oplogs {
@@ -115,11 +126,16 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.M,
 	}
 
 	var err error
-	if err = cw.conn.Client.Database(database).RunCommand(context.Background(),
-		bson.D{{"update", collection},
-			{"bypassDocumentValidation", false},
-			{"updates", updates},
-			{"ordered", ExecuteOrdered}}).Err(); err == nil {
+	updateCmd := bson.D{
+		{"update", collection},
+		{"bypassDocumentValidation", false},
+		{"updates", updates},
+		{"ordered", ExecuteOrdered},
+	}
+	if metadata.Key == "g" {
+		updateCmd = append(updateCmd, metadata)
+	}
+	if err = cw.conn.Client.Database(database).RunCommand(context.Background(), updateCmd).Err(); err == nil {
 		return nil
 	}
 
@@ -139,8 +155,7 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.M,
 	return err
 }
 
-func (cw *CommandWriter) doDelete(database, collection string, metadata bson.M,
-	oplogs []*OplogRecord) error {
+func (cw *CommandWriter) doDelete(database, collection string, metadata bson.E, oplogs []*OplogRecord) error {
 
 	var deleted []bson.D
 	var err error
@@ -149,10 +164,15 @@ func (cw *CommandWriter) doDelete(database, collection string, metadata bson.M,
 		LOG.Debug("command_writer:: delete %v", log.original.partialLog)
 	}
 
-	if err = cw.conn.Client.Database(database).RunCommand(context.Background(),
-		bson.D{{"delete", collection},
-			{"deletes", deleted},
-			{"ordered", ExecuteOrdered}}).Err(); err == nil {
+	deleteCmd := bson.D{
+		{"delete", collection},
+		{"deletes", deleted},
+		{"ordered", ExecuteOrdered},
+	}
+	if metadata.Key == "g" {
+		deleteCmd = append(deleteCmd, metadata)
+	}
+	if err = cw.conn.Client.Database(database).RunCommand(context.Background(), deleteCmd).Err(); err == nil {
 
 		return nil
 	}
@@ -167,7 +187,7 @@ func (cw *CommandWriter) doDelete(database, collection string, metadata bson.M,
 	return err
 }
 
-func (cw *CommandWriter) doCommand(database string, metadata bson.M, oplogs []*OplogRecord) error {
+func (cw *CommandWriter) doCommand(database string, metadata bson.E, oplogs []*OplogRecord) error {
 	var err error
 	for _, log := range oplogs {
 		operation, found := oplog.ExtraCommandName(log.original.partialLog.Object)
