@@ -1,3 +1,7 @@
+2025-04-03  Alibaba Cloud.
+* version: 2.8.5
+    * BUGFIX: support two-way sync with gid correctly
+
 2023-04-25 Alibaba Cloud.
 * version: 2.8.4
     * BUGFIX: #811, support replace&slice in delta oplog
