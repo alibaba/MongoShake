@@ -60,14 +60,27 @@ type AutologousFilter struct {
 func (filter *AutologousFilter) Filter(log *oplog.PartialLog) bool {
 
 	// Filter out unnecessary commands
-	if operation, found := oplog.ExtraCommandName(log.Object); found {
+	operation, found := oplog.ExtraCommandName(log.Object)
+	if found {
 		if oplog.IsNeedFilterCommand(operation) {
 			return true
 		}
 	}
 
+	// special case for txn oplog with inner ops for 'config.system.sessions'
+	if log.Namespace == "admin.$cmd" && operation == "applyOps" {
+		ns, err := oplog.ExtractInnerNs(&log.ParsedLog)
+		if err != nil {
+			LOG.Warn("ExtractInnerNs meets error:%v", err)
+			return false
+		}
+		if ns == "config.system.sessions" {
+			return true
+		}
+	}
+
 	// for namespace. we filter noop operation and collection name
-	// that are admin, local, mongoshake, mongoshake_conflict
+	// that are admin, local, config, mongoshake, mongoshake_conflict
 	return filter.FilterNs(log.Namespace)
 }
 

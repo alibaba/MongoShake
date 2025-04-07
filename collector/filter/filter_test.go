@@ -3,6 +3,7 @@ package filter
 import (
 	"fmt"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/x/mongo/driver/uuid"
 	"testing"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
@@ -253,6 +254,13 @@ func TestAutologousFilter(t *testing.T) {
 
 		log = &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
+				Namespace: "mongoshake_conflict.x",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
 				Namespace: "local.x.z.y",
 			},
 		}
@@ -275,6 +283,13 @@ func TestAutologousFilter(t *testing.T) {
 		log = &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Namespace: "admin.x",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "config.system.sessions",
 			},
 		}
 		assert.Equal(t, true, filter.Filter(log), "should be equal")
@@ -338,6 +353,57 @@ func TestAutologousFilter(t *testing.T) {
 
 	fmt.Println(rec, NsShouldBeIgnore)
 
+	// test cmd
+	{
+		fmt.Printf("TestAutologousFilter case %d.\n", nr)
+		nr++
+
+		InitNs([]string{})
+		filter := new(AutologousFilter)
+
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "zz.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key:   "drop",
+						Value: "xxx",
+					},
+				},
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "zz.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key:   "startIndexBuild",
+						Value: "xxx",
+					},
+				},
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "zz.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key:   "abortIndexBuild",
+						Value: "xxx",
+					},
+				},
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+	}
+
 	// test transaction
 	{
 		fmt.Printf("TestAutologousFilter case %d.\n", nr)
@@ -369,6 +435,71 @@ func TestAutologousFilter(t *testing.T) {
 				Operation: "d",
 			},
 		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		// txn with config.system.sessions
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key: "applyOps",
+						Value: bson.A{
+							bson.D{
+								bson.E{Key: "op", Value: "d"},
+								bson.E{Key: "ns", Value: "config.system.sessions"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: uuid.UUID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}},
+								}},
+							},
+							bson.D{
+								bson.E{Key: "op", Value: "d"},
+								bson.E{Key: "ns", Value: "config.system.sessions"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: "xxx"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+		ns, err := oplog.ExtractInnerNs(&log.ParsedLog)
+		assert.NoError(t, err, "should be equal")
+		assert.Equal(t, "config.system.sessions", ns, "should be equal")
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key: "applyOps",
+						Value: bson.A{
+							bson.D{
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.mmm"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: "xxx"},
+								}},
+							},
+							bson.D{
+								bson.E{Key: "op", Value: "d"},
+								bson.E{Key: "ns", Value: "config.system.sessions"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: "xxx"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+		ns, err = oplog.ExtractInnerNs(&log.ParsedLog)
+		assert.NoError(t, err, "should be equal")
+		assert.Equal(t, "zz.mmm", ns, "should be equal")
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
 	}
 }
