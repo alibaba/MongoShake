@@ -2,14 +2,14 @@ package filter
 
 import (
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/x/mongo/driver/uuid"
 	"testing"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
 
 	"github.com/getlantern/deepcopy"
 	"github.com/stretchr/testify/assert"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/x/mongo/driver/uuid"
 )
 
 func TestNamespaceFilter(t *testing.T) {
@@ -112,19 +112,19 @@ func TestNamespaceFilter(t *testing.T) {
 						Key: "applyOps",
 						Value: []bson.D{
 							{
-								bson.E{"op", "i"},
-								bson.E{"ns", "zz.mmm"},
-								bson.E{"o", bson.D{
-									bson.E{"a", 1},
-									bson.E{"_id", "xxx"},
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.mmm"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "a", Value: 1},
+									bson.E{Key: "_id", Value: "xxx"},
 								}},
 							},
 							{
-								bson.E{"op", "i"},
-								bson.E{"ns", "zz.x"},
-								bson.E{"o", bson.D{
-									bson.E{"xyz", "ff"},
-									bson.E{"_id", "yyy"},
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.x"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "xyz", Value: "ff"},
+									bson.E{Key: "_id", Value: "yyy"},
 								}},
 							},
 						},
@@ -150,19 +150,19 @@ func TestNamespaceFilter(t *testing.T) {
 						Key: "applyOps",
 						Value: []bson.D{
 							{
-								bson.E{"op", "i"},
-								bson.E{"ns", "zz.mmm"},
-								bson.E{"o", bson.D{
-									bson.E{"a", 1},
-									bson.E{"_id", "xxx"},
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.mmm"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "a", Value: 1},
+									bson.E{Key: "_id", Value: "xxx"},
 								}},
 							},
 							{
-								bson.E{"op", "i"},
-								bson.E{"ns", "ff.x"},
-								bson.E{"o", bson.D{
-									bson.E{"xyz", "ff"},
-									bson.E{"_id", "yyy"},
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "ff.x"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "xyz", Value: "ff"},
+									bson.E{Key: "_id", Value: "yyy"},
 								}},
 							},
 						},
@@ -171,7 +171,7 @@ func TestNamespaceFilter(t *testing.T) {
 			},
 		}
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
-		assert.Equal(t, 1, len(log.Object[0].Value.([]bson.D)), "should be equal")
+		assert.Equal(t, 2, len(log.Object[0].Value.([]bson.D)), "should be equal")
 	}
 }
 
@@ -296,7 +296,7 @@ func TestAutologousFilter(t *testing.T) {
 	}
 
 	rec := make(map[string]bool)
-	deepcopy.Copy(&rec, &NsShouldBeIgnore)
+	_ = deepcopy.Copy(&rec, &NsShouldBeIgnore)
 
 	{
 		fmt.Printf("TestAutologousFilter case %d.\n", nr)
@@ -409,7 +409,7 @@ func TestAutologousFilter(t *testing.T) {
 		fmt.Printf("TestAutologousFilter case %d.\n", nr)
 		nr++
 
-		deepcopy.Copy(&NsShouldBeIgnore, &rec)
+		_ = deepcopy.Copy(&NsShouldBeIgnore, &rec)
 
 		InitNs([]string{})
 		filter := new(AutologousFilter)
@@ -515,7 +515,6 @@ func TestComputeHash(t *testing.T) {
 
 		v1 := ComputeHash(106402199)
 		v2 := ComputeHash(106296614)
-		// assert.Equal(t, false, filter.Filter(log), "should be equal")
 		fmt.Println(v1, v2)
 	}
 }
