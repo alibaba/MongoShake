@@ -3,13 +3,15 @@ package coordinator
 import (
 	"context"
 	"fmt"
-	utils "github.com/alibaba/MongoShake/v2/common"
-	"github.com/alibaba/MongoShake/v2/unit_test_common"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"testing"
+
+	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
 
 const (

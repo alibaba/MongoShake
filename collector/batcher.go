@@ -1,17 +1,17 @@
 package collector
 
 import (
-	conf "github.com/alibaba/MongoShake/v2/collector/configure"
-	"github.com/alibaba/MongoShake/v2/collector/filter"
-	"github.com/alibaba/MongoShake/v2/oplog"
+	"time"
+
+	nimo "github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
-	"time"
-
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	"github.com/alibaba/MongoShake/v2/collector/filter"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	nimo "github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
+	"github.com/alibaba/MongoShake/v2/oplog"
 )
 
 const (
@@ -413,7 +413,8 @@ func (batcher *Batcher) setLastOplog() bool {
 
 // addIntoBatchGroup
 // isBarrier
-//     Barrier Oplogs(like DDL or Transaction) must execute sequentially and separately, send to batchGroup[0]
+//
+//	Barrier Oplogs(like DDL or Transaction) must execute sequentially and separately, send to batchGroup[0]
 func (batcher *Batcher) addIntoBatchGroup(genericLog *oplog.GenericOplog, isBarrier bool) {
 	if genericLog == fakeOplog {
 		return

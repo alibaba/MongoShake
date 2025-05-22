@@ -3,18 +3,20 @@ package executor
 import (
 	"context"
 	"fmt"
-	conf "github.com/alibaba/MongoShake/v2/collector/configure"
-	utils "github.com/alibaba/MongoShake/v2/common"
-	"github.com/alibaba/MongoShake/v2/oplog"
-	"github.com/alibaba/MongoShake/v2/unit_test_common"
+	"strconv"
+	"strings"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"strconv"
-	"strings"
-	"testing"
+
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/oplog"
+	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
 
 const (
@@ -114,7 +116,7 @@ func TestSingleWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		// query
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, nil)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, nil)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 1, len(result), "should be equal")
 		assert.Equal(t, int32(10), result[0]["x"], "should be equal")
@@ -127,7 +129,7 @@ func TestSingleWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		// query
-		result, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, nil)
+		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, nil)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 0, len(result), "should be equal")
 	}
@@ -177,7 +179,7 @@ func TestSingleWriter(t *testing.T) {
 
 		// query
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 2, len(result), "should be equal")
 		assert.Equal(t, int32(10000), result[0]["x"], "should be equal")
@@ -224,7 +226,7 @@ func TestSingleWriter(t *testing.T) {
 
 		// query
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 2, len(result), "should be equal")
 		if result[0]["_id"] == objectIdFromInt(123456789011) {
@@ -277,7 +279,7 @@ func TestSingleWriter(t *testing.T) {
 
 		// query
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 6, len(result), "should be equal")
 		assert.Equal(t, int32(1), result[0]["x"], "should be equal")
@@ -302,7 +304,7 @@ func TestSingleWriter(t *testing.T) {
 
 		// query
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 6, len(result), "should be equal")
 		assert.Equal(t, int32(30), result[0]["x"], "should be equal")
@@ -354,7 +356,7 @@ func TestSingleWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		fmt.Println(result)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 4, len(result), "should be equal")
@@ -391,7 +393,7 @@ func TestSingleWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		fmt.Println(result)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 4, len(result), "should be equal")
@@ -453,7 +455,7 @@ func TestSingleWriter(t *testing.T) {
 
 		// query
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		res, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		res, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 2, len(res), "should be equal")
 		assert.Equal(t, int32(1), res[0]["x"], "should be equal")
@@ -481,7 +483,7 @@ func TestSingleWriter(t *testing.T) {
 
 		// query
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
-		res, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		res, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 3, len(res), "should be equal")
 		assert.Equal(t, int32(1), res[0]["x"], "should be equal")
@@ -540,7 +542,7 @@ func TestBulkWriter(t *testing.T) {
 
 		// query
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 8, len(result), "should be equal")
 		assert.Equal(t, int32(1), result[0]["x"], "should be equal")
@@ -565,7 +567,7 @@ func TestBulkWriter(t *testing.T) {
 
 		// query
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 10, len(result), "should be equal")
 		assert.Equal(t, int32(80), result[7]["x"], "should be equal")
@@ -583,7 +585,7 @@ func TestBulkWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal") // won't throw error if not found
 
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 7, len(result), "should be equal")
 	}
@@ -652,7 +654,7 @@ func TestBulkWriter(t *testing.T) {
 
 		// query
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 3, len(result), "should be equal")
 		assert.Equal(t, int32(10001), result[0]["x"], "should be equal")
@@ -697,7 +699,7 @@ func TestBulkWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 5, len(result), "should be equal")
 		assert.Equal(t, int32(50), result[4]["x"], "should be equal")
@@ -714,7 +716,7 @@ func TestBulkWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 7, len(result), "should be equal")
 		assert.Equal(t, int32(40), result[3]["x"], "should be equal")
@@ -731,7 +733,7 @@ func TestBulkWriter(t *testing.T) {
 
 		err = writer.doDelete(testDb, testCollection, bson.M{}, deletes)
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 5, len(result), "should be equal")
 	}
@@ -785,7 +787,7 @@ func TestBulkWriter(t *testing.T) {
 		fmt.Println(err)
 
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		fmt.Println(result)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 5, len(result), "should be equal")
@@ -796,7 +798,7 @@ func TestBulkWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 7, len(result), "should be equal")
 		assert.Equal(t, int32(3), result[2]["x"], "should be equal")
@@ -846,7 +848,7 @@ func TestBulkWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		fmt.Println(result)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 4, len(result), "should be equal")
@@ -880,7 +882,7 @@ func TestBulkWriter(t *testing.T) {
 		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, true)
 		assert.Equal(t, nil, err, "should be equal")
 
-		result, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		fmt.Println(result)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 4, len(result), "should be equal")
@@ -944,7 +946,7 @@ func TestBulkWriter(t *testing.T) {
 
 		// query
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		res, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		res, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 2, len(res), "should be equal")
 		assert.Equal(t, int32(1), res[0]["x"], "should be equal")
@@ -973,7 +975,7 @@ func TestBulkWriter(t *testing.T) {
 
 		// query
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
-		res, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		res, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 3, len(res), "should be equal")
 		assert.Equal(t, int32(1), res[0]["x"], "should be equal")
@@ -1031,7 +1033,7 @@ func TestCommandWriter(t *testing.T) {
 
 		// query
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 8, len(result), "should be equal")
 		assert.Equal(t, int32(1), result[0]["x"], "should be equal")
@@ -1056,7 +1058,7 @@ func TestCommandWriter(t *testing.T) {
 
 		// query
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 10, len(result), "should be equal")
 		assert.Equal(t, int32(80), result[7]["x"], "should be equal")
@@ -1074,7 +1076,7 @@ func TestCommandWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal") // won't throw error if not found
 
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 7, len(result), "should be equal")
 	}
@@ -1143,7 +1145,7 @@ func TestCommandWriter(t *testing.T) {
 
 		// query
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 3, len(result), "should be equal")
 		assert.Equal(t, int32(10001), result[0]["x"], "should be equal")
@@ -1190,7 +1192,7 @@ func TestCommandWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 5, len(result), "should be equal")
 		assert.Equal(t, int32(50), result[4]["x"], "should be equal")
@@ -1207,7 +1209,7 @@ func TestCommandWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 7, len(result), "should be equal")
 		assert.Equal(t, int32(40), result[3]["x"], "should be equal")
@@ -1224,7 +1226,7 @@ func TestCommandWriter(t *testing.T) {
 
 		err = writer.doDelete(testDb, testCollection, bson.M{}, deletes)
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 5, len(result), "should be equal")
 	}
@@ -1278,7 +1280,7 @@ func TestCommandWriter(t *testing.T) {
 		fmt.Println(err)
 
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		fmt.Println(result)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 5, len(result), "should be equal")
@@ -1289,7 +1291,7 @@ func TestCommandWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 7, len(result), "should be equal")
 		assert.Equal(t, int32(3), result[2]["x"], "should be equal")
@@ -1339,7 +1341,7 @@ func TestCommandWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		fmt.Println(result)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 4, len(result), "should be equal")
@@ -1371,7 +1373,7 @@ func TestCommandWriter(t *testing.T) {
 		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, true)
 		assert.Equal(t, nil, err, "should be equal")
 
-		result, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		fmt.Println(result)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 4, len(result), "should be equal")
@@ -1436,7 +1438,7 @@ func TestCommandWriter(t *testing.T) {
 
 		// query
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		res, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		res, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 2, len(res), "should be equal")
 		assert.Equal(t, int32(1), res[0]["x"], "should be equal")
@@ -1463,7 +1465,7 @@ func TestCommandWriter(t *testing.T) {
 
 		// query
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
-		res, err = unit_test_common.FetchAllDocumentbsonM(conn.Client, testDb, testCollection, opts)
+		res, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 3, len(res), "should be equal")
 		assert.Equal(t, int32(1), res[0]["x"], "should be equal")
@@ -1535,7 +1537,7 @@ func TestRunCommand(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
-		result, err := unit_test_common.FetchAllDocumentbsonM(conn.Client, "zz", "y", opts)
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, "zz", "y", opts)
 		assert.Equal(t, nil, err, "should be equal")
 		fmt.Printf("result:%v\n", result)
 		assert.Equal(t, "567", result[0]["_id"].(string), "should be equal")

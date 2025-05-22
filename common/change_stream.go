@@ -3,13 +3,13 @@ package utils
 import (
 	"context"
 	"fmt"
+	"sort"
+	"time"
+
 	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"time"
-
-	"sort"
 )
 
 const (

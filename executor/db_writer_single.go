@@ -3,15 +3,15 @@ package executor
 import (
 	"context"
 	"fmt"
+
+	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
-	"github.com/alibaba/MongoShake/v2/oplog"
-
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/vinllen/log4go"
+	"github.com/alibaba/MongoShake/v2/oplog"
 )
 
 // SingleWriter use general single writer interface to execute command

@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/alibaba/MongoShake/v2/unit_test_common"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
 
 const (

@@ -4,9 +4,9 @@ import (
 	"net"
 	"net/rpc"
 
-	utils "github.com/alibaba/MongoShake/v2/common"
-
 	LOG "github.com/vinllen/log4go"
+
+	utils "github.com/alibaba/MongoShake/v2/common"
 )
 
 type RPCWriter struct {

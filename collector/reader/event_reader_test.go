@@ -2,16 +2,16 @@ package sourceReader
 
 import (
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/alibaba/MongoShake/v2/common"
+	"github.com/stretchr/testify/assert"
+	"go.mongodb.org/mongo-driver/bson"
+
+	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
-
-	"github.com/stretchr/testify/assert"
 )
 
 const (

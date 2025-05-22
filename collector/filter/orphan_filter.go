@@ -3,14 +3,14 @@ package filter
 import (
 	"crypto/md5"
 	"encoding/binary"
+	"math"
+
+	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"math"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
 	"github.com/alibaba/MongoShake/v2/sharding"
-
-	LOG "github.com/vinllen/log4go"
 )
 
 const (

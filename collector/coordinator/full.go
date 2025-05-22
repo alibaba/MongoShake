@@ -5,16 +5,16 @@ import (
 	"math"
 	"sync"
 
+	nimo "github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
+	"go.mongodb.org/mongo-driver/bson"
+
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/docsyncer"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	"github.com/alibaba/MongoShake/v2/collector/transform"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/sharding"
-
-	"github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
-	"go.mongodb.org/mongo-driver/bson"
 )
 
 func fetchChunkMap(isSharding bool) (sharding.ShardingChunkMap, error) {

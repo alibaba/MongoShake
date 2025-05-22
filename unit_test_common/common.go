@@ -6,7 +6,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func FetchAllDocumentbsonD(client *mongo.Client, testDb string, testCollection string,
+func FetchAllDocumentBsonD(client *mongo.Client, testDb string, testCollection string,
 	opts *options.FindOptions) ([]bson.D, error) {
 	cursor, _ := client.Database(testDb).Collection(testCollection).Find(nil, bson.M{}, opts)
 
@@ -22,7 +22,7 @@ func FetchAllDocumentbsonD(client *mongo.Client, testDb string, testCollection s
 	return result, nil
 }
 
-func FetchAllDocumentbsonM(client *mongo.Client, testDb string, testCollection string,
+func FetchAllDocumentBsonM(client *mongo.Client, testDb string, testCollection string,
 	opts *options.FindOptions) ([]bson.M, error) {
 
 	cursor, _ := client.Database(testDb).Collection(testCollection).Find(nil, bson.M{}, opts)

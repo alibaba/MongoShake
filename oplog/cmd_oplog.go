@@ -1,8 +1,9 @@
 package oplog
 
 import (
-	"go.mongodb.org/mongo-driver/bson"
 	"strings"
+
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 type CommandOperation struct {

@@ -2,14 +2,16 @@ package executor
 
 import (
 	"context"
-	conf "github.com/alibaba/MongoShake/v2/collector/configure"
-	utils "github.com/alibaba/MongoShake/v2/common"
-	"github.com/alibaba/MongoShake/v2/oplog"
+	"strings"
+
 	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"strings"
+
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/oplog"
 )
 
 // BulkWriter use general bulk interface such like Insert/Update/Delete to execute command
@@ -214,7 +216,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 			sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
 			return sw.doUpdate(database, collection, metadata, oplogs[index+1:], upsert)
 		}
-		if strings.Contains(err.Error(), shardKeyupdateErr) {
+		if strings.Contains(err.Error(), shardKeyUpdateErr) {
 			_ = LOG.Error("multiUpdateShardKey err_string:%s, index:%d, redo update shardKey singly",
 				err.Error(), index)
 

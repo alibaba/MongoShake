@@ -2,18 +2,17 @@ package utils
 
 import (
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"math/rand"
 	_ "net/http/pprof" // for profiling
 	"os"
+	"path"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"time"
 
-	"path"
-	"reflect"
-
 	LOG "github.com/vinllen/log4go"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func YieldInMs(n int64) {

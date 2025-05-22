@@ -3,18 +3,17 @@ package sourceReader
 // read change stream event from source mongodb
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
-	conf "github.com/alibaba/MongoShake/v2/collector/configure"
-	utils "github.com/alibaba/MongoShake/v2/common"
-
-	"fmt"
-
-	"github.com/alibaba/MongoShake/v2/collector/ckpt"
-	"github.com/alibaba/MongoShake/v2/collector/filter"
 	diskQueue "github.com/vinllen/go-diskqueue"
 	LOG "github.com/vinllen/log4go"
+
+	"github.com/alibaba/MongoShake/v2/collector/ckpt"
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	"github.com/alibaba/MongoShake/v2/collector/filter"
+	utils "github.com/alibaba/MongoShake/v2/common"
 )
 
 const (

@@ -3,18 +3,18 @@ package oplog
 import (
 	"context"
 	"fmt"
+	"strings"
+	"testing"
+
+	nimo "github.com/gugemichael/nimo4go"
+	"github.com/stretchr/testify/assert"
 	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"strings"
-	"testing"
 
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
-
-	nimo "github.com/gugemichael/nimo4go"
-	"github.com/stretchr/testify/assert"
 )
 
 const (

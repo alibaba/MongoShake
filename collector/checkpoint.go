@@ -7,11 +7,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	LOG "github.com/vinllen/log4go"
+
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-
-	LOG "github.com/vinllen/log4go"
 )
 
 func (sync *OplogSyncer) newCheckpointManager(name string, startPosition interface{}) {

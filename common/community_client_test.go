@@ -3,12 +3,14 @@ package utils
 import (
 	"context"
 	"fmt"
-	"github.com/alibaba/MongoShake/v2/unit_test_common"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"testing"
+
+	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
 
 const (

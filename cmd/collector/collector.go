@@ -1,3 +1,4 @@
+//go:build darwin || linux || windows
 // +build darwin linux windows
 
 package main
@@ -5,18 +6,18 @@ package main
 import (
 	"flag"
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"os"
 	"strconv"
 	"syscall"
+
+	nimo "github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/coordinator"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/quorum"
-
-	nimo "github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
 )
 
 type Exit struct{ Code int }
@@ -76,7 +77,7 @@ func main() {
 	signalProfile, _ := strconv.Atoi(utils.SIGNALPROFILE)
 	signalStack, _ := strconv.Atoi(utils.SIGNALSTACK)
 	if signalProfile > 0 {
-		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile))                     // syscall.SIGUSR2
+		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile)) // syscall.SIGUSR2
 		nimo.RegisterSignalForPrintStack(syscall.Signal(signalStack), func(bytes []byte) { // syscall.SIGUSR1
 			LOG.Info(string(bytes))
 		})

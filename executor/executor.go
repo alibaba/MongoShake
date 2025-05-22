@@ -2,20 +2,20 @@ package executor
 
 import (
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	nimo "github.com/gugemichael/nimo4go"
+	LOG "github.com/vinllen/log4go"
+	"go.mongodb.org/mongo-driver/bson"
+
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/transform"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-
-	nimo "github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
 )
 
 const (

@@ -1,16 +1,15 @@
 package tunnel
 
 import (
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"math/rand"
-
-	"github.com/alibaba/MongoShake/v2/oplog"
-
 	"fmt"
+	"math/rand"
 	"time"
 
 	LOG "github.com/vinllen/log4go"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"github.com/alibaba/MongoShake/v2/oplog"
 )
 
 const (

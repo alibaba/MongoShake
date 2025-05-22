@@ -1,19 +1,20 @@
 package executor
 
 import (
-	utils "github.com/alibaba/MongoShake/v2/common"
-	"github.com/alibaba/MongoShake/v2/oplog"
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
-	bson "go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+
+	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/oplog"
 )
 
 const (
 	versionMark       = "$v"
 	uuidMark          = "ui"
-	shardKeyupdateErr = "Document shard key value updates that cause the doc to move shards must be sent with write batch of size 1"
+	shardKeyUpdateErr = "Document shard key value updates that cause the doc to move shards must be sent with write batch of size 1"
 )
 
 type BasicWriter interface {

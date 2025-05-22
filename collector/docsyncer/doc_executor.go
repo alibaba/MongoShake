@@ -3,16 +3,16 @@ package docsyncer
 import (
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
+
+	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"sync/atomic"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	"sync"
-
-	LOG "github.com/vinllen/log4go"
 )
 
 var (

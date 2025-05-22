@@ -5,9 +5,9 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/alibaba/MongoShake/v2/oplog"
-
 	LOG "github.com/vinllen/log4go"
+
+	"github.com/alibaba/MongoShake/v2/oplog"
 )
 
 // OplogFilter: AutologousFilter, NamespaceFilter, GidFilter, NoopFilter, DDLFilter

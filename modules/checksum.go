@@ -1,9 +1,9 @@
 package module
 
 import (
-	"github.com/alibaba/MongoShake/v2/tunnel"
-
 	LOG "github.com/vinllen/log4go"
+
+	"github.com/alibaba/MongoShake/v2/tunnel"
 )
 
 /*

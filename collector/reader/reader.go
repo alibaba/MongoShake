@@ -4,9 +4,11 @@ package sourceReader
 
 import (
 	"fmt"
+
+	LOG "github.com/vinllen/log4go"
+
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/vinllen/log4go"
 )
 
 var (

@@ -3,6 +3,7 @@ package oplog
 import (
 	"encoding/json"
 	"fmt"
+
 	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -22,36 +23,36 @@ const (
 )
 
 /*
- * example:
-	{
-	    _id : { // 存储元信息
-	        "_data" : <BinData|hex string> // resumeToken
-	    },
-	    "operationType" : "<operation>", // insert, delete, replace, update, drop, rename, dropDatabase, invalidate
-	    "fullDocument" : { <document> }, // 修改后的数据，出现在insert, replace, delete, update. 相当于原来的o字段
-	    "ns" : { // 就是ns
-	        "db" : "<database>",
-	        "coll" : "<collection"
-	    },
-	    "to" : { // 只在operationType==rename的时候有效，表示改名以后的ns
-	        "db" : "<database>",
-	        "coll" : "<collection"
-	    },
-	    "documentKey" : { "_id" : <value> }, // 相当于o2字段。出现在insert, replace, delete, update。正常只包含_id，对于sharded collection，还包括shard key。
-	    "updateDescription" : { // 只在operationType==update的时候出现，相当于是增量的修改，而replace是替换。
-	        "updatedFields" : { <document> }, // 更新的field的值
-	        "removedFields" : [ "<field>", ... ] // 删除的field列表
-	    },
-        "FullDocument" : { //永不为 nil
-            "fullDocument" : { <document> }, // 开启full_document之后，为updateLookup，不开启则为default
-        }
-	    "clusterTime" : <Timestamp>, // 相当于ts字段
-	    "txnNumber" : <NumberLong>, // 相当于oplog里面的txnNumber，只在事务里面出现。事务号在一个事务里面单调递增
-	    "lsid" : { // 相当于lsid字段，只在事务里面出现。logic session id，请求所在的session的id。
-	        "id" : <UUID>,
-	        "uid" : <BinData>
-	    }
-	}
+  - example:
+    {
+    _id : { // 存储元信息
+    "_data" : <BinData|hex string> // resumeToken
+    },
+    "operationType" : "<operation>", // insert, delete, replace, update, drop, rename, dropDatabase, invalidate
+    "fullDocument" : { <document> }, // 修改后的数据，出现在insert, replace, delete, update. 相当于原来的o字段
+    "ns" : { // 就是ns
+    "db" : "<database>",
+    "coll" : "<collection"
+    },
+    "to" : { // 只在operationType==rename的时候有效，表示改名以后的ns
+    "db" : "<database>",
+    "coll" : "<collection"
+    },
+    "documentKey" : { "_id" : <value> }, // 相当于o2字段。出现在insert, replace, delete, update。正常只包含_id，对于sharded collection，还包括shard key。
+    "updateDescription" : { // 只在operationType==update的时候出现，相当于是增量的修改，而replace是替换。
+    "updatedFields" : { <document> }, // 更新的field的值
+    "removedFields" : [ "<field>", ... ] // 删除的field列表
+    },
+    "FullDocument" : { //永不为 nil
+    "fullDocument" : { <document> }, // 开启full_document之后，为updateLookup，不开启则为default
+    }
+    "clusterTime" : <Timestamp>, // 相当于ts字段
+    "txnNumber" : <NumberLong>, // 相当于oplog里面的txnNumber，只在事务里面出现。事务号在一个事务里面单调递增
+    "lsid" : { // 相当于lsid字段，只在事务里面出现。logic session id，请求所在的session的id。
+    "id" : <UUID>,
+    "uid" : <BinData>
+    }
+    }
 */
 type Event struct {
 	Id                bson.M              `bson:"_id" json:"_id"`

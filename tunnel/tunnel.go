@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"hash/crc32"
 
-	"github.com/alibaba/MongoShake/v2/oplog"
-
-	utils "github.com/alibaba/MongoShake/v2/common"
-	conf "github.com/alibaba/MongoShake/v2/collector/configure"
-	"github.com/gugemichael/nimo4go"
+	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
+
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/oplog"
 )
 
 const InitialStageChecking = false

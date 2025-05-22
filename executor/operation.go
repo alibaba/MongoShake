@@ -1,19 +1,18 @@
 package executor
 
 import (
-	"go.mongodb.org/mongo-driver/mongo"
+	"fmt"
 	"reflect"
 	"strings"
-
-	conf "github.com/alibaba/MongoShake/v2/collector/configure"
-	utils "github.com/alibaba/MongoShake/v2/common"
-	"github.com/alibaba/MongoShake/v2/oplog"
-
-	"fmt"
 	"sync/atomic"
 
 	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/oplog"
 )
 
 var ErrorsShouldSkip = map[int]string{

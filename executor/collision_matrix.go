@@ -3,15 +3,15 @@ package executor
 import (
 	"bytes"
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"reflect"
 	"strings"
 
-	"github.com/alibaba/MongoShake/v2/oplog"
-
 	nimo "github.com/gugemichael/nimo4go"
 	LOG "github.com/vinllen/log4go"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"github.com/alibaba/MongoShake/v2/oplog"
 )
 
 const MultiColumnIndexSplitter = "|"

@@ -2,12 +2,13 @@ package executor
 
 import (
 	"context"
+
+	LOG "github.com/vinllen/log4go"
+	"go.mongodb.org/mongo-driver/bson"
+
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-	"go.mongodb.org/mongo-driver/bson"
-
-	LOG "github.com/vinllen/log4go"
 )
 
 // CommandWriter use run_command to execute command

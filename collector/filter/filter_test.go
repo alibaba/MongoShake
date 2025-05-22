@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/alibaba/MongoShake/v2/oplog"
-
 	"github.com/getlantern/deepcopy"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/x/mongo/driver/uuid"
+
+	"github.com/alibaba/MongoShake/v2/oplog"
 )
 
 func TestNamespaceFilter(t *testing.T) {

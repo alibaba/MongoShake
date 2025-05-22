@@ -2,10 +2,10 @@ package oplog
 
 import (
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 func TestDistributeOplogByMod(t *testing.T) {
