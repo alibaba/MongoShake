@@ -10,7 +10,7 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
-// use run_command to execute command
+// CommandWriter use run_command to execute command
 type CommandWriter struct {
 	// mongo connection
 	conn *utils.MongoCommunityConn
@@ -43,11 +43,11 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.E, 
 		return nil
 	}
 
-	LOG.Warn("doInsert failed: %v", err)
+	_ = LOG.Warn("doInsert failed: %v", err)
 
 	// error can be ignored
 	if IgnoreError(err, "i", parseLastTimestamp(oplogs) <= cw.fullFinishTs) {
-		LOG.Warn("error[%v] can be ignored", err)
+		_ = LOG.Warn("error[%v] can be ignored", err)
 		return nil
 	}
 
@@ -55,7 +55,7 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.E, 
 		RecordDuplicatedOplog(cw.conn, collection, oplogs)
 		// update on duplicated key occur
 		if dupUpdate {
-			LOG.Info("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
+			LOG.Info("Duplicated document found. reinsert or update to [%s.%s]", database, collection)
 			return cw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.IncrSyncExecutorUpsert)
 		}
 		return nil
@@ -77,7 +77,7 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 				{"multi", false},
 			})
 		} else {
-			LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
+			_ = LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
 		}
 		LOG.Debug("command_writer:: updateOnInsert %v", log.original.partialLog)
 	}
@@ -96,7 +96,7 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 		return nil
 	}
 
-	LOG.Warn("doUpdateOnInsert failed: %v", err)
+	_ = LOG.Warn("doUpdateOnInsert failed: %v", err)
 
 	// error can be ignored
 	if IgnoreError(err, "u", parseLastTimestamp(oplogs) <= cw.fullFinishTs) {
@@ -116,10 +116,23 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.E, 
 
 	var updates []bson.D
 	for _, log := range oplogs {
-		log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+		var newObject interface{}
+		var transErr error
+		oplogVer, ok := oplog.GetKey(log.original.partialLog.Object, versionMark).(int32)
+		// handle oplog {o.$v:2} with 'diff' field
+		if ok && oplogVer == 2 {
+			if newObject, transErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); transErr != nil {
+				_ = LOG.Error("doUpdate run failed err[%v] org_doc[%v]", transErr, log.original.partialLog)
+				return transErr
+			}
+		} else {
+			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
+			newObject = log.original.partialLog.Object
+		}
+
 		updates = append(updates, bson.D{
 			{"q", log.original.partialLog.Query},
-			{"u", log.original.partialLog.Object},
+			{"u", newObject},
 			{"upsert", upsert},
 			{"multi", false}})
 		LOG.Debug("command_writer:: update %v", log.original.partialLog)
@@ -139,7 +152,7 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.E, 
 		return nil
 	}
 
-	LOG.Warn("doUpdate failed: %v", err)
+	_ = LOG.Warn("doUpdate failed: %v", err)
 
 	// error can be ignored
 	if IgnoreError(err, "u", parseLastTimestamp(oplogs) <= cw.fullFinishTs) {
@@ -177,7 +190,7 @@ func (cw *CommandWriter) doDelete(database, collection string, metadata bson.E, 
 		return nil
 	}
 
-	LOG.Warn("doDelete failed: %v", err)
+	_ = LOG.Warn("doDelete failed: %v", err)
 
 	// error can be ignored
 	if IgnoreError(err, "d", parseLastTimestamp(oplogs) <= cw.fullFinishTs) {

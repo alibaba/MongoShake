@@ -570,7 +570,7 @@ func TestConvertBson(t *testing.T) {
 	}
 }
 
-func TestDelteOplog(t *testing.T) {
+func TestV2OplogWithDiff(t *testing.T) {
 	/*
 		{
 		    "op": "u",

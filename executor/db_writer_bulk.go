@@ -12,7 +12,7 @@ import (
 	"strings"
 )
 
-// use general bulk interface such like Insert/Update/Delete to execute command
+// BulkWriter use general bulk interface such like Insert/Update/Delete to execute command
 type BulkWriter struct {
 	// mongo connection
 	conn *utils.MongoCommunityConn
@@ -34,7 +34,7 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, opts)
 
 	if err != nil {
-		LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
+		_ = LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
 			len(models), database+"."+collection, (err.(mongo.BulkWriteException)).WriteErrors[0], res)
 
 		if utils.DuplicateKey(err) {
@@ -63,7 +63,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 				SetUpdate(bson.D{{"$set", newObject}}).SetUpsert(true))
 		} else {
 			if upsert {
-				LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
+				_ = LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
 			}
 			// insert must have _id
 			if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
@@ -76,7 +76,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 				}
 				models = append(models, model)
 			} else {
-				LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
+				_ = LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
 			}
 		}
 
@@ -88,7 +88,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 	if err != nil {
 		// parse error
 		index, errMsg, dup := utils.FindFirstErrorIndexAndMessageN(err)
-		LOG.Error("detail error info with index[%v] msg[%v] dup[%v] res[%v]", index, errMsg, dup, res)
+		_ = LOG.Error("detail error info with index[%v] msg[%v] dup[%v] res[%v]", index, errMsg, dup, res)
 
 		if utils.DuplicateKey(err) {
 			// create single writer to write one by one
@@ -102,12 +102,12 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 			if index != -1 {
 				oplogRecord = oplogs[index]
 			}
-			LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v], oplog[%v]",
+			_ = LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v], oplog[%v]",
 				err, "u", parseLastTimestamp(oplogs) <= bw.fullFinishTs, oplogRecord)
 			return nil
 		}
 
-		LOG.Error("doUpdateOnInsert run upsert/update[%v] failed[%v]", upsert, err)
+		_ = LOG.Error("doUpdateOnInsert run upsert/update[%v] failed[%v]", upsert, err)
 		return err
 	}
 	return nil
@@ -134,7 +134,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 
 			if ok && oplogVer == 2 {
 				if newObject, oplogErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); oplogErr != nil {
-					LOG.Error("doUpdate run Faild err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
+					_ = LOG.Error("doUpdate run failed err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
 					return oplogErr
 				}
 			} else {
@@ -148,7 +148,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 					SetUpdate(newObject).SetUpsert(true))
 			} else {
 				if upsert {
-					LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
+					_ = LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
 				}
 
 				model := mongo.NewUpdateOneModel().
@@ -179,7 +179,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 			updateCmd = "replace"
 		}
 
-		LOG.Debug("bulk_writer: %s %v aftermodify_doc:%v", updateCmd, newObject, log.original.partialLog)
+		LOG.Debug("bulk_writer: %s %v after_modify_doc:%v", updateCmd, newObject, log.original.partialLog)
 	}
 
 	LOG.Debug("bulk_writer: update models len %v", len(models))
@@ -193,10 +193,10 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 		var oplogRecord *OplogRecord
 		if index != -1 {
 			oplogRecord = oplogs[index]
+			_ = LOG.Warn("detail error info with index[%v] msg[%v] dup[%v], isFullSyncStage[%v], oplog[%v] res[%v]",
+				index, errMsg, dup, parseLastTimestamp(oplogs) <= bw.fullFinishTs,
+				*oplogRecord.original.partialLog, res)
 		}
-		LOG.Warn("detail error info with index[%v] msg[%v] dup[%v], isFullSyncStage[%v], oplog[%v] res[%v]",
-			index, errMsg, dup, parseLastTimestamp(oplogs) <= bw.fullFinishTs,
-			*oplogRecord.original.partialLog, res)
 
 		if utils.DuplicateKey(err) {
 			RecordDuplicatedOplog(bw.conn, collection, oplogs)
@@ -207,7 +207,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 
 		// error can be ignored
 		if IgnoreError(err, "u", parseLastTimestamp(oplogs) <= bw.fullFinishTs) {
-			LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]", err, "u",
+			_ = LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]", err, "u",
 				parseLastTimestamp(oplogs) <= bw.fullFinishTs)
 
 			// re-run (index, len(oplogs) - 1]
@@ -215,14 +215,14 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 			return sw.doUpdate(database, collection, metadata, oplogs[index+1:], upsert)
 		}
 		if strings.Contains(err.Error(), shardKeyupdateErr) {
-			LOG.Error("multiUpdateShardKey err_string:%s, index:%d, redo update shardkey singly",
+			_ = LOG.Error("multiUpdateShardKey err_string:%s, index:%d, redo update shardKey singly",
 				err.Error(), index)
 
 			sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
 			return sw.doUpdate(database, collection, metadata, oplogs[index:], upsert)
 		}
 
-		LOG.Error("doUpdate run upsert/update[%v] failed[%v]", upsert, err)
+		_ = LOG.Error("doUpdate run upsert/update[%v] failed[%v]", upsert, err)
 		return err
 	}
 	return nil
@@ -241,12 +241,12 @@ func (bw *BulkWriter) doDelete(database, collection string, metadata bson.E, opl
 	if err != nil {
 		// error can be ignored
 		if IgnoreError(err, "d", parseLastTimestamp(oplogs) <= bw.fullFinishTs) {
-			LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]",
+			_ = LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]",
 				err, "d", parseLastTimestamp(oplogs) <= bw.fullFinishTs)
 			return nil
 		}
 
-		LOG.Error("doDelete run delete[%v] failed[%v] res[%v]", models, err, res)
+		_ = LOG.Error("doDelete run delete[%v] failed[%v] res[%v]", models, err, res)
 		return err
 	}
 	return nil
@@ -264,7 +264,8 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.E, oplogs []*Oplo
 			} else if err.Error() == "ns not found" {
 				LOG.Info("Execute command (op==c) oplog, operation [%s], ignore error[ns not found]", operation)
 			} else if IgnoreError(err, "c", parseLastTimestamp(oplogs) <= bw.fullFinishTs) {
-				LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]", err, "c", parseLastTimestamp(oplogs) <= bw.fullFinishTs)
+				_ = LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]",
+					err, "c", parseLastTimestamp(oplogs) <= bw.fullFinishTs)
 				return nil
 			} else {
 				return err

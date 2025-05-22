@@ -14,7 +14,7 @@ import (
 	LOG "github.com/vinllen/log4go"
 )
 
-// use general single writer interface to execute command
+// SingleWriter use general single writer interface to execute command
 type SingleWriter struct {
 	// mongo connection
 	conn *utils.MongoCommunityConn
@@ -36,7 +36,7 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.E, o
 				upserts = append(upserts, log)
 				continue
 			} else {
-				LOG.Error("insert data[%v] failed[%v]", log.original.partialLog.Object, err)
+				_ = LOG.Error("insert data[%v] failed[%v]", log.original.partialLog.Object, err)
 				return err
 			}
 		}
@@ -70,7 +70,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 			updates = append(updates, &pair{id: log.original.partialLog.DocumentKey, data: newObject, index: i})
 		} else {
 			if upsert {
-				LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
+				_ = LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
 			}
 			// insert must have _id
 			if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
@@ -91,7 +91,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 			res, err := collectionHandle.UpdateOne(context.Background(), update.id,
 				bson.D{{"$set", update.data}}, opts)
 			if err != nil {
-				LOG.Warn("upsert _id[%v] with data[%v] meets err[%v] res[%v], try to solve",
+				_ = LOG.Warn("upsert _id[%v] with data[%v] meets err[%v] res[%v], try to solve",
 					update.id, update.data, err, res)
 
 				// error can be ignored(insert fail & oplog is before full end)
@@ -100,12 +100,12 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 					continue
 				}
 
-				LOG.Error("upsert _id[%v] with data[%v] failed[%v]", update.id, update.data, err)
+				_ = LOG.Error("upsert _id[%v] with data[%v] failed[%v]", update.id, update.data, err)
 				return err
 			}
 			if res != nil {
 				if res.MatchedCount != 1 && res.UpsertedCount != 1 {
-					return fmt.Errorf("Update fail(MatchedCount:%d ModifiedCount:%d UpsertedCount:%d) upsert _id[%v] with data[%v]",
+					return fmt.Errorf("update fail(MatchedCount:%d ModifiedCount:%d UpsertedCount:%d) upsert _id[%v] with data[%v]",
 						res.MatchedCount, res.ModifiedCount, res.UpsertedCount, update.id, update.data)
 				}
 			}
@@ -116,7 +116,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 			res, err := collectionHandle.UpdateOne(context.Background(), update.id,
 				bson.D{{"$set", update.data}}, nil)
 			if err != nil && utils.DuplicateKey(err) == false {
-				LOG.Warn("update _id[%v] with data[%v] meets err[%v] res[%v], try to solve",
+				_ = LOG.Warn("update _id[%v] with data[%v] meets err[%v] res[%v], try to solve",
 					update.id, update.data, err, res)
 
 				// error can be ignored
@@ -125,12 +125,12 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 					continue
 				}
 
-				LOG.Error("update _id[%v] with data[%v] failed[%v]", update.id, update.data, err.Error())
+				_ = LOG.Error("update _id[%v] with data[%v] failed[%v]", update.id, update.data, err.Error())
 				return err
 			}
 			if res != nil {
 				if res.MatchedCount != 1 {
-					return fmt.Errorf("Update fail(MatchedCount:%d, ModifiedCount:%d) old-data[%v] with new-data[%v]",
+					return fmt.Errorf("update fail(MatchedCount:%d, ModifiedCount:%d) old-data[%v] with new-data[%v]",
 						res.MatchedCount, res.ModifiedCount, update.id, update.data)
 				}
 			}
@@ -170,7 +170,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 
 			if ok && oplogVer == 2 {
 				if update, oplogErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); oplogErr != nil {
-					LOG.Error("doUpdate run Faild err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
+					_ = LOG.Error("doUpdate run failed err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
 					return oplogErr
 				}
 			} else {
@@ -187,7 +187,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 					update, opts)
 			} else {
 				if upsert {
-					LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
+					_ = LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
 				}
 
 				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.Query,
@@ -210,7 +210,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 
 			updateCmd = "replace"
 		}
-		LOG.Debug("single_writer: %s %v aftermodify_doc:%v", updateCmd, update, log.original.partialLog)
+		LOG.Debug("single_writer: %s %v after_modify_doc:%v", updateCmd, update, log.original.partialLog)
 
 		if err != nil {
 			// error can be ignored
@@ -224,27 +224,27 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 				continue
 			}
 
-			LOG.Error("doUpdate[upsert] old-data[%v] with new-data[%v] failed[%v]",
+			_ = LOG.Error("doUpdate[upsert] old-data[%v] with new-data[%v] failed[%v]",
 				log.original.partialLog.Query, log.original.partialLog.Object, err)
 			return err
 		}
 		if res != nil {
 			if upsert {
 				if res.MatchedCount != 1 && res.UpsertedCount != 1 {
-					return fmt.Errorf("Update fail(MatchedCount:%d ModifiedCount:%d UpsertedCount:%d) old-data[%v] with new-data[%v]",
+					return fmt.Errorf("update fail(MatchedCount:%d ModifiedCount:%d UpsertedCount:%d) old-data[%v] with new-data[%v]",
 						res.MatchedCount, res.ModifiedCount, res.UpsertedCount,
 						log.original.partialLog.Query, log.original.partialLog.Object)
 				}
 			} else {
 				if res.MatchedCount != 1 {
-					return fmt.Errorf("Update fail(MatchedCount:%d ModifiedCount:%d MatchedCount:%d) old-data[%v] with new-data[%v]",
+					return fmt.Errorf("update fail(MatchedCount:%d ModifiedCount:%d MatchedCount:%d) old-data[%v] with new-data[%v]",
 						res.MatchedCount, res.ModifiedCount, res.MatchedCount,
 						log.original.partialLog.Query, log.original.partialLog.Object)
 				}
 			}
 		}
 
-		LOG.Debug("single_writer: aftermodify_doc %v %s[%v]", log.original.partialLog, updateCmd, update)
+		LOG.Debug("single_writer: after_modify_doc %v %s[%v]", log.original.partialLog, updateCmd, update)
 	}
 
 	return nil
@@ -259,7 +259,7 @@ func (sw *SingleWriter) doDelete(database, collection string, metadata bson.E, o
 
 		_, err := collectionHandle.DeleteOne(context.Background(), log.original.partialLog.Object)
 		if err != nil {
-			LOG.Error("delete data[%v] failed[%v]", log.original.partialLog.Query, err)
+			_ = LOG.Error("delete data[%v] failed[%v]", log.original.partialLog.Query, err)
 			return err
 		}
 

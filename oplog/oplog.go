@@ -303,7 +303,7 @@ func DiffUpdateOplogToNormal(updateObj bson.D) (interface{}, error) {
 		return updateObj, fmt.Errorf("diff field is not bson.D updateObj:[%v]", updateObj)
 	}
 
-	result, err := BuildUpdateDelteOplog("", bsonDiffObj)
+	result, err := ConvertV2Oplog("", bsonDiffObj)
 	if err != nil {
 		return updateObj, fmt.Errorf("parse diffOplog failed updateObj:[%v] err[%v]", updateObj, err)
 	}
@@ -312,7 +312,7 @@ func DiffUpdateOplogToNormal(updateObj bson.D) (interface{}, error) {
 
 }
 
-func BuildUpdateDelteOplog(prefixField string, obj bson.D) (interface{}, error) {
+func ConvertV2Oplog(prefixField string, obj bson.D) (interface{}, error) {
 	var result bson.D
 
 	for _, ele := range obj {
@@ -335,7 +335,7 @@ func BuildUpdateDelteOplog(prefixField string, obj bson.D) (interface{}, error) 
 				tmpPrefixField = prefixField + "." + ele.Key[1:]
 			}
 
-			nestObj, err := BuildUpdateDelteOplog(tmpPrefixField, ele.Value.(bson.D))
+			nestObj, err := ConvertV2Oplog(tmpPrefixField, ele.Value.(bson.D))
 			if err != nil {
 				return obj, fmt.Errorf("parse ele[%v] failed, updateObj:[%v]", ele, obj)
 			}
