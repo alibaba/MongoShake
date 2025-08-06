@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"syscall"
 
@@ -31,6 +32,7 @@ func main() {
 	// argument options
 	configuration := flag.String("conf", "", "configure file absolute path")
 	verbose := flag.Int("verbose", 0, "where log goes to: 0 - file，1 - file+stdout，2 - stdout")
+	GCPercent := flag.Int("GCPercent", 100, "golang GC percent")
 	version := flag.Bool("version", false, "show version")
 	flag.Parse()
 
@@ -43,7 +45,9 @@ func main() {
 	if file, err = os.Open(*configuration); err != nil {
 		crash(fmt.Sprintf("Configure file open failed. %v", err), -1)
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	// read fcv and do comparison
 	if _, err := conf.CheckFcv(*configuration, utils.FcvConfiguration.FeatureCompatibleVersion); err != nil {
@@ -66,18 +70,18 @@ func main() {
 		crash(fmt.Sprintf("initial log.dir[%v] log.name[%v] failed[%v].", conf.Options.LogDirectory,
 			conf.Options.LogFileName, err), -2)
 	} else {
-		LOG.Info("log init succ. log.dir[%v] log.name[%v] log.level[%v]",
+		LOG.Info("log init succeed. log.dir[%v] log.name[%v] log.level[%v]",
 			conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel)
 	}
 	LOG.Info("MongoDB Version Source[%v] Target[%v]", conf.Options.SourceDBVersion, conf.Options.TargetDBVersion)
 
 	conf.Options.Version = utils.BRANCH
 
-	nimo.Profiling(int(conf.Options.SystemProfilePort))
+	nimo.Profiling(conf.Options.SystemProfilePort)
 	signalProfile, _ := strconv.Atoi(utils.SIGNALPROFILE)
 	signalStack, _ := strconv.Atoi(utils.SIGNALSTACK)
 	if signalProfile > 0 {
-		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile)) // syscall.SIGUSR2
+		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile))                     // syscall.SIGUSR2
 		nimo.RegisterSignalForPrintStack(syscall.Signal(signalStack), func(bytes []byte) { // syscall.SIGUSR1
 			LOG.Info(string(bytes))
 		})
@@ -85,9 +89,16 @@ func main() {
 
 	utils.Welcome()
 
-	utils.Mkdirs(conf.Options.LogDirectory)
+	err = utils.Mkdirs(conf.Options.LogDirectory)
+	if err != nil {
+		crash(fmt.Sprintf("mkdir log dir failed: %v", err), -5)
+
+	}
 	// get exclusive process lock and write pid
 	if utils.WritePidById(conf.Options.LogDirectory, conf.Options.Id) {
+		if *GCPercent > 0 && *GCPercent <= 100 {
+			debug.SetGCPercent(*GCPercent)
+		}
 		startup()
 	}
 }
@@ -99,7 +110,7 @@ func startup() {
 	// initialize http api
 	utils.FullSyncInitHttpApi(conf.Options.FullSyncHTTPListenPort)
 	utils.IncrSyncInitHttpApi(conf.Options.IncrSyncHTTPListenPort)
-	coordinator := &coordinator.ReplicationCoordinator{
+	ReplCord := &coordinator.ReplicationCoordinator{
 		MongoD: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
 	}
 
@@ -113,37 +124,37 @@ func startup() {
 
 	// init
 	for i, src := range conf.Options.MongoUrls {
-		coordinator.MongoD[i] = new(utils.MongoSource)
-		coordinator.MongoD[i].URL = src
+		ReplCord.MongoD[i] = new(utils.MongoSource)
+		ReplCord.MongoD[i].URL = src
 		if len(conf.Options.IncrSyncOplogGIDS) != 0 {
-			coordinator.MongoD[i].Gids = conf.Options.IncrSyncOplogGIDS
+			ReplCord.MongoD[i].Gids = conf.Options.IncrSyncOplogGIDS
 		}
 	}
 	if conf.Options.MongoSUrl != "" {
-		coordinator.MongoS = &utils.MongoSource{
+		ReplCord.MongoS = &utils.MongoSource{
 			URL:         conf.Options.MongoSUrl,
 			ReplicaName: "mongos",
 		}
-		coordinator.RealSourceFullSync = []*utils.MongoSource{coordinator.MongoS}
-		coordinator.RealSourceIncrSync = []*utils.MongoSource{coordinator.MongoS}
+		ReplCord.RealSourceFullSync = []*utils.MongoSource{ReplCord.MongoS}
+		ReplCord.RealSourceIncrSync = []*utils.MongoSource{ReplCord.MongoS}
 		if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
-			coordinator.RealSourceIncrSync = coordinator.MongoD
+			ReplCord.RealSourceIncrSync = ReplCord.MongoD
 		}
 	} else {
-		coordinator.RealSourceFullSync = coordinator.MongoD
-		coordinator.RealSourceIncrSync = coordinator.MongoD
+		ReplCord.RealSourceFullSync = ReplCord.MongoD
+		ReplCord.RealSourceIncrSync = ReplCord.MongoD
 	}
 
 	if conf.Options.MongoCsUrl != "" {
-		coordinator.MongoCS = &utils.MongoSource{
+		ReplCord.MongoCS = &utils.MongoSource{
 			URL: conf.Options.MongoCsUrl,
 		}
 	}
 
 	// start mongodb replication
-	if err := coordinator.Run(); err != nil {
+	if err := ReplCord.Run(); err != nil {
 		// initial or connection established failed
-		LOG.Critical(fmt.Sprintf("run replication failed: %v", err))
+		_ = LOG.Critical(fmt.Sprintf("run replication failed: %v", err))
 		crash(err.Error(), -6)
 	}
 
@@ -162,7 +173,9 @@ func selectLeader() {
 		// election become to Master. keep waiting if we are the candidate. election id is must fixed
 		objectId, _ := primitive.ObjectIDFromHex("5204af979955496907000001")
 		quorum.UseElectionObjectId(objectId)
-		go quorum.BecomeMaster(conf.Options.CheckpointStorageUrl, utils.VarCheckpointStorageDbReplicaDefault)
+		go func() {
+			_ = quorum.BecomeMaster(conf.Options.CheckpointStorageUrl, utils.VarCheckpointStorageDbReplicaDefault)
+		}()
 
 		// wait until become to a real master
 		<-quorum.MasterPromotionNotifier
