@@ -159,6 +159,15 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 		err = dbHandler.RunCommand(nil, store).Err()
 	case "dropDatabase":
 		err = dbHandler.Drop(nil)
+	case "renameCollection":
+		// handle '"dropTarget": UUID("52c1c147-2408-4d96-9d0f-889a759ab079")' in object,
+		// change to {dropTarget: true} as described in:
+		//https://www.mongodb.com/docs/v5.0/reference/method/db.collection.renameCollection/
+		tmpCmd := log.Object
+		if log.Object != nil && oplog.GetKey(log.Object, "dropTarget") != nil {
+			oplog.SetFiled(tmpCmd, "dropTarget", true)
+		}
+		err = client.Database("admin").RunCommand(nil, tmpCmd).Err()
 	case "create":
 		if oplog.GetKey(log.Object, "autoIndexId") != nil &&
 			oplog.GetKey(log.Object, "idIndex") != nil {
@@ -179,8 +188,6 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 	case "dropIndexes":
 		fallthrough
 	case "convertToCapped":
-		fallthrough
-	case "renameCollection":
 		fallthrough
 	case "emptycapped":
 		if !oplog.IsRunOnAdminCommand(operation) {
