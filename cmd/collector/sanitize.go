@@ -230,7 +230,9 @@ func checkDefaultValue() error {
 		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 1024
 	}
 	if conf.Options.IncrSyncFetcherBufferCapacity <= 0 {
-		conf.Options.IncrSyncFetcherBufferCapacity = 256
+		// to reduce memory consumption
+		//conf.Options.IncrSyncFetcherBufferCapacity = 256
+		conf.Options.IncrSyncFetcherBufferCapacity = 64
 	}
 	if conf.Options.IncrSyncReaderFetchBatchSize <= 0 {
 		conf.Options.IncrSyncReaderFetchBatchSize = 1024
