@@ -20,8 +20,7 @@ type Hasher interface {
 	DistributeOplogByMod(log *PartialLog, mod int) uint32
 }
 
-/*********************************************/
-// PrimaryKeyHasher
+// TableHasher hash by namespace
 type TableHasher struct {
 	Hasher
 }
@@ -42,15 +41,13 @@ func (collectionHasher *TableHasher) DistributeOplogByMod(log *PartialLog, mod i
 	return stringHashValue(log.Namespace) % uint32(mod)
 }
 
-/*********************************************/
-// PrimaryKeyHasher
+// PrimaryKeyHasher hash by objectID
 type PrimaryKeyHasher struct {
 	Hasher
 }
 
-// we need to ensure that oplog entry will be sent to the same job[$hash]
-// if they have the same ObjectID. thus we can consume the oplog entry
-// sequentially
+// DistributeOplogByMod
+// We need to ensure that oplog entry will be sent to the same job[$hash] if they have the same ObjectID.
 func (objectIdHasher *PrimaryKeyHasher) DistributeOplogByMod(log *PartialLog, mod int) uint32 {
 	if mod == 1 {
 		return 0
@@ -66,15 +63,16 @@ func (objectIdHasher *PrimaryKeyHasher) DistributeOplogByMod(log *PartialLog, mo
 	}
 
 	if hashObject == nil {
-		LOG.Warn("Couldn't extract hash object. collector has mixed up. use Oplog.Namespace instead %v", log)
+		_ = LOG.Warn("Couldn't extract hash object. collector has mixed up. use Oplog.Namespace instead %v", log)
 		hashObject = log.Namespace
 	}
 
 	return Hash(hashObject) % uint32(mod)
 }
 
-/*********************************************/
-// WhiteListObjectIdHasher: hash by collection in general, when hit white list, hash by _id
+// WhiteListObjectIdHasher
+// 1) hash by collection in general;
+// 2) hash by objectId only when hit whitelist;
 type WhiteListObjectIdHasher struct {
 	Hasher
 
@@ -132,7 +130,7 @@ func GetIdOrNSFromOplog(log *PartialLog) interface{} {
 	case "c":
 		return log.Namespace
 	default:
-		LOG.Critical("Unrecognized oplog object operation %s", log.Operation)
+		_ = LOG.Critical("Unrecognized oplog object operation %s", log.Operation)
 	}
 
 	return log.Namespace
@@ -157,12 +155,16 @@ func Hash(hashObject interface{}) uint32 {
 		return stringHashValue(object.Hex())
 	case string:
 		return stringHashValue(object)
+	case int64:
+		return uint32(object)
+	case int32:
+		return uint32(object)
 	case int:
 		return uint32(object)
 	case nil:
-		LOG.Warn("Hash object is NIL. use default value %d", DefaultHashValue)
+		_ = LOG.Warn("Hash object is NIL. use default value %d", DefaultHashValue)
 	default:
-		LOG.Warn("Hash object is UNKNOWN type[%T], value is [%v]. use default value %d",
+		_ = LOG.Warn("Hash object is UNKNOWN type[%T], value is [%v]. use default value %d",
 			hashObject, hashObject, DefaultHashValue)
 	}
 
