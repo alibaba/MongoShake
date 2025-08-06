@@ -38,6 +38,7 @@ type ParsedLog struct {
 	DocumentKey   bson.D              `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists when source collection is sharded, only including shard key and _id
 	PrevOpTime    bson.Raw            `bson:"prevOpTime,omitempty"`
 	UI            *primitive.Binary   `bson:"ui,omitempty" json:"ui,omitempty"` // do not enable currently
+	Upsert        bool                `bson:"b,omitempty" json:"b,omitempty"`   // upsert for update op
 }
 
 type PartialLog struct {

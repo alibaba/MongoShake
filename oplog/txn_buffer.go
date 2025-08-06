@@ -56,7 +56,7 @@ func (ts *txnState) purge() error {
 }
 
 // TxnBuffer stores transaction oplog entries until they are needed
-// to commit them to a desination.  It includes a WaitGroup for tracking
+// to commit them to a destination.  It includes a WaitGroup for tracking
 // all goroutines across all transactions for use in global shutdown.
 type TxnBuffer struct {
 	sync.Mutex
@@ -422,6 +422,12 @@ func bsonDocToOplog(doc bson.D) (*ParsedLog, error) {
 				return nil, fmt.Errorf(opConvertErrorFmt, "ui field", "not binary data")
 			}
 			op.UI = &u
+		case "b":
+			b, ok := v.Value.(bool)
+			if !ok {
+				return nil, fmt.Errorf(opConvertErrorFmt, "b filed", "not a bool")
+			}
+			op.Upsert = b
 		}
 	}
 
