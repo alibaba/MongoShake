@@ -28,7 +28,7 @@ const (
 	CollectionCappedLowVersion = "UnknownError"                                  // <= 3.0 version
 )
 
-// for UT only
+// GetAllTimestampInUTInput is only for UT
 var (
 	GetAllTimestampInUTInput map[string]Pair // replicaSet/MongoS name => <oldest timestamp, newest timestamp>
 )
@@ -45,7 +45,7 @@ func (ms *MongoSource) String() string {
 	return fmt.Sprintf("url[%v], name[%v]", BlockMongoUrlPassword(ms.URL, "***"), ms.ReplicaName)
 }
 
-// get db version, return string with format like "3.0.1"
+// GetDBVersion return string of db version with format like "3.0.1"
 func GetDBVersion(conn *MongoCommunityConn) (string, error) {
 
 	res, err := conn.Client.Database("admin").
@@ -62,8 +62,8 @@ func GetDBVersion(conn *MongoCommunityConn) (string, error) {
 	return ver, nil
 }
 
-// get current db version and compare to threshold. Return whether the result
-// is bigger or equal to the input threshold.
+// GetAndCompareVersion get current db version and compare to threshold.
+// Return whether the result is bigger or equal to the input threshold.
 func GetAndCompareVersion(conn *MongoCommunityConn, threshold string, compare string) (bool, error) {
 	var err error
 	if compare == "" {
@@ -123,13 +123,13 @@ func getOplogTimestamp(conn *MongoCommunityConn, sortType int) (int64, error) {
 	return TimeStampToInt64(result["ts"].(primitive.Timestamp)), nil
 }
 
-// get newest oplog
+// GetNewestTimestampByConn return newest oplog
 func GetNewestTimestampByConn(conn *MongoCommunityConn) (int64, error) {
 
 	return getOplogTimestamp(conn, -1)
 }
 
-// get oldest oplog
+// GetOldestTimestampByConn return oldest oplog
 func GetOldestTimestampByConn(conn *MongoCommunityConn) (int64, error) {
 
 	return getOplogTimestamp(conn, 1)
@@ -167,20 +167,13 @@ func GetOldestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (i
 	return GetOldestTimestampByConn(conn)
 }
 
-// record the oldest and newest timestamp of each mongod
+// TimestampNode record the oldest and newest timestamp of each mongod
 type TimestampNode struct {
 	Oldest int64
 	Newest int64
 }
 
-/*
- * get all newest timestamp
- * return:
- *     map: whole timestamp map, key: replset name, value: struct that includes the newest and oldest timestamp
- *     primitive.Timestamp: the biggest of the newest timestamp
- *     primitive.Timestamp: the smallest of the newest timestamp
- *     error: error
- */
+// GetAllTimestamp get all newest timestamp
 func GetAllTimestamp(sources []*MongoSource, sslRootFile string) (map[string]TimestampNode, int64,
 	int64, int64, int64, error) {
 	smallestNew := int64(math.MaxInt64)
@@ -228,7 +221,7 @@ func GetAllTimestamp(sources []*MongoSource, sslRootFile string) (map[string]Tim
 	return tsMap, biggestNew, smallestNew, biggestOld, smallestOld, nil
 }
 
-// only used in unit test
+// GetAllTimestampInUT is only used in unit test
 func GetAllTimestampInUT() (map[string]TimestampNode, int64,
 	int64, int64, int64, error) {
 	smallestNew := int64(math.MaxInt64)
@@ -276,7 +269,8 @@ func FindFirstErrorIndexAndMessageN(err error) (int, string, bool) {
 
 	bwError, ok := err.(mongo.BulkWriteException)
 	if ok == false {
-		return 0, "", false
+		// return the origin err msg
+		return 0, err.Error(), false
 	}
 	wError := bwError.WriteErrors
 	if len(wError) == 0 {
@@ -293,21 +287,19 @@ func FindFirstErrorIndexAndMessageN(err error) (int, string, bool) {
 func GetListCollectionQueryCondition(conn *MongoCommunityConn) bson.M {
 	// "collection", "timeseries", 3.4 start to support views
 	versionOk, _ := GetAndCompareVersion(conn, "3.4.0", "")
-	queryConditon := bson.M{}
+	queryCondition := bson.M{}
 	if versionOk {
 		// 改成 not
-		queryConditon = bson.M{"type": bson.M{"$in": bson.A{"collection", "timeseries"}}}
+		queryCondition = bson.M{"type": bson.M{"$in": bson.A{"collection", "timeseries"}}}
 	}
 
-	return queryConditon
+	return queryCondition
 }
 
-/**
- * return db namespace. return:
- *     @[]NS: namespace list, e.g., []{"a.b", "a.c"}
- *     @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}
- *     @error: error info
- */
+// GetDbNamespace return db namespace. return:
+// @[]NS: namespace list, e.g., []{"a.b", "a.c"}
+// @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}
+// @error: error info
 func GetDbNamespace(url string, filterFunc func(name string) bool, sslRootFile string) ([]NS, map[string][]string, error) {
 	var err error
 	var conn *MongoCommunityConn
@@ -317,7 +309,7 @@ func GetDbNamespace(url string, filterFunc func(name string) bool, sslRootFile s
 	}
 	defer conn.Close()
 
-	queryConditon := GetListCollectionQueryCondition(conn)
+	queryCondition := GetListCollectionQueryCondition(conn)
 	var dbNames []string
 	if dbNames, err = conn.Client.ListDatabaseNames(nil, bson.M{}); err != nil {
 		err = fmt.Errorf("get database names of mongodb[%s] error: %v", url, err)
@@ -325,17 +317,17 @@ func GetDbNamespace(url string, filterFunc func(name string) bool, sslRootFile s
 	}
 	// sort by db names
 	sort.Strings(dbNames)
-	LOG.Debug("dbNames:%v queryConditon:%v", dbNames, queryConditon)
+	LOG.Debug("dbNames:%v queryCondition:%v", dbNames, queryCondition)
 
 	nsList := make([]NS, 0, 128)
 	for _, db := range dbNames {
-		colNames, err := conn.Client.Database(db).ListCollectionNames(nil, queryConditon)
+		colNames, err := conn.Client.Database(db).ListCollectionNames(nil, queryCondition)
 		if err != nil {
 			err = fmt.Errorf("get collection names of mongodb[%s] db[%v] error: %v", url, db, err)
 			return nil, nil, err
 		}
 
-		LOG.Debug("db[%v] colNames: %v queryConditon:%v", db, colNames, queryConditon)
+		LOG.Debug("db[%v] colNames: %v queryCondition:%v", db, colNames, queryCondition)
 		for _, col := range colNames {
 			ns := NS{Database: db, Collection: col}
 			if strings.HasPrefix(col, "system.") {
@@ -361,12 +353,10 @@ func GetDbNamespace(url string, filterFunc func(name string) bool, sslRootFile s
 	return nsList, nsMap, nil
 }
 
-/**
- * return all namespace. return:
- *     @map[NS]struct{}: namespace set where key is the namespace while value is useless, e.g., "a.b"->nil, "a.c"->nil
- *     @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}
- *     @error: error info
- */
+// GetAllNamespace return all namespace. return:
+// @map[NS]struct{}: namespace set where key is the namespace while value is useless, e.g., "a.b"->nil, "a.c"->nil
+// @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}
+// @error: error info
 func GetAllNamespace(sources []*MongoSource, filterFunc func(name string) bool,
 	sslRootFile string) (map[NS]struct{}, map[string][]string, error) {
 	nsSet := make(map[NS]struct{})

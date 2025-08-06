@@ -192,7 +192,7 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 		if conf.Options.FullSyncExecutorFilterOrphanDocument && exec.syncer.orphanFilter != nil {
 			var docData bson.D
 			if err := bson.Unmarshal(*doc, &docData); err != nil {
-				LOG.Error("doSync do bson unmarshal %v failed. %v", doc, err)
+				_ = LOG.Error("doSync do bson unmarshal %v failed. %v", doc, err)
 			}
 			// judge whether is orphan document, pass if so
 			if exec.syncer.orphanFilter.Filter(docData, ns.Database+"."+ns.Collection) {
@@ -211,25 +211,31 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 
 	if conf.Options.LogLevel == utils.VarLogLevelDebug {
 		var docBeg, docEnd bson.M
-		bson.Unmarshal(*docs[0], &docBeg)
-		bson.Unmarshal(*docs[len(docs)-1], &docEnd)
-		LOG.Debug("DBSyncer id[%v] doSync BulkWrite with table[%v] batch _id interval [%v, %v]", exec.syncer.id, ns,
-			docBeg, docEnd)
+		errUnmarshalBeg := bson.Unmarshal(*docs[0], &docBeg)
+		errUnmarshalEnd := bson.Unmarshal(*docs[len(docs)-1], &docEnd)
+		if errUnmarshalBeg == nil && errUnmarshalEnd == nil {
+			LOG.Debug("DBSyncer id[%v] doSync BulkWrite with table[%v] batch _id interval [%v, %v]",
+				exec.syncer.id, ns, docBeg, docEnd)
+		} else {
+			_ = LOG.Error("unmarshal doc failed, begin:[%v], end:[%v]", errUnmarshalBeg, errUnmarshalEnd)
+		}
 	}
 
 	opts := options.BulkWrite().SetOrdered(false)
 	res, err := exec.conn.Client.Database(ns.Database).Collection(ns.Collection).BulkWrite(nil, models, opts)
 
 	if err != nil {
-		if _, ok := err.(mongo.BulkWriteException); !ok {
-			return fmt.Errorf("bulk run failed[%v]", err)
+		bulkErr, ok := err.(mongo.BulkWriteException)
+		if !ok {
+			_ = LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[type:%T err:%v] res[%v]",
+				len(models), ns, err, err, res)
+		} else {
+			_ = LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
+				len(models), ns, bulkErr.WriteErrors[0], res)
 		}
 
-		LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
-			len(models), ns, (err.(mongo.BulkWriteException)).WriteErrors[0], res)
-
 		var updateModels []mongo.WriteModel
-		for _, wError := range (err.(mongo.BulkWriteException)).WriteErrors {
+		for _, wError := range bulkErr.WriteErrors {
 			if utils.DuplicateKey(wError) {
 				if !conf.Options.FullSyncExecutorInsertOnDupUpdate {
 					return fmt.Errorf("duplicate key error[%v], you can clean the document on the target mongodb, "+
@@ -265,7 +271,7 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 			if err != nil {
 				return fmt.Errorf("bulk run updateForInsert failed[%v]", err)
 			}
-			LOG.Debug("updateForInsert succ updateModels.len:%d updateModules[0]:%v\n",
+			LOG.Debug("updateForInsert succeed, updateModels.len:%d updateModules[0]:%v",
 				len(updateModels), updateModels[0])
 		} else {
 			return fmt.Errorf("bulk run failed[%v]", err)

@@ -271,7 +271,7 @@ func TestAutologousFilter(t *testing.T) {
 				Namespace: "a.system.views",
 			},
 		}
-		assert.Equal(t, true, filter.Filter(log), "should be equal")
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
 
 		log = &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
@@ -290,6 +290,27 @@ func TestAutologousFilter(t *testing.T) {
 		log = &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Namespace: "config.system.sessions",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "config.cache.databases",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "config.transactions",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "a.system.profile",
 			},
 		}
 		assert.Equal(t, true, filter.Filter(log), "should be equal")
