@@ -234,6 +234,9 @@ func checkDefaultValue() error {
 		//conf.Options.IncrSyncFetcherBufferCapacity = 256
 		conf.Options.IncrSyncFetcherBufferCapacity = 64
 	}
+	if conf.Options.IncrSyncFetcherBufferSizeThresholdInKB <= 0 {
+		conf.Options.IncrSyncFetcherBufferSizeThresholdInKB = 512
+	}
 	if conf.Options.IncrSyncReaderFetchBatchSize <= 0 {
 		conf.Options.IncrSyncReaderFetchBatchSize = 1024
 	}

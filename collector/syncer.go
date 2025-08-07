@@ -24,10 +24,10 @@ const (
 	// AdaptiveBatchingMaxSize = 16384 // 16k
 
 	// bson deserialize workload is CPU-intensive task
-	PipelineQueueMaxNr    = 8
-	PipelineQueueMiddleNr = 4
+	PipelineQueueMaxNr    = 4
+	PipelineQueueMiddleNr = 2
 	PipelineQueueMinNr    = 1
-	PipelineQueueLen      = 64 * 2
+	PipelineQueueLen      = 64
 
 	DurationTime                  = 6000 // unit: ms.
 	DDLCheckpointInterval         = 300  // unit: ms.
@@ -37,7 +37,7 @@ const (
 )
 
 type OplogHandler interface {
-	// invocation on every oplog consumed
+	// Handle is called on every oplog consumed
 	Handle(log *oplog.PartialLog)
 }
 
@@ -483,6 +483,7 @@ func (sync *OplogSyncer) deserializer(index int) {
 	// run
 	for {
 		batchRawLogs := <-sync.PendingQueue[index]
+		nPending := len(sync.PendingQueue[index])
 		nimo.AssertTrue(len(batchRawLogs) != 0, "pending queue batch logs has zero length")
 		var deserializeLogs = make([]*oplog.GenericOplog, 0, len(batchRawLogs))
 
@@ -500,6 +501,7 @@ func (sync *OplogSyncer) deserializer(index int) {
 			sync.LastFetchTs = deserializeLogs[0].Parsed.Timestamp
 		}
 		sync.logsQueue[index] <- deserializeLogs
+		LOG.Info("deserializer[%v] send %d to logsQueue, pending: %d", index, len(deserializeLogs), nPending)
 	}
 }
 
