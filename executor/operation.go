@@ -16,6 +16,7 @@ import (
 )
 
 var ErrorsShouldSkip = map[int]string{
+	//2: "BadValue",
 	61: "ShardKeyNotFound",
 }
 
@@ -116,7 +117,7 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 
 		// a few known error we can skip !! such as "ShardKeyNotFound" returned
 		// if mongoshake connected to MongoS
-		if exec.errorIgnore(err) {
+		if exec.errorIgnore(err, group.ns, group.op) {
 			LOG.Info("Replay-%d Discard known error[%v], It's acceptable", exec.batchExecutor.ReplayerId, err)
 			err = nil
 		}
@@ -145,7 +146,8 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 	return nil
 }
 
-func (exec *Executor) errorIgnore(err error) bool {
+// errorIgnore will ignore some known errors
+func (exec *Executor) errorIgnore(err error, ns, op string) bool {
 	if err == nil {
 		return false
 	}
@@ -159,6 +161,14 @@ func (exec *Executor) errorIgnore(err error) bool {
 		if er.HasErrorCode(k) {
 			return true
 		}
+	}
+
+	// special case for update featureCompatibilityVersion doc in 'admin.system.version'
+	// PS: Will meet if the source mongodb did upgraded major version then we will replay oplog of update fcv like:
+	// MongoDB4.4 try to set fcv to 5.0, which is not allowed.
+	if ns == "admin.system.version" && op == "u" && er.HasErrorCode(2) &&
+		er.HasErrorMessage("Invalid value for") && er.HasErrorMessage("featureCompatibilityVersion") {
+		return true
 	}
 
 	return false
