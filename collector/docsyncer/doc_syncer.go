@@ -9,7 +9,6 @@ import (
 	"time"
 
 	nimo "github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -19,6 +18,7 @@ import (
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	"github.com/alibaba/MongoShake/v2/collector/transform"
 	utils "github.com/alibaba/MongoShake/v2/common"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 const (

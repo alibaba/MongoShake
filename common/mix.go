@@ -10,8 +10,9 @@ import (
 	"strconv"
 	"time"
 
-	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 func YieldInMs(n int64) {

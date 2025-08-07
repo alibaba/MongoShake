@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	nimo "github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
@@ -15,6 +14,7 @@ import (
 	"github.com/alibaba/MongoShake/v2/collector/transform"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/sharding"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 func fetchChunkMap(isSharding bool) (sharding.ShardingChunkMap, error) {

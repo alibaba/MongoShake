@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	LOG "github.com/vinllen/log4go"
-
 	"github.com/Shopify/sarama"
-	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/rcrowley/go-metrics"
+
+	utils "github.com/alibaba/MongoShake/v2/common"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 var (

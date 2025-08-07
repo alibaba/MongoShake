@@ -7,9 +7,10 @@ import (
 	"strings"
 
 	"github.com/nightlyone/lockfile"
-	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 // Build info
@@ -99,7 +100,6 @@ func InitialLogger(logDir, logFile, level string, logFlush bool, verbose int) er
 		}
 		fileLogger := LOG.NewFileLogWriter(fmt.Sprintf("%s/%s", logDir, logFile), true)
 		fileLogger.SetRotateDaily(true)
-		// fileLogger.SetFormat("[%D %T] [%L] [%s] %M") // print function
 		fileLogger.SetFormat("[%D %T] [%L] %M")
 		fileLogger.SetRotateMaxBackup(7)
 		LOG.AddFilter("file", logLevel, fileLogger)

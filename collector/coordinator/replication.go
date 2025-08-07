@@ -8,12 +8,12 @@ import (
 	"sync"
 
 	nimo "github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
 
 	"github.com/alibaba/MongoShake/v2/collector"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 var (

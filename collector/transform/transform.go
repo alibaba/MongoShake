@@ -5,9 +5,10 @@ import (
 	"regexp"
 	"strings"
 
-	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 type NamespaceTransform struct {

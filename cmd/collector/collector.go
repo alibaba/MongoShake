@@ -12,13 +12,13 @@ import (
 	"syscall"
 
 	nimo "github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/coordinator"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/quorum"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 type Exit struct{ Code int }

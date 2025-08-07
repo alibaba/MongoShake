@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"strings"
 
-	LOG "github.com/vinllen/log4go"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"

@@ -8,12 +8,12 @@ import (
 	"time"
 
 	diskQueue "github.com/vinllen/go-diskqueue"
-	LOG "github.com/vinllen/log4go"
 
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	utils "github.com/alibaba/MongoShake/v2/common"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 const (

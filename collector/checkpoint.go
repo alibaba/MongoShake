@@ -7,11 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	LOG "github.com/vinllen/log4go"
-
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 func (sync *OplogSyncer) newCheckpointManager(name string, startPosition interface{}) {
@@ -152,7 +151,7 @@ func (sync *OplogSyncer) calculateWorkerLowestCheckpoint() (v int64, err error) 
 	candidates := make([]int64, 0, len(sync.batcher.workerGroup))
 	allAckValues := make([]int64, 0, len(sync.batcher.workerGroup))
 	for _, worker := range sync.batcher.workerGroup {
-		// read ack value first because of we don't wanna
+		// read ack value first because  we don't want
 		// a result of ack > unack. There wouldn't be cpu
 		// reorder under atomic !
 		ack := atomic.LoadInt64(&worker.ack)
@@ -169,7 +168,7 @@ func (sync *OplogSyncer) calculateWorkerLowestCheckpoint() (v int64, err error) 
 			allAcked = false
 		} else if unack < ack && unack == 0 {
 			// collector restarts. receiver unack value if from buffer
-			// this is rarely happened. However we have delayed for
+			// this is rarely happened. However, we have delayed for
 			// a bit log time. so we could use it
 			allAcked = false
 		} else if unack < ack && unack != 0 {

@@ -7,11 +7,11 @@ import (
 	"time"
 
 	nimo "github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 	"github.com/alibaba/MongoShake/v2/tunnel"
 )
 
@@ -24,7 +24,7 @@ type Worker struct {
 	// worker sequence id
 	id uint32
 
-	// job queue from OplogTailer
+	// job queue from OplogFetcher
 	queue chan []*oplog.GenericOplog
 	// worker tunnel controller (include tunnel and modules)
 	writeController *WriteController
@@ -35,7 +35,7 @@ type Worker struct {
 	// ack offset (used for checkpoint)
 	ack, unack int64
 	count      uint64
-	// if all oplogs are acked for righ now
+	// if all oplogs are acked for right now
 	allAcked bool
 	// retransmit on tunnel controller tunnel required
 	retransmit bool
@@ -81,6 +81,17 @@ func (worker *Worker) IsAllAcked() bool {
 
 func (worker *Worker) AllAcked(allAcked bool) {
 	worker.allAcked = allAcked
+}
+
+func (worker *Worker) HasUnAck() bool {
+	return worker.unack > worker.ack
+}
+
+func (worker *Worker) GetAck() int64 {
+	return atomic.LoadInt64(&worker.ack)
+}
+func (worker *Worker) GetUnAck() int64 {
+	return atomic.LoadInt64(&worker.unack)
 }
 
 func (worker *Worker) Offer(batch []*oplog.GenericOplog) {
@@ -145,7 +156,6 @@ func (worker *Worker) StartWorker() {
 				worker.transfer(batch)
 				worker.syncer.replMetric.AddConsume(uint64(len(batch)))
 			}
-			utils.DEBUG_LOG("%s poll queued batch oplogs. total[%d]", worker, len(batch))
 		}
 	}
 }
@@ -214,7 +224,7 @@ func (worker *Worker) transfer(batch []*oplog.GenericOplog) {
 			worker.retransmit = true
 
 		default:
-			LOG.Warn("%s transfer oplogs failed with reply value %d", worker, replyAndAcked)
+			_ = LOG.Warn("%s transfer oplogs failed with reply value %d", worker, replyAndAcked)
 			// we treat batched logs fail as just one time failed. and
 			// notify failed retry listener
 			worker.syncer.replMetric.AddFailed(1)
@@ -244,7 +254,7 @@ func (worker *Worker) purgeACK() {
 	})
 
 	if bigger != 0 {
-		LOG.Debug("%s purge unacked [lsn_ack:%d]. keep slice position from %d util %d",
+		LOG.Debug("%s purge unAcked [lsn_ack:%d]. keep slice position from %d util %d",
 			worker, worker.ack, bigger, len(worker.listUnACK))
 		worker.listUnACK = worker.listUnACK[bigger:]
 		worker.syncer.replMetric.AddSuccess(uint64(bigger))

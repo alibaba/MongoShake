@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -12,6 +11,7 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 // SingleWriter use general single writer interface to execute command
@@ -69,9 +69,9 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
 			updates = append(updates, &pair{id: log.original.partialLog.DocumentKey, data: newObject, index: i})
 		} else {
-			if upsert {
-				_ = LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
-			}
+			//if upsert {
+			//	_ = LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
+			//}
 			// insert must have _id
 			if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
 				updates = append(updates, &pair{id: bson.D{{"_id", id}}, data: newObject, index: i})
@@ -186,9 +186,9 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.DocumentKey,
 					update, opts)
 			} else {
-				if upsert {
-					_ = LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
-				}
+				//if upsert {
+				//	_ = LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
+				//}
 
 				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.Query,
 					update, opts)

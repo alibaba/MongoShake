@@ -1,12 +1,12 @@
 package tunnel
 
 import (
-	conf "github.com/alibaba/MongoShake/v2/collector/configure"
-	"github.com/alibaba/MongoShake/v2/executor"
-
-	utils "github.com/alibaba/MongoShake/v2/common"
 	nimo "github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
+
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/executor"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 type DirectWriter struct {

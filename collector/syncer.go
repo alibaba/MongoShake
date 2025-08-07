@@ -6,7 +6,6 @@ import (
 	"time"
 
 	nimo "github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
@@ -17,6 +16,7 @@ import (
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
 	"github.com/alibaba/MongoShake/v2/quorum"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 const (
@@ -254,7 +254,7 @@ func (sync *OplogSyncer) startBatcher() {
 
 		var newestTs int64
 		if exit {
-			LOG.Info("%s find exit signal", sync)
+			LOG.Info("%s have reached exit signal", sync)
 			// should exit now, make sure the checkpoint is updated before that
 			lastLog, lastFilterLog := batcher.getLastOplog()
 			newestTs = 1 // default is 1

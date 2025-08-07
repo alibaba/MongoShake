@@ -8,12 +8,12 @@ import (
 
 	nimo "github.com/gugemichael/nimo4go"
 	"github.com/stretchr/testify/assert"
-	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
 

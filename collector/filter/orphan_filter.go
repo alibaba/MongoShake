@@ -5,12 +5,12 @@ import (
 	"encoding/binary"
 	"math"
 
-	LOG "github.com/vinllen/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
 	"github.com/alibaba/MongoShake/v2/sharding"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 const (
