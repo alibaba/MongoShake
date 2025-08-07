@@ -54,10 +54,7 @@ func getExitPoint() primitive.Timestamp {
 	return utils.Int64ToTimestamp(utils.IncrSentinelOptions.ExitPoint)
 }
 
-/*
- * as we mentioned in syncer.go, Batcher is used to batch oplog before sending in order to
- * improve performance.
- */
+// Batcher is used to batch oplog before sending in order to improve performance.
 type Batcher struct {
 	// related oplog syncer. not owned
 	syncer *OplogSyncer
@@ -110,7 +107,7 @@ func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
 }
 
 func (batcher *Batcher) Fini() {
-	batcher.txnBuffer.Stop()
+	_ = batcher.txnBuffer.Stop()
 }
 
 /*
@@ -131,12 +128,12 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 	}
 
 	if moveChunkFilter.Filter(log) {
-		LOG.Critical("shake exit, must close balancer in sharding + oplog")
+		_ = LOG.Critical("shake exit, must close balancer in sharding + oplog")
 		LOG.Crashf("move chunk oplog found, must close balancer in sharding + oplog [%v]", log)
 		return false
 	}
 
-	// DDL is disable when timestamp <= fullSyncFinishPosition
+	// DDL is disabled when timestamp <= fullSyncFinishPosition
 	// v2.4.10: do not crash when "fetch_method" == "change_stream"
 	if ddlFilter.Filter(log) &&
 		primitive.CompareTimestamp(log.Timestamp, batcher.syncer.fullSyncFinishPosition) <= 0 &&
@@ -179,7 +176,7 @@ func (batcher *Batcher) getBatch() []*oplog.GenericOplog {
 		batcher.moveToNextQueue()
 		for len(mergeBatch) < conf.Options.IncrSyncAdaptiveBatchingMaxSize &&
 			len(syncer.logsQueue[batcher.currentQueue()]) > 0 {
-			// there has more pushed oplogs in next logs queue (read can't to be block)
+			// there has more pushed oplogs in next logs queue (read can't to be blocked)
 			// Hence, we fetch them by the way. and merge together
 			mergeBatch = append(mergeBatch, <-syncer.logsQueue[batcher.nextQueue]...)
 			batcher.moveToNextQueue()
@@ -198,10 +195,10 @@ func (batcher *Batcher) getBatch() []*oplog.GenericOplog {
 
 /*
  * if delay > 0, this function wait till delay timeout.
- * However, if the mergeBatch contain may oplogs, the delay time will depends on the first
+ * However, if the mergeBatch contain may oplogs, the delay time will depend on the first
  * oplog timestamp. So, if the time span of the included batched oplog is too large, the
  * delay time is inaccurate.
- * the second return value marks whether should exit.
+ * the second return value marks if we should exit.
  */
 func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 	var mergeBatch []*oplog.GenericOplog
@@ -235,7 +232,7 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 		return mergeBatch[:i], true
 	}
 
-	// judge whether should delay
+	// judge if we should delay
 	delay := getTargetDelay()
 	if delay > 0 {
 		firstOplog := mergeBatch[0].Parsed
@@ -270,10 +267,10 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 /**
  * this function is used to gather oplogs together.
  * honestly speaking, it's complicate so that reading unit tests may help you
- * to make it more clear. The reason this function is so complicate is there're
+ * to make it more clear. The reason this function is so complicate is there are
  * too much corner cases here.
  * return batched oplogs and barrier flag.
- * set barrier if find DDL.
+ * set barrier if we find DDL.
  * i d i c u i
  *      | |
  */
@@ -323,7 +320,7 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 			continue
 		}
 
-		// Transactoin
+		// Transaction
 		if txnMeta, txnOk := batcher.isTransaction(genericLog.Parsed); txnOk {
 			//LOG.Info("~~~~~~~~~transaction %v %v", i, genericLog.Parsed)
 			isRet, mustIndividual, _, deliveredOps := batcher.handleTransaction(txnMeta, genericLog)
@@ -509,12 +506,12 @@ Loop:
 		}
 	}
 
-	// Individual transaction that do not have commamnd can run run with other curd oplog
+	// Individual transaction that do not have command can run with other CURD oplog
 	if !txnMeta.IsCommitOp() && !haveCommandInTransaction &&
 		genericLog.Parsed.PrevOpTime.String() == emptyPrevRaw.String() {
 		mustIndividual = false
 	}
-	// transaction applyOps that do not have command can run parallelly
+	// transaction applyOps that do not have command can run in parallel
 	if haveCommandInTransaction {
 		mustSerial = true
 	}

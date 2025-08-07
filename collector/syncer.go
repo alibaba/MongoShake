@@ -90,13 +90,12 @@ type OplogSyncer struct {
 	shutdownWorking bool // shutdown routine starts?
 }
 
-/*
- * Syncer is used to fetch oplog from source MongoDB and then send to different workers which can be seen as
- * a network sender. There are several syncer coexist to improve the fetching performance.
- * The data flow in syncer is:
- * source mongodb --> reader --> persister --> pending queue(raw data) --> logs queue(parsed data) --> worker
- * The reason we split pending queue and logs queue is to improve the performance.
- */
+// NewOplogSyncer return a new OplogSyncer.
+// OplogSyncer is used to fetch oplog from source MongoDB and then send to different workers which can be seen as
+// a network sender. There are several syncer coexist to improve the fetching performance.
+// The data flow in syncer is:
+// source mongodb --> reader --> persister --> pending queue(raw data) --> logs queue(parsed data) --> worker
+// The reason why we split pending queue and logs queue is to improve the performance.
 func NewOplogSyncer(
 	replset string,
 	startPosition interface{},
@@ -106,7 +105,7 @@ func NewOplogSyncer(
 
 	reader, err := sourceReader.CreateReader(conf.Options.IncrSyncMongoFetchMethod, mongoUrl, replset)
 	if err != nil {
-		LOG.Critical("create reader with url[%v] replset[%v] failed[%v]", mongoUrl, replset, err)
+		_ = LOG.Critical("create reader with url[%v] replset[%v] failed[%v]", mongoUrl, replset, err)
 		return nil
 	}
 
@@ -175,7 +174,7 @@ func (sync *OplogSyncer) String() string {
 	return fmt.Sprintf("Syncer[%s]", sync.Replset)
 }
 
-// bind different worker
+// Bind bind different worker
 func (sync *OplogSyncer) Bind(w *Worker) {
 	sync.batcher.workerGroup = append(sync.batcher.workerGroup, w)
 }
@@ -184,7 +183,7 @@ func (sync *OplogSyncer) StartDiskApply() {
 	sync.persister.SetFetchStage(utils.FetchStageStoreDiskApply)
 }
 
-// start to polling oplog
+// Start to polling oplog
 func (sync *OplogSyncer) Start() {
 	LOG.Info("%s poll oplog syncer start. ckpt_interval[%dms], gid[%s], shard_key[%s]",
 		sync, conf.Options.CheckpointInterval, conf.Options.IncrSyncOplogGIDS, conf.Options.IncrSyncShardKey)
@@ -221,7 +220,7 @@ func (sync *OplogSyncer) Start() {
 		sync.poll()
 
 		// error or exception occur
-		LOG.Warn("%s polling yield. master:%t, yield:%dms", sync, quorum.IsMaster(), DurationTime)
+		_ = LOG.Warn("%s polling yield. master:%t, yield:%dms", sync, quorum.IsMaster(), DurationTime)
 		utils.YieldInMs(DurationTime)
 	}
 }
@@ -277,7 +276,7 @@ func (sync *OplogSyncer) startBatcher() {
 
 			// flush checkpoint value
 			sync.checkpoint(true, 0)
-			sync.checkCheckpointUpdate(true, newestTs) // check if need
+			sync.checkCheckpointUpdate(true, newestTs)
 			sync.CanClose = true
 			LOG.Info("%s blocking and waiting exits, checkpoint: %v", sync, utils.ExtractTimestampForLog(newestTs))
 			select {} // block forever, wait outer routine exits
@@ -296,7 +295,7 @@ func (sync *OplogSyncer) startBatcher() {
 
 			// flush checkpoint value
 			sync.checkpoint(barrier, 0)
-			sync.checkCheckpointUpdate(barrier, newestTs) // check if need
+			sync.checkCheckpointUpdate(barrier, newestTs)
 		} else {
 			// if log is nil, check whether filterLog is empty
 			if filterLog == nil {
@@ -345,7 +344,7 @@ func (sync *OplogSyncer) startBatcher() {
 			if log != nil {
 				newestTsLog := utils.ExtractTimestampForLog(newestTs)
 				if newestTs < utils.TimeStampToInt64(log.Timestamp) {
-					LOG.Error("%s filter newestTs[%v] smaller than previous timestamp[%v]",
+					_ = LOG.Error("%s filter newestTs[%v] smaller than previous timestamp[%v]",
 						sync, newestTsLog, log.Timestamp)
 				}
 
@@ -367,33 +366,36 @@ func (sync *OplogSyncer) startBatcher() {
 	})
 }
 
-// wait for checkpoint reach newestTs which mean oplog is written to dest db when barrier is true, maxtime is 3 second
+// checkCheckpointUpdate wait for checkpoint reach newestTs which mean oplog is written to dest db when barrier is true,
+// max time is about 3 second (CheckCheckpointUpdateTimes * DDLCheckpointInterval)
 func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) bool {
 	// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
 	if barrier && newestTs > 0 {
-		LOG.Info("%s find barrier", sync)
+		LOG.Info("%s checkCheckpointUpdate find barrier", sync)
 		var checkpointTs int64
 		for i := 0; i < CheckCheckpointUpdateTimes; i++ {
-			// checkpointTs := sync.ckptManager.GetInMemory().Timestamp
 			checkpoint, _, err := sync.ckptManager.Get()
 			if err != nil {
-				LOG.Error("%s get remote checkpoint failed: %v", sync, err)
+				_ = LOG.Error("%s[%v] get remote checkpoint failed: %v", sync, i, err)
 				utils.YieldInMs(DDLCheckpointInterval * 3)
 				continue
 			}
 
 			checkpointTs = checkpoint.Timestamp
 
-			LOG.Info("%s compare remote checkpoint[%v] to local newestTs[%v]", sync,
+			LOG.Info("%s[%v] compare remote checkpoint[%v] to local newestTs[%v]", sync, i,
 				utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
 			if checkpointTs >= newestTs {
-				LOG.Info("%s barrier checkpoint has updated to newest[%v]", sync, utils.ExtractTimestampForLog(newestTs))
+				LOG.Info("%s[%v] barrier checkpoint already updated to newest[%v]",
+					sync, i, utils.ExtractTimestampForLog(newestTs))
 				return true
 			}
 			utils.YieldInMs(DDLCheckpointInterval)
 
 			// re-flush
-			sync.checkpoint(true, 0)
+			if sync.checkpoint(true, 0) {
+				LOG.Info("[%v/%v] checkCheckpointUpdate checkpoint update succeed", i, CheckCheckpointUpdateTimes)
+			}
 		}
 
 		/*
@@ -402,7 +404,7 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) boo
 		 * However, if MongoShake crashes here and restarts, there maybe a conflict when the
 		 * oplog is DDL that has been applied but checkpoint not updated.
 		 */
-		LOG.Warn("check checkpoint[%v] update[%v] failed, but do worry",
+		_ = LOG.Warn("check checkpoint[%v] update to ts[%v] failed, but don't worry",
 			utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
 	}
 	return false
@@ -413,7 +415,7 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) boo
 
 // how many pending queue we create
 func calculatePendingQueueConcurrency() int {
-	// single {pending|logs}queue while it'is multi source shard
+	// single {pending|logs}queue while there are multi source shards
 	// need more thread when fetching method is change stream, no matter replica or sharding.
 	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
 		return PipelineQueueMaxNr
@@ -428,8 +430,8 @@ func calculatePendingQueueConcurrency() int {
 // deserializer: fetch oplog from pending queue, parsed and then add into logs queue.
 func (sync *OplogSyncer) startDeserializer() {
 	parallel := calculatePendingQueueConcurrency()
-	sync.PendingQueue = make([]chan [][]byte, parallel, parallel)
-	sync.logsQueue = make([]chan []*oplog.GenericOplog, parallel, parallel)
+	sync.PendingQueue = make([]chan [][]byte, parallel)
+	sync.logsQueue = make([]chan []*oplog.GenericOplog, parallel)
 	for index := 0; index != len(sync.PendingQueue); index++ {
 		sync.PendingQueue[index] = make(chan [][]byte, PipelineQueueLen)
 		sync.logsQueue[index] = make(chan []*oplog.GenericOplog, PipelineQueueLen)
@@ -463,7 +465,7 @@ func (sync *OplogSyncer) deserializer(index int) {
 		conf.Options.Tunnel != utils.VarTunnelDirect &&
 		!(conf.Options.Tunnel == utils.VarTunnelKafka &&
 			conf.Options.TunnelMessage == utils.VarTunnelMessageJson) {
-		// very time consuming!
+		// very time-consuming!
 		combiner = func(raw []byte, log *oplog.PartialLog) *oplog.GenericOplog {
 			if out, err := bson.Marshal(log.ParsedLog); err != nil {
 				LOG.Crashf("%s deserializer marshal[%v] failed: %v", sync, log.ParsedLog, err)
@@ -510,9 +512,9 @@ func (sync *OplogSyncer) poll() {
 	// happens frequently. so we simply reload.
 	checkpoint, _, err := sync.ckptManager.Get()
 	if err != nil {
-		// we doesn't continue working on ckpt fetched failed. because we should
+		// we don't continue working on ckpt fetched failed. because we should
 		// confirm the exist checkpoint value or exactly knows that it doesn't exist
-		LOG.Critical("%s Acquire the existing checkpoint from remote[%s %s.%s] failed !", sync,
+		_ = LOG.Critical("%s Acquire the existing checkpoint from remote[%s %s.%s] failed !", sync,
 			conf.Options.CheckpointStorage, conf.Options.CheckpointStorageDb,
 			conf.Options.CheckpointStorageCollection)
 		return
@@ -544,12 +546,12 @@ func (sync *OplogSyncer) next() bool {
 		sync.replMetric.SetOplogMax(payload)
 		sync.replMetric.SetOplogAvg(payload)
 		sync.replMetric.ReplStatus.Clear(utils.FetchBad)
-	} else if err == sourceReader.CollectionCappedError {
-		LOG.Error("%s oplog collection capped error, users should fix it manually", sync)
+	} else if err != nil && err.Error() == sourceReader.CollectionCappedError.Error() {
+		_ = LOG.Error("%s oplog collection capped error, users should fix it manually", sync)
 		utils.YieldInMs(DurationTime)
 		return false
-	} else if err != nil && err != sourceReader.TimeoutError {
-		LOG.Error("%s %s internal error: %v", sync, sync.reader.Name(), err)
+	} else if err != nil && err.Error() != sourceReader.TimeoutError.Error() {
+		_ = LOG.Error("%s %s internal error: %v", sync, sync.reader.Name(), err)
 		// error is nil indicate that only timeout incur syncer.next()
 		// return false. so we regardless that
 		if sync.isCrashError(err.Error()) {
@@ -571,7 +573,7 @@ func (sync *OplogSyncer) next() bool {
 }
 
 func (sync *OplogSyncer) checkShutdown() {
-	// single run, no need to adding lock or CAS
+	// single run, no need to add lock or CAS
 	if (!utils.IncrSentinelOptions.Shutdown && utils.IncrSentinelOptions.ExitPoint <= 0) ||
 		sync.SyncGroup == nil || sync.shutdownWorking {
 		return
