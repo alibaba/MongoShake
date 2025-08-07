@@ -133,7 +133,45 @@ func TestNamespaceFilter(t *testing.T) {
 			},
 		}
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
-		assert.Equal(t, 2, len(log.Object[0].Value.([]bson.D)), "should be equal")
+		assert.Equal(t, 2, len(log.Object[0].Value.([]interface{})), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestNamespaceFilter case %d.\n", nr)
+		nr++
+
+		filter := NewNamespaceFilter([]string{"zz.mmm"}, nil)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key: "applyOps",
+						Value: []bson.D{
+							{
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.mmm"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "a", Value: 1},
+									bson.E{Key: "_id", Value: "xxx"},
+								}},
+							},
+							{
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.x"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "xyz", Value: "ff"},
+									bson.E{Key: "_id", Value: "yyy"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+		assert.Equal(t, 1, len(log.Object[0].Value.([]interface{})), "should be equal")
 	}
 
 	{
@@ -171,7 +209,7 @@ func TestNamespaceFilter(t *testing.T) {
 			},
 		}
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
-		assert.Equal(t, 2, len(log.Object[0].Value.([]bson.D)), "should be equal")
+		assert.Equal(t, 1, len(log.Object[0].Value.([]interface{})), "should be equal")
 	}
 }
 
