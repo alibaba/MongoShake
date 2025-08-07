@@ -231,7 +231,7 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 				len(models), ns, err, err, res)
 		} else {
 			_ = LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
-				len(models), ns, bulkErr.WriteErrors[0], res)
+				len(models), ns, bulkErr, res)
 		}
 
 		var updateModels []mongo.WriteModel

@@ -36,8 +36,14 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, opts)
 
 	if err != nil {
-		_ = LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
-			len(models), database+"."+collection, (err.(mongo.BulkWriteException)).WriteErrors[0], res)
+		bulkErr, ok := err.(mongo.BulkWriteException)
+		if !ok {
+			_ = LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[type:%T err:%v] res[%v]",
+				len(models), database+"."+collection, err, err, res)
+		} else {
+			_ = LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
+				len(models), database+"."+collection, bulkErr, res)
+		}
 
 		if utils.DuplicateKey(err) {
 			RecordDuplicatedOplog(bw.conn, collection, oplogs)

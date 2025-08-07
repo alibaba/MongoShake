@@ -501,7 +501,7 @@ func (sync *OplogSyncer) deserializer(index int) {
 			sync.LastFetchTs = deserializeLogs[0].Parsed.Timestamp
 		}
 		sync.logsQueue[index] <- deserializeLogs
-		LOG.Info("deserializer[%v] send %d to logsQueue, pending: %d", index, len(deserializeLogs), nPending)
+		LOG.Debug("deserializer[%v] send %d to logsQueue, pending: %d", index, len(deserializeLogs), nPending)
 	}
 }
 
