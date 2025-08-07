@@ -28,7 +28,7 @@ const (
 
 func mockDeleteOplogRecord(oId interface{}) *OplogRecord {
 	or := &OplogRecord{
-		original: &PartialLogWithCallbak{
+		original: &PartialLogWithCallback{
 			partialLog: &oplog.PartialLog{
 				ParsedLog: oplog.ParsedLog{
 					Object: bson.D{
@@ -45,7 +45,7 @@ func mockDeleteOplogRecord(oId interface{}) *OplogRecord {
 }
 func mockOplogRecord(oId, oX interface{}, o2Id int) *OplogRecord {
 	or := &OplogRecord{
-		original: &PartialLogWithCallbak{
+		original: &PartialLogWithCallback{
 			partialLog: &oplog.PartialLog{
 				ParsedLog: oplog.ParsedLog{
 					Object: bson.D{
@@ -84,7 +84,7 @@ func objectIdFromInt(num int64) primitive.ObjectID {
 func TestSingleWriter(t *testing.T) {
 	// test single writer
 
-	utils.InitialLogger("", "", "debug", true, 1)
+	_ = utils.InitialLogger("", "", "debug", true, 1)
 
 	var nr int
 
@@ -106,11 +106,11 @@ func TestSingleWriter(t *testing.T) {
 		inserts := []*OplogRecord{mockOplogRecord(1, 1, -1)}
 
 		// write 1
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// update 1->2
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, []*OplogRecord{
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, []*OplogRecord{
 			mockOplogRecord(1, 10, 1),
 		}, false)
 		assert.Equal(t, nil, err, "should be equal")
@@ -123,7 +123,7 @@ func TestSingleWriter(t *testing.T) {
 		assert.Equal(t, int32(1), result[0]["_id"], "should be equal")
 
 		// delete 2
-		err = writer.doDelete(testDb, testCollection, bson.M{}, []*OplogRecord{
+		err = writer.doDelete(testDb, testCollection, bson.E{}, []*OplogRecord{
 			mockDeleteOplogRecord(1),
 		})
 		assert.Equal(t, nil, err, "should be equal")
@@ -153,28 +153,28 @@ func TestSingleWriter(t *testing.T) {
 		inserts := []*OplogRecord{
 			mockOplogRecord(objectIdFromInt(123456789011), 1, -1),
 		}
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// write 1 again(do update)
 		inserts = []*OplogRecord{
 			mockOplogRecord(objectIdFromInt(123456789011), int32(10000), -1),
 		}
-		err = writer.doUpdateOnInsert(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// upsert write 2(update do not exit, then insert)
 		inserts = []*OplogRecord{
 			mockOplogRecord(objectIdFromInt(123456789012), int32(10000), -1),
 		}
-		err = writer.doUpdateOnInsert(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// write 2 again
 		inserts = []*OplogRecord{
 			mockOplogRecord(objectIdFromInt(123456789012), int32(20000), -1),
 		}
-		err = writer.doUpdateOnInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// query
@@ -190,7 +190,8 @@ func TestSingleWriter(t *testing.T) {
 		fmt.Printf("TestSingleWriter case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		writer := NewDbWriter(conn, bson.E{}, false, 1)
@@ -213,7 +214,7 @@ func TestSingleWriter(t *testing.T) {
 			mockOplogRecord(objectIdFromInt(123456789012), 10, -1),
 		}
 		// write 1
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// write 1 again
@@ -221,7 +222,7 @@ func TestSingleWriter(t *testing.T) {
 			mockOplogRecord(objectIdFromInt(123456789011), 10, -1),
 		}
 		// write 1
-		err = writer.doUpdateOnInsert(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// query
@@ -242,7 +243,8 @@ func TestSingleWriter(t *testing.T) {
 		fmt.Printf("TestSingleWriter case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		writer := NewDbWriter(conn, bson.E{}, false, 0)
@@ -261,18 +263,18 @@ func TestSingleWriter(t *testing.T) {
 		}
 
 		// write 1
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// update 6->10
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, []*OplogRecord{
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, []*OplogRecord{
 			mockOplogRecord(6, 10, 6),
 		}, false)
 		assert.NotEqual(t, nil, err, "should be equal")
 		fmt.Printf("err:%v\n", err)
 
 		// upsert 6->10
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, []*OplogRecord{
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, []*OplogRecord{
 			mockOplogRecord(6, 10, 6),
 		}, true)
 		assert.Equal(t, nil, err, "should be equal")
@@ -291,13 +293,13 @@ func TestSingleWriter(t *testing.T) {
 		assert.Equal(t, int32(6), result[5]["_id"], "should be equal")
 
 		// dupInsert but ignore
-		err = writer.doInsert(testDb, testCollection, bson.M{}, []*OplogRecord{
+		err = writer.doInsert(testDb, testCollection, bson.E{}, []*OplogRecord{
 			mockOplogRecord(1, 30, 1),
 		}, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// dupInsert -> update
-		err = writer.doInsert(testDb, testCollection, bson.M{}, []*OplogRecord{
+		err = writer.doInsert(testDb, testCollection, bson.E{}, []*OplogRecord{
 			mockOplogRecord(1, 30, 1),
 		}, true)
 		assert.Equal(t, nil, err, "should be equal")
@@ -310,7 +312,7 @@ func TestSingleWriter(t *testing.T) {
 		assert.Equal(t, int32(30), result[0]["x"], "should be equal")
 
 		// delete not found
-		err = writer.doDelete(testDb, testCollection, bson.M{}, []*OplogRecord{
+		err = writer.doDelete(testDb, testCollection, bson.E{}, []*OplogRecord{
 			mockDeleteOplogRecord(20),
 		})
 		assert.Equal(t, nil, err, "should be equal")
@@ -321,7 +323,8 @@ func TestSingleWriter(t *testing.T) {
 		fmt.Printf("TestSingleWriter case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop database
@@ -334,7 +337,7 @@ func TestSingleWriter(t *testing.T) {
 			mockOplogRecord(2, 2, -1),
 			mockOplogRecord(3, 3, -1),
 			{
-				original: &PartialLogWithCallbak{
+				original: &PartialLogWithCallback{
 					partialLog: &oplog.PartialLog{
 						ParsedLog: oplog.ParsedLog{
 							Object: bson.D{
@@ -352,7 +355,7 @@ func TestSingleWriter(t *testing.T) {
 				},
 			},
 		}
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
@@ -365,7 +368,7 @@ func TestSingleWriter(t *testing.T) {
 		updates := []*OplogRecord{
 			mockOplogRecord(1, 10, 1),
 			{
-				original: &PartialLogWithCallbak{
+				original: &PartialLogWithCallback{
 					partialLog: &oplog.PartialLog{
 						ParsedLog: oplog.ParsedLog{
 							Timestamp: primitive.Timestamp{T: 0, I: 1},
@@ -389,7 +392,7 @@ func TestSingleWriter(t *testing.T) {
 			mockOplogRecord(2, 20, 2),
 			mockOplogRecord(3, 30, 3),
 		}
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, true)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, updates, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
@@ -437,7 +440,7 @@ func TestSingleWriter(t *testing.T) {
 			mockOplogRecord(2, 2, 1),
 		}
 
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, inserts, true)
 		assert.NotEqual(t, nil, err, "should be equal")
 		assert.Equal(t, true, strings.Contains(err.Error(), "Failed to target upsert by query"), "should be equal")
 		fmt.Println(err)
@@ -450,7 +453,7 @@ func TestSingleWriter(t *testing.T) {
 			{"_id", 2},
 			{"x", 2},
 		}
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// query
@@ -477,7 +480,7 @@ func TestSingleWriter(t *testing.T) {
 		}
 
 		// see https://github.com/alibaba/MongoShake/issues/380 (go-driver is in session(transaction) by default)
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts2, true)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts2, true)
 		assert.Equal(t, nil, err, "should be equal")
 		// assert.Equal(t, true, strings.Contains(err.Error(), "Must run update to shard key"), "should be equal")
 
@@ -495,7 +498,7 @@ func TestSingleWriter(t *testing.T) {
 func TestBulkWriter(t *testing.T) {
 	// test bulk writer
 
-	utils.InitialLogger("", "", "debug", true, 1)
+	_ = utils.InitialLogger("", "", "debug", true, 1)
 
 	var nr int
 
@@ -524,7 +527,7 @@ func TestBulkWriter(t *testing.T) {
 		}
 
 		// write 1
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// 4-8
@@ -537,7 +540,7 @@ func TestBulkWriter(t *testing.T) {
 		}
 
 		// write 1
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// query
@@ -562,7 +565,7 @@ func TestBulkWriter(t *testing.T) {
 		}
 
 		// write 1
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// query
@@ -581,7 +584,7 @@ func TestBulkWriter(t *testing.T) {
 			mockDeleteOplogRecord(10),
 			mockDeleteOplogRecord(11), // not found
 		}
-		err = writer.doDelete(testDb, testCollection, bson.M{}, deletes)
+		err = writer.doDelete(testDb, testCollection, bson.E{}, deletes)
 		assert.Equal(t, nil, err, "should be equal") // won't throw error if not found
 
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
@@ -609,14 +612,14 @@ func TestBulkWriter(t *testing.T) {
 		inserts := []*OplogRecord{
 			mockOplogRecord(objectIdFromInt(123456789011), 1, -1),
 		}
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// write 1 again(do update)
 		inserts = []*OplogRecord{
 			mockOplogRecord(objectIdFromInt(123456789011), int32(10000), -1),
 		}
-		err = writer.doUpdateOnInsert(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// write 1 again(do update)
@@ -627,21 +630,21 @@ func TestBulkWriter(t *testing.T) {
 			{"_id", objectIdFromInt(123456789011)},
 			{"x", int32(10000)},
 		}
-		err = writer.doUpdateOnInsert(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// upsert write 2(update do not exit, then insert)
 		inserts = []*OplogRecord{
 			mockOplogRecord(objectIdFromInt(123456789012), int32(10000), -1),
 		}
-		err = writer.doUpdateOnInsert(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// write 2 again
 		inserts = []*OplogRecord{
 			mockOplogRecord(objectIdFromInt(123456789012), int32(20000), -1),
 		}
-		err = writer.doUpdateOnInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// upsert + update
@@ -649,7 +652,7 @@ func TestBulkWriter(t *testing.T) {
 			mockOplogRecord(objectIdFromInt(123456789012), int32(20001), -1),
 			mockOplogRecord(objectIdFromInt(123456789013), int32(30000), -1),
 		}
-		err = writer.doUpdateOnInsert(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// query
@@ -665,7 +668,8 @@ func TestBulkWriter(t *testing.T) {
 		fmt.Printf("TestBulkWriter case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop database
@@ -684,7 +688,7 @@ func TestBulkWriter(t *testing.T) {
 		}
 
 		// write 1
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// update not exist
@@ -695,7 +699,7 @@ func TestBulkWriter(t *testing.T) {
 		}
 
 		// not work
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, false)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, updates, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
@@ -712,7 +716,7 @@ func TestBulkWriter(t *testing.T) {
 		}
 
 		// upsert
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, true)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, updates, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
@@ -731,7 +735,7 @@ func TestBulkWriter(t *testing.T) {
 			mockDeleteOplogRecord(999), // not exist
 		}
 
-		err = writer.doDelete(testDb, testCollection, bson.M{}, deletes)
+		err = writer.doDelete(testDb, testCollection, bson.E{}, deletes)
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
 		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
@@ -743,7 +747,8 @@ func TestBulkWriter(t *testing.T) {
 		fmt.Printf("TestBulkWriter case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop database
@@ -762,7 +767,7 @@ func TestBulkWriter(t *testing.T) {
 		}
 
 		// write 1
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// build index
@@ -782,7 +787,7 @@ func TestBulkWriter(t *testing.T) {
 		}
 
 		// upsert = false
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, false)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, updates, false)
 		assert.NotEqual(t, nil, err, "should be equal")
 		fmt.Println(err)
 
@@ -794,7 +799,7 @@ func TestBulkWriter(t *testing.T) {
 		assert.Equal(t, int32(3), result[2]["x"], "should be equal")
 
 		// upsert
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, true)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, updates, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
@@ -811,9 +816,10 @@ func TestBulkWriter(t *testing.T) {
 		fmt.Printf("TestBulkWriter case %d.\n", nr)
 		nr++
 
-		utils.InitialLogger("", "", "info", true, 1)
+		_ = utils.InitialLogger("", "", "info", true, 1)
 
-		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop database
@@ -826,7 +832,7 @@ func TestBulkWriter(t *testing.T) {
 			mockOplogRecord(2, 2, -1),
 			mockOplogRecord(3, 3, -1),
 			{
-				original: &PartialLogWithCallbak{
+				original: &PartialLogWithCallback{
 					partialLog: &oplog.PartialLog{
 						ParsedLog: oplog.ParsedLog{
 							Object: bson.D{
@@ -844,7 +850,7 @@ func TestBulkWriter(t *testing.T) {
 				},
 			},
 		}
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
@@ -857,7 +863,7 @@ func TestBulkWriter(t *testing.T) {
 		updates := []*OplogRecord{
 			mockOplogRecord(1, 10, 1),
 			{
-				original: &PartialLogWithCallbak{
+				original: &PartialLogWithCallback{
 					partialLog: &oplog.PartialLog{
 						ParsedLog: oplog.ParsedLog{
 							Timestamp: primitive.Timestamp{T: 0, I: 1},
@@ -879,7 +885,7 @@ func TestBulkWriter(t *testing.T) {
 			mockOplogRecord(2, 20, 2),
 			mockOplogRecord(3, 30, 3),
 		}
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, true)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, updates, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
@@ -927,7 +933,7 @@ func TestBulkWriter(t *testing.T) {
 			mockOplogRecord(2, 2, 2),
 		}
 
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, inserts, true)
 		assert.NotEqual(t, nil, err, "should be equal")
 		assert.Equal(t, true, strings.Contains(err.Error(),
 			"Failed to target upsert by query"), "should be equal")
@@ -941,7 +947,7 @@ func TestBulkWriter(t *testing.T) {
 			{"_id", 2},
 			{"x", 2},
 		}
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// query
@@ -968,7 +974,7 @@ func TestBulkWriter(t *testing.T) {
 		}
 
 		// see https://github.com/alibaba/MongoShake/issues/380(go-driver is in session(transaction) by default)
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts2, true)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts2, true)
 		fmt.Printf("err:%v\n", err)
 		assert.Equal(t, nil, err, "should be equal")
 		//assert.Equal(t, true, strings.Contains(err.Error(), "Must run update to shard key"), "should be equal")
@@ -986,7 +992,7 @@ func TestBulkWriter(t *testing.T) {
 
 func TestCommandWriter(t *testing.T) {
 
-	utils.InitialLogger("", "", "debug", true, 1)
+	_ = utils.InitialLogger("", "", "debug", true, 1)
 
 	var nr int
 
@@ -1015,7 +1021,7 @@ func TestCommandWriter(t *testing.T) {
 		}
 
 		// write 1
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// 4-8
@@ -1028,7 +1034,7 @@ func TestCommandWriter(t *testing.T) {
 		}
 
 		// write 1
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// query
@@ -1053,7 +1059,7 @@ func TestCommandWriter(t *testing.T) {
 		}
 
 		// write 1
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// query
@@ -1072,7 +1078,7 @@ func TestCommandWriter(t *testing.T) {
 			mockDeleteOplogRecord(10),
 			mockDeleteOplogRecord(11), // not found
 		}
-		err = writer.doDelete(testDb, testCollection, bson.M{}, deletes)
+		err = writer.doDelete(testDb, testCollection, bson.E{}, deletes)
 		assert.Equal(t, nil, err, "should be equal") // won't throw error if not found
 
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
@@ -1100,14 +1106,14 @@ func TestCommandWriter(t *testing.T) {
 		inserts := []*OplogRecord{
 			mockOplogRecord(objectIdFromInt(123456789011), 1, -1),
 		}
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// write 1 again(do update)
 		inserts = []*OplogRecord{
 			mockOplogRecord(objectIdFromInt(123456789011), int32(10000), -1),
 		}
-		err = writer.doUpdateOnInsert(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// write 1 again(do update)
@@ -1118,21 +1124,21 @@ func TestCommandWriter(t *testing.T) {
 			{"_id", objectIdFromInt(123456789011)},
 			{"x", int32(10000)},
 		}
-		err = writer.doUpdateOnInsert(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// upsert write 2(update do not exit, then insert)
 		inserts = []*OplogRecord{
 			mockOplogRecord(objectIdFromInt(123456789012), int32(10000), -1),
 		}
-		err = writer.doUpdateOnInsert(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// write 2 again
 		inserts = []*OplogRecord{
 			mockOplogRecord(objectIdFromInt(123456789012), int32(20000), -1),
 		}
-		err = writer.doUpdateOnInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// upsert + update
@@ -1140,7 +1146,7 @@ func TestCommandWriter(t *testing.T) {
 			mockOplogRecord(objectIdFromInt(123456789012), int32(20001), -1),
 			mockOplogRecord(objectIdFromInt(123456789013), int32(30000), -1),
 		}
-		err = writer.doUpdateOnInsert(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// query
@@ -1158,7 +1164,8 @@ func TestCommandWriter(t *testing.T) {
 		fmt.Printf("TestCommandWriter case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop database
@@ -1177,7 +1184,7 @@ func TestCommandWriter(t *testing.T) {
 		}
 
 		// write 1
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// update not exist
@@ -1188,7 +1195,7 @@ func TestCommandWriter(t *testing.T) {
 		}
 
 		// not work
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, false)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, updates, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
@@ -1205,7 +1212,7 @@ func TestCommandWriter(t *testing.T) {
 		}
 
 		// upsert
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, true)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, updates, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
@@ -1224,7 +1231,7 @@ func TestCommandWriter(t *testing.T) {
 			mockDeleteOplogRecord(999), // not exist
 		}
 
-		err = writer.doDelete(testDb, testCollection, bson.M{}, deletes)
+		err = writer.doDelete(testDb, testCollection, bson.E{}, deletes)
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
 		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
 		assert.Equal(t, nil, err, "should be equal")
@@ -1236,7 +1243,8 @@ func TestCommandWriter(t *testing.T) {
 		fmt.Printf("TestCommandWriter case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop database
@@ -1255,7 +1263,7 @@ func TestCommandWriter(t *testing.T) {
 		}
 
 		// write 1
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// build index
@@ -1274,8 +1282,8 @@ func TestCommandWriter(t *testing.T) {
 			mockOplogRecord(11, 110, 11),
 		}
 
-		// upsert = false(doUpdate will ingore dup error)
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, false)
+		// upsert = false(doUpdate will ignore dup error)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, updates, false)
 		assert.Equal(t, nil, err, "should be equal")
 		fmt.Println(err)
 
@@ -1287,7 +1295,7 @@ func TestCommandWriter(t *testing.T) {
 		assert.Equal(t, int32(3), result[2]["x"], "should be equal")
 
 		// upsert
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, true)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, updates, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
@@ -1304,9 +1312,10 @@ func TestCommandWriter(t *testing.T) {
 		fmt.Printf("TestCommandWriter case %d.\n", nr)
 		nr++
 
-		utils.InitialLogger("", "", "info", true, 1)
+		_ = utils.InitialLogger("", "", "info", true, 1)
 
-		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop database
@@ -1319,7 +1328,7 @@ func TestCommandWriter(t *testing.T) {
 			mockOplogRecord(2, 2, -1),
 			mockOplogRecord(3, 3, -1),
 			{
-				original: &PartialLogWithCallbak{
+				original: &PartialLogWithCallback{
 					partialLog: &oplog.PartialLog{
 						ParsedLog: oplog.ParsedLog{
 							Object: bson.D{
@@ -1337,7 +1346,7 @@ func TestCommandWriter(t *testing.T) {
 				},
 			},
 		}
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts, false)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
 		assert.Equal(t, nil, err, "should be equal")
 
 		opts := options.Find().SetSort(bson.D{{"_id", 1}})
@@ -1350,7 +1359,7 @@ func TestCommandWriter(t *testing.T) {
 		updates := []*OplogRecord{
 			mockOplogRecord(1, 10, 1),
 			{
-				original: &PartialLogWithCallbak{
+				original: &PartialLogWithCallback{
 					partialLog: &oplog.PartialLog{
 						ParsedLog: oplog.ParsedLog{
 							Timestamp: primitive.Timestamp{T: 0, I: 1},
@@ -1370,7 +1379,7 @@ func TestCommandWriter(t *testing.T) {
 			mockOplogRecord(2, 20, 2),
 			mockOplogRecord(3, 30, 3),
 		}
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, updates, true)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, updates, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		result, err = unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, opts)
@@ -1418,13 +1427,13 @@ func TestCommandWriter(t *testing.T) {
 			mockOplogRecord(2, 2, 2),
 		}
 
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, inserts, true)
 		assert.NotEqual(t, nil, err, "should be equal")
 		assert.Equal(t, true, strings.Contains(err.Error(),
 			"Failed to target upsert by query"), "should be equal")
 		fmt.Println(err)
 
-		// filter have _id & shardkey will update succ
+		// filter have _id & shardKey will update successfully
 		inserts[0].original.partialLog.Query = bson.D{
 			{"_id", 1},
 			{"x", 1},
@@ -1433,7 +1442,7 @@ func TestCommandWriter(t *testing.T) {
 			{"_id", 2},
 			{"x", 2},
 		}
-		err = writer.doUpdate(testDb, testCollection, bson.M{}, inserts, true)
+		err = writer.doUpdate(testDb, testCollection, bson.E{}, inserts, true)
 		assert.Equal(t, nil, err, "should be equal")
 
 		// query
@@ -1459,7 +1468,7 @@ func TestCommandWriter(t *testing.T) {
 			{"x", 3},
 		}
 
-		err = writer.doInsert(testDb, testCollection, bson.M{}, inserts2, true)
+		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts2, true)
 		fmt.Printf("err:%v\n", err)
 		//assert.Equal(t, nil, err, "should be equal")
 
@@ -1477,7 +1486,7 @@ func TestCommandWriter(t *testing.T) {
 func TestRunCommand(t *testing.T) {
 	// test RunCommand
 
-	utils.InitialLogger("", "", "debug", true, 1)
+	_ = utils.InitialLogger("", "", "debug", true, 1)
 
 	var nr int
 
@@ -1486,7 +1495,8 @@ func TestRunCommand(t *testing.T) {
 		fmt.Printf("TestRunCommand case %d.\n", nr)
 		nr++
 
-		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 		assert.Equal(t, nil, err, "should be equal")
 
 		// drop database
@@ -1658,7 +1668,7 @@ func TestRunCommand(t *testing.T) {
 					},
 					bson.E{
 						Key:   "unique",
-						Value: "true",
+						Value: true,
 					},
 					bson.E{
 						Key:   "v",
@@ -1685,7 +1695,7 @@ func TestRunCommand(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		indexes := make([]bson.M, 0)
-		cursor.All(nil, &indexes)
+		_ = cursor.All(nil, &indexes)
 		fmt.Printf("indexes:%v\n", indexes)
 
 		exist := false
@@ -1729,7 +1739,7 @@ func TestRunCommand(t *testing.T) {
 					},
 					bson.E{
 						Key:   "unique",
-						Value: "true",
+						Value: true,
 					},
 					bson.E{
 						Key:   "v",
@@ -1748,18 +1758,18 @@ func TestRunCommand(t *testing.T) {
 				},
 			},
 		}
-		oplogRecord := &OplogRecord{original: &PartialLogWithCallbak{
+		oplogRecord := &OplogRecord{original: &PartialLogWithCallback{
 			partialLog: log,
 		}}
 
-		err = writer.doCommand("zz", bson.M{}, []*OplogRecord{oplogRecord})
+		err = writer.doCommand("zz", bson.E{}, []*OplogRecord{oplogRecord})
 		assert.Equal(t, nil, err, "should be equal")
 
 		cursor, err := conn.Client.Database("zz").Collection("y").Indexes().List(context.Background())
 		assert.Equal(t, nil, err, "should be equal")
 
 		indexes := make([]bson.M, 0)
-		cursor.All(nil, &indexes)
+		_ = cursor.All(nil, &indexes)
 		fmt.Printf("indexes:%v\n", indexes)
 
 		exist := false
@@ -1801,13 +1811,13 @@ func TestRunCommand(t *testing.T) {
 						Key: "indexes",
 						Value: []bson.D{
 							{
-								{"unique", "true"},
+								{"unique", true},
 								{"v", 2},
 								{"name", "x_1"},
 								{"key", bson.D{{"x", 1}}},
 							},
 							{
-								{"unique", "true"},
+								{"unique", true},
 								{"v", 2},
 								{"name", "id_x_1"},
 								{"key", bson.D{{"_id", 1}, {"x", 1}}},
@@ -1825,7 +1835,7 @@ func TestRunCommand(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		indexes := make([]bson.M, 0)
-		cursor.All(nil, &indexes)
+		_ = cursor.All(nil, &indexes)
 		fmt.Printf("indexes:%v\n", indexes)
 
 		exist := false
@@ -1871,7 +1881,7 @@ func TestRunCommand(t *testing.T) {
 						Key: "indexes",
 						Value: []bson.D{
 							{
-								{"unique", "true"},
+								{"unique", true},
 								{"v", 2},
 								{"name", "x_1"},
 								{"key", bson.D{{"x", 1}}},
@@ -1881,18 +1891,18 @@ func TestRunCommand(t *testing.T) {
 				},
 			},
 		}
-		oplogRecord := &OplogRecord{original: &PartialLogWithCallbak{
+		oplogRecord := &OplogRecord{original: &PartialLogWithCallback{
 			partialLog: log,
 		}}
 
-		err = writer.doCommand("hh", bson.M{}, []*OplogRecord{oplogRecord})
+		err = writer.doCommand("hh", bson.E{}, []*OplogRecord{oplogRecord})
 		assert.Equal(t, nil, err, "should be equal")
 
 		cursor, err := conn.Client.Database("hh").Collection("y").Indexes().List(context.Background())
 		assert.Equal(t, nil, err, "should be equal")
 
 		indexes := make([]bson.M, 0)
-		cursor.All(nil, &indexes)
+		_ = cursor.All(nil, &indexes)
 		fmt.Printf("indexes:%v\n", indexes)
 
 		exist := false

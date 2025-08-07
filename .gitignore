@@ -25,11 +25,10 @@ data
 .cache/
 diagnostic/
 *.pid
-src/vendor/
-!vendor.json
 bin/
 /cmd/collector/collector
 /cmd/receiver/receiver
 conf/
-!conf/collector.conf
-!conf/receiver.conf
+
+#for unit test
+unit_test_common/include.go

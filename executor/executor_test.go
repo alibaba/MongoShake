@@ -20,7 +20,7 @@ func mockLogs(op, ns string, size int, cb bool) *OplogRecord {
 	}
 
 	return &OplogRecord{
-		original: &PartialLogWithCallbak{
+		original: &PartialLogWithCallback{
 			partialLog: &oplog.PartialLog{
 				ParsedLog: oplog.ParsedLog{
 					Namespace: ns,
@@ -200,7 +200,7 @@ func TestMergeToGroups(t *testing.T) {
 
 func mockTransLogs(op, ns string, logObject bson.D) *OplogRecord {
 	return &OplogRecord{
-		original: &PartialLogWithCallbak{
+		original: &PartialLogWithCallback{
 			partialLog: &oplog.PartialLog{
 				ParsedLog: oplog.ParsedLog{
 					Namespace: ns,

@@ -36,7 +36,7 @@ var (
 	ThresholdVersion string = "3.2.0"
 )
 
-type PartialLogWithCallbak struct {
+type PartialLogWithCallback struct {
 	partialLog *oplog.PartialLog
 	callback   func()
 }
@@ -48,7 +48,7 @@ type BatchGroupExecutor struct {
 	ReplayerId uint32
 	// mongo url
 	MongoUrl string
-	// tranform namespace
+	// transform namespace
 	NsTrans *transform.NamespaceTransform
 	// init sync finish timestamp
 	FullFinishTs int64
@@ -58,7 +58,7 @@ func (batchExecutor *BatchGroupExecutor) Start() {
 	// max concurrent execute connection sets to 64. And the total
 	// conns = number of executor * number of batchExecutor. Normally max
 	// is 64. if collector hashed oplogRecords by _id and the number of collector
-	// is bigger we will use single executer in respective batchExecutor
+	// is bigger we will use single executor in respective batchExecutor
 	parallel := conf.Options.IncrSyncExecutor
 	if len(conf.Options.TransformNamespace) > 0 {
 		batchExecutor.NsTrans = transform.NewNamespaceTransform(conf.Options.TransformNamespace)
@@ -79,10 +79,10 @@ func (batchExecutor *BatchGroupExecutor) Sync(rawLogs []*oplog.PartialLog, callb
 		return
 	}
 
-	logs := make([]*PartialLogWithCallbak, len(rawLogs), len(rawLogs))
+	logs := make([]*PartialLogWithCallback, len(rawLogs), len(rawLogs))
 	// populate the batch buffer first
 	for i, rawLog := range rawLogs {
-		logs[i] = &PartialLogWithCallbak{partialLog: rawLog}
+		logs[i] = &PartialLogWithCallback{partialLog: rawLog}
 	}
 	// only the last oplog message would be notified
 	logs[len(logs)-1].callback = callback
@@ -90,11 +90,11 @@ func (batchExecutor *BatchGroupExecutor) Sync(rawLogs []*oplog.PartialLog, callb
 	batchExecutor.replay(logs)
 }
 
-func (batchExecutor *BatchGroupExecutor) replay(logs []*PartialLogWithCallbak) {
+func (batchExecutor *BatchGroupExecutor) replay(logs []*PartialLogWithCallback) {
 	// TODO: skip the oplogRecords which has been replayed
 	//  lastTs := utils.TimestampToInt64(logs[len(logs)-1].partialLog.Timestamp)
 	//	if batchExecutor.replayer.Ack >= lastTs {
-	//		// every oplog in buffer have been alread executed in previously
+	//		// every oplog in buffer have been already executed in previously
 	//		// so discard them simply. Even the smaller timestamp oplogRecords has
 	//		// been changed(other collector or other mongos source)
 	//		return
@@ -254,7 +254,7 @@ func (exec *Executor) doSync(logs []*OplogRecord) error {
 		}
 	}
 
-	LOG.Info("Replayer-%d Executor-%d doSync oplogRecords received[%d] merged[%d]. merge to %.2f%% chunks",
+	LOG.Info("Replay-%d Executor-%d doSync oplogRecords received[%d] merged[%d]. merge to %.2f%% chunks",
 		exec.batchExecutor.ReplayerId, exec.id, count, len(oplogGroups), float32(len(oplogGroups))*100.00/float32(count))
 	return nil
 }
@@ -291,7 +291,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 	} else {
 		operation, found := oplog.ExtraCommandName(partialLog.Object)
 		if !found {
-			LOG.Warn("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
+			_ = LOG.Warn("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
 			return nil
 		}
 		switch operation {
@@ -302,7 +302,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 					oplog.SetFiled(idIndex.(bson.D), "ns", nsTrans.Transform(ns.(string)))
 				}
 			} else {
-				LOG.Warn("transformLogs meet unknown create command: %v", partialLog.Object)
+				_ = LOG.Warn("transformLogs meet unknown create command: %v", partialLog.Object)
 			}
 			fallthrough
 		case "createIndexes":
@@ -326,7 +326,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		case "emptycapped":
 			col, ok := oplog.GetKey(partialLog.Object, operation).(string)
 			if !ok {
-				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
+				_ = LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
 				return nil
 			}
 			partialLog.Namespace = nsTrans.Transform(fmt.Sprintf("%s.%s", db, col))
@@ -335,12 +335,12 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			// { "renameCollection" : "my.tbl", "to" : "my.my", "stayTemp" : false, "dropTarget" : false }
 			fromNs, ok := oplog.GetKey(partialLog.Object, operation).(string)
 			if !ok {
-				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
+				_ = LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
 				return nil
 			}
 			toNs, ok := oplog.GetKey(partialLog.Object, "to").(string)
 			if !ok {
-				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
+				_ = LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
 				return nil
 			}
 			partialLog.Namespace = nsTrans.Transform(fromNs)
@@ -358,7 +358,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 					subLog := oplog.NewPartialLog(m)
 					transSubLog := transformPartialLog(subLog, nsTrans, transformRef)
 					if transSubLog == nil {
-						LOG.Warn("transformPartialLog sublog %v return nil, ignore!", subLog)
+						_ = LOG.Warn("transformPartialLog sub log %v return nil, ignore!", subLog)
 						return nil
 					}
 					ops[i] = transSubLog.Dump(keys, false)

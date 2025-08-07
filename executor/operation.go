@@ -22,16 +22,16 @@ var ErrorsShouldSkip = map[int]string{
 func (exec *Executor) ensureConnection() bool {
 	// reconnect if necessary
 	if exec.conn == nil || !exec.conn.IsGood() {
-		writeContern := utils.ReadWriteConcernDefault
+		writeConcern := utils.ReadWriteConcernDefault
 		if conf.Options.FullSyncExecutorMajorityEnable {
-			writeContern = utils.ReadWriteConcernMajority
+			writeConcern = utils.ReadWriteConcernMajority
 		}
 
 		if conn, err := utils.NewMongoCommunityConn(exec.MongoUrl, utils.VarMongoConnectModePrimary, true,
-			utils.ReadWriteConcernDefault, writeContern,
+			utils.ReadWriteConcernDefault, writeConcern,
 			conf.Options.TunnelMongoSslRootCaFile); err != nil {
 
-			LOG.Critical("Connect to mongo cluster failed. %v", err)
+			_ = LOG.Critical("Connect to mongo cluster failed. %v", err)
 			return false
 		} else {
 			exec.conn = conn
@@ -61,7 +61,7 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 
 	if !conf.Options.IncrSyncExecutorDebug {
 		if !exec.ensureConnection() {
-			return fmt.Errorf("Replay-%d network connection lost . we would retry for next connecting",
+			return fmt.Errorf("replay-%d network connection lost. we would retry for next connecting",
 				exec.batchExecutor.ReplayerId)
 		}
 		// just use the first log. they have the same metadata
@@ -109,7 +109,8 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 			exec.addNsMapMetric(group.ns, "n", len(group.oplogRecords))
 		default:
 			atomic.AddUint64(&exec.metricUnknown, uint64(len(group.oplogRecords)))
-			LOG.Warn("Replay-%d meets unknown type oplogs found. op '%s'", exec.batchExecutor.ReplayerId, group.op)
+			_ = LOG.Warn("Replay-%d meets unknown type oplogs found. op '%s'",
+				exec.batchExecutor.ReplayerId, group.op)
 			exec.addNsMapMetric(group.ns, "x", len(group.oplogRecords))
 		}
 
@@ -121,7 +122,7 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 		}
 
 		if err != nil {
-			LOG.Critical("Replayer-%d, executor-%d, oplog for namespace[%s] op[%s] failed. error type[%v]"+
+			_ = LOG.Critical("Replay-%d, executor-%d, oplog for namespace[%s] op[%s] failed. error type[%v]"+
 				" error[%v], logs number[%d], firstLog: %s",
 				exec.batchExecutor.ReplayerId, exec.id, group.ns, group.op, reflect.TypeOf(err), err.Error(), count,
 				group.oplogRecords[0].original.partialLog)
@@ -154,7 +155,7 @@ func (exec *Executor) errorIgnore(err error) bool {
 		return false
 	}
 
-	for k, _ := range ErrorsShouldSkip {
+	for k := range ErrorsShouldSkip {
 		if er.HasErrorCode(k) {
 			return true
 		}
