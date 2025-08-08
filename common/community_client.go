@@ -58,7 +58,6 @@ func loadCert(data []byte) ([]byte, error) {
 		if data == nil || len(data) == 0 {
 			return nil, fmt.Errorf(".pem file must have both a CERTIFICATE and an RSA PRIVATE KEY section")
 		}
-
 		block, rest := pem.Decode(data)
 		if block == nil {
 			return nil, fmt.Errorf("invalid .pem file")
@@ -66,13 +65,8 @@ func loadCert(data []byte) ([]byte, error) {
 
 		switch block.Type {
 		case "CERTIFICATE":
-			if certBlock != nil {
-				return nil, fmt.Errorf("multiple CERTIFICATE sections in .pem file")
-			}
-
 			certBlock = block
 		}
-
 		data = rest
 	}
 
@@ -154,7 +148,7 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 	if err = client.Ping(ctx, clientOps.ReadPreference); err != nil {
 		return nil, fmt.Errorf("ping to %v failed: %v\n"+
 			"If Mongo Server is standalone(single node) Or conn address is different with mongo server address"+
-			" try atandalone mode by mongodb://ip:port/admin?connect=direct",
+			" try atandalone mode by mongodb://ip:port/admin?direct=ture",
 			BlockMongoUrlPassword(url, "***"), err)
 	}
 
@@ -168,7 +162,7 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 
 func (conn *MongoCommunityConn) Close() {
 	LOG.Info("Close client with %s", BlockMongoUrlPassword(conn.URL, "***"))
-	conn.Client.Disconnect(conn.ctx)
+	_ = conn.Client.Disconnect(conn.ctx)
 }
 
 func (conn *MongoCommunityConn) IsGood() bool {
@@ -179,8 +173,8 @@ func (conn *MongoCommunityConn) IsGood() bool {
 	return true
 }
 
-func (conn *MongoCommunityConn) HasOplogNs(queryConditon bson.M) bool {
-	if ns, err := conn.Client.Database("local").ListCollectionNames(nil, queryConditon); err == nil {
+func (conn *MongoCommunityConn) HasOplogNs(queryCondition bson.M) bool {
+	if ns, err := conn.Client.Database("local").ListCollectionNames(nil, queryCondition); err == nil {
 		for _, table := range ns {
 			if table == OplogNS {
 				return true
@@ -196,31 +190,31 @@ func (conn *MongoCommunityConn) AcquireReplicaSetName() string {
 	res, err := conn.Client.Database("admin").
 		RunCommand(conn.ctx, bson.D{{"replSetGetStatus", 1}}).DecodeBytes()
 	if err != nil {
-		LOG.Warn("Replica set name not found in system.replset: %v", err)
+		_ = LOG.Warn("Replica set name not found in system.replset: %v", err)
 		return ""
 	}
 
 	id, ok := res.Lookup("set").StringValueOK()
 	if !ok {
-		LOG.Warn("Replica set name not found, is empty")
+		_ = LOG.Warn("Replica set name not found, is empty")
 		return ""
 	}
 
 	return id
 }
 
-func (conn *MongoCommunityConn) HasUniqueIndex(queryConditon bson.M) bool {
+func (conn *MongoCommunityConn) HasUniqueIndex(queryCondition bson.M) bool {
 	checkNs := make([]NS, 0, 128)
 	var databases []string
 	var err error
 	if databases, err = conn.Client.ListDatabaseNames(nil, bson.M{}); err != nil {
-		LOG.Critical("Couldn't get databases from remote server: %v", err)
+		_ = LOG.Critical("Couldn't get databases from remote server: %v", err)
 		return false
 	}
 
 	for _, db := range databases {
 		if db != "admin" && db != "local" && db != "config" {
-			coll, _ := conn.Client.Database(db).ListCollectionNames(nil, queryConditon)
+			coll, _ := conn.Client.Database(db).ListCollectionNames(nil, queryCondition)
 			for _, c := range coll {
 				if c != "system.profile" {
 					// push all collections
@@ -235,8 +229,8 @@ func (conn *MongoCommunityConn) HasUniqueIndex(queryConditon bson.M) bool {
 		cursor, _ := conn.Client.Database(ns.Database).Collection(ns.Collection).Indexes().List(nil)
 		for cursor.Next(nil) {
 
-			unique, uerr := cursor.Current.LookupErr("unique")
-			if uerr == nil && unique.Boolean() == true {
+			unique, uErr := cursor.Current.LookupErr("unique")
+			if uErr == nil && unique.Boolean() == true {
 				LOG.Info("Found unique index %s on %s.%s in auto shard mode",
 					cursor.Current.Lookup("name").StringValue(), ns.Database, ns.Collection)
 				return true
@@ -254,7 +248,7 @@ func (conn *MongoCommunityConn) CurrentDate() primitive.Timestamp {
 
 	t, i, ok := res.Lookup("operationTime").TimestampOK()
 	if !ok {
-		LOG.Warn("Replica set operationTime not found, res[%v]", res)
+		_ = LOG.Warn("Replica set operationTime not found, res[%v]", res)
 		return primitive.Timestamp{T: uint32(time.Now().Unix()), I: 0}
 	}
 

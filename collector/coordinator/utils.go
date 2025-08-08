@@ -199,11 +199,12 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 	var mutex sync.Mutex
 	indexMap := make(map[utils.NS][]bson.D)
 	for _, src := range sourceList {
-		LOG.Info("source[%v %v] start fetching index", src.ReplicaName, utils.BlockMongoUrlPassword(src.URL, "***"))
+		LOG.Info("source[%v] url[%s] start fetching index...",
+			src.ReplicaName, utils.BlockMongoUrlPassword(src.URL, "***"))
 		// 1. fetch namespace
 		nsList, _, err := utils.GetDbNamespace(src.URL, filterFunc, conf.Options.MongoSslRootCaFile)
 		if err != nil {
-			return nil, fmt.Errorf("source[%v %v] get namespace failed: %v", src.ReplicaName, src.URL, err)
+			return nil, fmt.Errorf("source[%v] get namespace failed: %v", src.ReplicaName, err)
 		}
 
 		LOG.Info("index namespace list: %v", nsList)
@@ -211,16 +212,15 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 		conn, err := utils.NewMongoCommunityConn(src.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
 			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
-			return nil, fmt.Errorf("source[%v %v] build connection failed: %v", src.ReplicaName, src.URL, err)
+			return nil, fmt.Errorf("source[%v] build connection failed: %v", src.ReplicaName, err)
 		}
 		defer conn.Close() // it's acceptable to call defer here
 
 		// 3. fetch all indexes
 		for _, ns := range nsList {
-			// indexes, err := conn.Session.DB(ns.Database).C(ns.Collection).Indexes()
 			cursor, err := conn.Client.Database(ns.Database).Collection(ns.Collection).Indexes().List(nil)
 			if err != nil {
-				return nil, fmt.Errorf("source[%v %v] fetch index failed: %v", src.ReplicaName, src.URL, err)
+				return nil, fmt.Errorf("source[%v] fetch index failed: %v", src.ReplicaName, err)
 			}
 
 			indexes := make([]bson.D, 0)
@@ -233,7 +233,8 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 			mutex.Unlock()
 		}
 
-		LOG.Info("source[%v %v] finish fetching index", src.ReplicaName, utils.BlockMongoUrlPassword(src.URL, "***"))
+		LOG.Info("source[%v] url[%s] finish fetching index",
+			src.ReplicaName, utils.BlockMongoUrlPassword(src.URL, "***"))
 	}
 	return indexMap, nil
 }

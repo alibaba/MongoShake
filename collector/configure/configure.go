@@ -45,7 +45,7 @@ type Configuration struct {
 	CheckpointStartPosition                int64    `config:"checkpoint.start_position" type:"date"`
 	TransformNamespace                     []string `config:"transform.namespace"`
 	SpecialSourceDBFlag                    string   `config:"special.source.db.flag" type:"string"` // add v2.4.20
-	SkipNSShareKeyVerify                   []string `config:"skip.nsshardkey.verify"`               //add v2.8.2
+	SkipNSShareKeyVerify                   []string `config:"skip.nsshardkey.verify"`               // add v2.8.2
 
 	// 2. full sync
 	FullSyncReaderCollectionParallel     int    `config:"full_sync.reader.collection_parallel"`
@@ -61,6 +61,7 @@ type Configuration struct {
 	FullSyncExecutorInsertOnDupUpdate    bool   `config:"full_sync.executor.insert_on_dup_update"`
 	FullSyncExecutorFilterOrphanDocument bool   `config:"full_sync.executor.filter.orphan_document"`
 	FullSyncExecutorMajorityEnable       bool   `config:"full_sync.executor.majority_enable"`
+	FullSyncDoNotShardDest               bool   `config:"full_sync.do_not_shard_destination"` // add v2.8.6
 
 	// 3. incr sync
 	IncrSyncMongoFetchMethod               string   `config:"incr_sync.mongo_fetch_method"`
@@ -122,9 +123,9 @@ var Options Configuration
 
 func GetSafeOptions() Configuration {
 	polish := new(Configuration)
-	deepcopy.Copy(polish, &Options)
+	_ = deepcopy.Copy(polish, &Options)
 
-	// modify mongo_ulrs
+	// modify mongo_urls
 	for i := range Options.MongoUrls {
 		polish.MongoUrls[i] = utils.BlockMongoUrlPassword(Options.MongoUrls[i], "***")
 	}

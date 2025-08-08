@@ -45,7 +45,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	}
 	LOG.Info("Collector startup. shard_by[%s] gids[%s]", conf.Options.IncrSyncShardKey, conf.Options.IncrSyncOplogGIDS)
 
-	// run extra job if has
+	// run extra job if need
 	if err := RunExtraJob(coordinator.RealSourceIncrSync); err != nil {
 		return err
 	}
