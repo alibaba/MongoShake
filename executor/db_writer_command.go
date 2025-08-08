@@ -208,10 +208,10 @@ func (cw *CommandWriter) doCommand(database string, metadata bson.E, oplogs []*O
 		if conf.Options.FilterDDLEnable || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
 			if err = RunCommand(database, operation, log.original.partialLog, cw.conn.Client); err == nil {
-				LOG.Info("Execute command (op==c) oplog , operation [%s]", conf.Options.FilterDDLEnable,
+				LOG.Info("Execute command(op=c) oplog, operation[%s]", conf.Options.FilterDDLEnable,
 					operation)
 			} else if IgnoreError(err, "c", parseLastTimestamp(oplogs) <= cw.fullFinishTs) {
-				LOG.Debug("Ignore error[%v] [%s] [%v]", err, database, log.original.partialLog)
+				LOG.Debug("Ignore error[%v] db[%s] oplog[%v]", err, database, log.original.partialLog)
 				return nil
 			} else {
 				return err

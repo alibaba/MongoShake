@@ -334,19 +334,19 @@ func IgnoreError(err error, op string, isFullSyncStage bool) bool {
 	switch op {
 	case "i":
 		/*if isFullSyncStage {
-			if err == 11000 { // duplicate key
+			if err == 11000 { // DuplicateKey
 				continue
 			}
 		}*/
 	case "u":
 		if isFullSyncStage {
-			if er.HasErrorCode(28) || er.HasErrorCode(211) { // PathNotViable
+			if er.HasErrorCode(28) || er.HasErrorCode(211) { // PathNotViable or KeyNotFound
 				return true
 			}
 		}
 	case "ui":
 		if isFullSyncStage {
-			if er.HasErrorCode(11000) { // duplicate key
+			if er.HasErrorCode(11000) { // DuplicateKey
 				return true
 			}
 		}
@@ -355,7 +355,7 @@ func IgnoreError(err error, op string, isFullSyncStage bool) bool {
 			return true
 		}
 	case "c":
-		if er.HasErrorCode(26) { // NamespaceNotFound
+		if er.HasErrorCode(26) || er.HasErrorCode(48) { // NamespaceNotFound or NamespaceExists
 			return true
 		}
 	default:

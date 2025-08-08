@@ -122,12 +122,122 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 }
 
 /*
- 1. update oplog:
-    {"ts" : Timestamp(1582533077, 2),"t" : NumberLong(1),"h" : NumberLong(0),"v" : 2,"op" : "u","ns" : "zz.test","ui" : UUID("ee9b60d8-845f-42ff-989d-09018a730d60"),"o2" : {"_id" : ObjectId("5e5384f97dc0f30426f01b79")},"wall" : ISODate("2020-02-24T08:31:17.681Z"),"o" : {"$v" : 1,"$unset" : {"ok" : true},"$set" : {"plus_field" : 2}}}
- 2. replacement oplog:
-    {"ts":{"T":1664192510,"I":1},"t":1,"h":null,"v":2,"op":"u","ns":"test.car","o":[{"Key":"_id","Value":"63318f67024749a30fc12af6"},{"Key":"b","Value":3}],"o2":[{"Key":"_id","Value":"63318f67024749a30fc12af6"}],"PrevOpTime":null,"ui":{"Subtype":4,"Data":"3p7boGbmTvqYSWp42PaZnw=="}}
- 3. chunkSplit oplog:(NOTE: inside o.applyOps, with 'b' field)
-    {"op":"u","b":true,"ns":"config.chunks","o":{"_id":{"$oid":"6581397503de9a2282ff6cc9"},"lastmod":{"$timestamp":{"t":1,"i":1}},"lastmodEpoch":{"$oid":"6581397526a5b24c88d7a6d4"},"ns":"ycsb.test6","min":{"_id":{"$minKey":1}},"max":{"_id":{"$oid":"65813993ed6de3163ad08fe8"}},"shard":"d-bp1be4d809f7b554","history":[{"validAfter":{"$timestamp":{"t":1702967669,"i":1}},"shard":"d-bp1be4d809f7b554"}]},"o2":{"_id":{"$oid":"6581397503de9a2282ff6cc9"}},"ui":{"$binary":{"base64":"qo7OUh4jREO5XpfQ2m2XdQ==","subType":"04"}}}
+1. update oplog:
+
+	{
+	    "ts": Timestamp(1582533077,
+	    2),
+	    "t": NumberLong(1),
+	    "h": NumberLong(0),
+	    "v": 2,
+	    "op": "u",
+	    "ns": "zz.test",
+	    "ui": UUID("ee9b60d8-845f-42ff-989d-09018a730d60"),
+	    "o2": {
+	        "_id": ObjectId("5e5384f97dc0f30426f01b79")
+	    },
+	    "wall": ISODate("2020-02-24T08:31:17.681Z"),
+	    "o": {
+	        "$v": 1,
+	        "$unset": {
+	            "ok": true
+	        },
+	        "$set": {
+	            "plus_field": 2
+	        }
+	    }
+	}
+
+2. replacement oplog:
+
+	{
+	    "ts": {
+	        "T": 1664192510,
+	        "I": 1
+	    },
+	    "t": 1,
+	    "h": null,
+	    "v": 2,
+	    "op": "u",
+	    "ns": "test.car",
+	    "o": [
+	        {
+	            "Key": "_id",
+	            "Value": "63318f67024749a30fc12af6"
+	        },
+	        {
+	            "Key": "b",
+	            "Value": 3
+	        }
+	    ],
+	    "o2": [
+	        {
+	            "Key": "_id",
+	            "Value": "63318f67024749a30fc12af6"
+	        }
+	    ],
+	    "PrevOpTime": null,
+	    "ui": {
+	        "Subtype": 4,
+	        "Data": "3p7boGbmTvqYSWp42PaZnw=="
+	    }
+	}
+
+3. chunkSplit oplog: (NOTE:there's an 'b' field inside 'o.applyOps')
+
+	{
+	    "op": "u",
+	    "b": true,
+	    "ns": "config.chunks",
+	    "o": {
+	        "_id": {
+	            "$oid": "6581397503de9a2282ff6cc9"
+	        },
+	        "lastmod": {
+	            "$timestamp": {
+	                "t": 1,
+	                "i": 1
+	            }
+	        },
+	        "lastmodEpoch": {
+	            "$oid": "6581397526a5b24c88d7a6d4"
+	        },
+	        "ns": "ycsb.test6",
+	        "min": {
+	            "_id": {
+	                "$minKey": 1
+	            }
+	        },
+	        "max": {
+	            "_id": {
+	                "$oid": "65813993ed6de3163ad08fe8"
+	            }
+	        },
+	        "shard": "d-bp1be4d809f7b554",
+	        "history": [
+	            {
+	                "validAfter": {
+	                    "$timestamp": {
+	                        "t": 1702967669,
+	                        "i": 1
+	                    }
+	                },
+	                "shard": "d-bp1be4d809f7b554"
+	            }
+	        ]
+	    },
+	    "o2": {
+	        "_id": {
+	            "$oid": "6581397503de9a2282ff6cc9"
+	        }
+	    },
+	    "ui": {
+	        "$binary": {
+	            "base64": "qo7OUh4jREO5XpfQ2m2XdQ==",
+	            "subType": "04"
+	        }
+	    }
+	}
 */
 func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, oplogs []*OplogRecord, upsert bool) error {
 
@@ -273,12 +383,12 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.E, oplogs []*Oplo
 		if conf.Options.FilterDDLEnable || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
 			if err = RunCommand(database, operation, log.original.partialLog, bw.conn.Client); err == nil {
-				LOG.Info("Execute command (op==c) oplog, operation [%s]", operation)
+				LOG.Info("execute command(op=c) oplog, operation[%s]", operation)
 			} else if err.Error() == "ns not found" {
-				LOG.Info("Execute command (op==c) oplog, operation [%s], ignore error[ns not found]", operation)
+				LOG.Info("execute command(op=c) oplog, operation[%s], ignore error[ns not found]", operation)
 			} else if IgnoreError(err, "c", parseLastTimestamp(oplogs) <= bw.fullFinishTs) {
-				_ = LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]",
-					err, "c", parseLastTimestamp(oplogs) <= bw.fullFinishTs)
+				LOG.Info("ignore error[%v] db[%s] oplog[%v], inFullSync[%v]",
+					err, database, log.original.partialLog, parseLastTimestamp(oplogs) <= bw.fullFinishTs)
 				return nil
 			} else {
 				return err
