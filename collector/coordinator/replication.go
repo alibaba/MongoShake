@@ -25,7 +25,7 @@ var (
 type ReplicationCoordinator struct {
 	MongoD             []*utils.MongoSource // the source mongod
 	MongoS             *utils.MongoSource   // the source mongos
-	MongoCS            *utils.MongoSource   // the source mongocs
+	MongoCS            *utils.MongoSource   // the source mongo cs
 	RealSourceFullSync []*utils.MongoSource // point to MongoD if source is mongod, otherwise MongoS
 	RealSourceIncrSync []*utils.MongoSource // point to MongoD if source is mongod, otherwise MongoS
 
@@ -45,12 +45,12 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	}
 	LOG.Info("Collector startup. shard_by[%s] gids[%s]", conf.Options.IncrSyncShardKey, conf.Options.IncrSyncOplogGIDS)
 
-	// run extra job if need
+	// run extra job if we need
 	if err := RunExtraJob(coordinator.RealSourceIncrSync); err != nil {
 		return err
 	}
 
-	// all configurations has changed to immutable
+	// all configurations have changed to immutable
 	// opts, _ := json.Marshal(conf.Options)
 	opts, _ := json.Marshal(conf.GetSafeOptions())
 	LOG.Info("Collector configuration %s", string(opts))
@@ -99,7 +99,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			return err
 		}
 	default:
-		LOG.Critical("unknown sync mode %v", conf.Options.SyncMode)
+		_ = LOG.Critical("unknown sync mode %v", conf.Options.SyncMode)
 		return errors.New("unknown sync mode " + conf.Options.SyncMode)
 	}
 
@@ -117,7 +117,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	if conn, err = utils.NewMongoCommunityConn(checkpointStorageUrl, utils.VarMongoConnectModePrimary, true,
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault,
 		conf.Options.CheckpointStorageUrlMongoSslRootCaFile); conn == nil || !conn.IsGood() || err != nil {
-		LOG.Critical("Connect checkpointStorageUrl[%v] error[%v]. Please add primary node into 'mongo_urls' "+
+		_ = LOG.Critical("Connect checkpointStorageUrl[%v] error[%v]. Please add primary node into 'mongo_urls' "+
 			"if 'context.storage.url' is empty", checkpointStorageUrl, err)
 		return err
 	}
@@ -128,7 +128,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault,
 			conf.Options.MongoSslRootCaFile); conn == nil || !conn.IsGood() || err != nil {
 
-			LOG.Critical("Connect mongo server error. %v, url : %s. "+
+			_ = LOG.Critical("Connect mongo server error. %v, url : %s. "+
 				"See https://github.com/alibaba/MongoShake/wiki/FAQ"+
 				"#q-how-to-solve-the-oplog-tailer-initialize-failed-no-reachable-servers-error", err, src.URL)
 			return err
@@ -140,7 +140,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 			conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog &&
 			!conn.HasOplogNs(utils.GetListCollectionQueryCondition(conn)) {
 
-			LOG.Critical("There has no oplog collection in mongo db server")
+			_ = LOG.Critical("There has no oplog collection in mongo db server")
 			conn.Close()
 			return errors.New("no oplog ns in mongo. " +
 				"See https://github.com/alibaba/MongoShake/wiki/FAQ" +
@@ -152,12 +152,12 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		// rsName will be set to default if empty
 		if rsName == "" {
 			rsName = fmt.Sprintf("default-%d", i)
-			LOG.Warn("Source mongodb have empty replica set name, url[%s], change to default[%s]",
+			_ = LOG.Warn("Source mongodb have empty replica set name, url[%s], change to default[%s]",
 				utils.BlockMongoUrlPassword(src.URL, "***"), rsName)
 		}
 
 		if _, exist := rs[rsName]; exist {
-			LOG.Critical("There has duplicate replica set name : %s", rsName)
+			_ = LOG.Critical("There has duplicate replica set name : %s", rsName)
 			conn.Close()
 			return errors.New("duplicated replica set source")
 		}
@@ -219,7 +219,7 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 			err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's "+
 				"oplog collection size is too small or full sync continues too long",
 				fullBegin, utils.ExtractTimestampForLog(oldestTs))
-			LOG.Error(err)
+			_ = LOG.Error(err)
 			return err
 		}
 

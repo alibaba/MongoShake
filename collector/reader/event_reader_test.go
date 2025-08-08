@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
@@ -47,6 +48,7 @@ func TestEventReader(t *testing.T) {
 		_, err = conn.Client.Database("db1").Collection("c1").InsertOne(nil, bson.M{"yy": 1})
 		assert.Equal(t, nil, err, "should be equal")
 
+		conf.Options.IncrSyncReaderFetchBatchSize = 8192
 		er := NewEventReader(testMongoAddressCs, "ut_event_reader")
 		er.StartFetcher()
 		time.Sleep(3 * time.Second) // wait fetcher start

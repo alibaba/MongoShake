@@ -1,18 +1,9 @@
 package sourceReader
 
-// read from the source
-
 import (
 	"fmt"
 
-	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
-)
-
-var (
-	BatchSize   = conf.Options.IncrSyncReaderFetchBatchSize
-	ChannelSize = BatchSize * 10
 )
 
 type Reader interface {
@@ -40,7 +31,4 @@ func CreateReader(fetchMethod string, src string, replset string) (Reader, error
 	default:
 		return nil, fmt.Errorf("unknown reader type[%v]", fetchMethod)
 	}
-
-	LOG.Critical("can't see me!")
-	return nil, nil
 }

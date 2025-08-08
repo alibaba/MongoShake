@@ -43,10 +43,7 @@ func NewChangeStreamConn(src string,
 	}
 
 	waitTime := changeStreamTimeout * time.Hour // hours
-	ops := &options.ChangeStreamOptions{
-		MaxAwaitTime: &waitTime,
-		BatchSize:    &batchSize,
-	}
+	ops := options.ChangeStream().SetBatchSize(batchSize).SetMaxAwaitTime(waitTime)
 	if watchStartTime != nil {
 		if val, ok := watchStartTime.(int64); ok {
 			if (val >> 32) > 1 {

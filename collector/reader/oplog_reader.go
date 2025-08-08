@@ -1,7 +1,5 @@
 package sourceReader
 
-// read oplog from source mongodb
-
 import (
 	"context"
 	"errors"
@@ -60,7 +58,7 @@ func NewOplogReader(src string, replset string) *OplogReader {
 		src:       src,
 		replset:   replset,
 		query:     bson.M{},
-		oplogChan: make(chan *retOplog, ChannelSize), // ten times of batchSize
+		oplogChan: make(chan *retOplog, 10*conf.Options.IncrSyncReaderFetchBatchSize), // ten times of batchSize
 		firstRead: true,
 	}
 }
@@ -193,7 +191,7 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 		}
 	}
 
-	findOptions := options.Find().SetBatchSize(int32(BatchSize)).
+	findOptions := options.Find().SetBatchSize(int32(conf.Options.IncrSyncReaderFetchBatchSize)).
 		SetNoCursorTimeout(true).
 		SetCursorType(options.TailableAwait).
 		SetMaxAwaitTime(time.Millisecond * 1000).

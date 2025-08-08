@@ -2,7 +2,6 @@ pkg
 .gopath
 .idea
 *.iml
-logs
 *.pprof
 *.output
 *.data
@@ -23,7 +22,6 @@ runtime.trace
 data
 
 .cache/
-*.pid
 bin/
 /cmd/collector/collector
 /cmd/receiver/receiver
