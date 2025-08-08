@@ -19,10 +19,9 @@ import (
 )
 
 const (
-	testMongoAddress           = unit_test_common.TestUrl
-	testMongoAddressServerless = unit_test_common.TestUrlServerlessTenant
-	testDb                     = "test_db"
-	testCollection             = "test_coll"
+	testMongoAddress = unit_test_common.TestUrl
+	testDb           = "test_db"
+	testCollection   = "test_coll"
 )
 
 var (

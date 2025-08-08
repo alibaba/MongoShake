@@ -369,7 +369,7 @@ func checkConflict() error {
 	if utils.HasDuplicated(conf.Options.MongoUrls) {
 		return fmt.Errorf("mongo urls were duplicated")
 	}
-	// quorm
+	// quorum
 	if conf.Options.MasterQuorum && conf.Options.CheckpointStorage != utils.VarCheckpointStorageDatabase {
 		return fmt.Errorf("context storage should set to 'database' while master election enabled")
 	}

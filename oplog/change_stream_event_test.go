@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	nimo "github.com/gugemichael/nimo4go"
+	"github.com/mongodb/mongo-tools-common/json"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -18,12 +19,50 @@ import (
 )
 
 const (
-	testUrl = unit_test_common.TestUrl
+	testUrl                  = unit_test_common.TestUrl
+	testMongoShardingAddress = unit_test_common.TestUrlSharding
+
+	uuidMark = "ui"
 )
 
 var (
 	client *mongo.Client
 )
+
+// below structs are for decode result of listIndexes
+// IndexInfo
+type IndexInfo struct {
+	Key                bson.D `bson:"key"`
+	Name               string `bson:"name"`
+	V                  int32  `bson:"v"`
+	ExpireAfterSeconds int32  `bson:"expireAfterSeconds"`
+	Hidden             bool   `bson:"hidden"`
+	PrepareUnique      bool   `bson:"prepareUnique"`
+	Unique             bool   `bson:"unique"`
+}
+
+// Cursor
+type Cursor struct {
+	ID         int64       `bson:"id"`
+	NS         string      `bson:"ns"`
+	FirstBatch []IndexInfo `bson:"firstBatch"`
+}
+
+// ListIndexesResult
+type ListIndexesResult struct {
+	Cursor Cursor  `bson:"cursor"`
+	OK     float64 `bson:"ok"`
+}
+
+// DocCollections is for result of config.collections
+type DocCollections struct {
+	ObjectId  string              `bson:"_id"`
+	Timestamp primitive.Timestamp `bson:"timestamp"`
+	Uuid      *primitive.Binary   `bson:"uuid"`
+	ShardKey  bson.D              `bson:"key"`
+	Unique    bool                `bson:"unique"`
+	NoBalance bool                `bson:"noBalance"`
+}
 
 func marshalData(input bson.M) bson.Raw {
 	var dataRaw bson.Raw
@@ -50,9 +89,8 @@ func newMongoClient(url string) (*mongo.Client, error) {
 	return client, nil
 }
 
-// copy from executor.RunCommand
+// ApplyOpsFilter is synced from utils.ApplyOpsFilter
 func ApplyOpsFilter(key string) bool {
-	// convert to map if has more later
 	k := strings.TrimSpace(key)
 	if k == "$db" {
 		// 40621, $db is not allowed in OP_QUERY requests
@@ -63,6 +101,8 @@ func ApplyOpsFilter(key string) bool {
 
 	return false
 }
+
+// RunCommand is synced from executor.RunCommand
 func RunCommand(database, operation string, log *PartialLog, client *mongo.Client) error {
 	defer LOG.Debug("RunCommand run DDL: %v", log.Dump(nil, true))
 	dbHandler := client.Database(database)
@@ -74,26 +114,116 @@ func RunCommand(database, operation string, log *PartialLog, client *mongo.Clien
 		 * after v3.6, the given oplog should have uuid when run applyOps with createIndexes.
 		 * so we modify oplog base this ref:
 		 * https://docs.mongodb.com/manual/reference/command/createIndexes/#dbcmd.createIndexes
+		 * Note: Here we have to handle original createIndex oplog (only 1 index) or
+		 * createIndexes oplog (maybe multi indexes) converted from change events.
 		 */
-		var innerBsonD, indexes bson.D
+		var innerBsonD, command bson.D
+		var indexes bson.A
+		var ok bool
 		for i, ele := range log.Object {
 			if i == 0 {
 				nimo.AssertTrue(ele.Key == "createIndexes", "should panic when ele.Name != 'createIndexes'")
+			} else if ele.Key == "indexes" {
+				indexes, ok = ele.Value.(bson.A)
+				if !ok {
+					err = fmt.Errorf("unexpected createIndexes oplog:%v", log)
+				}
 			} else {
+				// "o" : { "createIndexes" : "test", "v" : 2, "key" : { "a" : "hashed" }, "name" : "a_hashed" }
 				innerBsonD = append(innerBsonD, ele)
 			}
 		}
-		indexes = append(indexes, log.Object[0]) // createIndexes
-		indexes = append(indexes, primitive.E{
-			Key: "indexes",
-			Value: []bson.D{ // only has 1 bson.D
-				innerBsonD,
-			},
-		})
-		err = dbHandler.RunCommand(nil, indexes).Err()
+		command = append(command, log.Object[0]) // createIndexes
+		if len(indexes) != 0 {
+			command = append(command, primitive.E{Key: "indexes", Value: indexes})
+		} else {
+			command = append(command, primitive.E{
+				Key: "indexes",
+				Value: []bson.D{ // only has 1 bson.D
+					innerBsonD,
+				},
+			})
+		}
+		err = dbHandler.RunCommand(nil, command).Err()
+	case "commitIndexBuild":
+		/*
+			If multiple indexes are created, 'commitIndexBuild' only generate one oplog,
+			however 'createIndexes' will generate multi oplogs.
+				{
+					"op" : "c",
+					"ns" : "test.$cmd",
+					"ui" : UUID("617ffe90-6dac-4e71-b570-1825422c1896"),
+					"o" : {
+						"commitIndexBuild" : "car",
+						"indexBuildUUID" : UUID("4e9b7457-b612-42bb-bbad-bd6e9a2d63a7"),
+						"indexes" : [
+							{ "v" : 2, "key" : { "count" : 1 }, "name" : "count_1" },
+							{ "v" : 2, "key" : { "type" : 1 }, "name" : "type_1" }
+						]},
+					"ts" : Timestamp(1653620229, 6),
+					"t" : NumberLong(1),
+					"v" : NumberLong(2),
+					"wall" : ISODate("2022-05-27T02:57:09.187Z")
+				}
+				Equivalent 'createIndexes' command:
+				> db.car.createIndexes([{"count":1},{"type":1}])
+				{
+					"ts": Timestamp(1653620582, 3),
+					"t": NumberLong(2),
+					"h": NumberLong(0),
+					"v": 2,
+					"op": "c",
+					"ns": "test.$cmd",
+					"ui": UUID("51d35827-e8b5-4891-8818-41326718505d"),
+					"wall": ISODate("2022-05-27T03:03:02.282Z"),
+					"o": {
+						"createIndexes": "car",
+						"v": 2,
+						"key": {"type": 1},
+						"name": "type_1"
+					}
+				}
+				{
+					"ts": Timestamp(1653620582, 2),
+					"t": NumberLong(2),
+					"h": NumberLong(0),
+					"v": 2,
+					"op": "c",
+					"ns": "test.$cmd",
+					"ui": UUID("51d35827-e8b5-4891-8818-41326718505d"),
+					"wall": ISODate("2022-05-27T03:03:02.281Z"),
+					"o": {
+						"createIndexes": "car",
+						"v": 2,
+						"key": {"count": 1},
+						"name": "count_1"
+					}
+				}
+		*/
+		var command bson.D
+		for i, ele := range log.Object {
+			if i == 0 {
+				command = append(command, primitive.E{
+					Key:   "createIndexes",
+					Value: ele.Value.(string),
+				})
+				nimo.AssertTrue(ele.Key == "commitIndexBuild", "should panic when ele.Name != 'commitIndexBuild'")
+			} else {
+				if ele.Key == "indexes" {
+					command = append(command, primitive.E{
+						Key:   "indexes",
+						Value: ele.Value,
+					})
+				}
+			}
+		}
+
+		nimo.AssertTrue(len(command) >= 2, "createIndexes command must at least have two elements")
+		LOG.Debug("RunCommand commitIndexBuild oplog after conversion[%v]", command)
+		err = dbHandler.RunCommand(nil, command).Err()
 	case "applyOps":
 		/*
-		 * Strictly speaking, we should handle applysOps nested case, but it is
+		 * Strictly speaking, we should handle applyOps nested case, but it is
 		 * complicate to fulfill, so we just use "applyOps" to run the command directly.
 		 */
 		var store bson.D
@@ -106,12 +236,12 @@ func RunCommand(database, operation string, log *PartialLog, client *mongo.Clien
 				case []interface{}:
 					for i, ele := range v {
 						doc := ele.(bson.D)
-						v[i] = RemoveFiled(doc, "ui")
+						v[i] = RemoveFiled(doc, uuidMark)
 					}
 				case bson.D:
 					ret := make(bson.D, 0, len(v))
 					for _, ele := range v {
-						if ele.Key == "ui" {
+						if ele.Key == uuidMark {
 							continue
 						}
 						ret = append(ret, ele)
@@ -119,8 +249,8 @@ func RunCommand(database, operation string, log *PartialLog, client *mongo.Clien
 					ele.Value = ret
 				case []bson.M:
 					for _, ele := range v {
-						if _, ok := ele["ui"]; ok {
-							delete(ele, "ui")
+						if _, ok := ele[uuidMark]; ok {
+							delete(ele, uuidMark)
 						}
 					}
 				}
@@ -131,6 +261,15 @@ func RunCommand(database, operation string, log *PartialLog, client *mongo.Clien
 		err = dbHandler.RunCommand(nil, store).Err()
 	case "dropDatabase":
 		err = dbHandler.Drop(nil)
+	case "renameCollection":
+		// handle '"dropTarget": UUID("52c1c147-2408-4d96-9d0f-889a759ab079")' in object,
+		// change to {dropTarget: true} as described in:
+		//https://www.mongodb.com/docs/v5.0/reference/method/db.collection.renameCollection/
+		tmpCmd := log.Object
+		if log.Object != nil && GetKey(log.Object, "dropTarget") != nil {
+			SetFiled(tmpCmd, "dropTarget", true)
+		}
+		err = client.Database("admin").RunCommand(nil, tmpCmd).Err()
 	case "create":
 		if GetKey(log.Object, "autoIndexId") != nil &&
 			GetKey(log.Object, "idIndex") != nil {
@@ -149,12 +288,47 @@ func RunCommand(database, operation string, log *PartialLog, client *mongo.Clien
 	case "dropIndex":
 		fallthrough
 	case "dropIndexes":
-		fallthrough
+		// using applyOps directly, refer to mongo-tools:HandleNonTxnOp
+		// ensure every shard collection's uuid is same
+		doc := bson.M{}
+		doc["ts"] = log.Timestamp
+		if log.Version > 0 {
+			doc["v"] = log.Version
+		}
+		doc["op"] = log.Operation
+		if log.Gid != "" {
+			doc["g"] = log.Gid
+		}
+		doc["ns"] = log.Namespace
+		if log.Object != nil && len(log.Object) > 0 {
+			doc["o"] = log.Object
+		}
+		if log.Query != nil && len(log.Query) > 0 {
+			doc["o2"] = log.Query
+		}
+		// uuid BinDataType == 3 or 4, see "BinDataType" in src/mongo/bson/bsontypes.h
+		if log.UI != nil && (log.UI.Subtype == 3 || log.UI.Subtype == 4) {
+			doc["ui"] = log.UI
+		}
+		LOG.Info("run applyOps for %s: %v", operation, doc)
+		err = client.Database("admin").RunCommand(context.Background(),
+			bson.D{{"applyOps", []interface{}{doc}}}, nil).Err()
+		if err != nil {
+			_ = LOG.Error("run applyOps[%v] for %s failed: %v", doc, operation, err)
+			return err
+		}
 	case "convertToCapped":
 		fallthrough
-	case "renameCollection":
-		fallthrough
 	case "emptycapped":
+		fallthrough
+
+		// NOTE: below commands are carefully-constructed oplogs transformed from change events which could call
+		//'runCommand()' directly, this does not mean that these exist in the native MongoDB oplog.
+	case "shardCollection":
+		fallthrough
+	case "reshardCollection":
+		fallthrough
+	case "refineCollectionShardKey":
 		if !IsRunOnAdminCommand(operation) {
 			err = dbHandler.RunCommand(nil, log.Object).Err()
 		} else {
@@ -209,7 +383,6 @@ func runOplog(data *PartialLog) error {
 	default:
 		return fmt.Errorf("unknown op[%v]", data.Operation)
 	}
-	return nil
 }
 
 func runByte(input []byte) error {
@@ -227,7 +400,7 @@ func getAllDoc(db, coll string) map[string]bson.M {
 	ret := make(map[string]bson.M)
 	result := make(bson.M)
 	for cursor.Next(context.Background()) {
-		cursor.Decode(&result)
+		_ = cursor.Decode(&result)
 		ret[result["_id"].(string)] = result
 		result = make(bson.M)
 	}
@@ -671,6 +844,194 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		assert.Equal(t, 0, len(list), "should be equal")
 	}
 
+	// test create & createIndexes & modify & dropIndexes
+	{
+		fmt.Printf("TestConvertEvent2Oplog case %d.\n", nr)
+		nr++
+		var err error
+		client, err = newMongoClient(testUrl)
+		assert.Equal(t, nil, err, "should be equal")
+		err = client.Database("testDb").Drop(context.Background())
+		assert.Equal(t, nil, err, "should be equal")
+		// create collection
+		eventCreateCollection := Event{
+			OperationType: "create",
+			Ns: bson.M{
+				"db":   "testDb",
+				"coll": "testColl",
+			},
+			OperationDescription: bson.D{
+				bson.E{
+					Key:   "changeStreamPreAndPostImages",
+					Value: bson.D{bson.E{Key: "enabled", Value: true}},
+				},
+				bson.E{
+					Key: "idIndex",
+					Value: bson.D{
+						bson.E{Key: "v", Value: 2},
+						bson.E{Key: "key", Value: bson.D{bson.E{Key: "_id", Value: 1}}},
+						bson.E{Key: "name", Value: "_id_"},
+					},
+				},
+			},
+		}
+		out, err := bson.Marshal(eventCreateCollection)
+		assert.Equal(t, nil, err, "should be equal")
+		err = runByte(out)
+		assert.Equal(t, nil, err, "should be equal")
+		// createIndexes
+		eventCreateIndexes := Event{
+			OperationType: "createIndexes",
+			Ns: bson.M{
+				"db":   "testDb",
+				"coll": "testColl",
+			},
+			OperationDescription: bson.D{
+				bson.E{
+					Key: "indexes",
+					Value: bson.A{
+						bson.D{
+							bson.E{Key: "v", Value: 2},
+							bson.E{Key: "key", Value: bson.D{bson.E{Key: "a", Value: 1}}},
+							bson.E{Key: "name", Value: "a_1"},
+						},
+						bson.D{
+							bson.E{Key: "v", Value: 2},
+							bson.E{Key: "key", Value: bson.D{bson.E{Key: "b", Value: 1}}},
+							bson.E{Key: "name", Value: "b_1"},
+						},
+					},
+				},
+			},
+		}
+		out, err = bson.Marshal(eventCreateIndexes)
+		assert.Equal(t, nil, err, "should be equal")
+		err = runByte(out)
+		assert.Equal(t, nil, err, "should be equal")
+		// insert a:1
+		eventInsert1 := Event{
+			OperationType: "insert",
+			FullDocument: bson.D{
+				bson.E{
+					Key:   "_id",
+					Value: "1",
+				},
+				bson.E{
+					Key:   "a",
+					Value: "1",
+				},
+			},
+			Ns: bson.M{
+				"db":   "testDb",
+				"coll": "testColl",
+			},
+		}
+		out, err = bson.Marshal(eventInsert1)
+		assert.Equal(t, nil, err, "should be equal")
+		err = runByte(out)
+		assert.Equal(t, nil, err, "should be equal")
+		all := getAllDoc("testDb", "testColl")
+		assert.Equal(t, 1, len(all), "should be equal")
+		assert.Equal(t, "1", all["1"]["a"], "should be equal")
+		var result ListIndexesResult
+		err = client.Database("testDb").RunCommand(context.Background(),
+			bson.D{bson.E{Key: "listIndexes", Value: "testColl"}}).Decode(&result)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 3, len(result.Cursor.FirstBatch), "should be equal")
+		assert.Equal(t, "_id_", result.Cursor.FirstBatch[0].Name, "should be equal")
+		assert.Equal(t, "a_1", result.Cursor.FirstBatch[1].Name, "should be equal")
+		assert.Equal(t, "b_1", result.Cursor.FirstBatch[2].Name, "should be equal")
+		// modify (use {prepareUnique:true} & {hidden:ture} for example)
+		eventModifyUnique := Event{
+			OperationType: "modify",
+			Ns: bson.M{
+				"db":   "testDb",
+				"coll": "testColl",
+			},
+			OperationDescription: bson.D{
+				bson.E{
+					Key: "index",
+					Value: bson.D{
+						bson.E{Key: "name", Value: "a_1"},
+						bson.E{Key: "prepareUnique", Value: true},
+					},
+				},
+			},
+		}
+		out, err = bson.Marshal(eventModifyUnique)
+		assert.Equal(t, nil, err, "should be equal")
+		err = runByte(out)
+		assert.Equal(t, nil, err, "should be equal")
+		err = client.Database("testDb").RunCommand(context.Background(),
+			bson.D{bson.E{Key: "listIndexes", Value: "testColl"}}).Decode(&result)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 3, len(result.Cursor.FirstBatch), "should be equal")
+		for _, idx := range result.Cursor.FirstBatch {
+			if idx.Name == "a_1" {
+				assert.Equal(t, true, idx.PrepareUnique, "should be equal")
+			}
+		}
+		eventModifyHidden := Event{
+			OperationType: "modify",
+			Ns: bson.M{
+				"db":   "testDb",
+				"coll": "testColl",
+			},
+			OperationDescription: bson.D{
+				bson.E{
+					Key: "index",
+					Value: bson.D{
+						bson.E{Key: "name", Value: "a_1"},
+						bson.E{Key: "hidden", Value: true},
+					},
+				},
+			},
+		}
+		out, err = bson.Marshal(eventModifyHidden)
+		assert.Equal(t, nil, err, "should be equal")
+		err = runByte(out)
+		assert.Equal(t, nil, err, "should be equal")
+		err = client.Database("testDb").RunCommand(context.Background(),
+			bson.D{bson.E{Key: "listIndexes", Value: "testColl"}}).Decode(&result)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 3, len(result.Cursor.FirstBatch), "should be equal")
+		for _, idx := range result.Cursor.FirstBatch {
+			if idx.Name == "a_1" {
+				assert.Equal(t, true, idx.Hidden, "should be equal")
+			}
+		}
+		// dropIndexes
+		eventDropIndexes := Event{
+			OperationType: "dropIndexes",
+			Ns: bson.M{
+				"db":   "testDb",
+				"coll": "testColl",
+			},
+			OperationDescription: bson.D{
+				bson.E{
+					Key: "indexes",
+					Value: bson.A{
+						bson.D{
+							bson.E{Key: "v", Value: 2},
+							bson.E{Key: "key", Value: bson.D{bson.E{Key: "a", Value: 1}}},
+							bson.E{Key: "name", Value: "a_1"},
+						},
+					},
+				},
+			},
+		}
+		out, err = bson.Marshal(eventDropIndexes)
+		assert.Equal(t, nil, err, "should be equal")
+		err = runByte(out)
+		assert.Equal(t, nil, err, "should be equal")
+		err = client.Database("testDb").RunCommand(context.Background(),
+			bson.D{bson.E{Key: "listIndexes", Value: "testColl"}}).Decode(&result)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 2, len(result.Cursor.FirstBatch), "should be equal")
+		assert.Equal(t, "_id_", result.Cursor.FirstBatch[0].Name, "should be equal")
+		assert.Equal(t, "b_1", result.Cursor.FirstBatch[1].Name, "should be equal")
+	}
+
 	// test simple transaction
 	{
 		fmt.Printf("TestConvertEvent2Oplog case %d.\n", nr)
@@ -769,5 +1130,104 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, true, oplog.Object != nil && len(oplog.Object) > 0, "should be equal")
 		fmt.Println(oplog)
+	}
+
+	// test sharding events: shardCollection/reshardCollection/refineCollectionShardKey
+	{
+		fmt.Printf("TestConvertEvent2Oplog case %d.\n", nr)
+		nr++
+		var err error
+		_ = client.Disconnect(context.Background())
+		client, err = newMongoClient(testMongoShardingAddress)
+		assert.Equal(t, nil, err, "should be equal")
+		err = client.Database("testDb").Drop(context.Background())
+		assert.Equal(t, nil, err, "should be equal")
+		// shardCollection
+		eventShardCollection := Event{
+			OperationType: "shardCollection",
+			Ns: bson.M{
+				"db":   "testDb",
+				"coll": "testColl",
+			},
+			OperationDescription: bson.D{
+				bson.E{Key: "shardKey", Value: bson.D{bson.E{Key: "_id", Value: "hashed"}}},
+				bson.E{Key: "unique", Value: false},
+				bson.E{Key: "numInitialChunks", Value: json.NumberLong(0)},
+				bson.E{Key: "presplitHashedZones", Value: false},
+			},
+		}
+		out, err := bson.Marshal(eventShardCollection)
+		assert.Equal(t, nil, err, "should be equal")
+		err = runByte(out)
+		assert.Equal(t, nil, err, "should be equal")
+		collNames, err := client.Database("testDb").ListCollectionNames(context.Background(),
+			bson.M{"type": "collection"})
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, 1, len(collNames), "should be equal")
+		assert.Equal(t, collNames[0], "testColl", "should be equal")
+		count, err := client.Database("config").Collection("collections").CountDocuments(context.Background(),
+			bson.M{"_id": "testDb.testColl"})
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, int64(1), count, "should be equal")
+		// insert some data
+		for i := 0; i < 1000; i++ {
+			_, err = client.Database("testDb").Collection("testColl").InsertOne(context.Background(),
+				bson.M{"_id": i, "a": i, "msg": "hello world test data"})
+			assert.Equal(t, nil, err, "should be equal")
+		}
+		// reshardCollection
+		eventReShardCollection := Event{
+			OperationType: "reshardCollection",
+			Ns: bson.M{
+				"db":   "testDb",
+				"coll": "testColl",
+			},
+			OperationDescription: bson.D{
+				bson.E{Key: "shardKey", Value: bson.D{bson.E{Key: "_id", Value: 1}}},
+				bson.E{Key: "oldShardKey", Value: bson.D{bson.E{Key: "_id", Value: "hashed"}}},
+				bson.E{Key: "unique", Value: false},
+			},
+		}
+		out, err = bson.Marshal(eventReShardCollection)
+		assert.Equal(t, nil, err, "should be equal")
+		err = runByte(out)
+		assert.Equal(t, nil, err, "should be equal")
+		var document DocCollections
+		err = client.Database("config").Collection("collections").FindOne(context.Background(),
+			bson.M{"_id": "testDb.testColl"}).Decode(&document)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, bson.D{bson.E{Key: "_id", Value: int32(1)}}, document.ShardKey, "should be equal")
+		// refineCollectionShardKey, have to create corresponding index first
+		indexModel := mongo.IndexModel{
+			Keys: bson.D{
+				{Key: "_id", Value: 1},
+				{Key: "a", Value: 1},
+			},
+			Options: options.Index().SetUnique(false).SetName("_id_1_a_1"),
+		}
+		_, err = client.Database("testDb").Collection("testColl").
+			Indexes().CreateOne(context.Background(), indexModel)
+		eventRefineShardKey := Event{
+			OperationType: "refineCollectionShardKey",
+			Ns: bson.M{
+				"db":   "testDb",
+				"coll": "testColl",
+			},
+			OperationDescription: bson.D{
+				bson.E{Key: "shardKey", Value: bson.D{
+					bson.E{Key: "_id", Value: 1},
+					bson.E{Key: "a", Value: 1},
+				}},
+				bson.E{Key: "oldShardKey", Value: bson.E{Key: "_id", Value: 1}},
+			},
+		}
+		out, err = bson.Marshal(eventRefineShardKey)
+		assert.Equal(t, nil, err, "should be equal")
+		err = runByte(out)
+		assert.Equal(t, nil, err, "should be equal")
+		err = client.Database("config").Collection("collections").FindOne(context.Background(),
+			bson.M{"_id": "testDb.testColl"}).Decode(&document)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, bson.D{bson.E{Key: "_id", Value: int32(1)}, bson.E{Key: "a", Value: int32(1)}}, document.ShardKey, "should be equal")
 	}
 }

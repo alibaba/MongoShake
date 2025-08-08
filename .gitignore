@@ -23,7 +23,6 @@ runtime.trace
 data
 
 .cache/
-diagnostic/
 *.pid
 bin/
 /cmd/collector/collector

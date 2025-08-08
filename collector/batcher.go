@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	noopInterval = 10 // s
+	noopInterval = 10 // seconds
 )
 
 var (
@@ -265,12 +265,10 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 
 // BatchMore
 /**
- * this function is used to gather oplogs together.
- * honestly speaking, it's complicate so that reading unit tests may help you
- * to make it more clear. The reason this function is so complicate is there are
- * too much corner cases here.
- * return batched oplogs and barrier flag.
- * set barrier if we find DDL.
+ * This function is used to gather oplogs together.
+ * Honestly speaking, it's complicate so that reading unit tests may help you to make it more clear.
+ * The reason this function is so complicated is that there are too many corner cases involved.
+ * Return batched oplogs and barrier flag, set barrier if meet DDL.
  * i d i c u i
  *      | |
  */
@@ -309,21 +307,19 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 	}
 
 	for i, genericLog := range mergeBatch {
-		//LOG.Info("~~~~~~~~~enter_input %v %v\n", i, genericLog.Parsed)
-
-		// filter oplog such like Noop or Gid-filtered
+		// filter oplog such like Noop or with gid
 		// PAY ATTENTION: we can't handle the oplog in transaction that has been filtered
 		if batcher.filter(genericLog.Parsed) {
 			// don't push to worker, set lastFilterOplog
 			batcher.lastFilterOplog = genericLog.Parsed
-			//LOG.Info("~~~~~~~~~filter %v %v", i, genericLog.Parsed)
+			//LOG.Debug("~~~~~~~~~filter %v %v", i, genericLog.Parsed)
 			continue
 		}
 
 		// Transaction
 		if txnMeta, txnOk := batcher.isTransaction(genericLog.Parsed); txnOk {
-			//LOG.Info("~~~~~~~~~transaction %v %v", i, genericLog.Parsed)
-			isRet, mustIndividual, _, deliveredOps := batcher.handleTransaction(txnMeta, genericLog)
+			//LOG.Debug("~~~~~~~~~transaction %v %v", i, genericLog.Parsed)
+			isRet, mustIndividual, deliveredOps := batcher.handleTransaction(txnMeta, genericLog)
 			if !isRet {
 				continue
 			}
@@ -336,8 +332,6 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 				nimo.AssertTrue(allEmpty == true, "batcher.batchGroup don't be empty")
 				return batcher.batchGroup, true, allEmpty, false
 			} else {
-
-				// TODO need do filter
 				for _, ele := range deliveredOps {
 					batcher.addIntoBatchGroup(ele, false)
 				}
@@ -355,7 +349,6 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 						err, genericLog.Parsed.ParsedLog)
 				}
 
-				// TODO need do filter
 				for _, ele := range deliveredOps {
 					batcher.addIntoBatchGroup(&oplog.GenericOplog{
 						Raw: nil,
@@ -446,7 +439,7 @@ func (batcher *Batcher) isTransaction(partialLog *oplog.PartialLog) (oplog.TxnMe
 }
 
 func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta,
-	genericLog *oplog.GenericOplog) (isRet bool, mustIndividual bool, mustSerial bool,
+	genericLog *oplog.GenericOplog) (isRet bool, mustIndividual bool,
 	deliveredOps []*oplog.GenericOplog) {
 	err := batcher.txnBuffer.AddOp(txnMeta, genericLog.Parsed.ParsedLog)
 	if err != nil {
@@ -464,17 +457,16 @@ func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta,
 
 		batcher.syncer.replMetric.AddFilter(1)
 		batcher.lastFilterOplog = genericLog.Parsed
-		return false, false, false, nil
+		return false, false, nil
 	}
 
 	if !txnMeta.IsCommit() {
-		// transaction can not be commit
-		return false, false, false, nil
+		// transaction can not be committed
+		return false, false, nil
 	}
 
 	haveCommandInTransaction := false
 	mustIndividual = true
-	mustSerial = false
 	// transaction can be commit now
 	ops, errs := batcher.txnBuffer.GetTxnStream(txnMeta)
 Loop:
@@ -513,7 +505,7 @@ Loop:
 	}
 	// transaction applyOps that do not have command can run in parallel
 	if haveCommandInTransaction {
-		mustSerial = true
+		mustIndividual = true
 	}
 
 	err = batcher.txnBuffer.PurgeTxn(txnMeta)
@@ -521,7 +513,7 @@ Loop:
 		LOG.Crashf("error cleaning up transaction buffer, err[%v]", err)
 	}
 
-	return true, mustIndividual, mustSerial, deliveredOps
+	return true, mustIndividual, deliveredOps
 }
 
 func (batcher *Batcher) moveToNextQueue() {

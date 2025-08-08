@@ -101,7 +101,6 @@ func GetAndCompareVersion(conn *MongoCommunityConn, threshold string, compare st
 }
 
 func ApplyOpsFilter(key string) bool {
-	// convert to map if has more later
 	k := strings.TrimSpace(key)
 	if k == "$db" {
 		// 40621, $db is not allowed in OP_QUERY requests

@@ -102,7 +102,7 @@ func (partialLog *PartialLog) String() string {
 	}
 }
 
-// dump according to the given keys, "all" == true means ignore keys
+// Dump will dump oplog according to the given keys, "all" == true means ignore keys
 func (partialLog *PartialLog) Dump(keys map[string]struct{}, all bool) bson.D {
 	var out bson.D
 	logType := reflect.TypeOf(partialLog.ParsedLog)
@@ -116,7 +116,7 @@ func (partialLog *PartialLog) Dump(keys map[string]struct{}, all bool) bson.D {
 					continue
 				}
 			}
-			out = append(out, primitive.E{tagName, value})
+			out = append(out, primitive.E{Key: tagName, Value: value})
 		}
 	}
 
@@ -165,7 +165,7 @@ func ConvertBsonD2MExcept(input bson.D, except map[string]struct{}) (bson.M, map
 	return m, keys
 }
 
-// convert bson.D to bson.M
+// ConvertBsonD2M convert bson.D to bson.M
 func ConvertBsonD2M(input bson.D) (bson.M, map[string]struct{}) {
 	m := bson.M{}
 	keys := make(map[string]struct{}, len(input))
@@ -208,7 +208,7 @@ func ConvertBsonM2E(input bson.M) (bson.E, error) {
 	return e, nil
 }
 
-// pay attention: the input bson.D will be modified.
+// RemoveFiled remove specified field in bson.D and return the one after modify
 func RemoveFiled(input bson.D, key string) bson.D {
 	flag := -1
 	for id := range input {
@@ -285,13 +285,65 @@ func GatherApplyOps(input []*PartialLog) (*GenericOplog, error) {
 	}
 }
 
-// Oplog from mongod(5.0) in sharding&replica
-// {"ts":{"T":1653449035,"I":3},"v":2,"op":"u","ns":"test.bar",
-//  "o":[{"Key":"diff","Value":[{"Key":"d","Value":[{"Key":"ok","Value":false}]},
-//                              {"Key":"i","Value":[{"Key":"plus_field","Value":2}]}]}],
-//  "o2":[{"Key":"_id","Value":"628da11482387c117d4e9e45"}]}
-
-// "o" : { "$v" : 2, "diff" : { "d" : { "count" : false }, "u" : { "name" : "orange" }, "i" : { "c" : 11 } } }
+// DiffUpdateOplogToNormal convert diff update oplog(v2) to normal one(v1)
+/*
+Oplog from mongod(5.0) in sharding&replica》
+Example 1:
+{
+    "ts": {"T": 1653449035,"I": 3},
+    "v": 2,
+    "op": "u",
+    "ns": "test.bar",
+    "o": [
+        {
+            "Key": "diff",
+            "Value": [
+                {
+                    "Key": "d",
+                    "Value": [
+                        {
+                            "Key": "ok",
+                            "Value": false
+                        }
+                    ]
+                },
+                {
+                    "Key": "i",
+                    "Value": [
+                        {
+                            "Key": "plus_field",
+                            "Value": 2
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "o2": [
+        {
+            "Key": "_id",
+            "Value": "628da11482387c117d4e9e45"
+        }
+    ]
+}
+// example 2:
+{
+    "o": {
+        "$v": 2,
+        "diff": {
+            "d": {
+                "count": false
+            },
+            "u": {
+                "name": "orange"
+            },
+            "i": {
+                "c": 11
+            }
+        }
+    }
+}
+*/
 func DiffUpdateOplogToNormal(updateObj bson.D) (interface{}, error) {
 
 	diffObj := GetKey(updateObj, "diff")

@@ -14,14 +14,14 @@ import (
 )
 
 const (
-	testCollection          = "test"
-	testTimeSeriesCollecion = "weather"
+	testCollection           = "test"
+	testTimeSeriesCollection = "weather"
 )
 
 func TestCommonFunctions(t *testing.T) {
 	var nr int
 
-	InitialLogger("", "", "debug", true, 1)
+	_ = InitialLogger("", "", "debug", true, 1)
 
 	{
 		fmt.Printf("TestCommonFunctions case %d.\n", nr)
@@ -96,7 +96,7 @@ func TestCommonFunctions(t *testing.T) {
 		fmt.Printf("TestCommonFunctions case %d.\n", nr)
 		nr++
 
-		conn, err := NewMongoCommunityConn(unit_test_common.TestUrl5_0, VarMongoConnectModeSecondaryPreferred, true,
+		conn, err := NewMongoCommunityConn(unit_test_common.TestUrl, VarMongoConnectModeSecondaryPreferred, true,
 			ReadWriteConcernDefault, ReadWriteConcernDefault, "")
 		assert.Equal(t, err, nil, "")
 
@@ -111,17 +111,17 @@ func TestCommonFunctions(t *testing.T) {
 		result := conn.IsTimeSeriesCollection(testDb, testCollection)
 		assert.Equal(t, result, false, "")
 
-		// create time series collecion testTimeSeriesCollecion
+		// create time series collection testTimeSeriesCollection
 		var cco options.CreateCollectionOptions
 		tso := options.TimeSeries()
 		tso.SetTimeField("ts")
 		tso.SetMetaField("meta")
 		tso.SetGranularity("seconds")
 		cco.SetTimeSeriesOptions(tso)
-		err = conn.Client.Database(testDb).CreateCollection(context.Background(), testTimeSeriesCollecion, &cco)
+		err = conn.Client.Database(testDb).CreateCollection(context.Background(), testTimeSeriesCollection, &cco)
 		assert.Equal(t, err, nil, "")
 
-		result = conn.IsTimeSeriesCollection(testDb, testTimeSeriesCollecion)
+		result = conn.IsTimeSeriesCollection(testDb, testTimeSeriesCollection)
 		assert.Equal(t, result, true, "")
 
 		err = conn.Client.Database(testDb).Drop(context.Background())

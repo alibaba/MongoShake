@@ -1,6 +1,9 @@
 package executor
 
 import (
+	"context"
+	"fmt"
+
 	nimo "github.com/gugemichael/nimo4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -42,7 +45,10 @@ type BasicWriter interface {
 	doCommand(database string, metadata bson.E, oplogs []*OplogRecord) error
 }
 
-// oplog writer
+// NewDbWriter return a new writer, could be:
+// 1) SingleWriter;
+// 2) BulkWriter; (by default for MongoDB3.2+)
+// 3) CommandWriter; (for gid enabled)
 func NewDbWriter(conn *utils.MongoCommunityConn, metadata bson.E, bulkInsert bool, fullFinishTs int64) BasicWriter {
 	if !bulkInsert { // bulk insertion disable
 		// LOG.Info("db writer create: SingleWriter")
@@ -66,49 +72,103 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 		 * after v3.6, the given oplog should have uuid when run applyOps with createIndexes.
 		 * so we modify oplog base this ref:
 		 * https://docs.mongodb.com/manual/reference/command/createIndexes/#dbcmd.createIndexes
+		 * Note: Here we have to handle original createIndex oplog (only 1 index) or
+		 * createIndexes oplog (maybe multi indexes) converted from change events.
 		 */
-		var innerBsonD, indexes bson.D
+		var innerBsonD, command bson.D
+		var indexes bson.A
+		var ok bool
 		for i, ele := range log.Object {
 			if i == 0 {
 				nimo.AssertTrue(ele.Key == "createIndexes", "should panic when ele.Name != 'createIndexes'")
+			} else if ele.Key == "indexes" {
+				indexes, ok = ele.Value.(bson.A)
+				if !ok {
+					err = fmt.Errorf("unexpected createIndexes oplog:%v", log)
+				}
 			} else {
+				// "o" : { "createIndexes" : "test", "v" : 2, "key" : { "a" : "hashed" }, "name" : "a_hashed" }
 				innerBsonD = append(innerBsonD, ele)
 			}
 		}
-		indexes = append(indexes, log.Object[0]) // createIndexes
-		indexes = append(indexes, primitive.E{
-			Key: "indexes",
-			Value: []bson.D{ // only has 1 bson.D
-				innerBsonD,
-			},
-		})
-		err = dbHandler.RunCommand(nil, indexes).Err()
+		command = append(command, log.Object[0]) // createIndexes
+		if len(indexes) != 0 {
+			command = append(command, primitive.E{Key: "indexes", Value: indexes})
+		} else {
+			command = append(command, primitive.E{
+				Key: "indexes",
+				Value: []bson.D{ // only has 1 bson.D
+					innerBsonD,
+				},
+			})
+		}
+		err = dbHandler.RunCommand(nil, command).Err()
 	case "commitIndexBuild":
 		/*
-			If multiple indexes are created, commitIndexBuild only generate one oplog, CreateIndexes multiple oplogs
-			{ "op" : "c", "ns" : "test.$cmd", "ui" : UUID("617ffe90-6dac-4e71-b570-1825422c1896"),
-			  "o" : { "commitIndexBuild" : "car", "indexBuildUUID" : UUID("4e9b7457-b612-42bb-bbad-bd6e9a2d63a7"),
-			          "indexes" : [
-			                      { "v" : 2, "key" : { "count" : 1 }, "name" : "count_1" },
-			                      { "v" : 2, "key" : { "type" : 1 }, "name" : "type_1" }
-			                      ]},
-			  "ts" : Timestamp(1653620229, 6), "t" : NumberLong(1), "v" : NumberLong(2), "wall" : ISODate("2022-05-27T02:57:09.187Z") }
-
-			CreateIndexes Command: db.car.createIndexes([{"count":1},{"type":1}])
-			{ "ts" : Timestamp(1653620582, 3), "t" : NumberLong(2), "h" : NumberLong(0), "v" : 2, "op" : "c", "ns" : "test.$cmd", "ui" : UUID("51d35827-e8b5-4891-8818-41326718505d"), "wall" : ISODate("2022-05-27T03:03:02.282Z"), "o" : { "createIndexes" : "car", "v" : 2, "key" : { "type" : 1 }, "name" : "type_1" } }
-			{ "ts" : Timestamp(1653620582, 2), "t" : NumberLong(2), "h" : NumberLong(0), "v" : 2, "op" : "c", "ns" : "test.$cmd", "ui" : UUID("51d35827-e8b5-4891-8818-41326718505d"), "wall" : ISODate("2022-05-27T03:03:02.281Z"), "o" : { "createIndexes" : "car", "v" : 2, "key" : { "count" : 1 }, "name" : "count_1" } }
+			If multiple indexes are created, 'commitIndexBuild' only generate one oplog,
+			however 'createIndexes' will generate multi oplogs.
+				{
+					"op" : "c",
+					"ns" : "test.$cmd",
+					"ui" : UUID("617ffe90-6dac-4e71-b570-1825422c1896"),
+					"o" : {
+						"commitIndexBuild" : "car",
+						"indexBuildUUID" : UUID("4e9b7457-b612-42bb-bbad-bd6e9a2d63a7"),
+						"indexes" : [
+							{ "v" : 2, "key" : { "count" : 1 }, "name" : "count_1" },
+							{ "v" : 2, "key" : { "type" : 1 }, "name" : "type_1" }
+						]},
+					"ts" : Timestamp(1653620229, 6),
+					"t" : NumberLong(1),
+					"v" : NumberLong(2),
+					"wall" : ISODate("2022-05-27T02:57:09.187Z")
+				}
+				Equivalent 'createIndexes' command:
+				> db.car.createIndexes([{"count":1},{"type":1}])
+				{
+					"ts": Timestamp(1653620582, 3),
+					"t": NumberLong(2),
+					"h": NumberLong(0),
+					"v": 2,
+					"op": "c",
+					"ns": "test.$cmd",
+					"ui": UUID("51d35827-e8b5-4891-8818-41326718505d"),
+					"wall": ISODate("2022-05-27T03:03:02.282Z"),
+					"o": {
+						"createIndexes": "car",
+						"v": 2,
+						"key": {"type": 1},
+						"name": "type_1"
+					}
+				}
+				{
+					"ts": Timestamp(1653620582, 2),
+					"t": NumberLong(2),
+					"h": NumberLong(0),
+					"v": 2,
+					"op": "c",
+					"ns": "test.$cmd",
+					"ui": UUID("51d35827-e8b5-4891-8818-41326718505d"),
+					"wall": ISODate("2022-05-27T03:03:02.281Z"),
+					"o": {
+						"createIndexes": "car",
+						"v": 2,
+						"key": {"count": 1},
+						"name": "count_1"
+					}
+				}
 		*/
-		var indexes bson.D
+		var command bson.D
 		for i, ele := range log.Object {
 			if i == 0 {
-				indexes = append(indexes, primitive.E{
+				command = append(command, primitive.E{
 					Key:   "createIndexes",
 					Value: ele.Value.(string),
 				})
 				nimo.AssertTrue(ele.Key == "commitIndexBuild", "should panic when ele.Name != 'commitIndexBuild'")
 			} else {
 				if ele.Key == "indexes" {
-					indexes = append(indexes, primitive.E{
+					command = append(command, primitive.E{
 						Key:   "indexes",
 						Value: ele.Value,
 					})
@@ -116,12 +176,12 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 			}
 		}
 
-		nimo.AssertTrue(len(indexes) >= 2, "indexes must at least have two elements")
-		LOG.Debug("RunCommand commitIndexBuild oplog after conversion[%v]", indexes)
-		err = dbHandler.RunCommand(nil, indexes).Err()
+		nimo.AssertTrue(len(command) >= 2, "createIndexes command must at least have two elements")
+		LOG.Debug("RunCommand commitIndexBuild oplog after conversion[%v]", command)
+		err = dbHandler.RunCommand(nil, command).Err()
 	case "applyOps":
 		/*
-		 * Strictly speaking, we should handle applysOps nested case, but it is
+		 * Strictly speaking, we should handle applyOps nested case, but it is
 		 * complicate to fulfill, so we just use "applyOps" to run the command directly.
 		 */
 		var store bson.D
@@ -186,10 +246,47 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 	case "dropIndex":
 		fallthrough
 	case "dropIndexes":
-		fallthrough
+		// using applyOps directly, refer to mongo-tools:HandleNonTxnOp
+		// ensure every shard collection's uuid is same
+		doc := bson.M{}
+		doc["ts"] = log.Timestamp
+		if log.Version > 0 {
+			doc["v"] = log.Version
+		}
+		doc["op"] = log.Operation
+		if log.Gid != "" {
+			doc["g"] = log.Gid
+		}
+		doc["ns"] = log.Namespace
+		if log.Object != nil && len(log.Object) > 0 {
+			doc["o"] = log.Object
+		}
+		if log.Query != nil && len(log.Query) > 0 {
+			doc["o2"] = log.Query
+		}
+		// uuid BinDataType == 3 or 4, see "BinDataType" in src/mongo/bson/bsontypes.h
+		if log.UI != nil && (log.UI.Subtype == 3 || log.UI.Subtype == 4) {
+			doc["ui"] = log.UI
+		}
+		LOG.Info("run applyOps for %s: %v", operation, doc)
+		err = client.Database("admin").RunCommand(context.Background(),
+			bson.D{{"applyOps", []interface{}{doc}}}, nil).Err()
+		if err != nil {
+			_ = LOG.Error("run applyOps[%v] for %s failed: %v", doc, operation, err)
+			return err
+		}
 	case "convertToCapped":
 		fallthrough
 	case "emptycapped":
+		fallthrough
+
+		// NOTE: below commands are carefully-constructed oplogs transformed from change events which could call
+		//'runCommand()' directly, this does not mean that these exist in the native MongoDB oplog.
+	case "shardCollection":
+		fallthrough
+	case "reshardCollection":
+		fallthrough
+	case "refineCollectionShardKey":
 		if !oplog.IsRunOnAdminCommand(operation) {
 			err = dbHandler.RunCommand(nil, log.Object).Err()
 		} else {
@@ -222,7 +319,7 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 	return err
 }
 
-// true means error can be ignored
+// IgnoreError return true if error can be ignored
 // https://github.com/mongodb/mongo/blob/master/src/mongo/base/error_codes.yml
 func IgnoreError(err error, op string, isFullSyncStage bool) bool {
 	if err == nil {
