@@ -306,9 +306,8 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 
 	LOG.Debug("bulk_writer: update models len %v", len(models))
 
-	opts := options.BulkWrite().SetBypassDocumentValidation(true)
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(
-		context.Background(), models, opts)
+		context.Background(), models, nil)
 
 	if err != nil {
 		// parse error
