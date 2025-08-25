@@ -33,6 +33,9 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 	}
 
 	opts := options.BulkWrite().SetOrdered(false)
+	if conf.Options.IncrSyncBypassDocumentValidation {
+		opts = opts.SetBypassDocumentValidation(true)
+	}
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, opts)
 
 	if err != nil {
@@ -91,7 +94,11 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 		LOG.Debug("bulk_writer: updateOnInsert %v", log.original.partialLog)
 	}
 
-	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, nil)
+	opts := options.BulkWrite()
+	if conf.Options.IncrSyncBypassDocumentValidation {
+		opts = opts.SetBypassDocumentValidation(true)
+	}
+	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, opts)
 
 	if err != nil {
 		// parse error
@@ -306,8 +313,12 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 
 	LOG.Debug("bulk_writer: update models len %v", len(models))
 
+	opts := options.BulkWrite()
+	if conf.Options.IncrSyncBypassDocumentValidation {
+		opts = opts.SetBypassDocumentValidation(true)
+	}
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(
-		context.Background(), models, nil)
+		context.Background(), models, opts)
 
 	if err != nil {
 		// parse error

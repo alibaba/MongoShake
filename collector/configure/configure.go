@@ -81,6 +81,7 @@ type Configuration struct {
 	IncrSyncExecutorInsertOnDupUpdate      bool     `config:"incr_sync.executor.insert_on_dup_update"`
 	IncrSyncConflictWriteTo                string   `config:"incr_sync.conflict_write_to"` // remove "sdk" option since v2.4.21
 	IncrSyncExecutorMajorityEnable         bool     `config:"incr_sync.executor.majority_enable"`
+	IncrSyncBypassDocumentValidation       bool     `config:"incr_sync.executor.bypass_document_validation"` // add v2.8.7
 
 	/*---------------------------------------------------------*/
 	// inner variables, not open to user

@@ -48,7 +48,11 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.E, o
 	var upserts []*OplogRecord
 
 	for _, log := range oplogs {
-		if _, err := collectionHandle.InsertOne(context.Background(), log.original.partialLog.Object); err != nil {
+		opts := options.InsertOne()
+		if conf.Options.IncrSyncBypassDocumentValidation {
+			opts = opts.SetBypassDocumentValidation(true)
+		}
+		if _, err := collectionHandle.InsertOne(context.Background(), log.original.partialLog.Object, opts); err != nil {
 
 			if utils.DuplicateKey(err) {
 				upserts = append(upserts, log)
@@ -106,6 +110,9 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 		for _, update := range updates {
 
 			opts := options.Update().SetUpsert(true)
+			if conf.Options.IncrSyncBypassDocumentValidation {
+				opts = opts.SetBypassDocumentValidation(true)
+			}
 			res, err := collectionHandle.UpdateOne(context.Background(), update.id,
 				bson.D{{"$set", update.data}}, opts)
 			if err != nil {
@@ -130,9 +137,12 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 		}
 	} else {
 		for i, update := range updates {
-
+			opts := options.Update().SetUpsert(false)
+			if conf.Options.IncrSyncBypassDocumentValidation {
+				opts = opts.SetBypassDocumentValidation(true)
+			}
 			res, err := collectionHandle.UpdateOne(context.Background(), update.id,
-				bson.D{{"$set", update.data}}, nil)
+				bson.D{{"$set", update.data}}, opts)
 			if err != nil && utils.DuplicateKey(err) == false {
 				_ = LOG.Warn("update _id[%v] with data[%v] meets err[%v] res[%v], try to solve",
 					update.id, update.data, err, res)
@@ -235,6 +245,9 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 			if upsert {
 				opts.SetUpsert(true)
 			}
+			if conf.Options.IncrSyncBypassDocumentValidation {
+				opts = opts.SetBypassDocumentValidation(true)
+			}
 			if upsert && len(log.original.partialLog.DocumentKey) > 0 {
 				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.DocumentKey,
 					update, opts)
@@ -252,6 +265,9 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 			opts := options.Replace()
 			if upsert {
 				opts.SetUpsert(true)
+			}
+			if conf.Options.IncrSyncBypassDocumentValidation {
+				opts = opts.SetBypassDocumentValidation(true)
 			}
 			if upsert && len(log.original.partialLog.DocumentKey) > 0 {
 				res, err = collectionHandle.ReplaceOne(context.Background(), log.original.partialLog.DocumentKey,
