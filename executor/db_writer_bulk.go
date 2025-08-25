@@ -2,17 +2,19 @@ package executor
 
 import (
 	"context"
-	conf "github.com/alibaba/MongoShake/v2/collector/configure"
-	utils "github.com/alibaba/MongoShake/v2/common"
-	"github.com/alibaba/MongoShake/v2/oplog"
-	LOG "github.com/vinllen/log4go"
+	"strings"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"strings"
+
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/oplog"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
-// use general bulk interface such like Insert/Update/Delete to execute command
+// BulkWriter use general bulk interface such like Insert/Update/Delete to execute command
 type BulkWriter struct {
 	// mongo connection
 	conn *utils.MongoCommunityConn
@@ -34,8 +36,14 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, opts)
 
 	if err != nil {
-		LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
-			len(models), database+"."+collection, (err.(mongo.BulkWriteException)).WriteErrors[0], res)
+		bulkErr, ok := err.(mongo.BulkWriteException)
+		if !ok {
+			_ = LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[type:%T err:%v] res[%v]",
+				len(models), database+"."+collection, err, err, res)
+		} else {
+			_ = LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
+				len(models), database+"."+collection, bulkErr, res)
+		}
 
 		if utils.DuplicateKey(err) {
 			RecordDuplicatedOplog(bw.conn, collection, oplogs)
@@ -62,9 +70,9 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 				SetFilter(log.original.partialLog.DocumentKey).
 				SetUpdate(bson.D{{"$set", newObject}}).SetUpsert(true))
 		} else {
-			if upsert {
-				LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
-			}
+			//if upsert {
+			//	_ = LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
+			//}
 			// insert must have _id
 			if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
 
@@ -76,7 +84,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 				}
 				models = append(models, model)
 			} else {
-				LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
+				_ = LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
 			}
 		}
 
@@ -88,7 +96,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 	if err != nil {
 		// parse error
 		index, errMsg, dup := utils.FindFirstErrorIndexAndMessageN(err)
-		LOG.Error("detail error info with index[%v] msg[%v] dup[%v] res[%v]", index, errMsg, dup, res)
+		_ = LOG.Error("detail error info with index[%v] msg[%v] dup[%v] res[%v]", index, errMsg, dup, res)
 
 		if utils.DuplicateKey(err) {
 			// create single writer to write one by one
@@ -102,20 +110,134 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 			if index != -1 {
 				oplogRecord = oplogs[index]
 			}
-			LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v], oplog[%v]",
+			_ = LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v], oplog[%v]",
 				err, "u", parseLastTimestamp(oplogs) <= bw.fullFinishTs, oplogRecord)
 			return nil
 		}
 
-		LOG.Error("doUpdateOnInsert run upsert/update[%v] failed[%v]", upsert, err)
+		_ = LOG.Error("doUpdateOnInsert run upsert/update[%v] failed[%v]", upsert, err)
 		return err
 	}
 	return nil
 }
 
 /*
-	 replacement oplog:
-		{"ts":{"T":1664192510,"I":1},"t":1,"h":null,"v":2,"op":"u","ns":"test.car","o":[{"Key":"_id","Value":"63318f67024749a30fc12af6"},{"Key":"b","Value":3}],"o2":[{"Key":"_id","Value":"63318f67024749a30fc12af6"}],"PrevOpTime":null,"ui":{"Subtype":4,"Data":"3p7boGbmTvqYSWp42PaZnw=="}}
+1. update oplog:
+
+	{
+	    "ts": Timestamp(1582533077,
+	    2),
+	    "t": NumberLong(1),
+	    "h": NumberLong(0),
+	    "v": 2,
+	    "op": "u",
+	    "ns": "zz.test",
+	    "ui": UUID("ee9b60d8-845f-42ff-989d-09018a730d60"),
+	    "o2": {
+	        "_id": ObjectId("5e5384f97dc0f30426f01b79")
+	    },
+	    "wall": ISODate("2020-02-24T08:31:17.681Z"),
+	    "o": {
+	        "$v": 1,
+	        "$unset": {
+	            "ok": true
+	        },
+	        "$set": {
+	            "plus_field": 2
+	        }
+	    }
+	}
+
+2. replacement oplog:
+
+	{
+	    "ts": {
+	        "T": 1664192510,
+	        "I": 1
+	    },
+	    "t": 1,
+	    "h": null,
+	    "v": 2,
+	    "op": "u",
+	    "ns": "test.car",
+	    "o": [
+	        {
+	            "Key": "_id",
+	            "Value": "63318f67024749a30fc12af6"
+	        },
+	        {
+	            "Key": "b",
+	            "Value": 3
+	        }
+	    ],
+	    "o2": [
+	        {
+	            "Key": "_id",
+	            "Value": "63318f67024749a30fc12af6"
+	        }
+	    ],
+	    "PrevOpTime": null,
+	    "ui": {
+	        "Subtype": 4,
+	        "Data": "3p7boGbmTvqYSWp42PaZnw=="
+	    }
+	}
+
+3. chunkSplit oplog: (NOTE:there's an 'b' field inside 'o.applyOps')
+
+	{
+	    "op": "u",
+	    "b": true,
+	    "ns": "config.chunks",
+	    "o": {
+	        "_id": {
+	            "$oid": "6581397503de9a2282ff6cc9"
+	        },
+	        "lastmod": {
+	            "$timestamp": {
+	                "t": 1,
+	                "i": 1
+	            }
+	        },
+	        "lastmodEpoch": {
+	            "$oid": "6581397526a5b24c88d7a6d4"
+	        },
+	        "ns": "ycsb.test6",
+	        "min": {
+	            "_id": {
+	                "$minKey": 1
+	            }
+	        },
+	        "max": {
+	            "_id": {
+	                "$oid": "65813993ed6de3163ad08fe8"
+	            }
+	        },
+	        "shard": "d-bp1be4d809f7b554",
+	        "history": [
+	            {
+	                "validAfter": {
+	                    "$timestamp": {
+	                        "t": 1702967669,
+	                        "i": 1
+	                    }
+	                },
+	                "shard": "d-bp1be4d809f7b554"
+	            }
+	        ]
+	    },
+	    "o2": {
+	        "_id": {
+	            "$oid": "6581397503de9a2282ff6cc9"
+	        }
+	    },
+	    "ui": {
+	        "$binary": {
+	            "base64": "qo7OUh4jREO5XpfQ2m2XdQ==",
+	            "subType": "04"
+	        }
+	    }
+	}
 */
 func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, oplogs []*OplogRecord, upsert bool) error {
 
@@ -134,7 +256,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 
 			if ok && oplogVer == 2 {
 				if newObject, oplogErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); oplogErr != nil {
-					LOG.Error("doUpdate run Faild err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
+					_ = LOG.Error("doUpdate run failed err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
 					return oplogErr
 				}
 			} else {
@@ -147,9 +269,9 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 					SetFilter(log.original.partialLog.DocumentKey).
 					SetUpdate(newObject).SetUpsert(true))
 			} else {
-				if upsert {
-					LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
-				}
+				//if upsert {
+				//	_ = LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
+				//}
 
 				model := mongo.NewUpdateOneModel().
 					SetFilter(log.original.partialLog.Query).
@@ -171,7 +293,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 				model := mongo.NewReplaceOneModel().
 					SetFilter(log.original.partialLog.Query).
 					SetReplacement(log.original.partialLog.Object)
-				if upsert {
+				if upsert || log.original.partialLog.Upsert {
 					model.SetUpsert(true)
 				}
 				models = append(models, model)
@@ -179,7 +301,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 			updateCmd = "replace"
 		}
 
-		LOG.Debug("bulk_writer: %s %v aftermodify_doc:%v", updateCmd, newObject, log.original.partialLog)
+		LOG.Debug("bulk_writer: %s %v after_modify_doc:%v", updateCmd, newObject, log.original.partialLog)
 	}
 
 	LOG.Debug("bulk_writer: update models len %v", len(models))
@@ -193,10 +315,10 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 		var oplogRecord *OplogRecord
 		if index != -1 {
 			oplogRecord = oplogs[index]
+			_ = LOG.Warn("detail error info with index[%v] msg[%v] dup[%v], isFullSyncStage[%v], oplog[%v] res[%v]",
+				index, errMsg, dup, parseLastTimestamp(oplogs) <= bw.fullFinishTs,
+				*oplogRecord.original.partialLog, res)
 		}
-		LOG.Warn("detail error info with index[%v] msg[%v] dup[%v], isFullSyncStage[%v], oplog[%v] res[%v]",
-			index, errMsg, dup, parseLastTimestamp(oplogs) <= bw.fullFinishTs,
-			*oplogRecord.original.partialLog, res)
 
 		if utils.DuplicateKey(err) {
 			RecordDuplicatedOplog(bw.conn, collection, oplogs)
@@ -207,22 +329,22 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 
 		// error can be ignored
 		if IgnoreError(err, "u", parseLastTimestamp(oplogs) <= bw.fullFinishTs) {
-			LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]", err, "u",
+			_ = LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]", err, "u",
 				parseLastTimestamp(oplogs) <= bw.fullFinishTs)
 
 			// re-run (index, len(oplogs) - 1]
 			sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
 			return sw.doUpdate(database, collection, metadata, oplogs[index+1:], upsert)
 		}
-		if strings.Contains(err.Error(), shardKeyupdateErr) {
-			LOG.Error("multiUpdateShardKey err_string:%s, index:%d, redo update shardkey singly",
+		if strings.Contains(err.Error(), shardKeyUpdateErr) {
+			_ = LOG.Error("multiUpdateShardKey err_string:%s, index:%d, redo update shardKey singly",
 				err.Error(), index)
 
 			sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
 			return sw.doUpdate(database, collection, metadata, oplogs[index:], upsert)
 		}
 
-		LOG.Error("doUpdate run upsert/update[%v] failed[%v]", upsert, err)
+		_ = LOG.Error("doUpdate run upsert/update[%v] failed[%v]", upsert, err)
 		return err
 	}
 	return nil
@@ -241,12 +363,12 @@ func (bw *BulkWriter) doDelete(database, collection string, metadata bson.E, opl
 	if err != nil {
 		// error can be ignored
 		if IgnoreError(err, "d", parseLastTimestamp(oplogs) <= bw.fullFinishTs) {
-			LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]",
+			_ = LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]",
 				err, "d", parseLastTimestamp(oplogs) <= bw.fullFinishTs)
 			return nil
 		}
 
-		LOG.Error("doDelete run delete[%v] failed[%v] res[%v]", models, err, res)
+		_ = LOG.Error("doDelete run delete[%v] failed[%v] res[%v]", models, err, res)
 		return err
 	}
 	return nil
@@ -260,11 +382,12 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.E, oplogs []*Oplo
 		if conf.Options.FilterDDLEnable || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
 			if err = RunCommand(database, operation, log.original.partialLog, bw.conn.Client); err == nil {
-				LOG.Info("Execute command (op==c) oplog, operation [%s]", operation)
+				LOG.Info("execute command(op=c) oplog, operation[%s]", operation)
 			} else if err.Error() == "ns not found" {
-				LOG.Info("Execute command (op==c) oplog, operation [%s], ignore error[ns not found]", operation)
+				LOG.Info("execute command(op=c) oplog, operation[%s], ignore error[ns not found]", operation)
 			} else if IgnoreError(err, "c", parseLastTimestamp(oplogs) <= bw.fullFinishTs) {
-				LOG.Warn("ignore error[%v] when run operation[%v], initialSync[%v]", err, "c", parseLastTimestamp(oplogs) <= bw.fullFinishTs)
+				LOG.Info("ignore error[%v] db[%s] oplog[%v], inFullSync[%v]",
+					err, database, log.original.partialLog, parseLastTimestamp(oplogs) <= bw.fullFinishTs)
 				return nil
 			} else {
 				return err

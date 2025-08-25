@@ -2,12 +2,12 @@ package oplog
 
 import (
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 func TestRemoveFiled(t *testing.T) {
@@ -570,7 +570,7 @@ func TestConvertBson(t *testing.T) {
 	}
 }
 
-func TestDelteOplog(t *testing.T) {
+func TestV2OplogWithDiff(t *testing.T) {
 	/*
 		{
 		    "op": "u",

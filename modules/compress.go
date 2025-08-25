@@ -9,10 +9,9 @@ import (
 	"io/ioutil"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
-	"github.com/alibaba/MongoShake/v2/tunnel"
-
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/vinllen/log4go"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	"github.com/alibaba/MongoShake/v2/tunnel"
 )
 
 const (

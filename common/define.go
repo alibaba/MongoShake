@@ -1,7 +1,7 @@
 package utils
 
 const (
-	// log
+	// log level
 	VarLogLevelDebug   = "debug"
 	VarLogLevelInfo    = "info"
 	VarLogLevelWarning = "warning"

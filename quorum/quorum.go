@@ -3,18 +3,18 @@ package quorum
 import (
 	"context"
 	"fmt"
-	conf "github.com/alibaba/MongoShake/v2/collector/configure"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
 	"math/rand"
 	"net"
 	"os"
 	"time"
 
-	utils "github.com/alibaba/MongoShake/v2/common"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 
-	LOG "github.com/vinllen/log4go"
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	utils "github.com/alibaba/MongoShake/v2/common"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 const (
@@ -145,7 +145,7 @@ func BecomeMaster(uri string, db string) error {
 					if time.Now().Unix()-heartbeat >= int64(HeartBeatTimeoutInSeconds) {
 						// I wanna be the master. DON'T care about the success of update
 						masterCollection.UpdateOne(context.Background(),
-							bson.D{{"_id", electionObjectId}},bson.M{"$set": promotion()})
+							bson.D{{"_id", electionObjectId}}, bson.M{"$set": promotion()})
 						LOG.Info("Expired master found. compete to become master")
 						// wait random time. just disrupt others compete
 						wait(time.Millisecond * time.Duration(rand.Uint32()%2500+1))

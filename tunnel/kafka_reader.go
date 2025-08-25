@@ -4,9 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 	"github.com/alibaba/MongoShake/v2/tunnel/kafka"
-
-	LOG "github.com/vinllen/log4go"
 )
 
 type KafkaReader struct {

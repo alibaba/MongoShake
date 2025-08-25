@@ -2,16 +2,15 @@ package replayer
 
 import (
 	"fmt"
-	utils "github.com/alibaba/MongoShake/v2/common"
-	"go.mongodb.org/mongo-driver/bson"
 	"testing"
-
-	"github.com/alibaba/MongoShake/v2/oplog"
-	"github.com/alibaba/MongoShake/v2/tunnel"
-
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.mongodb.org/mongo-driver/bson"
+
+	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/oplog"
+	"github.com/alibaba/MongoShake/v2/tunnel"
 )
 
 func TestReplayer(t *testing.T) {

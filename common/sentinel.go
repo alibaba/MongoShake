@@ -6,7 +6,8 @@ import (
 	"reflect"
 
 	nimo "github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
+
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 const (

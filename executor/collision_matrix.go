@@ -3,21 +3,21 @@ package executor
 import (
 	"bytes"
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"reflect"
 	"strings"
 
-	"github.com/alibaba/MongoShake/v2/oplog"
-
 	nimo "github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"github.com/alibaba/MongoShake/v2/oplog"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 const MultiColumnIndexSplitter = "|"
 
 type OplogRecord struct {
-	original *PartialLogWithCallbak
+	original *PartialLogWithCallback
 
 	// wait() procedure will stop to wait for the dependent OplogRecord
 	// that operate the equivalent index values ahead of the this one
@@ -27,18 +27,18 @@ type OplogRecord struct {
 
 type CollisionMatrix interface {
 	// split oplogs into safety segments
-	split(logs []*PartialLogWithCallbak) [][]*PartialLogWithCallbak
+	split(logs []*PartialLogWithCallback) [][]*PartialLogWithCallback
 
-	convert(segment []*PartialLogWithCallbak) []*OplogRecord
+	convert(segment []*PartialLogWithCallback) []*OplogRecord
 }
 
 type NoopMatrix struct{}
 
-func (noop *NoopMatrix) split(logs []*PartialLogWithCallbak) [][]*PartialLogWithCallbak {
-	return [][]*PartialLogWithCallbak{logs}
+func (noop *NoopMatrix) split(logs []*PartialLogWithCallback) [][]*PartialLogWithCallback {
+	return [][]*PartialLogWithCallback{logs}
 }
 
-func (noop *NoopMatrix) convert(segment []*PartialLogWithCallbak) []*OplogRecord {
+func (noop *NoopMatrix) convert(segment []*PartialLogWithCallback) []*OplogRecord {
 	records := make([]*OplogRecord, len(segment), len(segment))
 	for index, log := range segment {
 		// nothing to change !
@@ -62,7 +62,7 @@ func (oplogUniqueIdentifier *OplogUniqueIdentifier) addSignature(signature strin
 	oplogUniqueIdentifier.signatureTable = append(oplogUniqueIdentifier.signatureTable, signature)
 }
 
-func fillupOperationValues(log *PartialLogWithCallbak) {
+func fillupOperationValues(log *PartialLogWithCallback) {
 	if log.partialLog.Operation != "i" && log.partialLog.Operation != "u" {
 		return
 	}
@@ -137,7 +137,7 @@ func fillupOperationValues(log *PartialLogWithCallbak) {
 	}
 }
 
-func newUniqueIdentifier(order int, log *PartialLogWithCallbak) *OplogUniqueIdentifier {
+func newUniqueIdentifier(order int, log *PartialLogWithCallback) *OplogUniqueIdentifier {
 	nimo.AssertTrue(len(log.partialLog.UniqueIndexes) != 0, "make identifier of empty indexes wrong")
 
 	// first of all, we need to fill up the oplog.uk colum field
@@ -332,18 +332,18 @@ func haveMutualIndex(first, second *oplog.PartialLog) bool {
 type BarrierMatrix struct {
 	NoopMatrix
 
-	//	original []*PartialLogWithCallbak
+	//	original []*PartialLogWithCallback
 }
 
 func NewBarrierMatrix() *BarrierMatrix {
 	return &BarrierMatrix{NoopMatrix{}}
 }
 
-func (*BarrierMatrix) split(logs []*PartialLogWithCallbak) [][]*PartialLogWithCallbak {
-	var segmentList [][]*PartialLogWithCallbak
-	var seg []*PartialLogWithCallbak
+func (*BarrierMatrix) split(logs []*PartialLogWithCallback) [][]*PartialLogWithCallback {
+	var segmentList [][]*PartialLogWithCallback
+	var seg []*PartialLogWithCallback
 	var identifier *OplogUniqueIdentifier
-	signatureSet := make(map[string][]*PartialLogWithCallbak)
+	signatureSet := make(map[string][]*PartialLogWithCallback)
 	for i, log := range logs {
 		// put the log into segment straightly if no unique index operations found
 		if len(log.partialLog.UniqueIndexes) != 0 {
@@ -377,6 +377,6 @@ func (*BarrierMatrix) split(logs []*PartialLogWithCallbak) [][]*PartialLogWithCa
 	return segmentList
 }
 
-func (barrier *BarrierMatrix) convert(segment []*PartialLogWithCallbak) []*OplogRecord {
+func (barrier *BarrierMatrix) convert(segment []*PartialLogWithCallback) []*OplogRecord {
 	return barrier.NoopMatrix.convert(segment)
 }

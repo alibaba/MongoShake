@@ -2,26 +2,26 @@ package docsyncer
 
 import (
 	"fmt"
-	"github.com/alibaba/MongoShake/v2/collector/configure"
-	"github.com/alibaba/MongoShake/v2/collector/filter"
-	"github.com/alibaba/MongoShake/v2/collector/transform"
-	"github.com/alibaba/MongoShake/v2/common"
-	"github.com/alibaba/MongoShake/v2/oplog"
-	"github.com/alibaba/MongoShake/v2/sharding"
-	"github.com/alibaba/MongoShake/v2/unit_test_common"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
+
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	"github.com/alibaba/MongoShake/v2/collector/filter"
+	"github.com/alibaba/MongoShake/v2/collector/transform"
+	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/oplog"
+	"github.com/alibaba/MongoShake/v2/sharding"
+	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
 
 const (
-	testMongoAddress           = unit_test_common.TestUrl
-	testMongoAddressServerless = unit_test_common.TestUrlServerlessTenant
-	testDb                     = "test_db"
-	testCollection             = "test_coll"
+	testMongoAddress = unit_test_common.TestUrl
+	testDb           = "test_db"
+	testCollection   = "test_coll"
 )
 
 var (
@@ -43,7 +43,7 @@ func marshalData(input []bson.D) []*bson.Raw {
 }
 
 func fetchAllDocument(conn *utils.MongoCommunityConn) ([]bson.D, error) {
-	return unit_test_common.FetchAllDocumentbsonD(conn.Client, testDb, testCollection, nil)
+	return unit_test_common.FetchAllDocumentBsonD(conn.Client, testDb, testCollection, nil)
 }
 
 func TestDbSync(t *testing.T) {

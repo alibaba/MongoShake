@@ -3,13 +3,14 @@ package utils
 import (
 	"context"
 	"fmt"
-	LOG "github.com/vinllen/log4go"
+	"sort"
+	"time"
+
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"time"
 
-	"sort"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 const (
@@ -32,7 +33,7 @@ func NewChangeStreamConn(src string,
 	filterFunc func(name string) bool,
 	watchStartTime interface{},
 	batchSize int32,
-	sourceDbversion string,
+	sourceDbVersion string,
 	sslRootFile string) (*ChangeStreamConn, error) {
 
 	conn, err := NewMongoCommunityConn(src, mode, true, ReadWriteConcernMajority, "", sslRootFile)
@@ -41,11 +42,8 @@ func NewChangeStreamConn(src string,
 			src, mode, err)
 	}
 
-	waitTime := time.Duration(changeStreamTimeout * time.Hour) // hours
-	ops := &options.ChangeStreamOptions{
-		MaxAwaitTime: &waitTime,
-		BatchSize:    &batchSize,
-	}
+	waitTime := changeStreamTimeout * time.Hour // hours
+	ops := options.ChangeStream().SetBatchSize(batchSize).SetMaxAwaitTime(waitTime)
 	if watchStartTime != nil {
 		if val, ok := watchStartTime.(int64); ok {
 			if (val >> 32) > 1 {
@@ -56,8 +54,8 @@ func NewChangeStreamConn(src string,
 				ops.SetStartAtOperationTime(startTime)
 			}
 		} else {
-			// ResumeToken，sourceDbversion >= 4.2 use StartAfter, < 4.2 use ResumeAfter
-			if val_ver, _ := GetAndCompareVersion(nil, "4.2.0", sourceDbversion); val_ver {
+			// ResumeToken，sourceDbVersion >= 4.2 use StartAfter, < 4.2 use ResumeAfter
+			if bigger, _ := GetAndCompareVersion(nil, "4.2.0", sourceDbVersion); bigger {
 				ops.SetStartAfter(watchStartTime)
 			} else {
 				ops.SetResumeAfter(watchStartTime)
@@ -102,10 +100,8 @@ func NewChangeStreamConn(src string,
 
 		csHandler, err = conn.Client.Watch(conn.ctx, mongo.Pipeline{}, ops)
 		if err != nil {
-			if conn != nil {
-				conn.Close()
-			}
-			LOG.Error("client[%v] create change stream handler failed[%v]", src, err)
+			conn.Close()
+			_ = LOG.Error("client[%v] create change stream handler failed[%v]", src, err)
 			return nil, fmt.Errorf("client[%v] create change stream handler failed[%v]", src, err)
 		}
 	}
@@ -121,7 +117,7 @@ func NewChangeStreamConn(src string,
 
 func (csc *ChangeStreamConn) Close() {
 	if csc.CsHandler != nil {
-		csc.CsHandler.Close(csc.ctx)
+		_ = csc.CsHandler.Close(csc.ctx)
 		csc.CsHandler = nil
 	}
 
@@ -183,9 +179,6 @@ func printCsOption(ops *options.ChangeStreamOptions) string {
 	if ops.StartAfter != nil {
 		ret = fmt.Sprintf("%v StartAfter[%v]", ret, ops.StartAfter)
 	}
-	//if ops.MultiDbSelections != "" {
-	//	ret = fmt.Sprintf("%v MultiDbSelections[%v]", ret, ops.MultiDbSelections)
-	//}
 
 	return ret
 }

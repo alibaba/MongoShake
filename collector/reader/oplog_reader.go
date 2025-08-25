@@ -1,37 +1,32 @@
 package sourceReader
 
-// read oplog from source mongodb
-
 import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"time"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"sync"
-	"time"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-
-	LOG "github.com/vinllen/log4go"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 const (
 	QueryTs    = "ts"
-	QueryGid   = "g"
 	QueryOpGT  = "$gt"
 	QueryOpGTE = "$gte"
-
-	tailTimeout = 7
 
 	localDB = "local"
 )
 
-// TimeoutError. mongodb query executed timeout
+// TimeoutError defines mongodb query executed timeout
 var TimeoutError = errors.New("read next log timeout, It shouldn't be happen")
 var CollectionCappedError = errors.New("collection capped error")
 
@@ -63,7 +58,7 @@ func NewOplogReader(src string, replset string) *OplogReader {
 		src:       src,
 		replset:   replset,
 		query:     bson.M{},
-		oplogChan: make(chan *retOplog, ChannelSize), // ten times of batchSize
+		oplogChan: make(chan *retOplog, 10*conf.Options.IncrSyncReaderFetchBatchSize), // ten times of batchSize
 		firstRead: true,
 	}
 }
@@ -109,7 +104,9 @@ func (or *OplogReader) NextOplog() (log *oplog.GenericOplog, err error) {
 	}
 
 	log = &oplog.GenericOplog{Raw: raw, Parsed: new(oplog.PartialLog)}
-	bson.Unmarshal(raw, log.Parsed)
+	if err = bson.Unmarshal(raw, log.Parsed); err != nil {
+		return nil, err
+	}
 	return log, nil
 }
 
@@ -124,7 +121,7 @@ func (or *OplogReader) get() (log []byte, err error) {
 	}
 }
 
-// start fetcher if not exist
+// StartFetcher start fetcher if not exist
 func (or *OplogReader) StartFetcher() {
 	if or.fetcherExist == true {
 		return
@@ -149,15 +146,16 @@ func (or *OplogReader) fetcher() {
 			continue
 		}
 
-		if !or.oplogsCursor.Next(context.Background()) {
+		if !or.oplogsCursor.TryNext(context.Background()) {
 			if err := or.oplogsCursor.Err(); err != nil {
 				// some internal error. need rebuild the oplogsCursor
 				or.releaseCursor()
-				if utils.IsCollectionCappedError(err) { // print it
-					LOG.Error("oplog collection capped may happen: %v", err)
+				if utils.IsCollectionCappedError(err) {
+					_ = LOG.Error("oplog collection capped may happen: %v", err)
 					or.oplogChan <- &retOplog{nil, CollectionCappedError}
 				} else {
-					or.oplogChan <- &retOplog{nil, fmt.Errorf("get next oplog failed, release oplogsIterator, %s", err.Error())}
+					e := fmt.Errorf("get next oplog failed, release oplogsIterator, %s", err.Error())
+					or.oplogChan <- &retOplog{nil, e}
 				}
 				// wait a moment
 				time.Sleep(1 * time.Second)
@@ -172,7 +170,7 @@ func (or *OplogReader) fetcher() {
 	}
 }
 
-// ensureNetwork establish the mongodb connection at first
+// EnsureNetwork establish the mongodb connection at first
 // if current connection is not ready or disconnected
 func (or *OplogReader) EnsureNetwork() (err error) {
 	if or.oplogsCursor != nil {
@@ -193,9 +191,10 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 		}
 	}
 
-	findOptions := options.Find().SetBatchSize(int32(BatchSize)).
+	findOptions := options.Find().SetBatchSize(int32(conf.Options.IncrSyncReaderFetchBatchSize)).
 		SetNoCursorTimeout(true).
-		SetCursorType(options.Tailable).
+		SetCursorType(options.TailableAwait).
+		SetMaxAwaitTime(time.Millisecond * 1000).
 		SetOplogReplay(true)
 
 	var queryTs int64
@@ -205,7 +204,7 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 		newestTs := or.getNewestTimestamp()
 		queryTs = or.getQueryTimestamp()
 		if newestTs < queryTs {
-			LOG.Warn("oplog_reader current starting point[%v] is bigger than the newest timestamp[%v]!",
+			_ = LOG.Warn("oplog_reader current starting point[%v] is bigger than the newest timestamp[%v]!",
 				utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(newestTs))
 			queryTs = newestTs
 		}
@@ -221,7 +220,7 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 		if !or.firstRead {
 			return CollectionCappedError
 		} else {
-			LOG.Warn("oplog_reader current starting point[%v] is smaller than the oldest timestamp[%v]!",
+			_ = LOG.Warn("oplog_reader current starting point[%v] is smaller than the oldest timestamp[%v]!",
 				utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(oldestTs))
 		}
 	}
@@ -231,7 +230,7 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 		or.query, findOptions)
 	if or.oplogsCursor == nil || err != nil {
 		err = fmt.Errorf("oplog_reader Find mongo instance [%s] error. %s", or.src, err.Error())
-		LOG.Warn("oplog_reader failed err[%v] or.query[%v]", err, or.query)
+		_ = LOG.Warn("oplog_reader failed err[%v] or.query[%v]", err, or.query)
 		return err
 	}
 
@@ -254,26 +253,11 @@ func (or *OplogReader) getOldestTimestamp() int64 {
 
 func (or *OplogReader) releaseCursor() {
 	if or.oplogsCursor != nil {
-		or.oplogsCursor.Close(context.Background())
+		_ = or.oplogsCursor.Close(context.Background())
 	}
 	or.oplogsCursor = nil
 }
 
 func (or *OplogReader) FetchNewestTimestamp() (interface{}, error) {
 	return nil, fmt.Errorf("interface not implement")
-}
-
-// GidOplogReader. query along with gid
-type GidOplogReader struct {
-	OplogReader
-}
-
-func (reader *GidOplogReader) SetQueryGid(gid string) {
-	reader.query[QueryGid] = gid
-}
-
-func NewGidOplogReader(src string) *GidOplogReader {
-	return &GidOplogReader{
-		OplogReader: OplogReader{src: src, query: bson.M{}},
-	}
 }

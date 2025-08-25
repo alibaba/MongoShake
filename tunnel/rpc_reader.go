@@ -4,7 +4,7 @@ import (
 	"net"
 	"net/rpc"
 
-	LOG "github.com/vinllen/log4go"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 type RPCReader struct {

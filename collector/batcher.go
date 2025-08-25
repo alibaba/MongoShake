@@ -1,21 +1,21 @@
 package collector
 
 import (
-	conf "github.com/alibaba/MongoShake/v2/collector/configure"
-	"github.com/alibaba/MongoShake/v2/collector/filter"
-	"github.com/alibaba/MongoShake/v2/oplog"
+	"time"
+
+	nimo "github.com/gugemichael/nimo4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
-	"time"
-
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	"github.com/alibaba/MongoShake/v2/collector/filter"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	nimo "github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
+	"github.com/alibaba/MongoShake/v2/oplog"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 const (
-	noopInterval = 10 // s
+	noopInterval = 10 // seconds
 )
 
 var (
@@ -54,10 +54,7 @@ func getExitPoint() primitive.Timestamp {
 	return utils.Int64ToTimestamp(utils.IncrSentinelOptions.ExitPoint)
 }
 
-/*
- * as we mentioned in syncer.go, Batcher is used to batch oplog before sending in order to
- * improve performance.
- */
+// Batcher is used to batch oplog before sending in order to improve performance.
 type Batcher struct {
 	// related oplog syncer. not owned
 	syncer *OplogSyncer
@@ -110,7 +107,7 @@ func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
 }
 
 func (batcher *Batcher) Fini() {
-	batcher.txnBuffer.Stop()
+	_ = batcher.txnBuffer.Stop()
 }
 
 /*
@@ -131,12 +128,12 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 	}
 
 	if moveChunkFilter.Filter(log) {
-		LOG.Critical("shake exit, must close balancer in sharding + oplog")
+		_ = LOG.Critical("shake exit, must close balancer in sharding + oplog")
 		LOG.Crashf("move chunk oplog found, must close balancer in sharding + oplog [%v]", log)
 		return false
 	}
 
-	// DDL is disable when timestamp <= fullSyncFinishPosition
+	// DDL is disabled when timestamp <= fullSyncFinishPosition
 	// v2.4.10: do not crash when "fetch_method" == "change_stream"
 	if ddlFilter.Filter(log) &&
 		primitive.CompareTimestamp(log.Timestamp, batcher.syncer.fullSyncFinishPosition) <= 0 &&
@@ -179,7 +176,7 @@ func (batcher *Batcher) getBatch() []*oplog.GenericOplog {
 		batcher.moveToNextQueue()
 		for len(mergeBatch) < conf.Options.IncrSyncAdaptiveBatchingMaxSize &&
 			len(syncer.logsQueue[batcher.currentQueue()]) > 0 {
-			// there has more pushed oplogs in next logs queue (read can't to be block)
+			// there has more pushed oplogs in next logs queue (read can't to be blocked)
 			// Hence, we fetch them by the way. and merge together
 			mergeBatch = append(mergeBatch, <-syncer.logsQueue[batcher.nextQueue]...)
 			batcher.moveToNextQueue()
@@ -198,10 +195,10 @@ func (batcher *Batcher) getBatch() []*oplog.GenericOplog {
 
 /*
  * if delay > 0, this function wait till delay timeout.
- * However, if the mergeBatch contain may oplogs, the delay time will depends on the first
+ * However, if the mergeBatch contain may oplogs, the delay time will depend on the first
  * oplog timestamp. So, if the time span of the included batched oplog is too large, the
  * delay time is inaccurate.
- * the second return value marks whether should exit.
+ * the second return value marks if we should exit.
  */
 func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 	var mergeBatch []*oplog.GenericOplog
@@ -235,7 +232,7 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 		return mergeBatch[:i], true
 	}
 
-	// judge whether should delay
+	// judge if we should delay
 	delay := getTargetDelay()
 	if delay > 0 {
 		firstOplog := mergeBatch[0].Parsed
@@ -268,12 +265,10 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 
 // BatchMore
 /**
- * this function is used to gather oplogs together.
- * honestly speaking, it's complicate so that reading unit tests may help you
- * to make it more clear. The reason this function is so complicate is there're
- * too much corner cases here.
- * return batched oplogs and barrier flag.
- * set barrier if find DDL.
+ * This function is used to gather oplogs together.
+ * Honestly speaking, it's complicate so that reading unit tests may help you to make it more clear.
+ * The reason this function is so complicated is that there are too many corner cases involved.
+ * Return batched oplogs and barrier flag, set barrier if meet DDL.
  * i d i c u i
  *      | |
  */
@@ -312,21 +307,19 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 	}
 
 	for i, genericLog := range mergeBatch {
-		//LOG.Info("~~~~~~~~~enter_input %v %v\n", i, genericLog.Parsed)
-
-		// filter oplog such like Noop or Gid-filtered
+		// filter oplog such like Noop or with gid
 		// PAY ATTENTION: we can't handle the oplog in transaction that has been filtered
 		if batcher.filter(genericLog.Parsed) {
 			// don't push to worker, set lastFilterOplog
 			batcher.lastFilterOplog = genericLog.Parsed
-			//LOG.Info("~~~~~~~~~filter %v %v", i, genericLog.Parsed)
+			//LOG.Debug("~~~~~~~~~filter %v %v", i, genericLog.Parsed)
 			continue
 		}
 
-		// Transactoin
+		// Transaction
 		if txnMeta, txnOk := batcher.isTransaction(genericLog.Parsed); txnOk {
-			//LOG.Info("~~~~~~~~~transaction %v %v", i, genericLog.Parsed)
-			isRet, mustIndividual, _, deliveredOps := batcher.handleTransaction(txnMeta, genericLog)
+			//LOG.Debug("~~~~~~~~~transaction %v %v", i, genericLog.Parsed)
+			isRet, mustIndividual, deliveredOps := batcher.handleTransaction(txnMeta, genericLog)
 			if !isRet {
 				continue
 			}
@@ -339,8 +332,6 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 				nimo.AssertTrue(allEmpty == true, "batcher.batchGroup don't be empty")
 				return batcher.batchGroup, true, allEmpty, false
 			} else {
-
-				// TODO need do filter
 				for _, ele := range deliveredOps {
 					batcher.addIntoBatchGroup(ele, false)
 				}
@@ -358,7 +349,6 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 						err, genericLog.Parsed.ParsedLog)
 				}
 
-				// TODO need do filter
 				for _, ele := range deliveredOps {
 					batcher.addIntoBatchGroup(&oplog.GenericOplog{
 						Raw: nil,
@@ -413,7 +403,8 @@ func (batcher *Batcher) setLastOplog() bool {
 
 // addIntoBatchGroup
 // isBarrier
-//     Barrier Oplogs(like DDL or Transaction) must execute sequentially and separately, send to batchGroup[0]
+//
+//	Barrier Oplogs(like DDL or Transaction) must execute sequentially and separately, send to batchGroup[0]
 func (batcher *Batcher) addIntoBatchGroup(genericLog *oplog.GenericOplog, isBarrier bool) {
 	if genericLog == fakeOplog {
 		return
@@ -448,7 +439,7 @@ func (batcher *Batcher) isTransaction(partialLog *oplog.PartialLog) (oplog.TxnMe
 }
 
 func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta,
-	genericLog *oplog.GenericOplog) (isRet bool, mustIndividual bool, mustSerial bool,
+	genericLog *oplog.GenericOplog) (isRet bool, mustIndividual bool,
 	deliveredOps []*oplog.GenericOplog) {
 	err := batcher.txnBuffer.AddOp(txnMeta, genericLog.Parsed.ParsedLog)
 	if err != nil {
@@ -466,17 +457,16 @@ func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta,
 
 		batcher.syncer.replMetric.AddFilter(1)
 		batcher.lastFilterOplog = genericLog.Parsed
-		return false, false, false, nil
+		return false, false, nil
 	}
 
 	if !txnMeta.IsCommit() {
-		// transaction can not be commit
-		return false, false, false, nil
+		// transaction can not be committed
+		return false, false, nil
 	}
 
 	haveCommandInTransaction := false
 	mustIndividual = true
-	mustSerial = false
 	// transaction can be commit now
 	ops, errs := batcher.txnBuffer.GetTxnStream(txnMeta)
 Loop:
@@ -508,14 +498,14 @@ Loop:
 		}
 	}
 
-	// Individual transaction that do not have commamnd can run run with other curd oplog
+	// Individual transaction that do not have command can run with other CURD oplog
 	if !txnMeta.IsCommitOp() && !haveCommandInTransaction &&
 		genericLog.Parsed.PrevOpTime.String() == emptyPrevRaw.String() {
 		mustIndividual = false
 	}
-	// transaction applyOps that do not have command can run parallelly
+	// transaction applyOps that do not have command can run in parallel
 	if haveCommandInTransaction {
-		mustSerial = true
+		mustIndividual = true
 	}
 
 	err = batcher.txnBuffer.PurgeTxn(txnMeta)
@@ -523,7 +513,7 @@ Loop:
 		LOG.Crashf("error cleaning up transaction buffer, err[%v]", err)
 	}
 
-	return true, mustIndividual, mustSerial, deliveredOps
+	return true, mustIndividual, deliveredOps
 }
 
 func (batcher *Batcher) moveToNextQueue() {

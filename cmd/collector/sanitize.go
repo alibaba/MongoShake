@@ -230,7 +230,12 @@ func checkDefaultValue() error {
 		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 1024
 	}
 	if conf.Options.IncrSyncFetcherBufferCapacity <= 0 {
-		conf.Options.IncrSyncFetcherBufferCapacity = 256
+		// to reduce memory consumption
+		//conf.Options.IncrSyncFetcherBufferCapacity = 256
+		conf.Options.IncrSyncFetcherBufferCapacity = 64
+	}
+	if conf.Options.IncrSyncFetcherBufferSizeThresholdInKB <= 0 {
+		conf.Options.IncrSyncFetcherBufferSizeThresholdInKB = 512
 	}
 	if conf.Options.IncrSyncReaderFetchBatchSize <= 0 {
 		conf.Options.IncrSyncReaderFetchBatchSize = 1024
@@ -364,7 +369,7 @@ func checkConflict() error {
 	if utils.HasDuplicated(conf.Options.MongoUrls) {
 		return fmt.Errorf("mongo urls were duplicated")
 	}
-	// quorm
+	// quorum
 	if conf.Options.MasterQuorum && conf.Options.CheckpointStorage != utils.VarCheckpointStorageDatabase {
 		return fmt.Errorf("context storage should set to 'database' while master election enabled")
 	}

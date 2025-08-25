@@ -2,10 +2,11 @@ package utils
 
 import (
 	"fmt"
-	"github.com/alibaba/MongoShake/v2/unit_test_common"
 	"testing"
-
+	
 	"github.com/stretchr/testify/assert"
+
+	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
 
 var (

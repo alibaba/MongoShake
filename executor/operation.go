@@ -1,38 +1,38 @@
 package executor
 
 import (
-	"go.mongodb.org/mongo-driver/mongo"
+	"fmt"
 	"reflect"
 	"strings"
+	"sync/atomic"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-
-	"fmt"
-	"sync/atomic"
-
-	LOG "github.com/vinllen/log4go"
-	"go.mongodb.org/mongo-driver/bson"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 var ErrorsShouldSkip = map[int]string{
+	//2: "BadValue",
 	61: "ShardKeyNotFound",
 }
 
 func (exec *Executor) ensureConnection() bool {
 	// reconnect if necessary
 	if exec.conn == nil || !exec.conn.IsGood() {
-		writeContern := utils.ReadWriteConcernDefault
+		writeConcern := utils.ReadWriteConcernDefault
 		if conf.Options.FullSyncExecutorMajorityEnable {
-			writeContern = utils.ReadWriteConcernMajority
+			writeConcern = utils.ReadWriteConcernMajority
 		}
 
 		if conn, err := utils.NewMongoCommunityConn(exec.MongoUrl, utils.VarMongoConnectModePrimary, true,
-			utils.ReadWriteConcernDefault, writeContern,
+			utils.ReadWriteConcernDefault, writeConcern,
 			conf.Options.TunnelMongoSslRootCaFile); err != nil {
 
-			LOG.Critical("Connect to mongo cluster failed. %v", err)
+			_ = LOG.Critical("Connect to mongo cluster failed. %v", err)
 			return false
 		} else {
 			exec.conn = conn
@@ -62,7 +62,7 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 
 	if !conf.Options.IncrSyncExecutorDebug {
 		if !exec.ensureConnection() {
-			return fmt.Errorf("Replay-%d network connection lost . we would retry for next connecting",
+			return fmt.Errorf("replay-%d network connection lost. we would retry for next connecting",
 				exec.batchExecutor.ReplayerId)
 		}
 		// just use the first log. they have the same metadata
@@ -110,19 +110,20 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 			exec.addNsMapMetric(group.ns, "n", len(group.oplogRecords))
 		default:
 			atomic.AddUint64(&exec.metricUnknown, uint64(len(group.oplogRecords)))
-			LOG.Warn("Replay-%d meets unknown type oplogs found. op '%s'", exec.batchExecutor.ReplayerId, group.op)
+			_ = LOG.Warn("Replay-%d meets unknown type oplogs found. op '%s'",
+				exec.batchExecutor.ReplayerId, group.op)
 			exec.addNsMapMetric(group.ns, "x", len(group.oplogRecords))
 		}
 
 		// a few known error we can skip !! such as "ShardKeyNotFound" returned
 		// if mongoshake connected to MongoS
-		if exec.errorIgnore(err) {
+		if exec.errorIgnore(err, group.ns, group.op) {
 			LOG.Info("Replay-%d Discard known error[%v], It's acceptable", exec.batchExecutor.ReplayerId, err)
 			err = nil
 		}
 
 		if err != nil {
-			LOG.Critical("Replayer-%d, executor-%d, oplog for namespace[%s] op[%s] failed. error type[%v]"+
+			_ = LOG.Critical("Replay-%d, executor-%d, oplog for namespace[%s] op[%s] failed. error type[%v]"+
 				" error[%v], logs number[%d], firstLog: %s",
 				exec.batchExecutor.ReplayerId, exec.id, group.ns, group.op, reflect.TypeOf(err), err.Error(), count,
 				group.oplogRecords[0].original.partialLog)
@@ -145,7 +146,8 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 	return nil
 }
 
-func (exec *Executor) errorIgnore(err error) bool {
+// errorIgnore will ignore some known errors
+func (exec *Executor) errorIgnore(err error, ns, op string) bool {
 	if err == nil {
 		return false
 	}
@@ -155,10 +157,18 @@ func (exec *Executor) errorIgnore(err error) bool {
 		return false
 	}
 
-	for k, _ := range ErrorsShouldSkip {
+	for k := range ErrorsShouldSkip {
 		if er.HasErrorCode(k) {
 			return true
 		}
+	}
+
+	// special case for update featureCompatibilityVersion doc in 'admin.system.version'
+	// PS: Will meet if the source mongodb did upgraded major version then we will replay oplog of update fcv like:
+	// MongoDB4.4 try to set fcv to 5.0, which is not allowed.
+	if ns == "admin.system.version" && op == "u" && er.HasErrorCode(2) &&
+		er.HasErrorMessage("Invalid value for") && er.HasErrorMessage("featureCompatibilityVersion") {
+		return true
 	}
 
 	return false

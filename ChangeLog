@@ -1,22 +1,48 @@
+2025-08-11  Alibaba Cloud.
+    * version: 2.8.6
+    * BUGFIX: #894, support filter txn oplog with config.system.sessions
+    * BUGFIX: fix unit test for filter
+    * IMPROVE: CommandWriter handle {o.:2} oplog correctly
+    * REFINE: format go import
+    * BUGFIX: chunk split oplog support 'b' field(upsert)
+    * BUGFIX: hasher support int32/int64 objectId type
+    * BUGFIX: handle renameCollection oplog with dropTarget
+    * FEATURE: support adjust GC percent
+    * IMPROVE: add bypassDocumentValidation:true to bulkWriter update
+    * IMPROVE: support insert op on system.views collections
+    * REFINE: change IncrSyncFetcherBufferCapacity from 256 to 64 to reduce memory consumption
+    * REFINE: optimize log output for checkCheckpointUpdate
+    * BUGFIX: fix unit test for db_writer
+    * FEATURE: support capacity& size threshold for fetcher buffer
+    * BUGFIX: support ignore unexpected fcv update error
+    * BUGFIX: #844, avoid send on closed channel panic in log4go package
+    * BUGFIX: avoid panic in log print for bulkErr
+    * IMPROVE: #849, NamespaceFilter support handle txn oplog
+    * IMPROVE: #908, support newly added change events for MongoDB6.0+
+    * BUGFIX: runCommand ignore NamespaceExists error
+    * REFINE: #757, oplogReader use TailableAwait cursor type instead of Tailable
+    * IMPROVE: handle some historical PRs (thanks for all the developers who have proposed PRs)
+    * BUGFIX: #915, incr_sync.reader.fetch_batch_size not taking effect for EventReader
+
 2025-04-03  Alibaba Cloud.
-* version: 2.8.5
+    * version: 2.8.5
     * BUGFIX: support two-way sync with gid correctly
 
 2023-04-25 Alibaba Cloud.
-* version: 2.8.4
+    * version: 2.8.4
     * BUGFIX: #811, support replace&slice in delta oplog
 
 2023-03-10 Alibaba Cloud.
     * version: 2.8.3
-    * BUGFIX: #803, fix changestream connection leak
+    * BUGFIX: #803, fix changeStream connection leak
     * BUGFIX: #804, fix startTime check logic
-    * BUGFIX: #784, don't use nocursortimeout when src collection is timeseries
+    * BUGFIX: #784, don't use noCursorTimeout when src collection is timeseries
     * BUGFIX: #777,#778, compatible with delta oplog greater than mongodb 5.0
 
 2022-12-12 Alibaba Cloud.
     * version: 2.8.2
     * BUGFIX: #771, fix bug that duplicate data when write kafka failed
-    * BUGFIX: #764, fix bug when multi oplog are updating shardkey
+    * BUGFIX: #764, fix bug when multi oplog are updating shardKey
 
 2022-09-22 Alibaba Cloud.
     * version: 2.8.1
@@ -102,7 +128,7 @@
 	* IMPROVE: remove `incr_sync.worker.oplog_compressor` option in conf.
 	* IMPROVE: improve the performance of writing kafka, add
 	`incr_sync.tunnel.write_thread` and `tunnel.kafka.partition_number`. #553.
-	* IMPROVE: support format canonical extented JSON format. #542.
+	* IMPROVE: support format canonical extended JSON format. #542.
 
 2021-03-05 Alibaba Cloud.
 	* version: 2.4.20
@@ -115,7 +141,7 @@
 	* version: 2.4.19
 	* BUGFIX: fix bug of cursorNotFound error. #451
 	* IMPROVE: polish LOG exit mechanism. #529
-	* IMPORVE: update mongo-go-driver to 1.4.4.
+	* IMPROVE: update mongo-go-driver to 1.4.4.
 	* IMPROVE: polish inner debug mechanism with `full_sync.executor.debug`
 	parameter in configuration.
 
@@ -171,11 +197,11 @@
 2020-08-27 Alibaba Cloud.
 	* version: 2.4.11
 	* IMPROVE: add ut_test script.
-	* IMPORVE: in full sync stage: replace mgo driver with mongo-go-driver in
+	* IMPROVE: in full sync stage: replace mgo driver with mongo-go-driver in
 	reading.
 	* BUGFIX: if can not run incr sync directly, return error when sync_mode
 	== incr.
-	* IMPROVE: docSync crash directly when meest error in full sync.
+	* IMPROVE: docSync crash directly when meet error in full sync.
 	* BUGFIX: do not change sync_mode whn tunnel != direct. #424
 	* IMPROVE: sort data before return in full sync stage.
 
@@ -267,13 +293,13 @@
 2020-03-25 Alibaba Cloud.
 	* version: 2.4.0
 	* IMPROVE: support change stream to solve move chunk problem.
-	* IMRPOVE: add feature compatiable version(fcv) for configuration and
+	* IMPROVE: add feature compatible version(fcv) for configuration and
 	checkpoint.
 	* IMPROVE: optimize orphan document filter.
 	* IMPROVE: block password in conf and log.
 	* IMPROVE: retry to insert document when duplicate error happen in full
 	sync stage.
-	* IMRPOVE: add 'full_sync.create_index' in configuration.
+	* IMPROVE: add 'full_sync.create_index' in configuration.
 	* DISABLE: temporarily disable oplog stored to disk during document
 	replication released on v2.2.1.
 
@@ -285,7 +311,7 @@
 2019-11-20 Alibaba Cloud.
 	* version: 2.2.0
 	* this is a experimental version for sharding replication
-	* IMRPOVE: support filter orphan document in full synchronization for mongodb sharding
+	* IMPROVE: support filter orphan document in full synchronization for mongodb sharding
 	* IMPROVE: support move chunk in incremental synchronization for mongodb sharding
 	* IMPROVE: support ddl in incremental synchronization for mongodb sharding
 	* IMPROVE: support different sharding key or index at destination mongodb
@@ -296,7 +322,7 @@
 	* BUGFIX: fetch data from kafka failed. update "sarama" driver, see #212.
 	* IMPROVE: support for the compilation of windows environment. see #233.
 	* IMPROVE: remove some parameters in configuration.
-	* IMRPOVE: add TPS in restful metric.
+	* IMPROVE: add TPS in restful metric.
 
 2019-08-17 Alibaba Cloud.
 	* version: 2.0.7
@@ -306,7 +332,7 @@
 	* BUGFIX: bugfix: set white namespace filter for sharding replication
 	cause db filtered. see #222.
 	* IMPROVE: add switch in configuration to support syncing some special
-	database like 'admin', 'local', default is disbale. see #223.
+	database like 'admin', 'local', default is disable. see #223.
 	* IMPROVE: set `adaptive.batching_max_size = 1024` by default to reduce
 	memory usage. see
 	https://github.com/alibaba/MongoShake/wiki/FAQ#q-mongoshake-crashed-because-of-oomout-of-memory-how-can-i-estimate-memory-usage
@@ -350,8 +376,8 @@
 	* BUG FIX: DDL createIndexes fail. Using `applyOps` in DDL replay. see
 	issue #176.
 	* BUG FIX: DDL filter applyOps command panic.
-	* IMPROVE: improve comparision script.
-	* IMRPOVE: update vinllen/mgo library to solve the problem that using too
+	* IMPROVE: improve comparsion script.
+	* IMPROVE: update vinllen/mgo library to solve the problem that using too
 	many mgo connections.
 
 2019-06-24 Alibaba Cloud.
@@ -366,7 +392,7 @@
 	* Feature: support full synchronization.
 	* Feature: support DDL synchronization including index and transaction.
 	* Feature: support namespace rename.
-	* BUG FIX: fix bug of dbref order.
+	* BUG FIX: fix bug of dbRef order.
 
 2019-04-20 Alibaba Cloud.
 	* version: 1.5.0-unstable
@@ -391,7 +417,7 @@
 	`replayer.executor.insert_on_dup_update` by default.
 	* IMPROVE: filter config database.
 	* IMPROVE: print `_id` type and value when can't be hashed.
-	* IMPROVE: disbale print version in command.
+	* IMPROVE: disable print version in command.
 	* IMPROVE: add `adaptive.batching_max_size` and `fetcher.buffer_capacity`
 	in configuration so users can control the memory usage.
 	* BUG FIX: do not use bulk writer to operate index.

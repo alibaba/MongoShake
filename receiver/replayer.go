@@ -1,13 +1,13 @@
 package replayer
 
 import (
+	"go.mongodb.org/mongo-driver/bson"
+
 	utils "github.com/alibaba/MongoShake/v2/common"
 	module "github.com/alibaba/MongoShake/v2/modules"
 	"github.com/alibaba/MongoShake/v2/oplog"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 	"github.com/alibaba/MongoShake/v2/tunnel"
-	"go.mongodb.org/mongo-driver/bson"
-
-	LOG "github.com/vinllen/log4go"
 )
 
 const (

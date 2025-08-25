@@ -5,16 +5,16 @@ import (
 	"math"
 	"sync"
 
+	nimo "github.com/gugemichael/nimo4go"
+	"go.mongodb.org/mongo-driver/bson"
+
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/docsyncer"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	"github.com/alibaba/MongoShake/v2/collector/transform"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/sharding"
-
-	"github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
-	"go.mongodb.org/mongo-driver/bson"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 func fetchChunkMap(isSharding bool) (sharding.ShardingChunkMap, error) {
@@ -69,7 +69,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		LOG.Info("source is mongod, need to fetching chunk map")
 		shardingChunkMap, err = fetchChunkMap(fromIsSharding)
 		if err != nil {
-			LOG.Critical("fetch chunk map failed[%v]", err)
+			_ = LOG.Critical("fetch chunk map failed[%v]", err)
 			return err
 		}
 	} else {
@@ -149,7 +149,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		}
 	}
 
-	// global qps limit, all dbsyncer share only 1 Qos
+	// global qps limit, all dbSyncer share only 1 Qos
 	qos := utils.StartQoS(0, int64(conf.Options.FullSyncReaderDocumentBatchSize), &utils.FullSentinelOptions.TPS)
 
 	// start sync each db
@@ -162,20 +162,21 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 			if chunkMap, ok := shardingChunkMap[src.ReplicaName]; ok {
 				dbChunkMap = chunkMap
 			} else {
-				LOG.Warn("document syncer %v has no chunk map", src.ReplicaName)
+				_ = LOG.Warn("document syncer %v has no chunk map", src.ReplicaName)
 			}
 			orphanFilter = filter.NewOrphanFilter(src.ReplicaName, dbChunkMap)
 		}
 
 		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, src.ReplicaName, toUrl, trans, orphanFilter, qos, fromIsSharding)
 		dbSyncer.Init()
-		LOG.Info("document syncer-%d do replication for url=%v", i, src.URL)
+		LOG.Info("document syncer-%d do replication for url=%v",
+			i, utils.BlockMongoUrlPassword(src.URL, "***"))
 
 		wg.Add(1)
 		nimo.GoRoutine(func() {
 			defer wg.Done()
 			if err := dbSyncer.Start(); err != nil {
-				LOG.Critical("document replication for url=%v failed. %v",
+				_ = LOG.Critical("document replication for url=%v failed. %v",
 					utils.BlockMongoUrlPassword(src.URL, "***"), err)
 				replError = err
 			}
@@ -187,8 +188,8 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	nimo.GoRoutine(func() {
 		// before starting, we must register all interface
 		if err := utils.FullSyncHttpApi.Listen(); err != nil {
-			LOG.Critical("start full sync server with port[%v] failed: %v", conf.Options.FullSyncHTTPListenPort,
-				err)
+			_ = LOG.Critical("start full sync server with port[%v] failed: %v",
+				conf.Options.FullSyncHTTPListenPort, err)
 		}
 	})
 
@@ -207,9 +208,11 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 
 	// update checkpoint after full sync
 	// do not update checkpoint when source is "aliyun_serverless"
-	if conf.Options.SyncMode != utils.VarSyncModeFull && conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless {
-		// need merge to one when from mongos and fetch_mothod=="change_stream"
-		if coordinator.MongoS != nil && conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
+	if conf.Options.SyncMode != utils.VarSyncModeFull &&
+		conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless {
+		// need merge to one when from mongos and fetch_method=="change_stream"
+		if coordinator.MongoS != nil &&
+			conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
 			var smallestNew int64 = math.MaxInt64
 			for _, val := range ckptMap {
 				if smallestNew > val.Newest {

@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	LOG "github.com/vinllen/log4go"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 const (

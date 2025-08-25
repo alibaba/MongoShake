@@ -10,8 +10,7 @@ import (
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-
-	LOG "github.com/vinllen/log4go"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 func (sync *OplogSyncer) newCheckpointManager(name string, startPosition interface{}) {
@@ -74,17 +73,16 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 	return nil
 }
 
-/*
- * calculate and update current checkpoint value. `flush` means whether force calculate & update checkpoint.
- * if inputTs is given(> 0), use this value to update checkpoint, otherwise, calculate from workers.
- */
-func (sync *OplogSyncer) checkpoint(flush bool, inputTs int64) {
+// checkpoint calculate and update current checkpoint value. `flush` means whether force calculate & update checkpoint.
+// if inputTs is given(> 0), use this value to update checkpoint, otherwise, calculate from workers.
+// Return true if we do update checkpoint, else return false.
+func (sync *OplogSyncer) checkpoint(flush bool, inputTs int64) bool {
 	now := time.Now()
 
 	// do checkpoint every once in a while
 	if !flush && sync.ckptTime.Add(time.Duration(conf.Options.CheckpointInterval)*time.Millisecond).After(now) {
 		LOG.Debug("do not repeat update checkpoint in %v milliseconds", conf.Options.CheckpointInterval)
-		return
+		return false
 	}
 	// we force update the ckpt time even failed
 	sync.ckptTime = now
@@ -97,7 +95,7 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs int64) {
 	if !flush && conf.Options.Tunnel != utils.VarTunnelDirect &&
 		now.Before(sync.startTime.Add(1*time.Minute)) {
 		LOG.Info("CheckpointOperation requires three minutes at least to flush receiver's buffer")
-		return
+		return false
 	}
 
 	// read all workerGroup self ckpt. get minimum of all updated checkpoint
@@ -130,20 +128,21 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs int64) {
 					utils.ExtractTimestampForLog(inMemoryTs), utils.ExtractTimestampForLog(lowest))
 				sync.replMetric.AddCheckpoint(1)
 				sync.replMetric.SetLSNCheckpoint(lowest)
-				return
+				return true
 			}
 		case lowestInt64 < inMemoryTs:
 			LOG.Info("CheckpointOperation calculated[%v] is smaller than value in memory[%v]",
 				utils.ExtractTimestampForLog(lowest), utils.ExtractTimestampForLog(inMemoryTs))
-			return
+			return false
 		case lowestInt64 == inMemoryTs:
-			return
+			return false
 		}
 	}
 
 	// this log will be print if no ack calculated
-	LOG.Warn("CheckpointOperation updated is not suitable. lowest [%d]. current [%v]. inputTs [%v]. reason : %v",
+	_ = LOG.Warn("CheckpointOperation updated is not suitable. lowest [%d]. current [%v]. inputTs [%v]. reason : %v",
 		lowest, utils.ExtractTimestampForLog(inMemoryTs), inputTs, err)
+	return false
 }
 
 func (sync *OplogSyncer) calculateWorkerLowestCheckpoint() (v int64, err error) {
@@ -152,7 +151,7 @@ func (sync *OplogSyncer) calculateWorkerLowestCheckpoint() (v int64, err error) 
 	candidates := make([]int64, 0, len(sync.batcher.workerGroup))
 	allAckValues := make([]int64, 0, len(sync.batcher.workerGroup))
 	for _, worker := range sync.batcher.workerGroup {
-		// read ack value first because of we don't wanna
+		// read ack value first because  we don't want
 		// a result of ack > unack. There wouldn't be cpu
 		// reorder under atomic !
 		ack := atomic.LoadInt64(&worker.ack)
@@ -169,7 +168,7 @@ func (sync *OplogSyncer) calculateWorkerLowestCheckpoint() (v int64, err error) 
 			allAcked = false
 		} else if unack < ack && unack == 0 {
 			// collector restarts. receiver unack value if from buffer
-			// this is rarely happened. However we have delayed for
+			// this is rarely happened. However, we have delayed for
 			// a bit log time. so we could use it
 			allAcked = false
 		} else if unack < ack && unack != 0 {

@@ -3,18 +3,18 @@ package executor
 import (
 	"context"
 	"fmt"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
-	"github.com/alibaba/MongoShake/v2/oplog"
-
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/vinllen/log4go"
+	"github.com/alibaba/MongoShake/v2/oplog"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
-// use general single writer interface to execute command
+// SingleWriter use general single writer interface to execute command
 type SingleWriter struct {
 	// mongo connection
 	conn *utils.MongoCommunityConn
@@ -23,7 +23,25 @@ type SingleWriter struct {
 	fullFinishTs int64
 }
 
-// { "op" : "i", "ns" : "test.c", "ui" : UUID("4654d08e-db1f-4e94-9778-90aeee4feff0"), "o" : { "_id" : ObjectId("627a1f83b95fae5fca006bac"), "a" : 1, "b" : 1, "c" : 1 }, "ts" : Timestamp(1652170627, 2), "t" : NumberLong(1), "wall" : ISODate("2022-05-10T08:17:07.558Z"), "v" : NumberLong(2) }
+// insert oplog example:
+/*
+{
+    "op": "i",
+    "ns": "test.c",
+    "ui": UUID("4654d08e-db1f-4e94-9778-90aeee4feff0"),
+    "o": {
+        "_id": ObjectId("627a1f83b95fae5fca006bac"),
+        "a": 1,
+        "b": 1,
+        "c": 1
+    },
+    "ts": Timestamp(1652170627,
+    2),
+    "t": NumberLong(1),
+    "wall": ISODate("2022-05-10T08:17:07.558Z"),
+    "v": NumberLong(2)
+}
+*/
 func (sw *SingleWriter) doInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord, dupUpdate bool) error {
 
 	collectionHandle := sw.conn.Client.Database(database).Collection(collection)
@@ -36,7 +54,7 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.E, o
 				upserts = append(upserts, log)
 				continue
 			} else {
-				LOG.Error("insert data[%v] failed[%v]", log.original.partialLog.Object, err)
+				_ = LOG.Error("insert data[%v] failed[%v]", log.original.partialLog.Object, err)
 				return err
 			}
 		}
@@ -69,9 +87,9 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
 			updates = append(updates, &pair{id: log.original.partialLog.DocumentKey, data: newObject, index: i})
 		} else {
-			if upsert {
-				LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
-			}
+			//if upsert {
+			//	_ = LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
+			//}
 			// insert must have _id
 			if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
 				updates = append(updates, &pair{id: bson.D{{"_id", id}}, data: newObject, index: i})
@@ -91,7 +109,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 			res, err := collectionHandle.UpdateOne(context.Background(), update.id,
 				bson.D{{"$set", update.data}}, opts)
 			if err != nil {
-				LOG.Warn("upsert _id[%v] with data[%v] meets err[%v] res[%v], try to solve",
+				_ = LOG.Warn("upsert _id[%v] with data[%v] meets err[%v] res[%v], try to solve",
 					update.id, update.data, err, res)
 
 				// error can be ignored(insert fail & oplog is before full end)
@@ -100,12 +118,12 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 					continue
 				}
 
-				LOG.Error("upsert _id[%v] with data[%v] failed[%v]", update.id, update.data, err)
+				_ = LOG.Error("upsert _id[%v] with data[%v] failed[%v]", update.id, update.data, err)
 				return err
 			}
 			if res != nil {
 				if res.MatchedCount != 1 && res.UpsertedCount != 1 {
-					return fmt.Errorf("Update fail(MatchedCount:%d ModifiedCount:%d UpsertedCount:%d) upsert _id[%v] with data[%v]",
+					return fmt.Errorf("update fail(MatchedCount:%d ModifiedCount:%d UpsertedCount:%d) upsert _id[%v] with data[%v]",
 						res.MatchedCount, res.ModifiedCount, res.UpsertedCount, update.id, update.data)
 				}
 			}
@@ -116,7 +134,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 			res, err := collectionHandle.UpdateOne(context.Background(), update.id,
 				bson.D{{"$set", update.data}}, nil)
 			if err != nil && utils.DuplicateKey(err) == false {
-				LOG.Warn("update _id[%v] with data[%v] meets err[%v] res[%v], try to solve",
+				_ = LOG.Warn("update _id[%v] with data[%v] meets err[%v] res[%v], try to solve",
 					update.id, update.data, err, res)
 
 				// error can be ignored
@@ -125,12 +143,12 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 					continue
 				}
 
-				LOG.Error("update _id[%v] with data[%v] failed[%v]", update.id, update.data, err.Error())
+				_ = LOG.Error("update _id[%v] with data[%v] failed[%v]", update.id, update.data, err.Error())
 				return err
 			}
 			if res != nil {
 				if res.MatchedCount != 1 {
-					return fmt.Errorf("Update fail(MatchedCount:%d, ModifiedCount:%d) old-data[%v] with new-data[%v]",
+					return fmt.Errorf("update fail(MatchedCount:%d, ModifiedCount:%d) old-data[%v] with new-data[%v]",
 						res.MatchedCount, res.ModifiedCount, update.id, update.data)
 				}
 			}
@@ -140,16 +158,51 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 	return nil
 }
 
+// update oplog example:
 /*
-replace(update all):
-
-	db.c.insert({"a":1,"b":1,"c":1}) + db.c.update({"a":1}, {"b":2})
-	{ "op" : "u", "ns" : "test.c", "ui" : UUID("4654d08e-db1f-4e94-9778-90aeee4feff0"), "o" : { "_id" : ObjectId("627a2492b95fae5fca006bad"), "b" : 2 }, "o2" : { "_id" : ObjectId("627a2492b95fae5fca006bad") }, "ts" : Timestamp(1652171939, 1), "t" : NumberLong(1), "wall" : ISODate("2022-05-10T08:38:59.701Z"), "v" : NumberLong(2) }
-
-updateOne:
-
-	db.c.insert({"a":1,"b":1,"c":1}) + db.c.updateOne({"a":1}, {"$set":{"b":2}})
-	{ "op" : "u", "ns" : "test.c", "ui" : UUID("4654d08e-db1f-4e94-9778-90aeee4feff0"), "o" : { "$v" : 1, "$set" : { "b" : 3 }, "$unset" : { "c" : true } }, "o2" : { "_id" : ObjectId("627a1f83b95fae5fca006bac") }, "ts" : Timestamp(1652170892, 1), "t" : NumberLong(1), "wall" : ISODate("2022-05-10T08:21:32.695Z"), "v" : NumberLong(2) }
+1) replace(update all):
+PRIMARY> db.c.insert({"a":1,"b":1,"c":1})
+PRIMARY> db.c.update({"a":1}, {"b":2})
+{
+    "op": "u",
+    "ns": "test.c",
+    "ui": UUID("4654d08e-db1f-4e94-9778-90aeee4feff0"),
+    "o": {
+        "_id": ObjectId("627a2492b95fae5fca006bad"),
+        "b": 2
+    },
+    "o2": {
+        "_id": ObjectId("627a2492b95fae5fca006bad")
+    },
+    "ts": Timestamp(1652171939,1),
+    "t": NumberLong(1),
+    "wall": ISODate("2022-05-10T08:38:59.701Z"),
+    "v": NumberLong(2)
+}
+2) '$set' update:
+PRIMARY> db.c.insert({"a":1,"b":1,"c":1})
+PRIMARY> db.c.updateOne({"a":1}, {"$set":{"b":2}})
+{
+    "op": "u",
+    "ns": "test.c",
+    "ui": UUID("4654d08e-db1f-4e94-9778-90aeee4feff0"),
+    "o": {
+        "$v": 1,
+        "$set": {
+            "b": 3
+        },
+        "$unset": {
+            "c": true
+        }
+    },
+    "o2": {
+        "_id": ObjectId("627a1f83b95fae5fca006bac")
+    },
+    "ts": Timestamp(1652170892,1),
+    "t": NumberLong(1),
+    "wall": ISODate("2022-05-10T08:21:32.695Z"),
+    "v": NumberLong(2)
+}
 */
 func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, oplogs []*OplogRecord, upsert bool) error {
 	collectionHandle := sw.conn.Client.Database(database).Collection(collection)
@@ -170,7 +223,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 
 			if ok && oplogVer == 2 {
 				if update, oplogErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); oplogErr != nil {
-					LOG.Error("doUpdate run Faild err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
+					_ = LOG.Error("doUpdate run failed err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
 					return oplogErr
 				}
 			} else {
@@ -186,9 +239,9 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.DocumentKey,
 					update, opts)
 			} else {
-				if upsert {
-					LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
-				}
+				//if upsert {
+				//	_ = LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
+				//}
 
 				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.Query,
 					update, opts)
@@ -210,7 +263,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 
 			updateCmd = "replace"
 		}
-		LOG.Debug("single_writer: %s %v aftermodify_doc:%v", updateCmd, update, log.original.partialLog)
+		LOG.Debug("single_writer: %s %v after_modify_doc:%v", updateCmd, update, log.original.partialLog)
 
 		if err != nil {
 			// error can be ignored
@@ -224,42 +277,54 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 				continue
 			}
 
-			LOG.Error("doUpdate[upsert] old-data[%v] with new-data[%v] failed[%v]",
+			_ = LOG.Error("doUpdate[upsert] old-data[%v] with new-data[%v] failed[%v]",
 				log.original.partialLog.Query, log.original.partialLog.Object, err)
 			return err
 		}
 		if res != nil {
 			if upsert {
 				if res.MatchedCount != 1 && res.UpsertedCount != 1 {
-					return fmt.Errorf("Update fail(MatchedCount:%d ModifiedCount:%d UpsertedCount:%d) old-data[%v] with new-data[%v]",
+					return fmt.Errorf("update fail(MatchedCount:%d ModifiedCount:%d UpsertedCount:%d) old-data[%v] with new-data[%v]",
 						res.MatchedCount, res.ModifiedCount, res.UpsertedCount,
 						log.original.partialLog.Query, log.original.partialLog.Object)
 				}
 			} else {
 				if res.MatchedCount != 1 {
-					return fmt.Errorf("Update fail(MatchedCount:%d ModifiedCount:%d MatchedCount:%d) old-data[%v] with new-data[%v]",
+					return fmt.Errorf("update fail(MatchedCount:%d ModifiedCount:%d MatchedCount:%d) old-data[%v] with new-data[%v]",
 						res.MatchedCount, res.ModifiedCount, res.MatchedCount,
 						log.original.partialLog.Query, log.original.partialLog.Object)
 				}
 			}
 		}
 
-		LOG.Debug("single_writer: aftermodify_doc %v %s[%v]", log.original.partialLog, updateCmd, update)
+		LOG.Debug("single_writer: after_modify_doc %v %s[%v]", log.original.partialLog, updateCmd, update)
 	}
 
 	return nil
 
 }
 
-// { "op" : "d", "ns" : "test.c", "ui" : UUID("4654d08e-db1f-4e94-9778-90aeee4feff0"), "o" : { "_id" : ObjectId("627a1f83b95fae5fca006bac") }, "ts" : Timestamp(1652171085, 1), "t" : NumberLong(1), "wall" : ISODate("2022-05-10T08:24:45.828Z"), "v" : NumberLong(2) }
+// delete oplog example:
+/*
+{
+    "op": "d",
+    "ns": "test.c",
+    "ui": UUID("4654d08e-db1f-4e94-9778-90aeee4feff0"),
+    "o": {
+        "_id": ObjectId("627a1f83b95fae5fca006bac")
+    },
+    "ts": Timestamp(1652171085,1),
+    "t": NumberLong(1),
+    "wall": ISODate("2022-05-10T08:24:45.828Z"),
+    "v": NumberLong(2)
+}
+*/
 func (sw *SingleWriter) doDelete(database, collection string, metadata bson.E, oplogs []*OplogRecord) error {
 	collectionHandle := sw.conn.Client.Database(database).Collection(collection)
 	for _, log := range oplogs {
-		// ignore ErrNotFound
-
 		_, err := collectionHandle.DeleteOne(context.Background(), log.original.partialLog.Object)
 		if err != nil {
-			LOG.Error("delete data[%v] failed[%v]", log.original.partialLog.Query, err)
+			_ = LOG.Error("delete data[%v] failed[%v]", log.original.partialLog.Query, err)
 			return err
 		}
 
@@ -277,11 +342,12 @@ func (sw *SingleWriter) doCommand(database string, metadata bson.E, oplogs []*Op
 		if conf.Options.FilterDDLEnable || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order
 			if err = RunCommand(database, operation, log.original.partialLog, sw.conn.Client); err == nil {
-				LOG.Info("Execute command (op==c) oplog, operation [%s]", operation)
+				LOG.Info("execute command(op=c) oplog, operation[%s]", operation)
 			} else if err.Error() == "ns not found" {
-				LOG.Info("Execute command (op==c) oplog, operation [%s], ignore error[ns not found]", operation)
-			} else if IgnoreError(err, "c", utils.TimeStampToInt64(log.original.partialLog.Timestamp) <= sw.fullFinishTs) {
-				continue
+				LOG.Info("execute command(op=c) oplog, operation[%s], ignore error[ns not found]", operation)
+			} else if IgnoreError(err, "c", parseLastTimestamp(oplogs) <= sw.fullFinishTs) {
+				LOG.Info("Ignore error[%v] db[%s] oplog[%v], inFullSync[%v]",
+					err, database, log.original.partialLog, parseLastTimestamp(oplogs) <= sw.fullFinishTs)
 			} else {
 				return err
 			}

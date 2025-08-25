@@ -3,13 +3,13 @@ package oplog
 import (
 	"encoding/json"
 	"fmt"
-	LOG "github.com/vinllen/log4go"
+	"reflect"
+	"strings"
+
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
-	"reflect"
-
-	"strings"
 )
 
 const (
@@ -38,6 +38,7 @@ type ParsedLog struct {
 	DocumentKey   bson.D              `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists when source collection is sharded, only including shard key and _id
 	PrevOpTime    bson.Raw            `bson:"prevOpTime,omitempty"`
 	UI            *primitive.Binary   `bson:"ui,omitempty" json:"ui,omitempty"` // do not enable currently
+	Upsert        bool                `bson:"b,omitempty" json:"b,omitempty"`   // upsert for update op
 }
 
 type PartialLog struct {
@@ -101,7 +102,7 @@ func (partialLog *PartialLog) String() string {
 	}
 }
 
-// dump according to the given keys, "all" == true means ignore keys
+// Dump will dump oplog according to the given keys, "all" == true means ignore keys
 func (partialLog *PartialLog) Dump(keys map[string]struct{}, all bool) bson.D {
 	var out bson.D
 	logType := reflect.TypeOf(partialLog.ParsedLog)
@@ -115,7 +116,7 @@ func (partialLog *PartialLog) Dump(keys map[string]struct{}, all bool) bson.D {
 					continue
 				}
 			}
-			out = append(out, primitive.E{tagName, value})
+			out = append(out, primitive.E{Key: tagName, Value: value})
 		}
 	}
 
@@ -164,7 +165,7 @@ func ConvertBsonD2MExcept(input bson.D, except map[string]struct{}) (bson.M, map
 	return m, keys
 }
 
-// convert bson.D to bson.M
+// ConvertBsonD2M convert bson.D to bson.M
 func ConvertBsonD2M(input bson.D) (bson.M, map[string]struct{}) {
 	m := bson.M{}
 	keys := make(map[string]struct{}, len(input))
@@ -207,7 +208,7 @@ func ConvertBsonM2E(input bson.M) (bson.E, error) {
 	return e, nil
 }
 
-// pay attention: the input bson.D will be modified.
+// RemoveFiled remove specified field in bson.D and return the one after modify
 func RemoveFiled(input bson.D, key string) bson.D {
 	flag := -1
 	for id := range input {
@@ -284,13 +285,65 @@ func GatherApplyOps(input []*PartialLog) (*GenericOplog, error) {
 	}
 }
 
-// Oplog from mongod(5.0) in sharding&replica
-// {"ts":{"T":1653449035,"I":3},"v":2,"op":"u","ns":"test.bar",
-//  "o":[{"Key":"diff","Value":[{"Key":"d","Value":[{"Key":"ok","Value":false}]},
-//                              {"Key":"i","Value":[{"Key":"plus_field","Value":2}]}]}],
-//  "o2":[{"Key":"_id","Value":"628da11482387c117d4e9e45"}]}
-
-// "o" : { "$v" : 2, "diff" : { "d" : { "count" : false }, "u" : { "name" : "orange" }, "i" : { "c" : 11 } } }
+// DiffUpdateOplogToNormal convert diff update oplog(v2) to normal one(v1)
+/*
+Oplog from mongod(5.0) in sharding&replica》
+Example 1:
+{
+    "ts": {"T": 1653449035,"I": 3},
+    "v": 2,
+    "op": "u",
+    "ns": "test.bar",
+    "o": [
+        {
+            "Key": "diff",
+            "Value": [
+                {
+                    "Key": "d",
+                    "Value": [
+                        {
+                            "Key": "ok",
+                            "Value": false
+                        }
+                    ]
+                },
+                {
+                    "Key": "i",
+                    "Value": [
+                        {
+                            "Key": "plus_field",
+                            "Value": 2
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "o2": [
+        {
+            "Key": "_id",
+            "Value": "628da11482387c117d4e9e45"
+        }
+    ]
+}
+// example 2:
+{
+    "o": {
+        "$v": 2,
+        "diff": {
+            "d": {
+                "count": false
+            },
+            "u": {
+                "name": "orange"
+            },
+            "i": {
+                "c": 11
+            }
+        }
+    }
+}
+*/
 func DiffUpdateOplogToNormal(updateObj bson.D) (interface{}, error) {
 
 	diffObj := GetKey(updateObj, "diff")
@@ -303,7 +356,7 @@ func DiffUpdateOplogToNormal(updateObj bson.D) (interface{}, error) {
 		return updateObj, fmt.Errorf("diff field is not bson.D updateObj:[%v]", updateObj)
 	}
 
-	result, err := BuildUpdateDelteOplog("", bsonDiffObj)
+	result, err := ConvertV2Oplog("", bsonDiffObj)
 	if err != nil {
 		return updateObj, fmt.Errorf("parse diffOplog failed updateObj:[%v] err[%v]", updateObj, err)
 	}
@@ -312,7 +365,7 @@ func DiffUpdateOplogToNormal(updateObj bson.D) (interface{}, error) {
 
 }
 
-func BuildUpdateDelteOplog(prefixField string, obj bson.D) (interface{}, error) {
+func ConvertV2Oplog(prefixField string, obj bson.D) (interface{}, error) {
 	var result bson.D
 
 	for _, ele := range obj {
@@ -335,7 +388,7 @@ func BuildUpdateDelteOplog(prefixField string, obj bson.D) (interface{}, error) 
 				tmpPrefixField = prefixField + "." + ele.Key[1:]
 			}
 
-			nestObj, err := BuildUpdateDelteOplog(tmpPrefixField, ele.Value.(bson.D))
+			nestObj, err := ConvertV2Oplog(tmpPrefixField, ele.Value.(bson.D))
 			if err != nil {
 				return obj, fmt.Errorf("parse ele[%v] failed, updateObj:[%v]", ele, obj)
 			}

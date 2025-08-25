@@ -1,9 +1,9 @@
 package conf
 
 import (
-	utils "github.com/alibaba/MongoShake/v2/common"
-
 	"github.com/getlantern/deepcopy"
+
+	utils "github.com/alibaba/MongoShake/v2/common"
 )
 
 type Configuration struct {
@@ -45,7 +45,7 @@ type Configuration struct {
 	CheckpointStartPosition                int64    `config:"checkpoint.start_position" type:"date"`
 	TransformNamespace                     []string `config:"transform.namespace"`
 	SpecialSourceDBFlag                    string   `config:"special.source.db.flag" type:"string"` // add v2.4.20
-	SkipNSShareKeyVerify                   []string `config:"skip.nsshardkey.verify"`               //add v2.8.2
+	SkipNSShareKeyVerify                   []string `config:"skip.nsshardkey.verify"`               // add v2.8.2
 
 	// 2. full sync
 	FullSyncReaderCollectionParallel     int    `config:"full_sync.reader.collection_parallel"`
@@ -61,24 +61,26 @@ type Configuration struct {
 	FullSyncExecutorInsertOnDupUpdate    bool   `config:"full_sync.executor.insert_on_dup_update"`
 	FullSyncExecutorFilterOrphanDocument bool   `config:"full_sync.executor.filter.orphan_document"`
 	FullSyncExecutorMajorityEnable       bool   `config:"full_sync.executor.majority_enable"`
+	FullSyncDoNotShardDest               bool   `config:"full_sync.do_not_shard_destination"` // add v2.8.6
 
 	// 3. incr sync
-	IncrSyncMongoFetchMethod              string   `config:"incr_sync.mongo_fetch_method"`
-	IncrSyncChangeStreamWatchFullDocument bool     `config:"incr_sync.change_stream.watch_full_document"`
-	IncrSyncReaderFetchBatchSize          int      `config:"incr_sync.reader.fetch_batch_size"`
-	IncrSyncOplogGIDS                     []string `config:"incr_sync.oplog.gids"`
-	IncrSyncShardKey                      string   `config:"incr_sync.shard_key"`
-	IncrSyncShardByObjectIdWhiteList      []string `config:"incr_sync.shard_by_object_id_whitelist"`
-	IncrSyncWorker                        int      `config:"incr_sync.worker"`
-	IncrSyncTunnelWriteThread             int      `config:"incr_sync.tunnel.write_thread"` // add v2.4.21
-	IncrSyncTargetDelay                   int64    `config:"incr_sync.target_delay"`
-	IncrSyncWorkerBatchQueueSize          uint64   `config:"incr_sync.worker.batch_queue_size"`
-	IncrSyncAdaptiveBatchingMaxSize       int      `config:"incr_sync.adaptive.batching_max_size"`
-	IncrSyncFetcherBufferCapacity         int      `config:"incr_sync.fetcher.buffer_capacity"`
-	IncrSyncExecutorUpsert                bool     `config:"incr_sync.executor.upsert"`
-	IncrSyncExecutorInsertOnDupUpdate     bool     `config:"incr_sync.executor.insert_on_dup_update"`
-	IncrSyncConflictWriteTo               string   `config:"incr_sync.conflict_write_to"` // remove "sdk" option since v2.4.21
-	IncrSyncExecutorMajorityEnable        bool     `config:"incr_sync.executor.majority_enable"`
+	IncrSyncMongoFetchMethod               string   `config:"incr_sync.mongo_fetch_method"`
+	IncrSyncChangeStreamWatchFullDocument  bool     `config:"incr_sync.change_stream.watch_full_document"`
+	IncrSyncReaderFetchBatchSize           int      `config:"incr_sync.reader.fetch_batch_size"`
+	IncrSyncOplogGIDS                      []string `config:"incr_sync.oplog.gids"`
+	IncrSyncShardKey                       string   `config:"incr_sync.shard_key"`
+	IncrSyncShardByObjectIdWhiteList       []string `config:"incr_sync.shard_by_object_id_whitelist"`
+	IncrSyncWorker                         int      `config:"incr_sync.worker"`
+	IncrSyncTunnelWriteThread              int      `config:"incr_sync.tunnel.write_thread"` // add v2.4.21
+	IncrSyncTargetDelay                    int64    `config:"incr_sync.target_delay"`
+	IncrSyncWorkerBatchQueueSize           uint64   `config:"incr_sync.worker.batch_queue_size"`
+	IncrSyncAdaptiveBatchingMaxSize        int      `config:"incr_sync.adaptive.batching_max_size"`
+	IncrSyncFetcherBufferCapacity          int      `config:"incr_sync.fetcher.buffer_capacity"`
+	IncrSyncFetcherBufferSizeThresholdInKB int      `config:"incr_sync.fetcher.buffer_size_threshold_in_kb"` // add v2.8.6
+	IncrSyncExecutorUpsert                 bool     `config:"incr_sync.executor.upsert"`
+	IncrSyncExecutorInsertOnDupUpdate      bool     `config:"incr_sync.executor.insert_on_dup_update"`
+	IncrSyncConflictWriteTo                string   `config:"incr_sync.conflict_write_to"` // remove "sdk" option since v2.4.21
+	IncrSyncExecutorMajorityEnable         bool     `config:"incr_sync.executor.majority_enable"`
 
 	/*---------------------------------------------------------*/
 	// inner variables, not open to user
@@ -121,9 +123,9 @@ var Options Configuration
 
 func GetSafeOptions() Configuration {
 	polish := new(Configuration)
-	deepcopy.Copy(polish, &Options)
+	_ = deepcopy.Copy(polish, &Options)
 
-	// modify mongo_ulrs
+	// modify mongo_urls
 	for i := range Options.MongoUrls {
 		polish.MongoUrls[i] = utils.BlockMongoUrlPassword(Options.MongoUrls[i], "***")
 	}

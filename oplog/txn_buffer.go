@@ -4,17 +4,15 @@
 // not use this file except in compliance with the License. You may obtain
 // a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
 
-// Package txn implements functions for examining and processing transaction
-// oplog entries.
 package oplog
 
 import (
 	"errors"
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"sync"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 var ErrBufferClosed = errors.New("transaction buffer already closed")
@@ -58,7 +56,7 @@ func (ts *txnState) purge() error {
 }
 
 // TxnBuffer stores transaction oplog entries until they are needed
-// to commit them to a desination.  It includes a WaitGroup for tracking
+// to commit them to a destination.  It includes a WaitGroup for tracking
 // all goroutines across all transactions for use in global shutdown.
 type TxnBuffer struct {
 	sync.Mutex
@@ -313,8 +311,8 @@ const extractErrorFmt = "error extracting transaction ops: %s: %v"
 
 // ExtractInnerOps
 // doc.applyOps[i].ts（Let ckpt use the last ts to judge complete）
-//     applyOps[0 - n-1].ts = doc.ts - 1
-//     applyOps[n-1].ts = doc.ts
+// doc.applyOps[0 - n-1].ts = doc.ts - 1
+// doc.applyOps[n-1].ts = doc.ts
 func ExtractInnerOps(tranOp *ParsedLog) ([]ParsedLog, error) {
 	doc := tranOp.Object
 	rawAO, err := findValueByKey("applyOps", &doc)
@@ -356,6 +354,37 @@ func ExtractInnerOps(tranOp *ParsedLog) ([]ParsedLog, error) {
 	return ops, nil
 }
 
+// ExtractInnerNs is used to extract the inner namespace of the txn
+// PS: here only check the first inner op
+func ExtractInnerNs(op *ParsedLog) (string, error) {
+	doc := op.Object
+	rawAO, err := findValueByKey("applyOps", &doc)
+	if err != nil {
+		return "", fmt.Errorf(extractErrorFmt, "applyOps field", err)
+	}
+
+	ao, ok := rawAO.(bson.A)
+	if !ok {
+		return "", fmt.Errorf(extractErrorFmt, "applyOps field", "not a BSON array")
+	}
+	if len(ao) == 0 {
+		return "", fmt.Errorf(extractErrorFmt, "applyOps field", "empty BSON array")
+	}
+	innerOp, ok := ao[0].(bson.D)
+	if !ok {
+		return "", fmt.Errorf(extractErrorFmt, "applyOps field", "inner op not a BSON document")
+	}
+	innerNs, err := findValueByKey("ns", &innerOp)
+	if err != nil {
+		return "", fmt.Errorf(extractErrorFmt, "inner op", err)
+	}
+	ns, ok := innerNs.(string)
+	if !ok {
+		return "", fmt.Errorf(extractErrorFmt, "inner op", "ns not a string")
+	}
+	return ns, nil
+}
+
 const opConvertErrorFmt = "error converting bson.D to op: %s: %v"
 
 func bsonDocToOplog(doc bson.D) (*ParsedLog, error) {
@@ -393,6 +422,12 @@ func bsonDocToOplog(doc bson.D) (*ParsedLog, error) {
 				return nil, fmt.Errorf(opConvertErrorFmt, "ui field", "not binary data")
 			}
 			op.UI = &u
+		case "b":
+			b, ok := v.Value.(bool)
+			if !ok {
+				return nil, fmt.Errorf(opConvertErrorFmt, "b filed", "not a bool")
+			}
+			op.Upsert = b
 		}
 	}
 

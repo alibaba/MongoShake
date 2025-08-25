@@ -2,13 +2,13 @@ package collector
 
 import (
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"go.mongodb.org/mongo-driver/bson"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/oplog"
-
-	"github.com/stretchr/testify/assert"
 )
 
 func mockOplogsBinary() []byte {

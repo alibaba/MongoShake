@@ -2,13 +2,14 @@ package filter
 
 import (
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson"
 	"testing"
-
-	"github.com/alibaba/MongoShake/v2/oplog"
 
 	"github.com/getlantern/deepcopy"
 	"github.com/stretchr/testify/assert"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/x/mongo/driver/uuid"
+
+	"github.com/alibaba/MongoShake/v2/oplog"
 )
 
 func TestNamespaceFilter(t *testing.T) {
@@ -111,19 +112,19 @@ func TestNamespaceFilter(t *testing.T) {
 						Key: "applyOps",
 						Value: []bson.D{
 							{
-								bson.E{"op", "i"},
-								bson.E{"ns", "zz.mmm"},
-								bson.E{"o", bson.D{
-									bson.E{"a", 1},
-									bson.E{"_id", "xxx"},
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.mmm"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "a", Value: 1},
+									bson.E{Key: "_id", Value: "xxx"},
 								}},
 							},
 							{
-								bson.E{"op", "i"},
-								bson.E{"ns", "zz.x"},
-								bson.E{"o", bson.D{
-									bson.E{"xyz", "ff"},
-									bson.E{"_id", "yyy"},
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.x"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "xyz", Value: "ff"},
+									bson.E{Key: "_id", Value: "yyy"},
 								}},
 							},
 						},
@@ -132,7 +133,45 @@ func TestNamespaceFilter(t *testing.T) {
 			},
 		}
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
-		assert.Equal(t, 2, len(log.Object[0].Value.([]bson.D)), "should be equal")
+		assert.Equal(t, 2, len(log.Object[0].Value.([]interface{})), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestNamespaceFilter case %d.\n", nr)
+		nr++
+
+		filter := NewNamespaceFilter([]string{"zz.mmm"}, nil)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key: "applyOps",
+						Value: []bson.D{
+							{
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.mmm"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "a", Value: 1},
+									bson.E{Key: "_id", Value: "xxx"},
+								}},
+							},
+							{
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.x"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "xyz", Value: "ff"},
+									bson.E{Key: "_id", Value: "yyy"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+		assert.Equal(t, 1, len(log.Object[0].Value.([]interface{})), "should be equal")
 	}
 
 	{
@@ -149,19 +188,19 @@ func TestNamespaceFilter(t *testing.T) {
 						Key: "applyOps",
 						Value: []bson.D{
 							{
-								bson.E{"op", "i"},
-								bson.E{"ns", "zz.mmm"},
-								bson.E{"o", bson.D{
-									bson.E{"a", 1},
-									bson.E{"_id", "xxx"},
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.mmm"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "a", Value: 1},
+									bson.E{Key: "_id", Value: "xxx"},
 								}},
 							},
 							{
-								bson.E{"op", "i"},
-								bson.E{"ns", "ff.x"},
-								bson.E{"o", bson.D{
-									bson.E{"xyz", "ff"},
-									bson.E{"_id", "yyy"},
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "ff.x"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "xyz", Value: "ff"},
+									bson.E{Key: "_id", Value: "yyy"},
 								}},
 							},
 						},
@@ -170,7 +209,7 @@ func TestNamespaceFilter(t *testing.T) {
 			},
 		}
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
-		assert.Equal(t, 1, len(log.Object[0].Value.([]bson.D)), "should be equal")
+		assert.Equal(t, 1, len(log.Object[0].Value.([]interface{})), "should be equal")
 	}
 }
 
@@ -253,6 +292,13 @@ func TestAutologousFilter(t *testing.T) {
 
 		log = &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
+				Namespace: "mongoshake_conflict.x",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
 				Namespace: "local.x.z.y",
 			},
 		}
@@ -263,7 +309,7 @@ func TestAutologousFilter(t *testing.T) {
 				Namespace: "a.system.views",
 			},
 		}
-		assert.Equal(t, true, filter.Filter(log), "should be equal")
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
 
 		log = &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
@@ -278,10 +324,38 @@ func TestAutologousFilter(t *testing.T) {
 			},
 		}
 		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "config.system.sessions",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "config.cache.databases",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "config.transactions",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "a.system.profile",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
 	}
 
 	rec := make(map[string]bool)
-	deepcopy.Copy(&rec, &NsShouldBeIgnore)
+	_ = deepcopy.Copy(&rec, &NsShouldBeIgnore)
 
 	{
 		fmt.Printf("TestAutologousFilter case %d.\n", nr)
@@ -338,12 +412,63 @@ func TestAutologousFilter(t *testing.T) {
 
 	fmt.Println(rec, NsShouldBeIgnore)
 
+	// test cmd
+	{
+		fmt.Printf("TestAutologousFilter case %d.\n", nr)
+		nr++
+
+		InitNs([]string{})
+		filter := new(AutologousFilter)
+
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "zz.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key:   "drop",
+						Value: "xxx",
+					},
+				},
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "zz.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key:   "startIndexBuild",
+						Value: "xxx",
+					},
+				},
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "zz.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key:   "abortIndexBuild",
+						Value: "xxx",
+					},
+				},
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+	}
+
 	// test transaction
 	{
 		fmt.Printf("TestAutologousFilter case %d.\n", nr)
 		nr++
 
-		deepcopy.Copy(&NsShouldBeIgnore, &rec)
+		_ = deepcopy.Copy(&NsShouldBeIgnore, &rec)
 
 		InitNs([]string{})
 		filter := new(AutologousFilter)
@@ -370,6 +495,71 @@ func TestAutologousFilter(t *testing.T) {
 			},
 		}
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		// txn with config.system.sessions
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key: "applyOps",
+						Value: bson.A{
+							bson.D{
+								bson.E{Key: "op", Value: "d"},
+								bson.E{Key: "ns", Value: "config.system.sessions"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: uuid.UUID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}},
+								}},
+							},
+							bson.D{
+								bson.E{Key: "op", Value: "d"},
+								bson.E{Key: "ns", Value: "config.system.sessions"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: "xxx"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+		ns, err := oplog.ExtractInnerNs(&log.ParsedLog)
+		assert.NoError(t, err, "should be equal")
+		assert.Equal(t, "config.system.sessions", ns, "should be equal")
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key: "applyOps",
+						Value: bson.A{
+							bson.D{
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.mmm"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: "xxx"},
+								}},
+							},
+							bson.D{
+								bson.E{Key: "op", Value: "d"},
+								bson.E{Key: "ns", Value: "config.system.sessions"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: "xxx"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+		ns, err = oplog.ExtractInnerNs(&log.ParsedLog)
+		assert.NoError(t, err, "should be equal")
+		assert.Equal(t, "zz.mmm", ns, "should be equal")
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
 	}
 }
 
@@ -384,7 +574,6 @@ func TestComputeHash(t *testing.T) {
 
 		v1 := ComputeHash(106402199)
 		v2 := ComputeHash(106296614)
-		// assert.Equal(t, false, filter.Filter(log), "should be equal")
 		fmt.Println(v1, v2)
 	}
 }

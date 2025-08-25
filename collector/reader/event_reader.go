@@ -1,20 +1,17 @@
 package sourceReader
 
-// read change stream event from source mongodb
-
 import (
+	"fmt"
 	"sync"
 	"time"
 
-	conf "github.com/alibaba/MongoShake/v2/collector/configure"
-	utils "github.com/alibaba/MongoShake/v2/common"
-
-	"fmt"
+	diskQueue "github.com/vinllen/go-diskqueue"
 
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
-	diskQueue "github.com/vinllen/go-diskqueue"
-	LOG "github.com/vinllen/log4go"
+	utils "github.com/alibaba/MongoShake/v2/common"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 const (
@@ -52,7 +49,7 @@ func NewEventReader(src string, replset string) *EventReader {
 	return &EventReader{
 		src:             src,
 		replset:         replset,
-		eventChan:       make(chan *retOplog, ChannelSize),
+		eventChan:       make(chan *retOplog, 10*conf.Options.IncrSyncReaderFetchBatchSize),
 		firstRead:       true,
 		diskQueueLastTs: -1,
 	}
@@ -105,7 +102,7 @@ func (er *EventReader) get() ([]byte, error) {
 	}
 }
 
-// start fetcher if not exist
+// StartFetcher start fetcher if not exist
 func (er *EventReader) StartFetcher() {
 	if er.fetcherExist == true {
 		return
@@ -136,7 +133,7 @@ func (er *EventReader) fetcher() {
 			err := er.client.CsHandler.Err()
 			// no data
 			er.client.Close()
-			LOG.Error("change stream reader hit the end: %v", err)
+			_ = LOG.Error("change stream reader hit the end: %v", err)
 			time.Sleep(1 * time.Second)
 			continue
 		}
@@ -164,7 +161,7 @@ func (er *EventReader) EnsureNetwork() error {
 		conf.Options.SpecialSourceDBFlag,
 		filterList.IterateFilter,
 		er.startAtOperationTime,
-		int32(BatchSize),
+		int32(conf.Options.IncrSyncReaderFetchBatchSize),
 		conf.Options.SourceDBVersion,
 		conf.Options.MongoSslRootCaFile); err != nil {
 		return err

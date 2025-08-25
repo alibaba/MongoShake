@@ -2,16 +2,15 @@ package executor
 
 import (
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"testing"
-
-	"github.com/alibaba/MongoShake/v2/collector/transform"
-	"github.com/alibaba/MongoShake/v2/oplog"
-
 	"sync"
+	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"github.com/alibaba/MongoShake/v2/collector/transform"
+	"github.com/alibaba/MongoShake/v2/oplog"
 )
 
 func mockLogs(op, ns string, size int, cb bool) *OplogRecord {
@@ -21,7 +20,7 @@ func mockLogs(op, ns string, size int, cb bool) *OplogRecord {
 	}
 
 	return &OplogRecord{
-		original: &PartialLogWithCallbak{
+		original: &PartialLogWithCallback{
 			partialLog: &oplog.PartialLog{
 				ParsedLog: oplog.ParsedLog{
 					Namespace: ns,
@@ -201,7 +200,7 @@ func TestMergeToGroups(t *testing.T) {
 
 func mockTransLogs(op, ns string, logObject bson.D) *OplogRecord {
 	return &OplogRecord{
-		original: &PartialLogWithCallbak{
+		original: &PartialLogWithCallback{
 			partialLog: &oplog.PartialLog{
 				ParsedLog: oplog.ParsedLog{
 					Namespace: ns,

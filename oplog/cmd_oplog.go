@@ -1,8 +1,9 @@
 package oplog
 
 import (
-	"go.mongodb.org/mongo-driver/bson"
 	"strings"
+
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 type CommandOperation struct {
@@ -12,22 +13,25 @@ type CommandOperation struct {
 }
 
 var opsMap = map[string]*CommandOperation{
-	"create":           {concernSyncData: false, runOnAdmin: false, needFilter: false},
-	"createIndexes":    {concernSyncData: false, runOnAdmin: false, needFilter: false},
-	"collMod":          {concernSyncData: false, runOnAdmin: false, needFilter: false},
-	"dropDatabase":     {concernSyncData: false, runOnAdmin: false, needFilter: false},
-	"drop":             {concernSyncData: false, runOnAdmin: false, needFilter: false},
-	"deleteIndex":      {concernSyncData: false, runOnAdmin: false, needFilter: false},
-	"deleteIndexes":    {concernSyncData: false, runOnAdmin: false, needFilter: false},
-	"dropIndex":        {concernSyncData: false, runOnAdmin: false, needFilter: false},
-	"dropIndexes":      {concernSyncData: false, runOnAdmin: false, needFilter: false},
-	"renameCollection": {concernSyncData: false, runOnAdmin: true, needFilter: false},
-	"convertToCapped":  {concernSyncData: false, runOnAdmin: false, needFilter: false},
-	"emptycapped":      {concernSyncData: false, runOnAdmin: false, needFilter: false},
-	"applyOps":         {concernSyncData: true, runOnAdmin: false, needFilter: false},
-	"startIndexBuild":  {concernSyncData: false, runOnAdmin: false, needFilter: true},
-	"commitIndexBuild": {concernSyncData: false, runOnAdmin: false, needFilter: false},
-	"abortIndexBuild":  {concernSyncData: false, runOnAdmin: false, needFilter: true},
+	"create":                   {concernSyncData: false, runOnAdmin: false, needFilter: false},
+	"createIndexes":            {concernSyncData: false, runOnAdmin: false, needFilter: false},
+	"collMod":                  {concernSyncData: false, runOnAdmin: false, needFilter: false},
+	"dropDatabase":             {concernSyncData: false, runOnAdmin: false, needFilter: false},
+	"drop":                     {concernSyncData: false, runOnAdmin: false, needFilter: false},
+	"deleteIndex":              {concernSyncData: false, runOnAdmin: false, needFilter: false},
+	"deleteIndexes":            {concernSyncData: false, runOnAdmin: false, needFilter: false},
+	"dropIndex":                {concernSyncData: false, runOnAdmin: false, needFilter: false},
+	"dropIndexes":              {concernSyncData: false, runOnAdmin: false, needFilter: false},
+	"renameCollection":         {concernSyncData: false, runOnAdmin: true, needFilter: false},
+	"convertToCapped":          {concernSyncData: false, runOnAdmin: false, needFilter: false},
+	"emptycapped":              {concernSyncData: false, runOnAdmin: false, needFilter: false},
+	"applyOps":                 {concernSyncData: true, runOnAdmin: false, needFilter: false},
+	"startIndexBuild":          {concernSyncData: false, runOnAdmin: false, needFilter: true},
+	"commitIndexBuild":         {concernSyncData: false, runOnAdmin: false, needFilter: false},
+	"abortIndexBuild":          {concernSyncData: false, runOnAdmin: false, needFilter: true},
+	"shardCollection":          {concernSyncData: false, runOnAdmin: true, needFilter: false}, // belows are for change events
+	"reshardCollection":        {concernSyncData: true, runOnAdmin: true, needFilter: false},
+	"refineCollectionShardKey": {concernSyncData: false, runOnAdmin: true, needFilter: false},
 }
 
 func ExtraCommandName(o bson.D) (string, bool) {

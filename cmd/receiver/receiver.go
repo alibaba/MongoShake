@@ -9,13 +9,13 @@ import (
 	"strconv"
 	"syscall"
 
+	nimo "github.com/gugemichael/nimo4go"
+
 	utils "github.com/alibaba/MongoShake/v2/common"
 	replayer "github.com/alibaba/MongoShake/v2/receiver"
 	conf "github.com/alibaba/MongoShake/v2/receiver/configure"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 	"github.com/alibaba/MongoShake/v2/tunnel"
-
-	nimo "github.com/gugemichael/nimo4go"
-	LOG "github.com/vinllen/log4go"
 )
 
 type Exit struct{ Code int }
@@ -60,7 +60,7 @@ func main() {
 	signalProfile, _ := strconv.Atoi(utils.SIGNALPROFILE)
 	signalStack, _ := strconv.Atoi(utils.SIGNALSTACK)
 	if signalProfile > 0 {
-		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile))                     // syscall.SIGUSR2
+		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile)) // syscall.SIGUSR2
 		nimo.RegisterSignalForPrintStack(syscall.Signal(signalStack), func(bytes []byte) { // syscall.SIGUSR1
 			LOG.Info(string(bytes))
 		})

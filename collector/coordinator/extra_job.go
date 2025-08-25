@@ -9,8 +9,7 @@ import (
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-
-	LOG "github.com/vinllen/log4go"
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 const (
@@ -79,7 +78,8 @@ func (cui *CheckUniqueIndexExistsJob) innerRun() error {
 		conns[i], err = utils.NewMongoCommunityConn(source.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
 			utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
-			LOG.Error("extra job[%s] connect source[%v] failed: %v", cui.Name(), source.URL, err)
+			_ = LOG.Error("extra job[%s] connect source[%v] failed: %v",
+				cui.Name(), utils.BlockMongoUrlPassword(source.URL, "***"), err)
 			return nil
 		}
 	}
@@ -104,8 +104,9 @@ func (cui *CheckUniqueIndexExistsJob) innerRun() error {
 					if uErr == nil && nErr == nil &&
 						!strings.HasPrefix(name.String(), "_id") && unique.Boolean() == true {
 						return fmt.Errorf("extra job[%s] with source[%v] query "+
-							"collection[%s - %s] find unique[%v]",
-							cui.Name(), source.URL, ns.Database, ns.Collection, cursor.Current)
+							"collection[%s - %s] find unique[%v]", cui.Name(),
+							utils.BlockMongoUrlPassword(source.URL, "***"),
+							ns.Database, ns.Collection, cursor.Current)
 					}
 				}
 			}
