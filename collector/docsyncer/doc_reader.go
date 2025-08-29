@@ -14,8 +14,7 @@ import (
 	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
-/*************************************************/
-// splitter: pre-split the collection into several pieces
+// DocumentSplitter pre-split the big collection into several pieces
 type DocumentSplitter struct {
 	src           string   // source mongo address url
 	sslRootCaFile string   // source root ca ssl
@@ -91,7 +90,6 @@ func (ds *DocumentSplitter) String() string {
 		utils.BlockMongoUrlPassword(ds.src, "***"), ds.ns, ds.count, ds.pieceByteSize/utils.MB, ds.pieceNumber)
 }
 
-// TODO, need add retry
 func (ds *DocumentSplitter) Run() error {
 	// close channel
 	defer close(ds.readerChan)
@@ -106,13 +104,13 @@ func (ds *DocumentSplitter) Run() error {
 
 	LOG.Info("splitter[%s] enable split, waiting splitVector return...", ds)
 
-	var res bson.M
-	err := ds.client.Client.Database(ds.ns.Database).RunCommand(nil, bson.D{
+	res := bson.M{}
+	err := ds.client.Client.Database(ds.ns.Database).RunCommand(context.Background(), bson.D{
 		{"splitVector", ds.ns.Str()},
 		{"keyPattern", bson.M{conf.Options.FullSyncReaderParallelIndex: 1}},
 		// {"maxSplitPoints", ds.pieceNumber - 1},
 		{"maxChunkSize", ds.pieceByteSize / utils.MB},
-	}).Decode(res)
+	}).Decode(&res)
 	// if failed, do not panic, run single thread fetching
 	if err != nil {
 		LOG.Warn("splitter[%s] run splitVector failed[%v], give up parallel fetching", ds, err)
@@ -184,8 +182,7 @@ func parseDocKeyValue(x interface{}) (string, interface{}, error) {
 	return key, val, nil
 }
 
-/*************************************************/
-// DocumentReader: the reader of single piece
+// DocumentReader is the reader for single piece
 type DocumentReader struct {
 	// source mongo address url
 	src           string
@@ -206,7 +203,8 @@ type DocumentReader struct {
 }
 
 // NewDocumentReader creates reader with mongodb url
-func NewDocumentReader(id int, src string, ns utils.NS, key string, start, end interface{}, sslRootCaFile string) *DocumentReader {
+func NewDocumentReader(id int, src string, ns utils.NS, key string, start, end interface{},
+	sslRootCaFile string) *DocumentReader {
 	q := make(bson.M)
 	if start != nil || end != nil {
 		innerQ := make(bson.M)
@@ -241,7 +239,7 @@ func (reader *DocumentReader) String() string {
 	return ret
 }
 
-// NextDoc returns an document by raw bytes which is []byte
+// NextDoc returns a document by raw bytes which is []byte
 // reader.docCursor.Current is valid only before next docCursor.Next(), So must be copy
 func (reader *DocumentReader) NextDoc() (doc bson.Raw, err error) {
 	if err := reader.ensureNetwork(); err != nil {
