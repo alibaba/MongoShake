@@ -92,6 +92,9 @@ func checkDefaultValue() error {
 		conf.Options.LogLevel != utils.VarLogLevelWarning && conf.Options.LogLevel != utils.VarLogLevelError {
 		return fmt.Errorf("log.level should in {debug, info, warning, error}")
 	}
+	if conf.Options.LogDirectory == "" {
+		conf.Options.LogDirectory = "logs"
+	}
 	if conf.Options.LogFileName == "" {
 		conf.Options.LogFileName = "mongoshake.log"
 	}

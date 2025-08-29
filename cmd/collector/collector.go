@@ -81,7 +81,7 @@ func main() {
 	signalProfile, _ := strconv.Atoi(utils.SIGNALPROFILE)
 	signalStack, _ := strconv.Atoi(utils.SIGNALSTACK)
 	if signalProfile > 0 {
-		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile))                     // syscall.SIGUSR2
+		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile)) // syscall.SIGUSR2
 		nimo.RegisterSignalForPrintStack(syscall.Signal(signalStack), func(bytes []byte) { // syscall.SIGUSR1
 			LOG.Info(string(bytes))
 		})
@@ -89,11 +89,6 @@ func main() {
 
 	utils.Welcome()
 
-	err = utils.Mkdirs(conf.Options.LogDirectory)
-	if err != nil {
-		crash(fmt.Sprintf("mkdir log dir failed: %v", err), -5)
-
-	}
 	// get exclusive process lock and write pid
 	if utils.WritePidById(conf.Options.LogDirectory, conf.Options.Id) {
 		if *GCPercent > 0 && *GCPercent <= 100 {

@@ -147,8 +147,8 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 	// ping
 	if err = client.Ping(ctx, clientOps.ReadPreference); err != nil {
 		return nil, fmt.Errorf("ping to %v failed: %v\n"+
-			"If Mongo Server is standalone(single node) Or conn address is different with mongo server address"+
-			" try atandalone mode by mongodb://ip:port/admin?direct=ture",
+			"If mongo server is standalone(single node) or conn address is different with mongo server address"+
+			" try a standalone mode by mongodb://ip:port/admin?directConnection=true",
 			BlockMongoUrlPassword(url, "***"), err)
 	}
 
