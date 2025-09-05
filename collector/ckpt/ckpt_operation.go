@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 
+	"github.com/Masterminds/semver/v3"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -17,7 +18,8 @@ import (
 )
 
 const (
-	// we can't insert Timestamp(0, 0) that will be treat as Now() inserted
+	// InitCheckpoint
+	// Note: we can't insert Timestamp(0, 0) that will be treat as Now() inserted
 	// into mongo. so we use Timestamp(0, 1)
 	InitCheckpoint  = int64(1)
 	EmptyCheckpoint = int64(0)
@@ -41,19 +43,19 @@ func (cc *CheckpointContext) String() string {
 }
 
 type CheckpointOperation interface {
-	// read checkpoint from remote storage. and encapsulation
+	// Get read checkpoint from remote storage. and encapsulation
 	// with CheckpointContext struct
 	// bool means whether exists on remote
 	Get() (*CheckpointContext, bool)
 
-	// save checkpoint
+	// Insert save checkpoint
 	Insert(ckpt *CheckpointContext) error
 
-	// log info
+	// String return log info
 	String() string
 }
 
-// mongo
+// MongoCheckpoint for mongo
 type MongoCheckpoint struct {
 	CheckpointContext
 
@@ -66,13 +68,41 @@ type MongoCheckpoint struct {
 
 func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 	if ckpt.client == nil {
+		// mongodb3.6- doesn't support {readConcern:majority}, here we use 'local' first to get dbVersion,
+		// then change to 'majority' if possible.
+		tmpClient, err := utils.NewMongoCommunityConn(ckpt.URL, utils.VarMongoConnectModePrimary, true, "local", "", "")
+		if err != nil {
+			LOG.Error("%s MongoCheckpoint create client failed:%v", ckpt.Name, err)
+			return false
+		}
+		defer tmpClient.Close()
+		dbVersion, err := utils.GetDBVersion(tmpClient)
+		if err != nil {
+			LOG.Error("%s MongoCheckpoint get db version failed:%v", ckpt.Name, err)
+			return false
+		}
+		version, err := semver.StrictNewVersion(dbVersion)
+		if err != nil {
+			LOG.Error("%s MongoCheckpoint failed to parse dbVersion: %v", ckpt.Name, err)
+			return false
+		}
+		version36, _ := semver.StrictNewVersion(utils.MongoVersion36)
+		rc := utils.ReadWriteConcernLocal
+		if version.GreaterThanEqual(version36) {
+			LOG.Info("%s MongoCheckpoint dbVersion %s >= %s, use readConcern:majority",
+				ckpt.Name, version.String(), utils.MongoVersion36)
+			rc = utils.ReadWriteConcernMajority
+		} else {
+			LOG.Info("%s MongoCheckpoint dbVersion %s < %s, use readConcern:local",
+				ckpt.Name, version.String(), utils.MongoVersion36)
+		}
+
 		if client, err := utils.NewMongoCommunityConn(ckpt.URL, utils.VarMongoConnectModePrimary, true,
-			utils.ReadWriteConcernMajority, utils.ReadWriteConcernMajority,
+			rc, utils.ReadWriteConcernMajority,
 			conf.Options.CheckpointStorageUrlMongoSslRootCaFile); err == nil {
 			ckpt.client = client
-
 		} else {
-			LOG.Warn("%s CheckpointOperation manager connect mongo cluster failed. %v", ckpt.Name, err)
+			LOG.Error("%s MongoCheckpoint connect to mongo cluster failed. %v", ckpt.Name, err)
 			return false
 		}
 	}
@@ -87,7 +117,7 @@ func (ckpt *MongoCheckpoint) close() {
 
 func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 	if !ckpt.ensureNetwork() {
-		LOG.Warn("%s Reload ckpt ensure network failed. %v", ckpt.Name, ckpt.client)
+		LOG.Error("%s MongoCheckpoint ensureNetwork failed", ckpt.Name)
 		return nil, false
 	}
 
@@ -98,7 +128,7 @@ func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 
 		LOG.Info("%s Load exist checkpoint. content %v", ckpt.Name, value)
 		return value, true
-	} else if err == mongo.ErrNoDocuments {
+	} else if err.Error() == mongo.ErrNoDocuments.Error() {
 		if InitCheckpoint > ckpt.Timestamp {
 			ckpt.Timestamp = InitCheckpoint
 		}
@@ -138,7 +168,7 @@ func (ckpt *MongoCheckpoint) Insert(updates *CheckpointContext) error {
 	return nil
 }
 
-// http
+// HttpApiCheckpoint for http api
 type HttpApiCheckpoint struct {
 	CheckpointContext
 
@@ -175,11 +205,13 @@ func (ckpt *HttpApiCheckpoint) Get() (*CheckpointContext, bool) {
 
 func (ckpt *HttpApiCheckpoint) Insert(insert *CheckpointContext) error {
 	body, _ := json.Marshal(insert)
-	if resp, err := http.Post(ckpt.URL, "application/json", bytes.NewReader(body)); err != nil || resp.StatusCode != http.StatusOK {
+	if resp, err := http.Post(ckpt.URL, "application/json", bytes.NewReader(body));
+		err != nil || resp.StatusCode != http.StatusOK {
 		LOG.Warn("%s Context api manager write request failed, %v", ckpt.Name, err)
 		return err
 	}
 
-	LOG.Info("%s Record new checkpoint in HttpApi success [%d]", ckpt.Name, utils.ExtractMongoTimestamp(insert.Timestamp))
+	LOG.Info("%s Record new checkpoint in HttpApi success [%d]",
+		ckpt.Name, utils.ExtractMongoTimestamp(insert.Timestamp))
 	return nil
 }

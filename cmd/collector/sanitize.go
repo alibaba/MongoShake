@@ -119,14 +119,15 @@ func checkDefaultValue() error {
 			conf.Options.MongoConnectMode != utils.VarMongoConnectModeSecondary &&
 			conf.Options.MongoConnectMode != utils.VarMongoConnectModeNearset &&
 			conf.Options.MongoConnectMode != utils.VarMongoConnectModeStandalone {
-			return fmt.Errorf("mongo_connect_mode should in {primary, secondaryPreferred, secondary, nearest, standalone}")
+			return fmt.Errorf("mongo_connect_mode should in" +
+				" {primary, secondaryPreferred, secondary, nearest, standalone}")
 		}
 	}
 
 	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
 		if len(conf.Options.MongoSUrl) == 0 && len(conf.Options.MongoUrls) > 1 {
-			return fmt.Errorf("mongo_s_url should be given if source is sharding and incr_sync.mongo_fetch_method == %s",
-				utils.VarIncrSyncMongoFetchMethodChangeStream)
+			return fmt.Errorf("mongo_s_url should be given if source is sharding and "+
+				"incr_sync.mongo_fetch_method == %s", utils.VarIncrSyncMongoFetchMethodChangeStream)
 		}
 	}
 
@@ -200,7 +201,8 @@ func checkDefaultValue() error {
 	}
 	if len(conf.Options.IncrSyncShardByObjectIdWhiteList) != 0 {
 		if conf.Options.IncrSyncShardKey != utils.VarIncrSyncShardKeyCollection {
-			return fmt.Errorf("incr_sync.shard_by_object_id_whitelist should only be set when 'incr_sync.shard_key == collection'")
+			return fmt.Errorf("incr_sync.shard_by_object_id_whitelist should only be set when" +
+				" 'incr_sync.shard_key == collection'")
 		}
 	}
 	if conf.Options.IncrSyncWorker == 0 {
@@ -211,8 +213,8 @@ func checkDefaultValue() error {
 	if conf.Options.IncrSyncTunnelWriteThread == 0 {
 		conf.Options.IncrSyncTunnelWriteThread = conf.Options.IncrSyncWorker
 	} else if conf.Options.IncrSyncTunnelWriteThread%conf.Options.IncrSyncWorker != 0 {
-		return fmt.Errorf("incr_sync.tunnel.write_thread[%v] must be an interge multiple of incr_sync.worker[%v]",
-			conf.Options.IncrSyncTunnelWriteThread, conf.Options.IncrSyncWorker)
+		return fmt.Errorf("incr_sync.tunnel.write_thread[%v] must be an interge multiple of"+
+			" incr_sync.worker[%v]", conf.Options.IncrSyncTunnelWriteThread, conf.Options.IncrSyncWorker)
 	}
 	if conf.Options.IncrSyncWorkerOplogCompressor == "" {
 		conf.Options.IncrSyncWorkerOplogCompressor = utils.VarIncrSyncWorkerOplogCompressorNone
@@ -291,7 +293,8 @@ func checkConnection() error {
 		_, err := utils.NewMongoCommunityConn(mongo, conf.Options.MongoConnectMode, true,
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
-			return fmt.Errorf("connect source mongodb[%v] failed[%v]", utils.BlockMongoUrlPassword(mongo, "***"), err)
+			return fmt.Errorf("connect source mongodb[%v] failed[%v]",
+				utils.BlockMongoUrlPassword(mongo, "***"), err)
 		}
 	}
 
@@ -300,7 +303,8 @@ func checkConnection() error {
 		_, err := utils.NewMongoCommunityConn(conf.Options.MongoCsUrl, utils.VarMongoConnectModeSecondaryPreferred,
 			true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
-			return fmt.Errorf("connect config-server[%v] failed[%v]", utils.BlockMongoUrlPassword(conf.Options.MongoCsUrl, "***"), err)
+			return fmt.Errorf("connect config-server[%v] failed[%v]",
+				utils.BlockMongoUrlPassword(conf.Options.MongoCsUrl, "***"), err)
 		}
 	}
 
@@ -313,7 +317,8 @@ func checkConnection() error {
 			targetConn, err := utils.NewMongoCommunityConn(mongo, conf.Options.MongoConnectMode, true,
 				utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.TunnelMongoSslRootCaFile)
 			if err != nil {
-				return fmt.Errorf("connect target tunnel mongodb[%v] failed[%v]", utils.BlockMongoUrlPassword(mongo, "***"), err)
+				return fmt.Errorf("connect target tunnel mongodb[%v] failed[%v]",
+					utils.BlockMongoUrlPassword(mongo, "***"), err)
 			}
 
 			// set target version
@@ -333,11 +338,11 @@ func checkConnection() error {
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 	// ignore error
 	conf.Options.SourceDBVersion, _ = utils.GetDBVersion(sourceConn)
-	if ok, err := utils.GetAndCompareVersion(sourceConn, "2.6.0",
+	if ok, err := utils.GetAndCompareVersion(sourceConn, utils.MongoVersion26,
 		conf.Options.SourceDBVersion); err != nil {
 		return err
 	} else if !ok {
-		return fmt.Errorf("source MongoDB version[%v] should >= 3.0", conf.Options.SourceDBVersion)
+		return fmt.Errorf("source MongoDB version[%v] should >= 2.6.0", conf.Options.SourceDBVersion)
 	}
 
 	return nil
@@ -392,7 +397,8 @@ func checkConflict() error {
 	}
 	if conf.Options.SpecialSourceDBFlag == utils.VarSpecialSourceDBFlagAliyunServerless {
 		if conf.Options.IncrSyncMongoFetchMethod != utils.VarIncrSyncMongoFetchMethodChangeStream {
-			return fmt.Errorf("incr_sync.mongo_fetch_method must be 'change_stream' when special.source.db.flag is set")
+			return fmt.Errorf("incr_sync.mongo_fetch_method must be 'change_stream' when " +
+				"special.source.db.flag is set")
 		}
 	}
 
@@ -433,7 +439,8 @@ func checkConflict() error {
 	// check source mongodb version >= 4.0 when change stream enable
 	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
 		if conf.Options.MongoSUrl == "" && len(conf.Options.MongoUrls) > 1 {
-			return fmt.Errorf("mongo_s_url should be given when source is sharding and fetch method is change stream")
+			return fmt.Errorf("mongo_s_url should be given when source is sharding and fetch method is" +
+				" change_stream")
 		}
 
 		source, err := getSourceDbUrl()
@@ -444,13 +451,14 @@ func checkConflict() error {
 		conn, err := utils.NewMongoCommunityConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
-			return fmt.Errorf("connect source[%v] failed[%v]", utils.BlockMongoUrlPassword(source, "***"), err)
+			return fmt.Errorf("connect source[%v] failed[%v]",
+				utils.BlockMongoUrlPassword(source, "***"), err)
 		}
-		if isOk, err := utils.GetAndCompareVersion(conn, "4.0.1", conf.Options.SourceDBVersion); err != nil {
-			return fmt.Errorf("compare source[%v] to v4.0.1 failed[%v]", source, err)
+		if isOk, err := utils.GetAndCompareVersion(conn, utils.MongoVersion401, conf.Options.SourceDBVersion); err != nil {
+			return fmt.Errorf("compare source[%v] to %s failed[%v]", source, utils.MongoVersion401, err)
 		} else if !isOk {
-			return fmt.Errorf("source[%v] version should >= 4.0.1 when incr_sync.mongo_fetch_method == %v",
-				conf.Options.MongoUrls[0], utils.VarIncrSyncMongoFetchMethodChangeStream)
+			return fmt.Errorf("source[%v] version should >= %s when incr_sync.mongo_fetch_method == %v",
+				conf.Options.MongoUrls[0], utils.MongoVersion401, utils.VarIncrSyncMongoFetchMethodChangeStream)
 		}
 	} else {
 		// disable mongos if fetch method != 'change_stream'

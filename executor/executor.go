@@ -32,8 +32,7 @@ const (
 )
 
 var (
-	GlobalExecutorId int32  = -1
-	ThresholdVersion string = "3.2.0"
+	GlobalExecutorId int32 = -1
 )
 
 type PartialLogWithCallback struct {

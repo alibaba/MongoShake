@@ -56,7 +56,7 @@ func NewCheckpointManager(name string, startPosition int64) *CheckpointManager {
 	return newManager
 }
 
-// get persist checkpoint
+// Get return persistent checkpoint
 func (manager *CheckpointManager) Get() (*CheckpointContext, bool, error) {
 	var exist bool
 	manager.ctx, exist = manager.delegate.Get()
@@ -66,7 +66,8 @@ func (manager *CheckpointManager) Get() (*CheckpointContext, bool, error) {
 
 	// check fcv
 	if exist && utils.FcvCheckpoint.IsCompatible(manager.ctx.Version) == false {
-		return nil, exist, fmt.Errorf("current required checkpoint version[%v] > input[%v], please upgrade MongoShake to version >= %v",
+		return nil, exist, fmt.Errorf("current required checkpoint version[%v] > input[%v],"+
+			" please upgrade MongoShake to version >= %v",
 			utils.FcvCheckpoint.CurrentVersion, manager.ctx.Version,
 			utils.LowestCheckpointVersion[utils.FcvCheckpoint.CurrentVersion])
 	}
@@ -74,7 +75,7 @@ func (manager *CheckpointManager) Get() (*CheckpointContext, bool, error) {
 	return manager.ctx, exist, nil
 }
 
-// get in memory checkpoint
+// GetInMemory return in-memory checkpoint
 func (manager *CheckpointManager) GetInMemory() *CheckpointContext {
 	return manager.ctx
 }
@@ -105,7 +106,8 @@ func (manager *CheckpointManager) Update(ts int64) error {
 	return manager.delegate.Insert(manager.ctx)
 }
 
-// OplogDiskQueueFinishTs and OplogDiskQueue won't immediate effect, will be inserted in the next Update call.
+// SetOplogDiskFinishTs
+// OplogDiskQueueFinishTs and OplogDiskQueue won't take effect immediately, will be inserted in the next Update call.
 func (manager *CheckpointManager) SetOplogDiskFinishTs(ts int64) {
 	if manager.ctxRec == nil {
 		manager.ctxRecLock.Lock()

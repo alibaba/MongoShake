@@ -74,6 +74,12 @@ const (
 
 	// special
 	VarSpecialSourceDBFlagAliyunServerless = "aliyun_serverless"
+
+	// mongo dbVersions
+	MongoVersion26  = "2.6.0"
+	MongoVersion32  = "3.2.0"
+	MongoVersion36  = "3.6.0"
+	MongoVersion401 = "4.0.1"
 )
 
 type Pair struct {
