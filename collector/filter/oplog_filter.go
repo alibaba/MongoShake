@@ -233,7 +233,7 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 		case "applyOps":
 			// parse and reorganize all inner ops within the transaction.
 			var ops []bson.D
-			var remainOps []interface{}
+			var remainOps bson.A
 			// it's very strange, some documents are []interface, some are []bson.D
 			switch v := oplog.GetKey(log.Object, "applyOps").(type) {
 			case []interface{}:
