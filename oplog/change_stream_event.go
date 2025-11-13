@@ -240,7 +240,7 @@ func ConvertEvent2Oplog(input []byte, fullDoc bool) (*PartialLog, error) {
 		oplog.Namespace = fmt.Sprintf("%s.%s", ns["db"], ns["coll"])
 		oplog.Operation = "u"
 		oplog.Query = event.DocumentKey
-		oplog.Object = event.FullDocument
+		oplog.Object = bson.D{bson.E{Key: "$set", Value: event.FullDocument}}
 	case "update":
 		/*
 		 * PRIMARY> db.test.find()

@@ -165,7 +165,7 @@ func startup() {
 func selectLeader() {
 	// first of all. ensure we are the Master
 	if conf.Options.MasterQuorum && conf.Options.CheckpointStorage == utils.VarCheckpointStorageDatabase {
-		// election become to Master. keep waiting if we are the candidate. election id is must fixed
+		// election become to Master. keep waiting if we are the candidate. election id must be fixed
 		objectId, _ := primitive.ObjectIDFromHex("5204af979955496907000001")
 		quorum.UseElectionObjectId(objectId)
 		go func() {
