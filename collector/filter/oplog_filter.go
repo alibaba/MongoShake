@@ -231,9 +231,15 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 			log.Namespace = ns
 			return filter.filter(log)
 		case "applyOps":
-			// parse and reorganize all inner ops within the transaction.
+			// parse and reorganize all inner ops within the transaction,
+			// also handle vectored insert oplog format with {multiOpType:1} introduced in 8.0
 			var ops []bson.D
 			var remainOps bson.A
+
+			isVectoredInsert := false
+			if log.MultiOpType != nil && *log.MultiOpType == 1 {
+				isVectoredInsert = true
+			}
 			// it's very strange, some documents are []interface, some are []bson.D
 			switch v := oplog.GetKey(log.Object, "applyOps").(type) {
 			case []interface{}:
@@ -253,6 +259,10 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 			for _, ele := range ops {
 				innerNs := oplog.GetKey(ele, "ns").(string)
 				if filter.FilterNs(innerNs) {
+					if isVectoredInsert {
+						LOG.Info("filter vectored insert ops with ns:%v in o.applyOps oplog", innerNs)
+						return true
+					}
 					LOG.Info("filter inner op with ns:%v in txn:%v", innerNs, log.Object)
 					continue
 				} else {

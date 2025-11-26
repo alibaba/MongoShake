@@ -19,13 +19,8 @@ var SIGNALPROFILE = "$"
 var SIGNALSTACK = "$"
 
 const (
-	// APPNAME = "mongoshake"
-	// AppDatabase          = APPNAME
-	// APPConflictDatabase  = APPNAME + "_conflict"
-
 	GlobalDiagnosticPath = "diagnostic"
-	// This is the time of golang was born to the world
-	GolangSecurityTime = "2006-01-02T15:04:05Z"
+	GolangSecurityTime   = "2006-01-02T15:04:05Z"
 
 	WorkGood       uint64 = 0
 	GetReady       uint64 = 1

@@ -3,12 +3,16 @@ package filter
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/getlantern/deepcopy"
+	"github.com/mongodb/mongo-tools-common/json"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/x/mongo/driver/uuid"
 
+	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
 )
 
@@ -97,12 +101,12 @@ func TestNamespaceFilter(t *testing.T) {
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
 	}
 
-	// test applyOps
+	// applyOps
 	{
 		fmt.Printf("TestNamespaceFilter case %d.\n", nr)
 		nr++
 
-		filter := NewNamespaceFilter(nil, nil)
+		filter := NewNamespaceFilter([]string{"zz"}, nil)
 		log := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Namespace: "admin.$cmd",
@@ -134,8 +138,40 @@ func TestNamespaceFilter(t *testing.T) {
 		}
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
 		assert.Equal(t, 2, len(log.Object[0].Value.(bson.A)), "should be equal")
+
+		log1 := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key: "applyOps",
+						Value: []bson.D{
+							{
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zl.mmm"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "a", Value: 1},
+									bson.E{Key: "_id", Value: "xxx"},
+								}},
+							},
+							{
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zl.x"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "xyz", Value: "ff"},
+									bson.E{Key: "_id", Value: "yyy"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log1), "should be equal")
 	}
 
+	// applyOps with black list and rewrite 'o.applyOps' field
 	{
 		fmt.Printf("TestNamespaceFilter case %d.\n", nr)
 		nr++
@@ -210,6 +246,151 @@ func TestNamespaceFilter(t *testing.T) {
 		}
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
 		assert.Equal(t, 1, len(log.Object[0].Value.(bson.A)), "should be equal")
+	}
+
+	// applyOps with delete op for config.system.sessions
+	// NamespaceFilter will not handle it, it's handled by AutologousFilter
+	{
+		fmt.Printf("TestNamespaceFilter case %d.\n", nr)
+		nr++
+		filter := NewNamespaceFilter(nil, nil)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key: "applyOps",
+						Value: []bson.D{
+							{
+								bson.E{Key: "op", Value: "d"},
+								bson.E{Key: "ns", Value: "config.system.sessions"},
+								bson.E{Key: "ui", Value: primitive.Binary{
+									Subtype: 4,
+									Data:    []byte{0, 1, 3, 4, 5, 6, 7},
+								}},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: "xxx"},
+								}},
+							},
+							{
+								bson.E{Key: "op", Value: "d"},
+								bson.E{Key: "ns", Value: "config.system.sessions"},
+								bson.E{Key: "ui", Value: primitive.Binary{
+									Subtype: 4,
+									Data:    []byte{0, 1, 3, 4, 5, 6, 7},
+								}},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: "yyy"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+		assert.Equal(t, 2, len(log.Object[0].Value.(bson.A)), "should be equal")
+	}
+	// applyOps with {multiOpType:1}
+	{
+		fmt.Printf("TestNamespaceFilter case %d.\n", nr)
+		nr++
+		filter := NewNamespaceFilter([]string{"zz"}, nil)
+		txnN := []int64{0, 1}
+		term := []int64{1}
+		multiOpType := []int{0, 1}
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "c",
+				Namespace: "admin.$cmd",
+				TxnNumber: &txnN[0],
+				Object: bson.D{
+					bson.E{
+						Key: "applyOps",
+						Value: []bson.D{
+							{
+								bson.E{Key: "ns", Value: "zz.y"},
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ui", Value: primitive.Binary{
+									Subtype: 4,
+									Data:    []byte{0, 1, 3, 4, 5, 6, 7},
+								}},
+								bson.E{Key: "o", Value: bson.M{
+									"_id": int64(4),
+									"x":   json.NumberLong(-20),
+									"y":   json.NumberLong(5)}},
+							},
+							{
+								bson.E{Key: "ns", Value: "zz.y"},
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ui", Value: primitive.Binary{
+									Subtype: 4,
+									Data:    []byte{0, 1, 3, 4, 5, 6, 7},
+								}},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: int64(5)},
+									bson.E{Key: "x", Value: json.NumberLong(-30)},
+									bson.E{Key: "y", Value: json.NumberLong(11)},
+								}},
+							},
+						},
+					},
+				},
+				Timestamp:   utils.TimeToTimestamp(time.Now().Unix()),
+				Term:        &term[0],
+				Version:     2,
+				PrevOpTime:  utils.MarshalData(bson.D{{"ts", utils.Int64ToTimestamp(0)}}),
+				MultiOpType: &multiOpType[1], // 1 for vectored insert oplog format
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+		assert.Equal(t, 2, len(log.Object[0].Value.(bson.A)), "should be equal")
+		log1 := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "c",
+				Namespace: "admin.$cmd",
+				TxnNumber: &txnN[0],
+				Object: bson.D{
+					bson.E{
+						Key: "applyOps",
+						Value: []bson.D{
+							{
+								bson.E{Key: "ns", Value: "zl.y"},
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ui", Value: primitive.Binary{
+									Subtype: 4,
+									Data:    []byte{0, 1, 3, 4, 5, 6, 7},
+								}},
+								bson.E{Key: "o", Value: bson.M{
+									"_id": int64(4),
+									"x":   json.NumberLong(-20),
+									"y":   json.NumberLong(5)}},
+							},
+							{
+								bson.E{Key: "ns", Value: "zl.y"},
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ui", Value: primitive.Binary{
+									Subtype: 4,
+									Data:    []byte{0, 1, 3, 4, 5, 6, 7},
+								}},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: int64(5)},
+									bson.E{Key: "x", Value: json.NumberLong(-30)},
+									bson.E{Key: "y", Value: json.NumberLong(11)},
+								}},
+							},
+						},
+					},
+				},
+				Timestamp:   utils.TimeToTimestamp(time.Now().Unix()),
+				Term:        &term[0],
+				Version:     2,
+				PrevOpTime:  utils.MarshalData(bson.D{{"ts", utils.Int64ToTimestamp(0)}}),
+				MultiOpType: &multiOpType[1], // 1 for vectored insert oplog format
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log1), "should be equal")
 	}
 }
 

@@ -14,7 +14,7 @@ const (
 )
 
 const (
-	DefaultHashValue = 0
+	DefaultHashValue = uint32(0)
 )
 
 type Hasher interface {
@@ -42,13 +42,14 @@ func (collectionHasher *TableHasher) DistributeOplogByMod(log *PartialLog, mod i
 	return stringHashValue(log.Namespace) % uint32(mod)
 }
 
-// PrimaryKeyHasher hash by objectID
+// PrimaryKeyHasher will try to hash by _id firstly, {op:c} will use namespace instead
 type PrimaryKeyHasher struct {
 	Hasher
 }
 
 // DistributeOplogByMod
 // We need to ensure that oplog entry will be sent to the same job[$hash] if they have the same ObjectID.
+// thus we can consume the oplog entry sequentially
 func (objectIdHasher *PrimaryKeyHasher) DistributeOplogByMod(log *PartialLog, mod int) uint32 {
 	if mod == 1 {
 		return 0
@@ -129,6 +130,11 @@ func GetIdOrNSFromOplog(log *PartialLog) interface{} {
 			return GetKey(log.Object, "")
 		}
 	case "c":
+		// we don't treat vectored insert oplog(o.applyOps:{$exists:true}) as txns and dispatch to fixed worker 0
+		if log.MultiOpType != nil && *log.MultiOpType == 1 {
+			// use 'ts' field to hash
+			return log.Timestamp.T + log.Timestamp.I
+		}
 		return log.Namespace
 	default:
 		_ = LOG.Critical("Unrecognized oplog object operation %s", log.Operation)
@@ -162,6 +168,12 @@ func Hash(hashObject interface{}) uint32 {
 		return uint32(object)
 	case int:
 		return uint32(object)
+	case uint:
+		return uint32(object)
+	case uint64:
+		return uint32(object)
+	case uint32:
+		return object
 	case nil:
 		_ = LOG.Warn("Hash object is NIL. use default value %d", DefaultHashValue)
 	default:
