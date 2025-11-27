@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -137,12 +136,9 @@ func DelayFor(ms int64) {
 	YieldInMs(ms)
 }
 
-/**
- * block password in mongo_urls:
- * two kind mongo_urls:
- * 1. mongodb://username:password@address
- * 2. username:password@address
- */
+// BlockMongoUrlPassword block password in two kinds of mongo_urls:
+// 1) "mongodb://username:password@address"
+// 2) "username:password@address"
 func BlockMongoUrlPassword(url, replace string) string {
 	colon := strings.Index(url, ":")
 	if colon == -1 || colon == len(url)-1 {
@@ -176,21 +172,11 @@ func BlockMongoUrlPassword(url, replace string) string {
 	}
 	return string(newUrl)
 }
-
-// marshal given struct by json
-func MarshalStruct(input interface{}) string {
-	ret, err := json.Marshal(input)
-	if err != nil {
-		return fmt.Sprintf("marshal struct failed[%v]", err)
-	}
-	return string(ret)
-}
-
 func DuplicateKey(err error) bool {
 	return mongo.IsDuplicateKeyError(err)
 }
 
-// Return true only Indexe only have key _id
+// HaveIdIndexKey return true if index key is just '_id'
 func HaveIdIndexKey(obj bson.D) bool {
 	for _, ele := range obj {
 		if ele.Key != "key" {

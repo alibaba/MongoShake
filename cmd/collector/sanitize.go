@@ -175,7 +175,7 @@ func checkDefaultValue() error {
 		conf.Options.FullSyncReaderFetchBatchSize = 1024
 	}
 	if conf.Options.FullSyncCreateIndex == "" {
-		conf.Options.FullSyncCreateIndex = utils.VarFullSyncCreateIndexForeground
+		conf.Options.FullSyncCreateIndex = utils.VarFullSyncCreateIndexBackground
 	} else if conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexNone &&
 		conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexForeground &&
 		conf.Options.FullSyncCreateIndex != utils.VarFullSyncCreateIndexBackground {
