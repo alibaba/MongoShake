@@ -85,10 +85,12 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 	LOG.Info("all namespace: %v", nsSet)
 
+	// init ckptMap with source of full sync, no matter mongod or mongos
 	var ckptMap map[string]utils.TimestampNode
-	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless && len(coordinator.MongoD) > 0 {
+	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless &&
+		(len(coordinator.RealSourceFullSync) > 0) {
 		// get current newest timestamp
-		ckptMap, err = getTimestampMap(coordinator.MongoD, conf.Options.MongoSslRootCaFile)
+		ckptMap, err = getTimestampMap(coordinator.RealSourceFullSync, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return err
 		}

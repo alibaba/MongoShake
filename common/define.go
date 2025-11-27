@@ -80,6 +80,9 @@ const (
 	MongoVersion32  = "3.2.0"
 	MongoVersion36  = "3.6.0"
 	MongoVersion401 = "4.0.1"
+
+	// replica name for ReplicationCoordinator
+	ReplicaNameMongos = "mongos"
 )
 
 type Pair struct {
