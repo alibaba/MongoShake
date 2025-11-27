@@ -100,22 +100,24 @@ We also provide some tools for synchronization in Shake series.<br>
 
 # Thanks
 ---
-| Username | Mail |
-| :------: | :------: |
+| Username |         Mail          |
+| :------: |:---------------------:|
 | lydarkforest | linyunads1379@163.com |
-| diggzhang | diggzhang@gmail.com |
-| ManleyLiu | daywbdb@qq.com |
-| hustchensi | chensi_04@126.com |
-| HelloCodeMing | huanmingwong@163.com |
+| diggzhang |  diggzhang@gmail.com  |
+| ManleyLiu |    daywbdb@qq.com     |
+| hustchensi |   chensi_04@126.com   |
+| HelloCodeMing | huanmingwong@163.com  |
 | cocoakekeyu | cocoakekeyu@gmail.com |
-| lixj1103 | 244769542@qq.com |
-| xzshinan | shinan@gongchang.com |
-| tzjavadmg | codyzeng@163.com |
-| dx8439 | 171390022@qq.com |
-| monkeyWie |  |
-| raydy.yan | yajuyan@hotmail.com |
-| loda507 | 741536172@qq.com |
-| 骑着蜗牛的兔子 | 348978774@qq.com |
-| lijwww | 2530877879@qq.com |
-| nanmu42 | i@nanmu.me |
-| zemul | zemiaozhou@gmail.com |
+| lixj1103 |   244769542@qq.com    |
+| xzshinan | shinan@gongchang.com  |
+| tzjavadmg |   codyzeng@163.com    |
+| dx8439 |   171390022@qq.com    |
+| monkeyWie |                       |
+| raydy.yan |  yajuyan@hotmail.com  |
+| loda507 |   741536172@qq.com    |
+| 骑着蜗牛的兔子 |   348978774@qq.com    |
+| lijwww |   2530877879@qq.com   |
+| nanmu42 |      i@nanmu.me       |
+| zemul | zemiaozhou@gmail.com  |
+| renheqiang |                       |
+| dobesv |   dobesv@gmail.com    |
