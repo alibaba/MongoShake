@@ -14,6 +14,7 @@ import (
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	sourceReader "github.com/alibaba/MongoShake/v2/collector/reader"
 	utils "github.com/alibaba/MongoShake/v2/common"
+	journal "github.com/alibaba/MongoShake/v2/journal"
 	"github.com/alibaba/MongoShake/v2/oplog"
 	"github.com/alibaba/MongoShake/v2/quorum"
 	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
@@ -69,7 +70,7 @@ type OplogSyncer struct {
 	// source mongo oplog/event reader
 	reader sourceReader.Reader
 	// journal log that records all oplogs
-	journal *utils.Journal
+	journal *journal.Journal
 	// oplogs dispatcher
 	batcher *Batcher
 	// data persist handler
@@ -113,7 +114,7 @@ func NewOplogSyncer(
 		Replset:                replset,
 		startPosition:          startPosition,
 		fullSyncFinishPosition: utils.Int64ToTimestamp(fullSyncFinishPosition),
-		journal: utils.NewJournal(utils.JournalFileName(
+		journal: journal.NewJournal(journal.FileName(
 			fmt.Sprintf("%s.%s", conf.Options.Id, replset))),
 		reader: reader,
 		qos:    utils.StartQoS(0, 1, &utils.IncrSentinelOptions.TPS), // default is 0 which means do not limit

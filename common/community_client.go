@@ -7,6 +7,8 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io/ioutil"
+	"net/url"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -76,7 +78,15 @@ func loadCert(data []byte) ([]byte, error) {
 func NewMongoCommunityConn(url string, connectMode string, timeout bool, readConcern,
 	writeConcern string, sslRootFile string) (*MongoCommunityConn, error) {
 
-	clientOps := options.Client().ApplyURI(url)
+	// URL encoding at first
+	encodedURL, err := EncodeMongoURI(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode MongoDB URL: %v", err)
+	}
+	LOG.Debug("encodedURL:[%v]", encodedURL)
+
+	clientOps := options.Client().ApplyURI(encodedURL)
+	//clientOps := options.Client().ApplyURI(url)
 
 	// tls tlsInsecure + tlsCaFile
 	if sslRootFile != "" {
@@ -262,4 +272,63 @@ func (conn *MongoCommunityConn) IsTimeSeriesCollection(dbName string, collName s
 	_, timeseries := res.Lookup("timeseries").DocumentOK()
 
 	return timeseries
+}
+
+// EncodeMongoURI encodes MongoDB URIs, mainly performing URL encoding on the password part.
+// expected to handle the following URI:
+// 1) normal one: "mongodb://user:password@localhost:27017/admin"
+// 2) with special chars: "mongodb://root:~!@#$^&*()_-=@localhost:27017/admin"
+// 3) without path: "mongodb://user:password@localhost:27017"
+// 4) auth disabled: "mongodb://localhost:27017"
+func EncodeMongoURI(uri string) (string, error) {
+	// split scheme and rest
+	parts := strings.SplitN(uri, ":", 2)
+	if len(parts) != 2 || !strings.HasPrefix(parts[1], "//") {
+		return "", fmt.Errorf("invalid URI scheme")
+	}
+	scheme := parts[0]
+	if scheme != "mongodb" {
+		return "", fmt.Errorf("unsupported scheme: %s", scheme)
+	}
+	rest := parts[1][2:] // remove "//"
+
+	// split user:pwd and hosts
+	atIndex := strings.LastIndex(rest, "@")
+	if atIndex == -1 { // coule be no-auth, do nothing
+		//return "", fmt.Errorf("missing '@' in URI")
+		return uri, nil
+	}
+	userInfoPart := rest[:atIndex]
+	afterUserInfo := rest[atIndex+1:]
+
+	// split user and password
+	userPassParts := strings.SplitN(userInfoPart, ":", 2)
+	if len(userPassParts) != 2 {
+		return "", fmt.Errorf("missing ':' in username:password")
+	}
+	username := userPassParts[0]
+	password := userPassParts[1]
+	if username == "" || password == "" {
+		return "", fmt.Errorf("missing username or password in username:password")
+	}
+
+	// split hosts and path
+	hostPathParts := strings.SplitN(afterUserInfo, "/", 2)
+	host := hostPathParts[0]
+	var path string
+	if len(hostPathParts) > 1 {
+		path = "/" + hostPathParts[1]
+	} else {
+		path = ""
+	}
+
+	// generate URL
+	u := &url.URL{
+		Scheme: scheme,
+		User:   url.UserPassword(username, password),
+		Host:   host,
+		Path:   path,
+	}
+
+	return u.String(), nil
 }

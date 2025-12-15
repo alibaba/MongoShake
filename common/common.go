@@ -156,7 +156,7 @@ func BlockMongoUrlPassword(url, replace string) string {
 		}
 	}
 
-	at := strings.Index(url, "@")
+	at := strings.LastIndex(url, "@")
 	if at == -1 || at == len(url)-1 || at <= colon {
 		return url
 	}

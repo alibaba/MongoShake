@@ -14,6 +14,7 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/transform"
 	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/journal"
 	"github.com/alibaba/MongoShake/v2/oplog"
 	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
@@ -169,7 +170,7 @@ type Executor struct {
 	// batchExecutor, not owned
 	batchExecutor *BatchGroupExecutor
 	// records all oplogRecords into journal files
-	journal *utils.Journal
+	journal *journal.Journal
 	// mongo url
 	MongoUrl string
 
@@ -207,7 +208,7 @@ func NewExecutor(id int, batchExecutor *BatchGroupExecutor, MongoUrl string) *Ex
 	return &Executor{
 		id:            id,
 		batchExecutor: batchExecutor,
-		journal:       utils.NewJournal(utils.JournalFileName(fmt.Sprintf("direct.%03d", id))),
+		journal:       journal.NewJournal(journal.FileName(fmt.Sprintf("direct.%03d", id))),
 		MongoUrl:      MongoUrl,
 		batchBlock:    make(chan []*OplogRecord, 1),
 	}

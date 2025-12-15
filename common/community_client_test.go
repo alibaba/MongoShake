@@ -130,3 +130,82 @@ func TestCommonFunctions(t *testing.T) {
 		conn.Close()
 	}
 }
+
+func TestEncodeMongoURI(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+		err      string
+	}{
+		{
+			input:    "mongodb://root:password001@localhost:27017/admin",
+			expected: "mongodb://root:password001@localhost:27017/admin",
+			err:      "",
+		},
+		{
+			input:    "mongodb://root:1234@abcd@localhost:27017/admin",
+			expected: "mongodb://root:1234%40abcd@localhost:27017/admin",
+			err:      "",
+		},
+		{
+			input:    "mongodb://root:dUM3!k&TdofokP0yl1@dds-xxx1.mongodb.rds.aliyuncs.com:3717,dds-xxx2.mongodb.rds.aliyuncs.com:3717",
+			expected: "mongodb://root:dUM3%21k&TdofokP0yl1@dds-xxx1.mongodb.rds.aliyuncs.com:3717,dds-xxx2.mongodb.rds.aliyuncs.com:3717",
+			err:      "",
+		},
+		{
+			input:    "mongodb://root_special_char:MongoDB@%()!#&-=@localhost:27017/admin",
+			expected: "mongodb://root_special_char:MongoDB%40%25%28%29%21%23&-=@localhost:27017/admin",
+			err:      "",
+		},
+		{
+			input:    "mongodb://root_special_char1:~!@#$^&*()_-=@localhost:27017/admin",
+			expected: "mongodb://root_special_char1:~%21%40%23$%5E&%2A%28%29_-=@localhost:27017/admin",
+			err:      "",
+		},
+		{
+			input:    "mongodb://user:pass@localhost/db",
+			expected: "mongodb://user:pass@localhost/db",
+			err:      "",
+		},
+		{
+			input:    "mongodb://user:pass:@localhost/db",
+			expected: "mongodb://user:pass%3A@localhost/db",
+			err:      "",
+		},
+		{
+			input:    "mongodb://user:passwd@localhost:27017",
+			expected: "mongodb://user:passwd@localhost:27017",
+			err:      "",
+		},
+		{
+			input:    "mongodb://localhost:27017,localhost:27018",
+			expected: "mongodb://localhost:27017,localhost:27018",
+			err:      "",
+		},
+		{
+			input: "invalid://user:pass@host/db",
+			err:   "unsupported scheme: invalid",
+		},
+		{
+			input: "mongodb://user@host/db",
+			err:   "missing ':' in username:password",
+		},
+		{
+			input: "mongodb://:@host/db",
+			err:   "missing username or password in username:password",
+		},
+	}
+
+	for _, tt := range tests {
+		encoded, err := EncodeMongoURI(tt.input)
+		if tt.err != "" {
+			if err == nil || err.Error() != tt.err {
+				t.Errorf("expected error %q for %q, got %v", tt.err, tt.input, err)
+			}
+		} else {
+			if encoded != tt.expected {
+				t.Errorf("expected %q for %q, got %q", tt.expected, tt.input, encoded)
+			}
+		}
+	}
+}
