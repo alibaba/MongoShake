@@ -28,7 +28,7 @@ var (
 		9:  "2.4.21", // remove incr_sync.worker.oplog_compressor; add incr_sync.tunnel.write_thread, tunnel.kafka.partition_number
 		10: "2.6.4",  // remove full_sync.reader.read_document_count; add full_sync.reader.parallel_thread, incr_sync.reader.fetch_batch_size, skip.nsshardkey.verify
 		11: "2.8.6",  // add incr_sync.fetcher.buffer_size_threshold_in_kb, full_sync.do_not_shard_destination
-		12: "2.8.7",  // add incr_sync.executor.bypass_document_validation
+		12: "2.8.7",  // add incr_sync.executor.bypass_document_validation, tunnel.kafka.sasl.enable, tunnel.kafka.sasl.auth, tunnel.kafka.sasl.mechanism, tunnel.kafka.compression, tunnel.kafka.producer.max_message_bytes, full_sync.reader.split_max_chunk_size
 	}
 )
 

@@ -168,6 +168,13 @@ func checkDefaultValue() error {
 	if conf.Options.FullSyncReaderParallelIndex == "" {
 		conf.Options.FullSyncReaderParallelIndex = "_id"
 	}
+	if conf.Options.FullSyncReaderSplitMaxChunkSize == 0 {
+		conf.Options.FullSyncReaderSplitMaxChunkSize = 1024
+	}
+	if conf.Options.FullSyncReaderSplitMaxChunkSize < 1 {
+		return fmt.Errorf("full_sync.reader.split_max_chunk_size should >= 1, " +
+			"and for some minor versions, should be within [1, 1024]MB")
+	}
 	if conf.Options.FullSyncReaderDocumentBatchSize <= 0 {
 		conf.Options.FullSyncReaderDocumentBatchSize = 128
 	}

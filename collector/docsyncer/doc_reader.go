@@ -63,10 +63,11 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 		return nil
 	}
 	ds.count = uint64(res.Count)
+	// max pieceByteSize should be limited by maxChunkSize of splitVector cmd
 	ds.pieceByteSize = uint64(res.Size / float64(conf.Options.FullSyncReaderParallelThread))
-	if ds.pieceByteSize > 8*utils.GB {
+	if ds.pieceByteSize > 1024*utils.MB {
 		// at most 8GB per chunk
-		ds.pieceByteSize = 8 * utils.GB
+		ds.pieceByteSize = 1024 * utils.MB
 	}
 
 	LOG.Info("NewDocumentSplitter db[%v] col[%v] res[%v], pieceByteSize[%v]",
@@ -107,15 +108,20 @@ func (ds *DocumentSplitter) Run() error {
 		return nil
 	}
 
-	LOG.Info("splitter[%s] enable split, waiting splitVector return...", ds)
+	maxChunkSize := conf.Options.FullSyncReaderSplitMaxChunkSize // default 1024MB, could be set by user
+	if uint64(maxChunkSize*utils.MB) > ds.pieceByteSize {
+		maxChunkSize = int(ds.pieceByteSize / uint64(utils.MB))
+	}
+	splitVectorCmd := bson.D{
+		{"splitVector", ds.ns.Str()},
+		{"keyPattern", bson.M{conf.Options.FullSyncReaderParallelIndex: 1}}, // {_id:1} or {shardKey:1}
+		// {"maxSplitPoints", ds.pieceNumber - 1},
+		{"maxChunkSize", maxChunkSize},
+	}
+	LOG.Info("splitter[%s] splitVector cmd: %v, waiting splitVector return...", ds, splitVectorCmd)
 
 	res := SplitVectorResult{}
-	err := ds.client.Client.Database(ds.ns.Database).RunCommand(context.Background(), bson.D{
-		{"splitVector", ds.ns.Str()},
-		{"keyPattern", bson.M{conf.Options.FullSyncReaderParallelIndex: 1}},
-		// {"maxSplitPoints", ds.pieceNumber - 1},
-		{"maxChunkSize", ds.pieceByteSize / utils.MB},
-	}).Decode(&res)
+	err := ds.client.Client.Database(ds.ns.Database).RunCommand(context.Background(), splitVectorCmd).Decode(&res)
 	// if failed, do not panic, run single thread fetching
 	if err != nil {
 		LOG.Warn("splitter[%s] run splitVector failed[%v], give up parallel fetching", ds, err)
