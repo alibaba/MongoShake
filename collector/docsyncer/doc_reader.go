@@ -26,6 +26,11 @@ type DocumentSplitter struct {
 	pieceNumber   int                  // how many piece
 }
 
+// SplitVectorResult is the result of splitVector cmd, contains multi split points.
+type SplitVectorResult struct {
+	SplitKeys []bson.Raw `bson:"splitKeys"`
+}
+
 func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitter {
 	ds := &DocumentSplitter{
 		src:           src,
@@ -104,7 +109,7 @@ func (ds *DocumentSplitter) Run() error {
 
 	LOG.Info("splitter[%s] enable split, waiting splitVector return...", ds)
 
-	res := bson.M{}
+	res := SplitVectorResult{}
 	err := ds.client.Client.Database(ds.ns.Database).RunCommand(context.Background(), bson.D{
 		{"splitVector", ds.ns.Str()},
 		{"keyPattern", bson.M{conf.Options.FullSyncReaderParallelIndex: 1}},
@@ -118,46 +123,51 @@ func (ds *DocumentSplitter) Run() error {
 		LOG.Info("splitter[%s] exits", ds)
 		return nil
 	}
+	// only print if len(splitKeys) < 100
+	if len(res.SplitKeys) > 100 {
+		LOG.Info("splitter[%s] run splitVector result len(splitKeys): %v", ds, len(res.SplitKeys))
+	} else {
+		LOG.Info("splitter[%s] run splitVector result splitKeys: %v", ds, res)
+	}
 
-	LOG.Info("splitter[%s] run splitVector result: %v", ds, res)
+	if len(res.SplitKeys) > 0 {
+		// return list is sorted
+		ds.pieceNumber = len(res.SplitKeys) + 1
 
-	if splitKeys, ok := res["splitKeys"]; ok {
-		if splitKeysList, ok := splitKeys.([]interface{}); ok && len(splitKeysList) > 0 {
-			// return list is sorted
-			ds.pieceNumber = len(splitKeysList) + 1
-
-			var start interface{}
-			cnt := 0
-			for i, keyDoc := range splitKeysList {
-				// check key == conf.Options.FullSyncReaderParallelIndex
-				key, val, err := parseDocKeyValue(keyDoc)
-				if err != nil {
-					LOG.Crash("splitter[%s] parse doc key failed: %v", ds, err)
-				}
-				if key != conf.Options.FullSyncReaderParallelIndex {
-					LOG.Crash("splitter[%s] parse doc invalid key: %v", ds, key)
-				}
-
-				LOG.Info("splitter[%s] piece[%d] create reader with boundary(%v, %v]", ds, cnt, start, val)
-				// inject new DocumentReader into channel
-				ds.readerChan <- NewDocumentReader(cnt, ds.src, ds.ns, key, start, val, ds.sslRootCaFile)
-
-				// new start
-				start = val
-				cnt++
-
-				// last one
-				if i == len(splitKeysList)-1 {
-					LOG.Info("splitter[%s] piece[%d] create reader with boundary(%v, INF)", ds, cnt, start)
-					// inject new DocumentReader into channel
-					ds.readerChan <- NewDocumentReader(cnt, ds.src, ds.ns, key, start, nil, ds.sslRootCaFile)
-				}
+		var start interface{}
+		cnt := 0
+		for i, keyDoc := range res.SplitKeys {
+			// check key == conf.Options.FullSyncReaderParallelIndex
+			doc := bson.M{}
+			err := bson.Unmarshal(keyDoc, &doc)
+			if err != nil {
+				LOG.Crash("splitter[%s] unmarshal doc [%v] failed: %v", ds, keyDoc, err)
+			}
+			key, val, err := parseDocKeyValue(doc)
+			if err != nil {
+				LOG.Crash("splitter[%s] parse doc key failed: %v", ds, err)
+			}
+			if key != conf.Options.FullSyncReaderParallelIndex {
+				LOG.Crash("splitter[%s] parse doc invalid key: %v", ds, key)
 			}
 
-			return nil
-		} else {
-			LOG.Warn("splitter[%s] run splitVector return empty result[%v]", ds, res)
+			LOG.Info("splitter[%s] piece[%d] create reader with boundary(%v, %v]", ds, cnt, start, val)
+			// inject new DocumentReader into channel
+			ds.readerChan <- NewDocumentReader(cnt, ds.src, ds.ns, key, start, val, ds.sslRootCaFile)
+
+			// new start
+			start = val
+			cnt++
+
+			// last one
+			if i == len(res.SplitKeys)-1 {
+				LOG.Info("splitter[%s] piece[%d] create reader with boundary(%v, INF)", ds, cnt, start)
+				// inject new DocumentReader into channel
+				ds.readerChan <- NewDocumentReader(cnt, ds.src, ds.ns, key, start, nil, ds.sslRootCaFile)
+			}
 		}
+
+		return nil
 	} else {
 		LOG.Warn("splitter[%s] run splitVector return null result[%v]", ds, res)
 	}
