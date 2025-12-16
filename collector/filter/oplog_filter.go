@@ -76,7 +76,7 @@ func (filter *AutologousFilter) Filter(log *oplog.PartialLog) bool {
 			_ = LOG.Warn("ExtractInnerNs meets error:%v", err)
 			return false
 		}
-		if ns == "config.system.sessions" {
+		if ns == "config.system.sessions" || ns == "config.system.preimages" {
 			return true
 		}
 	}

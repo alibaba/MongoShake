@@ -248,7 +248,7 @@ func TestNamespaceFilter(t *testing.T) {
 		assert.Equal(t, 1, len(log.Object[0].Value.(bson.A)), "should be equal")
 	}
 
-	// applyOps with delete op for config.system.sessions
+	// applyOps with inner delete ops for 'config.system.sessions'
 	// NamespaceFilter will not handle it, it's handled by AutologousFilter
 	{
 		fmt.Printf("TestNamespaceFilter case %d.\n", nr)
@@ -392,6 +392,65 @@ func TestNamespaceFilter(t *testing.T) {
 		}
 		assert.Equal(t, true, filter.Filter(log1), "should be equal")
 	}
+
+	// applyOps with inner delete ops for 'config.system.preimages'
+	// NamespaceFilter will not handle it, it's handled by AutologousFilter
+	{
+		fmt.Printf("TestNamespaceFilter case %d.\n", nr)
+		nr++
+		filter := NewNamespaceFilter(nil, nil)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key: "applyOps",
+						Value: []bson.D{
+							{
+								bson.E{Key: "op", Value: "d"},
+								bson.E{Key: "ns", Value: "config.system.preimages"},
+								bson.E{Key: "ui", Value: primitive.Binary{
+									Subtype: 4,
+									Data:    []byte{0, 1, 3, 4, 5, 6, 7},
+								}},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: bson.D{
+										bson.E{Key: "nsUUID", Value: primitive.Binary{
+											Subtype: 4,
+											Data:    []byte{0, 1, 3, 4, 5, 6, 7},
+										}},
+										bson.E{Key: "ts", Value: primitive.Timestamp{T: 1758155667, I: 24}},
+										bson.E{Key: "applyOpsIndex", Value: 0},
+									}},
+								}},
+							},
+							{
+								bson.E{Key: "op", Value: "d"},
+								bson.E{Key: "ns", Value: "config.system.preimages"},
+								bson.E{Key: "ui", Value: primitive.Binary{
+									Subtype: 4,
+									Data:    []byte{0, 1, 3, 4, 5, 6, 7},
+								}},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: bson.D{
+										bson.E{Key: "nsUUID", Value: primitive.Binary{
+											Subtype: 4,
+											Data:    []byte{0, 1, 3, 4, 5, 6, 7},
+										}},
+										bson.E{Key: "ts", Value: primitive.Timestamp{T: 175855668, I: 2}},
+										bson.E{Key: "applyOpsIndex", Value: 0},
+									}},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+		assert.Equal(t, 2, len(log.Object[0].Value.(bson.A)), "should be equal")
+	}
 }
 
 func TestGidFilter(t *testing.T) {
@@ -530,6 +589,27 @@ func TestAutologousFilter(t *testing.T) {
 		log = &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Namespace: "a.system.profile",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "config.system.preimages",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "config.migrationCoordinators",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "config.rangeDeletions",
 			},
 		}
 		assert.Equal(t, true, filter.Filter(log), "should be equal")
