@@ -6,7 +6,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/mongodb/mongo-tools-common/json"
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -1487,6 +1489,9 @@ func TestRunCommand(t *testing.T) {
 	// test RunCommand
 
 	_ = utils.InitialLogger("", "", "debug", true, 1)
+	txnN := []int64{0, 1}
+	term := []int64{1}
+	multiOpType := []int{0, 1}
 
 	var nr int
 
@@ -1508,7 +1513,7 @@ func TestRunCommand(t *testing.T) {
 
 		log := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
-				Operation: "i",
+				Operation: "c",
 				Namespace: "admin.$cmd",
 				Object: bson.D{
 					bson.E{
@@ -1554,6 +1559,74 @@ func TestRunCommand(t *testing.T) {
 		assert.Equal(t, "world", result[0]["hello"].(string), "should be equal")
 		assert.Equal(t, "789", result[1]["_id"].(string), "should be equal")
 		assert.Equal(t, "w2", result[1]["hello"].(string), "should be equal")
+		assert.Equal(t, int32(1), result[2]["x"], "should be equal")
+	}
+
+	// applyOps with {multiOpType:1} which should not be treated as txn.
+	{
+		fmt.Printf("TestRunCommand case %d.\n", nr)
+		nr++
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		assert.Equal(t, nil, err, "should be equal")
+		// drop database
+		err = conn.Client.Database("zz").Drop(nil)
+		assert.Equal(t, nil, err, "should be equal")
+		_, err = conn.Client.Database("zz").Collection("y").InsertOne(context.Background(), bson.M{"x": 1})
+		assert.Equal(t, nil, err, "should be equal")
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "c",
+				Namespace: "admin.$cmd",
+				TxnNumber: &txnN[0],
+				Object: bson.D{
+					bson.E{
+						Key: "applyOps",
+						Value: []bson.M{
+							{
+								"ns": "zz.y",
+								"op": "i",
+								"ui": primitive.Binary{
+									Subtype: 4,
+									Data:    []byte{0, 1, 3, 4, 5, 6, 7},
+								},
+								"o": bson.M{"_id": int64(4), "x": json.NumberLong(-20), "y": json.NumberLong(5)},
+							},
+							{
+								"ns": "zz.y",
+								"op": "i",
+								"ui": primitive.Binary{
+									Subtype: 4,
+									Data:    []byte{0, 1, 3, 4, 5, 6, 7},
+								},
+								"o": bson.D{
+									bson.E{Key: "_id", Value: int64(5)},
+									bson.E{Key: "x", Value: json.NumberLong(-30)},
+									bson.E{Key: "y", Value: json.NumberLong(11)},
+								},
+							},
+						},
+					},
+				},
+				Timestamp:   utils.TimeToTimestamp(time.Now().Unix()),
+				Term:        &term[0],
+				Version:     2,
+				PrevOpTime:  utils.MarshalData(bson.D{{"ts", utils.Int64ToTimestamp(0)}}),
+				MultiOpType: &multiOpType[1], // 1 for vectored insert oplog format
+			},
+		}
+		err = RunCommand(testDb, "applyOps", log, conn.Client)
+		assert.Equal(t, nil, err, "should be equal")
+		opts := options.Find().SetSort(bson.D{{"_id", 1}})
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, "zz", "y", opts)
+		assert.Equal(t, nil, err, "should be equal")
+		fmt.Printf("result:%v\n", result)
+		assert.Equal(t, int64(4), result[0]["_id"].(int64), "should be equal")
+		assert.Equal(t, int64(-20), result[0]["x"].(int64), "should be equal")
+		assert.Equal(t, int64(5), result[0]["y"].(int64), "should be equal")
+		assert.Equal(t, int64(5), result[1]["_id"].(int64), "should be equal")
+		assert.Equal(t, int64(-30), result[1]["x"].(int64), "should be equal")
+		assert.Equal(t, int64(11), result[1]["y"].(int64), "should be equal")
 		assert.Equal(t, int32(1), result[2]["x"], "should be equal")
 	}
 

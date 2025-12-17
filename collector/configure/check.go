@@ -10,7 +10,7 @@ import (
 	utils "github.com/alibaba/MongoShake/v2/common"
 )
 
-// read the given file and parse the fcv do comparison
+// CheckFcv read the given file and parse the fcv do comparison
 func CheckFcv(file string, fcv int) (int, error) {
 	// read line by line and parse the version
 

@@ -30,17 +30,6 @@ func mockSyncer() *OplogSyncer {
 	return syncer
 }
 
-func marshalData(input bson.D) bson.Raw {
-	var dataRaw bson.Raw
-	if data, err := bson.Marshal(input); err != nil {
-		return nil
-	} else {
-		dataRaw = data[:]
-	}
-
-	return dataRaw
-}
-
 /*
  * return oplogs array with length=input length.
  * ddlGiven array marks the ddl.
@@ -69,7 +58,7 @@ func mockOplogs(length int, ddlGiven []int, noopGiven []int, txnGiven []int, sta
 					Operation: op,
 					Timestamp: utils.TimeToTimestamp(startTs + int64(i)),
 					TxnNumber: &txnN[0],
-					LSID: marshalData(bson.D{
+					LSID: utils.MarshalData(bson.D{
 						{"id", primitive.Binary{4, []byte{0, 1, 3, 4, 5, 6, 7}}},
 						{"uid", []byte{9, 8, 7, 6, 5, 4, 3, 2, 1}},
 					}),
@@ -130,13 +119,13 @@ func mockOplogs(length int, ddlGiven []int, noopGiven []int, txnGiven []int, sta
 								},
 							},
 						},
-						LSID: marshalData(
+						LSID: utils.MarshalData(
 							bson.D{
 								{"id", primitive.Binary{4, []byte{0, 1, 3, 4, 5, 6, byte(startTs + int64(i))}}},
 								{"uid", []byte{8, 7, 6, 5, 4, 3, 2, 1, byte(startTs + int64(i))}},
 							}),
 						TxnNumber:  &txnN[0],
-						PrevOpTime: marshalData(bson.D{{"ts", utils.Int64ToTimestamp(0)}}),
+						PrevOpTime: utils.MarshalData(bson.D{{"ts", utils.Int64ToTimestamp(0)}}),
 					},
 				},
 			}
@@ -215,13 +204,13 @@ func mockTxnPartialOplogs(startTs int64, normalOplog bool) []*oplog.GenericOplog
 						Value: interface{}(true),
 					},
 				},
-				LSID: marshalData(
+				LSID: utils.MarshalData(
 					bson.D{
 						{"id", primitive.Binary{Subtype: 4, Data: []byte{0, 1, 3, 4, 5, 6, byte(startTs)}}},
 						{"uid", []byte{8, 7, 6, 5, 4, 3, 2, 1, byte(startTs)}},
 					}),
 				TxnNumber:  &txnN[0],
-				PrevOpTime: marshalData(bson.D{{"ts", utils.Int64ToTimestamp(0)}}),
+				PrevOpTime: utils.MarshalData(bson.D{{"ts", utils.Int64ToTimestamp(0)}}),
 			},
 		},
 	}
@@ -282,13 +271,13 @@ func mockTxnPartialOplogs(startTs int64, normalOplog bool) []*oplog.GenericOplog
 						Value: interface{}(true),
 					},
 				},
-				LSID: marshalData(
+				LSID: utils.MarshalData(
 					bson.D{
 						{"id", primitive.Binary{Subtype: 4, Data: []byte{0, 1, 3, 4, 5, 6, byte(startTs)}}},
 						{"uid", []byte{8, 7, 6, 5, 4, 3, 2, 1, byte(startTs)}},
 					}),
 				TxnNumber:  &txnN[0],
-				PrevOpTime: marshalData(bson.D{{"ts", utils.TimeToTimestamp(startTs + 0)}}),
+				PrevOpTime: utils.MarshalData(bson.D{{"ts", utils.TimeToTimestamp(startTs + 0)}}),
 			},
 		},
 	}
@@ -367,13 +356,13 @@ func mockTxnPartialOplogs(startTs int64, normalOplog bool) []*oplog.GenericOplog
 						Value: interface{}(9),
 					},
 				},
-				LSID: marshalData(
+				LSID: utils.MarshalData(
 					bson.D{
 						{"id", primitive.Binary{Subtype: 4, Data: []byte{0, 1, 3, 4, 5, 6, byte(startTs)}}},
 						{"uid", []byte{8, 7, 6, 5, 4, 3, 2, 1, byte(startTs)}},
 					}),
 				TxnNumber:  &txnN[0],
-				PrevOpTime: marshalData(bson.D{{"ts", utils.TimeToTimestamp(startTs + 1)}}),
+				PrevOpTime: utils.MarshalData(bson.D{{"ts", utils.TimeToTimestamp(startTs + 1)}}),
 			},
 		},
 	}
@@ -445,13 +434,13 @@ func mockDisTxnOplogs(startTs int64, normalOplog bool, isCommit bool) []*oplog.G
 						Value: interface{}(true),
 					},
 				},
-				LSID: marshalData(
+				LSID: utils.MarshalData(
 					bson.D{
 						{"id", primitive.Binary{4, []byte{0, 1, 3, 4, 5, 6, byte(startTs)}}},
 						{"uid", []byte{8, 7, 6, 5, 4, 3, 2, 1, byte(startTs)}},
 					}),
 				TxnNumber:  &txnN[0],
-				PrevOpTime: marshalData(bson.D{{"ts", utils.Int64ToTimestamp(0)}}),
+				PrevOpTime: utils.MarshalData(bson.D{{"ts", utils.Int64ToTimestamp(0)}}),
 			},
 		},
 	}
@@ -501,13 +490,13 @@ func mockDisTxnOplogs(startTs int64, normalOplog bool, isCommit bool) []*oplog.G
 				Operation: "c",
 				Namespace: "admin.$cmd",
 				Object:    tmpO,
-				LSID: marshalData(
+				LSID: utils.MarshalData(
 					bson.D{
 						{"id", primitive.Binary{4, []byte{0, 1, 3, 4, 5, 6, byte(startTs)}}},
 						{"uid", []byte{8, 7, 6, 5, 4, 3, 2, 1, byte(startTs)}},
 					}),
 				TxnNumber:  &txnN[0],
-				PrevOpTime: marshalData(bson.D{{"ts", utils.TimeToTimestamp(startTs + 0)}}),
+				PrevOpTime: utils.MarshalData(bson.D{{"ts", utils.TimeToTimestamp(startTs + 0)}}),
 			},
 		},
 	}
@@ -579,13 +568,13 @@ func mockDisTxnPartialOplogs(startTs int64, normalOplog bool, isCommit bool) []*
 						Value: interface{}(true),
 					},
 				},
-				LSID: marshalData(
+				LSID: utils.MarshalData(
 					bson.D{
 						{"id", primitive.Binary{4, []byte{0, 1, 3, 4, 5, 6, byte(startTs)}}},
 						{"uid", []byte{8, 7, 6, 5, 4, 3, 2, 1, byte(startTs)}},
 					}),
 				TxnNumber:  &txnN[0],
-				PrevOpTime: marshalData(bson.D{{"ts", utils.Int64ToTimestamp(0)}}),
+				PrevOpTime: utils.MarshalData(bson.D{{"ts", utils.Int64ToTimestamp(0)}}),
 			},
 		},
 	}
@@ -646,13 +635,13 @@ func mockDisTxnPartialOplogs(startTs int64, normalOplog bool, isCommit bool) []*
 						Value: interface{}(true),
 					},
 				},
-				LSID: marshalData(
+				LSID: utils.MarshalData(
 					bson.D{
 						{"id", primitive.Binary{4, []byte{0, 1, 3, 4, 5, 6, byte(startTs)}}},
 						{"uid", []byte{8, 7, 6, 5, 4, 3, 2, 1, byte(startTs)}},
 					}),
 				TxnNumber:  &txnN[0],
-				PrevOpTime: marshalData(bson.D{{"ts", utils.TimeToTimestamp(startTs + 0)}}),
+				PrevOpTime: utils.MarshalData(bson.D{{"ts", utils.TimeToTimestamp(startTs + 0)}}),
 			},
 		},
 	}
@@ -702,13 +691,13 @@ func mockDisTxnPartialOplogs(startTs int64, normalOplog bool, isCommit bool) []*
 				Operation: "c",
 				Namespace: "admin.$cmd",
 				Object:    tmpO,
-				LSID: marshalData(
+				LSID: utils.MarshalData(
 					bson.D{
 						{"id", primitive.Binary{4, []byte{0, 1, 3, 4, 5, 6, byte(startTs)}}},
 						{"uid", []byte{8, 7, 6, 5, 4, 3, 2, 1, byte(startTs)}},
 					}),
 				TxnNumber:  &txnN[0],
-				PrevOpTime: marshalData(bson.D{{"ts", utils.TimeToTimestamp(startTs + 1)}}),
+				PrevOpTime: utils.MarshalData(bson.D{{"ts", utils.TimeToTimestamp(startTs + 1)}}),
 			},
 		},
 	}

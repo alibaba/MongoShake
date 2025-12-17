@@ -30,7 +30,12 @@ type Configuration struct {
 	Tunnel                                 string   `config:"tunnel"`
 	TunnelAddress                          []string `config:"tunnel.address"`
 	TunnelMessage                          string   `config:"tunnel.message"`
-	TunnelKafkaPartitionNumber             int      `config:"tunnel.kafka.partition_number"` // add v2.4.21
+	TunnelKafkaPartitionNumber             int      `config:"tunnel.kafka.partition_number"`           // add v2.4.21
+	TunnelKafkaSaslEnable                  bool     `config:"tunnel.kafka.sasl.enable"`                // add v2.8.7
+	TunnelKafkaSaslAuth                    string   `config:"tunnel.kafka.sasl.auth"`                  // add v2.8.7
+	TunnelKafkaSaslMechanism               string   `config:"tunnel.kafka.sasl.mechanism"`             // add v2.8.7
+	TunnelKafkaCompression                 string   `config:"tunnel.kafka.compression"`                // add v2.8.7
+	KafkaProducerMaxMessage                int      `config:"tunnel.kafka.producer.max_message_bytes"` // add v2.8.7
 	TunnelJsonFormat                       string   `config:"tunnel.json.format"`
 	TunnelMongoSslRootCaFile               string   `config:"tunnel.mongo_ssl_root_ca_file"` // add v2.6.2
 	FilterNamespaceBlack                   []string `config:"filter.namespace.black"`
@@ -52,8 +57,9 @@ type Configuration struct {
 	FullSyncReaderWriteDocumentParallel  int    `config:"full_sync.reader.write_document_parallel"`
 	FullSyncReaderDocumentBatchSize      int    `config:"full_sync.reader.document_batch_size"`
 	FullSyncReaderFetchBatchSize         int    `config:"full_sync.reader.fetch_batch_size"`
-	FullSyncReaderParallelThread         int    `config:"full_sync.reader.parallel_thread"` // add v2.6.4
-	FullSyncReaderParallelIndex          string `config:"full_sync.reader.parallel_index"`  // add v2.6.4
+	FullSyncReaderParallelThread         int    `config:"full_sync.reader.parallel_thread"`      // add v2.6.4
+	FullSyncReaderParallelIndex          string `config:"full_sync.reader.parallel_index"`       // add v2.6.4
+	FullSyncReaderSplitMaxChunkSize      int    `config:"full_sync.reader.split_max_chunk_size"` // add v2.8.7
 	FullSyncCollectionDrop               bool   `config:"full_sync.collection_exist_drop"`
 	FullSyncCreateIndex                  string `config:"full_sync.create_index"`
 	FullSyncReaderOplogStoreDisk         bool   `config:"full_sync.reader.oplog_store_disk"`
@@ -81,6 +87,7 @@ type Configuration struct {
 	IncrSyncExecutorInsertOnDupUpdate      bool     `config:"incr_sync.executor.insert_on_dup_update"`
 	IncrSyncConflictWriteTo                string   `config:"incr_sync.conflict_write_to"` // remove "sdk" option since v2.4.21
 	IncrSyncExecutorMajorityEnable         bool     `config:"incr_sync.executor.majority_enable"`
+	IncrSyncBypassDocumentValidation       bool     `config:"incr_sync.executor.bypass_document_validation"` // add v2.8.7
 
 	/*---------------------------------------------------------*/
 	// inner variables, not open to user
@@ -140,6 +147,7 @@ func GetSafeOptions() Configuration {
 	for i := range Options.IncrSyncTunnelAddress {
 		polish.IncrSyncTunnelAddress[i] = utils.BlockMongoUrlPassword(Options.IncrSyncTunnelAddress[i], "***")
 	}
+	polish.TunnelKafkaSaslAuth = utils.BlockMongoUrlPassword(Options.TunnelKafkaSaslAuth, "***")
 	// modify storage url
 	polish.CheckpointStorageUrl = utils.BlockMongoUrlPassword(Options.CheckpointStorageUrl, "***")
 

@@ -36,7 +36,7 @@ func (exec *Executor) ensureConnection() bool {
 			return false
 		} else {
 			exec.conn = conn
-			if exec.bulkInsert, err = utils.GetAndCompareVersion(exec.conn, ThresholdVersion,
+			if exec.bulkInsert, err = utils.GetAndCompareVersion(exec.conn, utils.MongoVersion32,
 				conf.Options.TargetDBVersion); err != nil {
 				LOG.Info("compare version with return[%v], bulkInsert disable", err)
 			}

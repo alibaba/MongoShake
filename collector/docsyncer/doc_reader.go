@@ -14,8 +14,7 @@ import (
 	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
-/*************************************************/
-// splitter: pre-split the collection into several pieces
+// DocumentSplitter pre-split the big collection into several pieces
 type DocumentSplitter struct {
 	src           string   // source mongo address url
 	sslRootCaFile string   // source root ca ssl
@@ -25,6 +24,11 @@ type DocumentSplitter struct {
 	pieceByteSize uint64               // each piece max byte size
 	count         uint64               // total document number
 	pieceNumber   int                  // how many piece
+}
+
+// SplitVectorResult is the result of splitVector cmd, contains multi split points.
+type SplitVectorResult struct {
+	SplitKeys []bson.Raw `bson:"splitKeys"`
 }
 
 func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitter {
@@ -59,10 +63,11 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 		return nil
 	}
 	ds.count = uint64(res.Count)
+	// max pieceByteSize should be limited by maxChunkSize of splitVector cmd
 	ds.pieceByteSize = uint64(res.Size / float64(conf.Options.FullSyncReaderParallelThread))
-	if ds.pieceByteSize > 8*utils.GB {
+	if ds.pieceByteSize > 1024*utils.MB {
 		// at most 8GB per chunk
-		ds.pieceByteSize = 8 * utils.GB
+		ds.pieceByteSize = 1024 * utils.MB
 	}
 
 	LOG.Info("NewDocumentSplitter db[%v] col[%v] res[%v], pieceByteSize[%v]",
@@ -91,7 +96,6 @@ func (ds *DocumentSplitter) String() string {
 		utils.BlockMongoUrlPassword(ds.src, "***"), ds.ns, ds.count, ds.pieceByteSize/utils.MB, ds.pieceNumber)
 }
 
-// TODO, need add retry
 func (ds *DocumentSplitter) Run() error {
 	// close channel
 	defer close(ds.readerChan)
@@ -104,15 +108,20 @@ func (ds *DocumentSplitter) Run() error {
 		return nil
 	}
 
-	LOG.Info("splitter[%s] enable split, waiting splitVector return...", ds)
-
-	var res bson.M
-	err := ds.client.Client.Database(ds.ns.Database).RunCommand(nil, bson.D{
+	maxChunkSize := conf.Options.FullSyncReaderSplitMaxChunkSize // default 1024MB, could be set by user
+	if uint64(maxChunkSize*utils.MB) > ds.pieceByteSize {
+		maxChunkSize = int(ds.pieceByteSize / uint64(utils.MB))
+	}
+	splitVectorCmd := bson.D{
 		{"splitVector", ds.ns.Str()},
-		{"keyPattern", bson.M{conf.Options.FullSyncReaderParallelIndex: 1}},
+		{"keyPattern", bson.M{conf.Options.FullSyncReaderParallelIndex: 1}}, // {_id:1} or {shardKey:1}
 		// {"maxSplitPoints", ds.pieceNumber - 1},
-		{"maxChunkSize", ds.pieceByteSize / utils.MB},
-	}).Decode(res)
+		{"maxChunkSize", maxChunkSize},
+	}
+	LOG.Info("splitter[%s] splitVector cmd: %v, waiting splitVector return...", ds, splitVectorCmd)
+
+	res := SplitVectorResult{}
+	err := ds.client.Client.Database(ds.ns.Database).RunCommand(context.Background(), splitVectorCmd).Decode(&res)
 	// if failed, do not panic, run single thread fetching
 	if err != nil {
 		LOG.Warn("splitter[%s] run splitVector failed[%v], give up parallel fetching", ds, err)
@@ -120,46 +129,51 @@ func (ds *DocumentSplitter) Run() error {
 		LOG.Info("splitter[%s] exits", ds)
 		return nil
 	}
+	// only print if len(splitKeys) < 100
+	if len(res.SplitKeys) > 100 {
+		LOG.Info("splitter[%s] run splitVector result len(splitKeys): %v", ds, len(res.SplitKeys))
+	} else {
+		LOG.Info("splitter[%s] run splitVector result splitKeys: %v", ds, res)
+	}
 
-	LOG.Info("splitter[%s] run splitVector result: %v", ds, res)
+	if len(res.SplitKeys) > 0 {
+		// return list is sorted
+		ds.pieceNumber = len(res.SplitKeys) + 1
 
-	if splitKeys, ok := res["splitKeys"]; ok {
-		if splitKeysList, ok := splitKeys.([]interface{}); ok && len(splitKeysList) > 0 {
-			// return list is sorted
-			ds.pieceNumber = len(splitKeysList) + 1
-
-			var start interface{}
-			cnt := 0
-			for i, keyDoc := range splitKeysList {
-				// check key == conf.Options.FullSyncReaderParallelIndex
-				key, val, err := parseDocKeyValue(keyDoc)
-				if err != nil {
-					LOG.Crash("splitter[%s] parse doc key failed: %v", ds, err)
-				}
-				if key != conf.Options.FullSyncReaderParallelIndex {
-					LOG.Crash("splitter[%s] parse doc invalid key: %v", ds, key)
-				}
-
-				LOG.Info("splitter[%s] piece[%d] create reader with boundary(%v, %v]", ds, cnt, start, val)
-				// inject new DocumentReader into channel
-				ds.readerChan <- NewDocumentReader(cnt, ds.src, ds.ns, key, start, val, ds.sslRootCaFile)
-
-				// new start
-				start = val
-				cnt++
-
-				// last one
-				if i == len(splitKeysList)-1 {
-					LOG.Info("splitter[%s] piece[%d] create reader with boundary(%v, INF)", ds, cnt, start)
-					// inject new DocumentReader into channel
-					ds.readerChan <- NewDocumentReader(cnt, ds.src, ds.ns, key, start, nil, ds.sslRootCaFile)
-				}
+		var start interface{}
+		cnt := 0
+		for i, keyDoc := range res.SplitKeys {
+			// check key == conf.Options.FullSyncReaderParallelIndex
+			doc := bson.M{}
+			err := bson.Unmarshal(keyDoc, &doc)
+			if err != nil {
+				LOG.Crash("splitter[%s] unmarshal doc [%v] failed: %v", ds, keyDoc, err)
+			}
+			key, val, err := parseDocKeyValue(doc)
+			if err != nil {
+				LOG.Crash("splitter[%s] parse doc key failed: %v", ds, err)
+			}
+			if key != conf.Options.FullSyncReaderParallelIndex {
+				LOG.Crash("splitter[%s] parse doc invalid key: %v", ds, key)
 			}
 
-			return nil
-		} else {
-			LOG.Warn("splitter[%s] run splitVector return empty result[%v]", ds, res)
+			LOG.Info("splitter[%s] piece[%d] create reader with boundary(%v, %v]", ds, cnt, start, val)
+			// inject new DocumentReader into channel
+			ds.readerChan <- NewDocumentReader(cnt, ds.src, ds.ns, key, start, val, ds.sslRootCaFile)
+
+			// new start
+			start = val
+			cnt++
+
+			// last one
+			if i == len(res.SplitKeys)-1 {
+				LOG.Info("splitter[%s] piece[%d] create reader with boundary(%v, INF)", ds, cnt, start)
+				// inject new DocumentReader into channel
+				ds.readerChan <- NewDocumentReader(cnt, ds.src, ds.ns, key, start, nil, ds.sslRootCaFile)
+			}
 		}
+
+		return nil
 	} else {
 		LOG.Warn("splitter[%s] run splitVector return null result[%v]", ds, res)
 	}
@@ -184,8 +198,7 @@ func parseDocKeyValue(x interface{}) (string, interface{}, error) {
 	return key, val, nil
 }
 
-/*************************************************/
-// DocumentReader: the reader of single piece
+// DocumentReader is the reader for single piece
 type DocumentReader struct {
 	// source mongo address url
 	src           string
@@ -206,7 +219,8 @@ type DocumentReader struct {
 }
 
 // NewDocumentReader creates reader with mongodb url
-func NewDocumentReader(id int, src string, ns utils.NS, key string, start, end interface{}, sslRootCaFile string) *DocumentReader {
+func NewDocumentReader(id int, src string, ns utils.NS, key string, start, end interface{},
+	sslRootCaFile string) *DocumentReader {
 	q := make(bson.M)
 	if start != nil || end != nil {
 		innerQ := make(bson.M)
@@ -241,7 +255,7 @@ func (reader *DocumentReader) String() string {
 	return ret
 }
 
-// NextDoc returns an document by raw bytes which is []byte
+// NextDoc returns a document by raw bytes which is []byte
 // reader.docCursor.Current is valid only before next docCursor.Next(), So must be copy
 func (reader *DocumentReader) NextDoc() (doc bson.Raw, err error) {
 	if err := reader.ensureNetwork(); err != nil {
@@ -297,6 +311,8 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	// enable noCursorTimeout anyway! #451 #784
 	if reader.client.IsTimeSeriesCollection(reader.ns.Database, reader.ns.Collection) == false {
 		findOptions.SetNoCursorTimeout(true)
+		// timeseries collections can't use hint since they do not have _id index, #897
+		findOptions.SetHint(nil)
 	}
 	findOptions.SetComment(fmt.Sprintf("mongo-shake full sync: ns[%v] query[%v] rebuid-times[%v]",
 		reader.ns, reader.query, reader.rebuild))

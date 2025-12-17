@@ -26,6 +26,4 @@ bin/
 /cmd/collector/collector
 /cmd/receiver/receiver
 conf/
-
-#for unit test
-unit_test_common/include.go
+common/123.pid

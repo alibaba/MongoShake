@@ -15,8 +15,8 @@ const (
 	TypeIncr = "incr"
 )
 
-// IncrSentinelOptions. option's value type should be
-// String or Bool or Int64
+// IncrSentinelOptions
+// option's value type should be String or Bool or Int64
 // only used in incremental sync.
 var IncrSentinelOptions struct {
 	OplogDump      int64
@@ -28,6 +28,7 @@ var IncrSentinelOptions struct {
 	Shutdown       bool  // close shake
 }
 
+// FullSentinelOptions
 // only used in full sync.
 var FullSentinelOptions struct {
 	TPS int64
@@ -78,7 +79,7 @@ func (sentinel *Sentinel) Register() {
 	})
 
 	provider.RegisterAPI("/sentinel/options", nimo.HttpPost, func(body []byte) interface{} {
-		// check the exist of every option. options will be configured only
+		// check the existence of every option. options will be configured only
 		// if all the header kv pair are exist! this means that we ensure the
 		// operation consistency
 

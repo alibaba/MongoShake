@@ -6,10 +6,11 @@ import (
 	"reflect"
 	"strings"
 
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+
+	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 const (
@@ -36,9 +37,10 @@ type ParsedLog struct {
 	FromMigrate   bool                `bson:"fromMigrate,omitempty" json:"fromMigrate,omitempty"` // move chunk
 	TxnNumber     *int64              `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`     // transaction number in session
 	DocumentKey   bson.D              `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists when source collection is sharded, only including shard key and _id
-	PrevOpTime    bson.Raw            `bson:"prevOpTime,omitempty"`
-	UI            *primitive.Binary   `bson:"ui,omitempty" json:"ui,omitempty"` // do not enable currently
-	Upsert        bool                `bson:"b,omitempty" json:"b,omitempty"`   // upsert for update op
+	PrevOpTime    bson.Raw            `bson:"prevOpTime,omitempty" json:"prevOpTime,omitempty"`
+	UI            *primitive.Binary   `bson:"ui,omitempty" json:"ui,omitempty"`                   // do not enable currently
+	Upsert        bool                `bson:"b,omitempty" json:"b,omitempty"`                     // upsert for update op
+	MultiOpType   *int                `bson:"multiOpType,omitempty" json:"multiOpType,omitempty"` // added in 8.0 for vectored insert
 }
 
 type PartialLog struct {

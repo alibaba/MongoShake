@@ -24,6 +24,9 @@ var NsShouldBeIgnore = map[string]bool{
 	"config.mongos":                   true,
 	"config.system.sessions":          true,
 	"config.system.indexBuilds":       true,
+	"config.system.preimages":         true,
+	"config.migrationCoordinators":    true,
+	"config.rangeDeletions":           true,
 	//"system.views":                    false,
 	"system.profile": false,
 }

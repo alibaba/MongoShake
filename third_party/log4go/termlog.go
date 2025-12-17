@@ -32,8 +32,30 @@ func (c *ConsoleLogWriter) SetFormat(format string) {
 	c.format = format
 }
 func (c *ConsoleLogWriter) run(out io.Writer) {
-	for rec := range c.w {
-		fmt.Fprint(out, FormatLogRecord(c.format, rec))
+	//for rec := range c.w {
+	//	fmt.Fprint(out, FormatLogRecord(c.format, rec))
+	//}
+	for {
+		select {
+		case rec, ok := <-c.w:
+			if !ok {
+				return
+			}
+			fmt.Fprint(out, FormatLogRecord(c.format, rec))
+		case <-c.done:
+			// drain remaining messages
+			for {
+				select {
+				case rec, ok := <-c.w:
+					if !ok {
+						return
+					}
+					fmt.Fprint(out, FormatLogRecord(c.format, rec))
+				default:
+					return
+				}
+			}
+		}
 	}
 }
 
@@ -53,6 +75,6 @@ func (c *ConsoleLogWriter) LogWrite(rec *LogRecord) {
 // send log messages to this logger after a Close have undefined behavior.
 func (c *ConsoleLogWriter) Close() {
 	close(c.done)
-	close(c.w)
+	// close(c.w)
 	time.Sleep(50 * time.Millisecond) // Try to give console I/O time to complete
 }

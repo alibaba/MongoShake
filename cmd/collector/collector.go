@@ -81,7 +81,7 @@ func main() {
 	signalProfile, _ := strconv.Atoi(utils.SIGNALPROFILE)
 	signalStack, _ := strconv.Atoi(utils.SIGNALSTACK)
 	if signalProfile > 0 {
-		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile))                     // syscall.SIGUSR2
+		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile)) // syscall.SIGUSR2
 		nimo.RegisterSignalForPrintStack(syscall.Signal(signalStack), func(bytes []byte) { // syscall.SIGUSR1
 			LOG.Info(string(bytes))
 		})
@@ -89,11 +89,6 @@ func main() {
 
 	utils.Welcome()
 
-	err = utils.Mkdirs(conf.Options.LogDirectory)
-	if err != nil {
-		crash(fmt.Sprintf("mkdir log dir failed: %v", err), -5)
-
-	}
 	// get exclusive process lock and write pid
 	if utils.WritePidById(conf.Options.LogDirectory, conf.Options.Id) {
 		if *GCPercent > 0 && *GCPercent <= 100 {
@@ -133,7 +128,7 @@ func startup() {
 	if conf.Options.MongoSUrl != "" {
 		ReplCord.MongoS = &utils.MongoSource{
 			URL:         conf.Options.MongoSUrl,
-			ReplicaName: "mongos",
+			ReplicaName: utils.ReplicaNameMongos,
 		}
 		ReplCord.RealSourceFullSync = []*utils.MongoSource{ReplCord.MongoS}
 		ReplCord.RealSourceIncrSync = []*utils.MongoSource{ReplCord.MongoS}
@@ -170,7 +165,7 @@ func startup() {
 func selectLeader() {
 	// first of all. ensure we are the Master
 	if conf.Options.MasterQuorum && conf.Options.CheckpointStorage == utils.VarCheckpointStorageDatabase {
-		// election become to Master. keep waiting if we are the candidate. election id is must fixed
+		// election become to Master. keep waiting if we are the candidate. election id must be fixed
 		objectId, _ := primitive.ObjectIDFromHex("5204af979955496907000001")
 		quorum.UseElectionObjectId(objectId)
 		go func() {

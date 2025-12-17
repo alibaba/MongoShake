@@ -33,9 +33,13 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.E, 
 	var err error
 	insertCmd := bson.D{
 		{"insert", collection},
-		{"bypassDocumentValidation", false},
 		{"documents", inserts},
 		{"ordered", ExecuteOrdered},
+	}
+	if conf.Options.IncrSyncBypassDocumentValidation {
+		insertCmd = append(insertCmd, bson.E{Key: "bypassDocumentValidation", Value: true})
+	} else {
+		insertCmd = append(insertCmd, bson.E{Key: "bypassDocumentValidation", Value: false})
 	}
 	if metadata.Key == "g" {
 		insertCmd = append(insertCmd, metadata)
@@ -86,9 +90,13 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 	var err error
 	updateCmd := bson.D{
 		{"update", collection},
-		{"bypassDocumentValidation", false},
 		{"updates", updates},
 		{"ordered", ExecuteOrdered},
+	}
+	if conf.Options.IncrSyncBypassDocumentValidation {
+		updateCmd = append(updateCmd, bson.E{Key: "bypassDocumentValidation", Value: true})
+	} else {
+		updateCmd = append(updateCmd, bson.E{Key: "bypassDocumentValidation", Value: false})
 	}
 	if metadata.Key == "g" {
 		updateCmd = append(updateCmd, metadata)
@@ -142,9 +150,13 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.E, 
 	var err error
 	updateCmd := bson.D{
 		{"update", collection},
-		{"bypassDocumentValidation", false},
 		{"updates", updates},
 		{"ordered", ExecuteOrdered},
+	}
+	if conf.Options.IncrSyncBypassDocumentValidation {
+		updateCmd = append(updateCmd, bson.E{Key: "bypassDocumentValidation", Value: true})
+	} else {
+		updateCmd = append(updateCmd, bson.E{Key: "bypassDocumentValidation", Value: false})
 	}
 	if metadata.Key == "g" {
 		updateCmd = append(updateCmd, metadata)

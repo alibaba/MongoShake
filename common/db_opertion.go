@@ -183,14 +183,18 @@ func GetAllTimestamp(sources []*MongoSource, sslRootFile string) (map[string]Tim
 	tsMap := make(map[string]TimestampNode)
 
 	for _, src := range sources {
-		newest, err := GetNewestTimestampByUrl(src.URL, false, sslRootFile)
+		fromMongos := false
+		if src.ReplicaName == ReplicaNameMongos {
+			fromMongos = true
+		}
+		newest, err := GetNewestTimestampByUrl(src.URL, fromMongos, sslRootFile)
 		if err != nil {
 			return nil, 0, 0, 0, 0, err
 		} else if newest == 0 {
 			return nil, 0, 0, 0, 0, fmt.Errorf("illegal newest timestamp == 0")
 		}
 
-		oldest, err := GetOldestTimestampByUrl(src.URL, false, sslRootFile)
+		oldest, err := GetOldestTimestampByUrl(src.URL, fromMongos, sslRootFile)
 		if err != nil {
 			return nil, 0, 0, 0, 0, err
 		}

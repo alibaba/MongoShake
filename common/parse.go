@@ -37,3 +37,13 @@ func SetFiled(input bson.D, key string, value interface{}, upsert bool) {
 			Value: value})
 	}
 }
+
+func MarshalData(input bson.D) bson.Raw {
+	var dataRaw bson.Raw
+	if data, err := bson.Marshal(input); err != nil {
+		return nil
+	} else {
+		dataRaw = data[:]
+	}
+	return dataRaw
+}

@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	utils "github.com/alibaba/MongoShake/v2/common"
 	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
@@ -75,8 +76,13 @@ func marshalData(input bson.M) bson.Raw {
 	return dataRaw
 }
 
+// newMongoClient only used in unit test
 func newMongoClient(url string) (*mongo.Client, error) {
-	clientOps := options.Client().ApplyURI(url)
+	encodedURL, err := utils.EncodeMongoURI(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode MongoDB URL: %v", err)
+	}
+	clientOps := options.Client().ApplyURI(encodedURL)
 
 	client, err := mongo.NewClient(clientOps)
 	if err != nil {
