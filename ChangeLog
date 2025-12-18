@@ -17,6 +17,7 @@
     * IMPROVE: #923, add full_sync.reader.split_max_chunk_size in conf with default 1024MB
     * IMPROVE: #933, Filter support config.system.preimages
     * BUGFIX: #897, time-series collections could not use hint (not done)
+    * TOOL: add pre-split tool (preview version)
 
 2025-08-11  Alibaba Cloud.
     * version: 2.8.6
