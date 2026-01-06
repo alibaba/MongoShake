@@ -7,14 +7,15 @@ import time
 import random
 import sys
 import getopt
+import math
 
 # constant
-COMPARISION_COUNT = "comparison_count"
-COMPARISION_MODE = "comparisonMode"
+COMPARISON_COUNT = "comparison_count"
+COMPARISON_MODE = "comparisonMode"
 EXCLUDE_DBS = "excludeDbs"
 EXCLUDE_COLLS = "excludeColls"
 SAMPLE = "sample"
-# we don't check collections and index here because sharding's collection(`db.stats`) is splitted.
+# we don't check collections and index here because sharding's collection(`db.stats`) is split.
 CheckList = {"objects": 1, "numExtents": 1, "ok": 1}
 configure = {}
 
@@ -61,7 +62,7 @@ def check(src, dst):
     srcDbNames = [db for db in srcDbNames if db not in configure[EXCLUDE_DBS]]
     dstDbNames = [db for db in dstDbNames if db not in configure[EXCLUDE_DBS]]
     if len(srcDbNames) != len(dstDbNames):
-        log_error("DIFF => database count not equals src[%s] != dst[%s].\nsrc: %s\ndst: %s" % (len(srcDbNames),
+        log_error("DIFF => database count not equals src[%s] != dst[%s].\n src: %s\n dst: %s" % (len(srcDbNames),
                                                                                               len(dstDbNames),
                                                                                               srcDbNames,
                                                                                               dstDbNames))
@@ -137,14 +138,39 @@ def check(src, dst):
 
             log_info("compare data sample for collection [%s]" % coll)
             # check sample data
-            if not data_comparison(srcColl, dstColl, configure[COMPARISION_MODE]):
+            if not data_comparison(srcColl, dstColl, configure[COMPARISON_MODE]):
                 log_error("DIFF => collection [%s] data comparison not equals" % (coll))
                 return False
             else:
-                log_info("EQUL => collection [%s] data data comparison exactly eauals" % (coll))
+                log_info("EQUL => collection [%s] data data comparison exactly equals" % (coll))
 
     return True
 
+"""
+    Recursive processing of nested dictionaries and handle NaN special case
+"""
+def documents_equal(doc1, doc2):
+    if set(doc1.keys()) != set(doc2.keys()):
+        return False
+
+    for key in doc1.keys():
+        val1, val2 = doc1[key], doc2[key]
+
+        # recursive processing
+        if isinstance(val1, dict) and isinstance(val2, dict):
+            if not documents_equal(val1, val2):
+                return False
+        # handle NaN
+        elif isinstance(val1, float) and isinstance(val2, float):
+            if math.isnan(val1) and math.isnan(val2):
+                continue  # both NaN, considered equal
+            elif val1 != val2:
+                return False
+        # other cases
+        elif val1 != val2:
+            return False
+
+    return True
 
 """
     check sample data. comparison every entry
@@ -154,7 +180,7 @@ def data_comparison(srcColl, dstColl, mode):
         return True
     elif mode == "sample":
         # srcColl.count() mus::t equals to dstColl.count()
-        count = configure[COMPARISION_COUNT] if configure[COMPARISION_COUNT] <= srcColl.estimated_document_count() else srcColl.estimated_document_count()
+        count = configure[COMPARISON_COUNT] if configure[COMPARISON_COUNT] <= srcColl.estimated_document_count() else srcColl.estimated_document_count()
     else: # all
         count = srcColl.count_documents({})
 
@@ -166,7 +192,7 @@ def data_comparison(srcColl, dstColl, mode):
     show_progress = (batch * 64)
     total = 0
     while count > 0:
-        # sample a bounch of docs
+        # sample a bunch of docs
 
         docs = srcColl.aggregate([{"$sample": {"size":batch}}])
         while docs.alive:
@@ -174,8 +200,10 @@ def data_comparison(srcColl, dstColl, mode):
             migrated = dstColl.find_one(doc["_id"])
             # both origin and migrated bson is Map . so use ==
             if doc != migrated:
-                log_error("DIFF => src_record[%s], dst_record[%s]" % (doc, migrated))
-                return False
+                # handle NaN special case since 'NaN != NaN' is always true
+                if not documents_equal(doc, migrated):
+                    log_error("DIFF => src_record[%s], dst_record[%s]" % (doc, migrated))
+                    return False
 
         total += batch
         count -= batch
@@ -211,7 +239,7 @@ if __name__ == "__main__":
         if key in ("-d", "--dest"):
             dstUrl = value
         if key in ("-n", "--count"):
-            configure[COMPARISION_COUNT] = int(value)
+            configure[COMPARISON_COUNT] = int(value)
         if key in ("-e", "--excludeDbs"):
             configure[EXCLUDE_DBS] = value.split(",")
         if key in ("-x", "--excludeCollections"):
@@ -221,24 +249,24 @@ if __name__ == "__main__":
             if value != "all" and value != "no" and value != "sample":
                 log_info("comparisonMode[%r] illegal" % (value))
                 exit(1)
-            configure[COMPARISION_MODE] = value
-    if COMPARISION_MODE not in configure:
-        configure[COMPARISION_MODE] = "sample"
+            configure[COMPARISON_MODE] = value
+    if COMPARISON_MODE not in configure:
+        configure[COMPARISON_MODE] = "sample"
 
     # params verify
     if len(srcUrl) == 0 or len(dstUrl) == 0:
         usage()
 
     # default count is 10000
-    if configure.get(COMPARISION_COUNT) is None or configure.get(COMPARISION_COUNT) <= 0:
-        configure[COMPARISION_COUNT] = 10000
+    if configure.get(COMPARISON_COUNT) is None or configure.get(COMPARISON_COUNT) <= 0:
+        configure[COMPARISON_COUNT] = 10000
 
     # ignore databases
     configure[EXCLUDE_DBS] += ["admin", "local"]
     configure[EXCLUDE_COLLS] += ["system.profile"]
 
     # dump configuration
-    log_info("Configuration [sample=%s, count=%d, excludeDbs=%s, excludeColls=%s]" % (configure[SAMPLE], configure[COMPARISION_COUNT], configure[EXCLUDE_DBS], configure[EXCLUDE_COLLS]))
+    log_info("Configuration [sample=%s, count=%d, excludeDbs=%s, excludeColls=%s]" % (configure[SAMPLE], configure[COMPARISON_COUNT], configure[EXCLUDE_DBS], configure[EXCLUDE_COLLS]))
 
     try :
         src, dst = MongoCluster(srcUrl), MongoCluster(dstUrl)
