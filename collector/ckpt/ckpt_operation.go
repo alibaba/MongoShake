@@ -70,7 +70,8 @@ func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 	if ckpt.client == nil {
 		// mongodb3.6- doesn't support {readConcern:majority}, here we use 'local' first to get dbVersion,
 		// then change to 'majority' if possible.
-		tmpClient, err := utils.NewMongoCommunityConn(ckpt.URL, utils.VarMongoConnectModePrimary, true, "local", "", "")
+		tmpClient, err := utils.NewMongoCommunityConn(ckpt.URL, utils.VarMongoConnectModePrimary, true,
+			"local", "", conf.Options.CheckpointStorageUrlMongoSslRootCaFile)
 		if err != nil {
 			LOG.Error("%s MongoCheckpoint create client failed:%v", ckpt.Name, err)
 			return false
