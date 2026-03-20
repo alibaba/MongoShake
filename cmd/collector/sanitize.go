@@ -2,11 +2,20 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	utils "github.com/alibaba/MongoShake/v2/common"
 )
+
+var validFilterCmds = map[string]struct{}{
+	"i": {},
+	"u": {},
+	"d": {},
+	"c": {},
+	"n": {},
+}
 
 // priority use mongo_s_url
 func getSourceDbUrl() (string, error) {
@@ -98,6 +107,11 @@ func checkDefaultValue() error {
 	if conf.Options.LogFileName == "" {
 		conf.Options.LogFileName = "mongoshake.log"
 	}
+	filterCmds, err := normalizeFilterCmds(conf.Options.FilterCmds)
+	if err != nil {
+		return err
+	}
+	conf.Options.FilterCmds = filterCmds
 
 	if conf.Options.SyncMode == "" {
 		conf.Options.SyncMode = utils.VarSyncModeIncr
@@ -292,6 +306,21 @@ func checkDefaultValue() error {
 	filter.NsShouldBeIgnore[utils.APPConflictDatabase+"."] = true
 
 	return nil
+}
+
+func normalizeFilterCmds(cmds []string) ([]string, error) {
+	out := make([]string, 0, len(cmds))
+	for _, cmd := range cmds {
+		cmd = strings.TrimSpace(strings.ToLower(cmd))
+		if cmd == "" {
+			continue
+		}
+		if _, ok := validFilterCmds[cmd]; !ok {
+			return nil, fmt.Errorf("filter.cmds[%s] should in {i, u, d, c, n}", cmd)
+		}
+		out = append(out, cmd)
+	}
+	return out, nil
 }
 
 func checkConnection() error {
