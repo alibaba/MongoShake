@@ -504,6 +504,55 @@ func TestGidFilter(t *testing.T) {
 	}
 }
 
+func TestCmdFilter(t *testing.T) {
+	// test CmdFilter
+
+	var nr int
+	{
+		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		nr++
+
+		filter := NewCmdFilter(nil)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "d",
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		nr++
+
+		filter := NewCmdFilter([]string{" d ", "I"})
+
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "d",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "i",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "u",
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+	}
+}
+
 func TestAutologousFilter(t *testing.T) {
 	// test AutologousFilter
 

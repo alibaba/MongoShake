@@ -29,6 +29,34 @@ func (chain OplogFilterChain) IterateFilter(log *oplog.PartialLog) bool {
 	return false
 }
 
+type CmdFilter struct {
+	cmdMp map[string]struct{}
+}
+
+func NewCmdFilter(cmds []string) *CmdFilter {
+	mp := make(map[string]struct{}, len(cmds))
+	for _, cmd := range cmds {
+		cmd = strings.TrimSpace(strings.ToLower(cmd))
+		if cmd == "" {
+			continue
+		}
+		mp[cmd] = struct{}{}
+	}
+	return &CmdFilter{
+		cmdMp: mp,
+	}
+}
+
+func (filter *CmdFilter) Filter(log *oplog.PartialLog) bool {
+	if len(filter.cmdMp) == 0 {
+		return false
+	}
+
+	operation := strings.TrimSpace(strings.ToLower(log.Operation))
+	_, ok := filter.cmdMp[operation]
+	return ok
+}
+
 type GidFilter struct {
 	gidMp map[string]struct{}
 }
