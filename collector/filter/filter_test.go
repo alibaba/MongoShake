@@ -508,6 +508,21 @@ func TestCmdFilter(t *testing.T) {
 	// test CmdFilter
 
 	var nr int
+	newApplyOpsLog := func(ops []bson.D) *oplog.PartialLog {
+		return &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key:   "applyOps",
+						Value: ops,
+					},
+				},
+			},
+		}
+	}
+
 	{
 		fmt.Printf("TestCmdFilter case %d.\n", nr)
 		nr++
@@ -550,6 +565,216 @@ func TestCmdFilter(t *testing.T) {
 			},
 		}
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		nr++
+
+		filter := NewCmdFilter([]string{"d"})
+		log := newApplyOpsLog([]bson.D{
+			{
+				bson.E{Key: "op", Value: "d"},
+				bson.E{Key: "ns", Value: "zz.mmm"},
+				bson.E{Key: "o", Value: bson.D{
+					bson.E{Key: "_id", Value: "xxx"},
+				}},
+			},
+			{
+				bson.E{Key: "op", Value: "d"},
+				bson.E{Key: "ns", Value: "zz.mmm"},
+				bson.E{Key: "o", Value: bson.D{
+					bson.E{Key: "_id", Value: "yyy"},
+				}},
+			},
+		})
+
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+		assert.Equal(t, 0, len(log.Object[0].Value.(bson.A)), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		nr++
+
+		filter := NewCmdFilter([]string{"d"})
+		log := newApplyOpsLog([]bson.D{
+			{
+				bson.E{Key: "op", Value: "d"},
+				bson.E{Key: "ns", Value: "zz.mmm"},
+				bson.E{Key: "o", Value: bson.D{
+					bson.E{Key: "_id", Value: "xxx"},
+				}},
+			},
+			{
+				bson.E{Key: "op", Value: "i"},
+				bson.E{Key: "ns", Value: "zz.mmm"},
+				bson.E{Key: "o", Value: bson.D{
+					bson.E{Key: "_id", Value: "zzz"},
+				}},
+			},
+		})
+
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+		assert.Equal(t, 1, len(log.Object[0].Value.(bson.A)), "should be equal")
+		assert.Equal(t, "i", oplog.GetKey(log.Object[0].Value.(bson.A)[0].(bson.D), "op"), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		nr++
+
+		filter := NewCmdFilter([]string{"i"})
+		log := newApplyOpsLog([]bson.D{
+			{
+				bson.E{Key: "op", Value: "i"},
+				bson.E{Key: "ns", Value: "zz.mmm"},
+				bson.E{Key: "o", Value: bson.D{
+					bson.E{Key: "_id", Value: "xxx"},
+				}},
+			},
+			{
+				bson.E{Key: "op", Value: "i"},
+				bson.E{Key: "ns", Value: "zz.mmm"},
+				bson.E{Key: "o", Value: bson.D{
+					bson.E{Key: "_id", Value: "zzz"},
+				}},
+			},
+		})
+
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+		assert.Equal(t, 0, len(log.Object[0].Value.(bson.A)), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		nr++
+
+		filter := NewCmdFilter([]string{"i"})
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key: "applyOps",
+						Value: primitive.A{
+							bson.D{
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.mmm"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: "primitive-array-doc"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+		assert.Equal(t, 0, len(log.Object[0].Value.(bson.A)), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		nr++
+
+		filter := NewCmdFilter([]string{"c", "d"})
+		log := newApplyOpsLog([]bson.D{
+			{
+				bson.E{Key: "op", Value: "d"},
+				bson.E{Key: "ns", Value: "zz.mmm"},
+				bson.E{Key: "o", Value: bson.D{
+					bson.E{Key: "_id", Value: "xxx"},
+				}},
+			},
+			{
+				bson.E{Key: "op", Value: "i"},
+				bson.E{Key: "ns", Value: "zz.mmm"},
+				bson.E{Key: "o", Value: bson.D{
+					bson.E{Key: "_id", Value: "zzz"},
+				}},
+			},
+		})
+
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+		assert.Equal(t, 2, len(log.Object[0].Value.([]bson.D)), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		nr++
+
+		filter := NewCmdFilter([]string{"u"})
+		log := newApplyOpsLog([]bson.D{
+			{
+				bson.E{Key: "op", Value: "i"},
+				bson.E{Key: "ns", Value: "zz.mmm"},
+				bson.E{Key: "o", Value: bson.D{
+					bson.E{Key: "_id", Value: "insert-doc"},
+				}},
+			},
+			{
+				bson.E{Key: "op", Value: "u"},
+				bson.E{Key: "ns", Value: "zz.mmm"},
+				bson.E{Key: "o2", Value: bson.D{
+					bson.E{Key: "_id", Value: "update-doc"},
+				}},
+				bson.E{Key: "o", Value: bson.D{
+					bson.E{Key: "$set", Value: bson.D{{Key: "x", Value: 1}}},
+				}},
+			},
+			{
+				bson.E{Key: "op", Value: "d"},
+				bson.E{Key: "ns", Value: "zz.mmm"},
+				bson.E{Key: "o", Value: bson.D{
+					bson.E{Key: "_id", Value: "delete-doc"},
+				}},
+			},
+		})
+
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+		assert.Equal(t, 2, len(log.Object[0].Value.(bson.A)), "should be equal")
+		assert.Equal(t, "i", oplog.GetKey(log.Object[0].Value.(bson.A)[0].(bson.D), "op"), "should be equal")
+		assert.Equal(t, "d", oplog.GetKey(log.Object[0].Value.(bson.A)[1].(bson.D), "op"), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		nr++
+
+		filter := NewCmdFilter([]string{"i", "u"})
+		log := newApplyOpsLog([]bson.D{
+			{
+				bson.E{Key: "op", Value: "i"},
+				bson.E{Key: "ns", Value: "zz.mmm"},
+				bson.E{Key: "o", Value: bson.D{
+					bson.E{Key: "_id", Value: "insert-doc"},
+				}},
+			},
+			{
+				bson.E{Key: "op", Value: "u"},
+				bson.E{Key: "ns", Value: "zz.mmm"},
+				bson.E{Key: "o2", Value: bson.D{
+					bson.E{Key: "_id", Value: "update-doc"},
+				}},
+				bson.E{Key: "o", Value: bson.D{
+					bson.E{Key: "$set", Value: bson.D{{Key: "x", Value: 1}}},
+				}},
+			},
+			{
+				bson.E{Key: "op", Value: "d"},
+				bson.E{Key: "ns", Value: "zz.mmm"},
+				bson.E{Key: "o", Value: bson.D{
+					bson.E{Key: "_id", Value: "delete-doc"},
+				}},
+			},
+		})
+
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+		assert.Equal(t, 1, len(log.Object[0].Value.(bson.A)), "should be equal")
+		assert.Equal(t, "d", oplog.GetKey(log.Object[0].Value.(bson.A)[0].(bson.D), "op"), "should be equal")
 	}
 }
 
