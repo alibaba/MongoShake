@@ -53,8 +53,127 @@ func (filter *CmdFilter) Filter(log *oplog.PartialLog) bool {
 	}
 
 	operation := strings.TrimSpace(strings.ToLower(log.Operation))
-	_, ok := filter.cmdMp[operation]
-	return ok
+	// Command oplogs require a dedicated path:
+	//
+	//  1. Non-`c` operations keep the original behavior and are filtered only by
+	//     their top-level `op`.
+	//  2. If the current oplog is `c` and `filter.cmds=c` is configured, keep
+	//     filtering the whole command oplog by its top-level `op`.
+	//  3. Only when `c` is not configured, but one of `i/u/d` is configured and
+	//     the command is `applyOps`, do we rewrite matching inner DML ops. This
+	//     keeps top-level `c` filtering higher priority than partial `applyOps`
+	//     rewriting.
+	_, topLevelMatched := filter.cmdMp[operation]
+	if operation != "c" || topLevelMatched {
+		return topLevelMatched
+	}
+
+	if !filter.hasApplyOpsDMLFilter() {
+		return false
+	}
+
+	command, found := oplog.ExtraCommandName(log.Object)
+	if !found || command != "applyOps" {
+		return false
+	}
+
+	remainOps, ok := filter.filterApplyOpsDML(log.Object)
+	if !ok {
+		return false
+	}
+
+	oplog.SetFiled(log.Object, "applyOps", remainOps)
+	LOG.Info("CmdFilter applyOps DML filter?[%v], after reorganize: %v",
+		len(remainOps) == 0, log.Object)
+	return len(remainOps) == 0
+}
+
+// hasApplyOpsDMLFilter reports whether inner applyOps rewriting is relevant for
+// the current filter configuration.
+func (filter *CmdFilter) hasApplyOpsDMLFilter() bool {
+	for _, op := range []string{"i", "u", "d"} {
+		if _, ok := filter.cmdMp[op]; ok {
+			return true
+		}
+	}
+
+	return false
+}
+
+// filterApplyOpsDML removes matching DML ops inside applyOps and returns the
+// remaining inner ops.
+func (filter *CmdFilter) filterApplyOpsDML(logObject bson.D) (bson.A, bool) {
+	ops, ok := extractApplyOps(logObject)
+	if !ok {
+		return nil, false
+	}
+
+	remainOps := make(bson.A, 0, len(ops))
+	for _, ele := range ops {
+		innerOperation, ok := oplog.GetKey(ele, "op").(string)
+		if !ok {
+			LOG.Warn("CmdFilter meets illegal applyOps inner op: %v", ele)
+			return nil, false
+		}
+
+		innerOperation = strings.TrimSpace(strings.ToLower(innerOperation))
+		if filter.shouldFilterApplyOpsInnerOp(innerOperation) {
+			LOG.Info("CmdFilter filter inner %s op in applyOps: %v", innerOperation, ele)
+			continue
+		}
+
+		remainOps = append(remainOps, ele)
+	}
+
+	return remainOps, true
+}
+
+// shouldFilterApplyOpsInnerOp reports whether the given inner applyOps op
+// should be filtered by the current DML filter configuration.
+func (filter *CmdFilter) shouldFilterApplyOpsInnerOp(operation string) bool {
+	switch operation {
+	case "i", "u", "d":
+		_, ok := filter.cmdMp[operation]
+		return ok
+	default:
+		return false
+	}
+}
+
+// extractApplyOps extracts applyOps inner operations from the supported BSON
+// representations already used in the project.
+func extractApplyOps(logObject bson.D) ([]bson.D, bool) {
+	var ops []bson.D
+
+	switch v := oplog.GetKey(logObject, "applyOps").(type) {
+	case []bson.D:
+		ops = v
+	case []any:
+		ops = make([]bson.D, 0, len(v))
+		for _, ele := range v {
+			doc, ok := ele.(bson.D)
+			if !ok {
+				LOG.Error("unknown applyOps element type, filter can't handle. log:%+v", logObject)
+				return nil, false
+			}
+			ops = append(ops, doc)
+		}
+	case primitive.A:
+		ops = make([]bson.D, 0, len(v))
+		for _, ele := range v {
+			doc, ok := ele.(bson.D)
+			if !ok {
+				LOG.Error("unknown applyOps element type, filter can't handle. log:%+v", logObject)
+				return nil, false
+			}
+			ops = append(ops, doc)
+		}
+	default:
+		LOG.Error("unknown applyOps type, filter can't handle. log:%+v", logObject)
+		return nil, false
+	}
+
+	return ops, true
 }
 
 type GidFilter struct {
@@ -101,7 +220,7 @@ func (filter *AutologousFilter) Filter(log *oplog.PartialLog) bool {
 	if log.Namespace == "admin.$cmd" && operation == "applyOps" {
 		ns, err := oplog.ExtractInnerNs(&log.ParsedLog)
 		if err != nil {
-			_ = LOG.Warn("ExtractInnerNs meets error:%v", err)
+			LOG.Warn("ExtractInnerNs meets error:%v", err)
 			return false
 		}
 		if ns == "config.system.sessions" || ns == "config.system.preimages" {
@@ -210,7 +329,7 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 		// DDL
 		operation, found := oplog.ExtraCommandName(log.Object)
 		if !found {
-			_ = LOG.Warn("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
+			LOG.Warn("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
 			return false
 		}
 
@@ -244,7 +363,7 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 		case "emptycapped":
 			col, ok := oplog.GetKey(log.Object, operation).(string)
 			if !ok {
-				_ = LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, log.Object)
+				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, log.Object)
 				return false
 			}
 			log.Namespace = fmt.Sprintf("%s.%s", db, col)
@@ -253,7 +372,7 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 			// { "renameCollection" : "my.tbl", "to" : "my.my", "stayTemp" : false, "dropTarget" : false }
 			ns, ok := oplog.GetKey(log.Object, operation).(string)
 			if !ok {
-				_ = LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, log.Object)
+				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, log.Object)
 				return false
 			}
 			log.Namespace = ns
@@ -281,7 +400,7 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 					ops = append(ops, ele.(bson.D))
 				}
 			default:
-				_ = LOG.Error("unknown applyOps type, filter can't handle. log:%+v", log.Object)
+				LOG.Error("unknown applyOps type, filter can't handle. log:%+v", log.Object)
 				return false
 			}
 			for _, ele := range ops {
