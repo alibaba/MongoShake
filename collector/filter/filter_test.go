@@ -543,7 +543,7 @@ func TestCmdFilter(t *testing.T) {
 		fmt.Printf("TestCmdFilter case %d.\n", nr)
 		nr++
 
-		filter := NewCmdFilter([]string{" d ", "I"})
+		filter := NewCmdFilter([]string{"d", "i"})
 
 		log := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{

@@ -14,8 +14,9 @@ var validFilterCmds = map[string]struct{}{
 	"u": {},
 	"d": {},
 	"c": {},
-	"n": {},
 }
+
+const validFilterCmdsText = "{i, u, d, c}"
 
 // priority use mongo_s_url
 func getSourceDbUrl() (string, error) {
@@ -315,8 +316,11 @@ func normalizeFilterCmds(cmds []string) ([]string, error) {
 		if cmd == "" {
 			continue
 		}
+		if cmd == "n" {
+			return nil, fmt.Errorf("filter.cmds: unsupported op type %q; noop oplogs are already filtered by the built-in NoopFilter", cmd)
+		}
 		if _, ok := validFilterCmds[cmd]; !ok {
-			return nil, fmt.Errorf("filter.cmds[%s] should in {i, u, d, c, n}", cmd)
+			return nil, fmt.Errorf("filter.cmds: unknown op type %q, must be one of %s", cmd, validFilterCmdsText)
 		}
 		out = append(out, cmd)
 	}
