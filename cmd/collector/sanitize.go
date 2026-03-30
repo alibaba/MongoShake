@@ -9,14 +9,14 @@ import (
 	utils "github.com/alibaba/MongoShake/v2/common"
 )
 
-var validFilterCmds = map[string]struct{}{
+var validFilterOpTypes = map[string]struct{}{
 	"i": {},
 	"u": {},
 	"d": {},
 	"c": {},
 }
 
-const validFilterCmdsText = "{i, u, d, c}"
+const validFilterOpTypesText = "{i, u, d, c}"
 
 // priority use mongo_s_url
 func getSourceDbUrl() (string, error) {
@@ -108,11 +108,11 @@ func checkDefaultValue() error {
 	if conf.Options.LogFileName == "" {
 		conf.Options.LogFileName = "mongoshake.log"
 	}
-	filterCmds, err := normalizeFilterCmds(conf.Options.FilterCmds)
+	filterOpTypes, err := normalizeFilterOpTypes(conf.Options.FilterOpTypes)
 	if err != nil {
 		return err
 	}
-	conf.Options.FilterCmds = filterCmds
+	conf.Options.FilterOpTypes = filterOpTypes
 
 	if conf.Options.SyncMode == "" {
 		conf.Options.SyncMode = utils.VarSyncModeIncr
@@ -309,20 +309,20 @@ func checkDefaultValue() error {
 	return nil
 }
 
-func normalizeFilterCmds(cmds []string) ([]string, error) {
-	out := make([]string, 0, len(cmds))
-	for _, cmd := range cmds {
-		cmd = strings.TrimSpace(strings.ToLower(cmd))
-		if cmd == "" {
+func normalizeFilterOpTypes(opTypes []string) ([]string, error) {
+	out := make([]string, 0, len(opTypes))
+	for _, opType := range opTypes {
+		opType = strings.TrimSpace(strings.ToLower(opType))
+		if opType == "" {
 			continue
 		}
-		if cmd == "n" {
-			return nil, fmt.Errorf("filter.cmds: unsupported op type %q; noop oplogs are already filtered by the built-in NoopFilter", cmd)
+		if opType == "n" {
+			return nil, fmt.Errorf("filter.op_types: unsupported op type %q; noop oplogs are already filtered by the built-in NoopFilter", opType)
 		}
-		if _, ok := validFilterCmds[cmd]; !ok {
-			return nil, fmt.Errorf("filter.cmds: unknown op type %q, must be one of %s", cmd, validFilterCmdsText)
+		if _, ok := validFilterOpTypes[opType]; !ok {
+			return nil, fmt.Errorf("filter.op_types: unknown op type %q, must be one of %s", opType, validFilterOpTypesText)
 		}
-		out = append(out, cmd)
+		out = append(out, opType)
 	}
 	return out, nil
 }

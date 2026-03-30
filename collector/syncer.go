@@ -134,7 +134,7 @@ func NewOplogSyncer(
 	filterList := filter.OplogFilterChain{
 		new(filter.AutologousFilter),
 		new(filter.NoopFilter),
-		filter.NewCmdFilter(conf.Options.FilterCmds),
+		filter.NewOpTypeFilter(conf.Options.FilterOpTypes),
 		filter.NewGidFilter(gids),
 	}
 

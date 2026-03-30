@@ -612,8 +612,8 @@ func TestGidFilter(t *testing.T) {
 	}
 }
 
-func TestCmdFilter(t *testing.T) {
-	// test CmdFilter
+func TestOpTypeFilter(t *testing.T) {
+	// test OpTypeFilter
 
 	var nr int
 	newApplyOpsLog := func(ops []bson.D) *oplog.PartialLog {
@@ -632,10 +632,10 @@ func TestCmdFilter(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		fmt.Printf("TestOpTypeFilter case %d.\n", nr)
 		nr++
 
-		filter := NewCmdFilter(nil)
+		filter := NewOpTypeFilter(nil)
 		log := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Operation: "d",
@@ -648,10 +648,10 @@ func TestCmdFilter(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		fmt.Printf("TestOpTypeFilter case %d.\n", nr)
 		nr++
 
-		filter := NewCmdFilter([]string{"d", "i"})
+		filter := NewOpTypeFilter([]string{"d", "i"})
 
 		log := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
@@ -676,10 +676,10 @@ func TestCmdFilter(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		fmt.Printf("TestOpTypeFilter case %d.\n", nr)
 		nr++
 
-		filter := NewCmdFilter([]string{"d"})
+		filter := NewOpTypeFilter([]string{"d"})
 		log := newApplyOpsLog([]bson.D{
 			{
 				bson.E{Key: "op", Value: "d"},
@@ -702,10 +702,10 @@ func TestCmdFilter(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		fmt.Printf("TestOpTypeFilter case %d.\n", nr)
 		nr++
 
-		filter := NewCmdFilter([]string{"i"})
+		filter := NewOpTypeFilter([]string{"i"})
 		log := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Namespace: "admin.$cmd",
@@ -732,10 +732,10 @@ func TestCmdFilter(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		fmt.Printf("TestOpTypeFilter case %d.\n", nr)
 		nr++
 
-		filter := NewCmdFilter([]string{"d"})
+		filter := NewOpTypeFilter([]string{"d"})
 		log := newApplyOpsLog([]bson.D{
 			{
 				bson.E{Key: "op", Value: "d"},
@@ -759,10 +759,10 @@ func TestCmdFilter(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		fmt.Printf("TestOpTypeFilter case %d.\n", nr)
 		nr++
 
-		filter := NewCmdFilter([]string{"i"})
+		filter := NewOpTypeFilter([]string{"i"})
 		log := newApplyOpsLog([]bson.D{
 			{
 				bson.E{Key: "op", Value: "i"},
@@ -785,10 +785,10 @@ func TestCmdFilter(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		fmt.Printf("TestOpTypeFilter case %d.\n", nr)
 		nr++
 
-		filter := NewCmdFilter([]string{"i"})
+		filter := NewOpTypeFilter([]string{"i"})
 		log := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Namespace: "admin.$cmd",
@@ -815,10 +815,10 @@ func TestCmdFilter(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		fmt.Printf("TestOpTypeFilter case %d.\n", nr)
 		nr++
 
-		filter := NewCmdFilter([]string{"c", "d"})
+		filter := NewOpTypeFilter([]string{"c", "d"})
 		log := newApplyOpsLog([]bson.D{
 			{
 				bson.E{Key: "op", Value: "d"},
@@ -841,10 +841,10 @@ func TestCmdFilter(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		fmt.Printf("TestOpTypeFilter case %d.\n", nr)
 		nr++
 
-		filter := NewCmdFilter([]string{"u"})
+		filter := NewOpTypeFilter([]string{"u"})
 		log := newApplyOpsLog([]bson.D{
 			{
 				bson.E{Key: "op", Value: "i"},
@@ -879,10 +879,10 @@ func TestCmdFilter(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		fmt.Printf("TestOpTypeFilter case %d.\n", nr)
 		nr++
 
-		filter := NewCmdFilter([]string{"i", "u"})
+		filter := NewOpTypeFilter([]string{"i", "u"})
 		log := newApplyOpsLog([]bson.D{
 			{
 				bson.E{Key: "op", Value: "i"},
@@ -916,10 +916,10 @@ func TestCmdFilter(t *testing.T) {
 	}
 
 	{
-		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		fmt.Printf("TestOpTypeFilter case %d.\n", nr)
 		nr++
 
-		filter := NewCmdFilter([]string{"i"})
+		filter := NewOpTypeFilter([]string{"i"})
 		log := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Namespace: "admin.$cmd",
