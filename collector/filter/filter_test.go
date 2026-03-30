@@ -248,6 +248,68 @@ func TestNamespaceFilter(t *testing.T) {
 		assert.Equal(t, 1, len(log.Object[0].Value.(bson.A)), "should be equal")
 	}
 
+	{
+		fmt.Printf("TestNamespaceFilter case %d.\n", nr)
+		nr++
+
+		filter := NewNamespaceFilter([]string{"zz.mmm"}, nil)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key: "applyOps",
+						Value: []any{
+							bson.D{
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.mmm"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "a", Value: 1},
+									bson.E{Key: "_id", Value: "xxx"},
+								}},
+							},
+							bson.D{
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.x"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "xyz", Value: "ff"},
+									bson.E{Key: "_id", Value: "yyy"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+		assert.Equal(t, 1, len(log.Object[0].Value.(bson.A)), "should be equal")
+		assert.Equal(t, "zz.mmm", oplog.GetKey(log.Object[0].Value.(bson.A)[0].(bson.D), "ns"), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestNamespaceFilter case %d.\n", nr)
+		nr++
+
+		filter := NewNamespaceFilter([]string{"zz.mmm"}, nil)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key:   "applyOps",
+						Value: []any{"illegal"},
+					},
+				},
+			},
+		}
+		assert.NotPanics(t, func() {
+			assert.Equal(t, false, filter.Filter(log), "should be equal")
+		}, "should be equal")
+		assert.Equal(t, []any{"illegal"}, log.Object[0].Value, "should be equal")
+	}
+
 	// applyOps with inner delete ops for 'config.system.sessions'
 	// NamespaceFilter will not handle it, it's handled by AutologousFilter
 	{
@@ -391,6 +453,52 @@ func TestNamespaceFilter(t *testing.T) {
 			},
 		}
 		assert.Equal(t, true, filter.Filter(log1), "should be equal")
+
+		log2 := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "c",
+				Namespace: "admin.$cmd",
+				TxnNumber: &txnN[0],
+				Object: bson.D{
+					bson.E{
+						Key: "applyOps",
+						Value: []any{
+							bson.D{
+								bson.E{Key: "ns", Value: "zl.y"},
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ui", Value: primitive.Binary{
+									Subtype: 4,
+									Data:    []byte{0, 1, 3, 4, 5, 6, 7},
+								}},
+								bson.E{Key: "o", Value: bson.M{
+									"_id": int64(4),
+									"x":   json.NumberLong(-20),
+									"y":   json.NumberLong(5)}},
+							},
+							bson.D{
+								bson.E{Key: "ns", Value: "zl.y"},
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ui", Value: primitive.Binary{
+									Subtype: 4,
+									Data:    []byte{0, 1, 3, 4, 5, 6, 7},
+								}},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: int64(5)},
+									bson.E{Key: "x", Value: json.NumberLong(-30)},
+									bson.E{Key: "y", Value: json.NumberLong(11)},
+								}},
+							},
+						},
+					},
+				},
+				Timestamp:   utils.TimeToTimestamp(time.Now().Unix()),
+				Term:        &term[0],
+				Version:     2,
+				PrevOpTime:  utils.MarshalData(bson.D{{"ts", utils.Int64ToTimestamp(0)}}),
+				MultiOpType: &multiOpType[1], // 1 for vectored insert oplog format
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log2), "should be equal")
 	}
 
 	// applyOps with inner delete ops for 'config.system.preimages'
@@ -597,6 +705,36 @@ func TestCmdFilter(t *testing.T) {
 		fmt.Printf("TestCmdFilter case %d.\n", nr)
 		nr++
 
+		filter := NewCmdFilter([]string{"i"})
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key: "applyOps",
+						Value: []any{
+							bson.D{
+								bson.E{Key: "op", Value: "i"},
+								bson.E{Key: "ns", Value: "zz.mmm"},
+								bson.E{Key: "o", Value: bson.D{
+									bson.E{Key: "_id", Value: "generic-slice-doc"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+		assert.Equal(t, 0, len(log.Object[0].Value.(bson.A)), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		nr++
+
 		filter := NewCmdFilter([]string{"d"})
 		log := newApplyOpsLog([]bson.D{
 			{
@@ -775,6 +913,28 @@ func TestCmdFilter(t *testing.T) {
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
 		assert.Equal(t, 1, len(log.Object[0].Value.(bson.A)), "should be equal")
 		assert.Equal(t, "d", oplog.GetKey(log.Object[0].Value.(bson.A)[0].(bson.D), "op"), "should be equal")
+	}
+
+	{
+		fmt.Printf("TestCmdFilter case %d.\n", nr)
+		nr++
+
+		filter := NewCmdFilter([]string{"i"})
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "admin.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{
+						Key:   "applyOps",
+						Value: []any{"illegal"},
+					},
+				},
+			},
+		}
+
+		assert.Equal(t, false, filter.Filter(log), "should be equal")
+		assert.Equal(t, []any{"illegal"}, log.Object[0].Value, "should be equal")
 	}
 }
 

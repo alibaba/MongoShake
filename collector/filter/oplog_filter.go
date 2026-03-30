@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
 	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
@@ -104,8 +103,9 @@ func (filter *CmdFilter) hasApplyOpsDMLFilter() bool {
 // filterApplyOpsDML removes matching DML ops inside applyOps and returns the
 // remaining inner ops.
 func (filter *CmdFilter) filterApplyOpsDML(logObject bson.D) (bson.A, int, bool) {
-	ops, ok := extractApplyOps(logObject)
-	if !ok {
+	ops, err := oplog.NormalizeApplyOps(logObject)
+	if err != nil {
+		_ = LOG.Error("normalize applyOps failed: %v. log:%+v", err, logObject)
 		return nil, 0, false
 	}
 
@@ -140,42 +140,6 @@ func (filter *CmdFilter) shouldFilterApplyOpsInnerOp(operation string) bool {
 	default:
 		return false
 	}
-}
-
-// extractApplyOps extracts applyOps inner operations from the supported BSON
-// representations already used in the project.
-func extractApplyOps(logObject bson.D) ([]bson.D, bool) {
-	var ops []bson.D
-
-	switch v := oplog.GetKey(logObject, "applyOps").(type) {
-	case []bson.D:
-		ops = v
-	case []any:
-		ops = make([]bson.D, 0, len(v))
-		for _, ele := range v {
-			doc, ok := ele.(bson.D)
-			if !ok {
-				LOG.Error("unknown applyOps element type, filter can't handle. log:%+v", logObject)
-				return nil, false
-			}
-			ops = append(ops, doc)
-		}
-	case primitive.A:
-		ops = make([]bson.D, 0, len(v))
-		for _, ele := range v {
-			doc, ok := ele.(bson.D)
-			if !ok {
-				LOG.Error("unknown applyOps element type, filter can't handle. log:%+v", logObject)
-				return nil, false
-			}
-			ops = append(ops, doc)
-		}
-	default:
-		LOG.Error("unknown applyOps type, filter can't handle. log:%+v", logObject)
-		return nil, false
-	}
-
-	return ops, true
 }
 
 type GidFilter struct {
@@ -382,28 +346,16 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 		case "applyOps":
 			// parse and reorganize all inner ops within the transaction,
 			// also handle vectored insert oplog format with {multiOpType:1} introduced in 8.0
-			var ops []bson.D
+			ops, err := oplog.NormalizeApplyOps(log.Object)
+			if err != nil {
+				_ = LOG.Error("normalize applyOps failed: %v. log:%+v", err, log.Object)
+				return false
+			}
 			var remainOps bson.A
 
 			isVectoredInsert := false
 			if log.MultiOpType != nil && *log.MultiOpType == 1 {
 				isVectoredInsert = true
-			}
-			// it's very strange, some documents are []interface, some are []bson.D
-			switch v := oplog.GetKey(log.Object, "applyOps").(type) {
-			case []interface{}:
-				for _, ele := range v {
-					ops = append(ops, ele.(bson.D))
-				}
-			case []bson.D:
-				ops = v
-			case primitive.A:
-				for _, ele := range v {
-					ops = append(ops, ele.(bson.D))
-				}
-			default:
-				LOG.Error("unknown applyOps type, filter can't handle. log:%+v", log.Object)
-				return false
 			}
 			for _, ele := range ops {
 				innerNs := oplog.GetKey(ele, "ns").(string)

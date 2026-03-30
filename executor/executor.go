@@ -10,7 +10,6 @@ import (
 
 	nimo "github.com/gugemichael/nimo4go"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/transform"
@@ -277,38 +276,6 @@ func transformLogs(logs []*OplogRecord, nsTrans *transform.NamespaceTransform, t
 	return logs
 }
 
-// extractApplyOpsForTransform normalizes applyOps into []bson.D so namespace
-// transformation can handle logs rewritten by filters as well as raw decoded
-// BSON arrays.
-func extractApplyOpsForTransform(logObject bson.D) ([]bson.D, bool) {
-	switch v := oplog.GetKey(logObject, "applyOps").(type) {
-	case []bson.D:
-		return v, true
-	case []any:
-		ops := make([]bson.D, 0, len(v))
-		for _, ele := range v {
-			doc, ok := ele.(bson.D)
-			if !ok {
-				return nil, false
-			}
-			ops = append(ops, doc)
-		}
-		return ops, true
-	case primitive.A:
-		ops := make([]bson.D, 0, len(v))
-		for _, ele := range v {
-			doc, ok := ele.(bson.D)
-			if !ok {
-				return nil, false
-			}
-			ops = append(ops, doc)
-		}
-		return ops, true
-	default:
-		return nil, false
-	}
-}
-
 func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.NamespaceTransform, transformRef bool) *oplog.PartialLog {
 	db := strings.SplitN(partialLog.Namespace, ".", 2)[0]
 	if partialLog.Operation != "c" {
@@ -380,9 +347,9 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			oplog.SetFiled(partialLog.Object, operation, partialLog.Namespace)
 			oplog.SetFiled(partialLog.Object, "to", nsTrans.Transform(toNs))
 		case "applyOps":
-			ops, ok := extractApplyOpsForTransform(partialLog.Object)
-			if !ok {
-				_ = LOG.Warn("transformPartialLog meets unsupported applyOps type, ignore! oplog=%v", partialLog.Object)
+			ops, err := oplog.NormalizeApplyOps(partialLog.Object)
+			if err != nil {
+				_ = LOG.Warn("transformPartialLog meets unsupported applyOps type[%v], ignore! oplog=%v", err, partialLog.Object)
 				return nil
 			}
 

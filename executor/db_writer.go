@@ -184,35 +184,21 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 		 * Strictly speaking, we should handle applyOps nested case, but it is
 		 * complicate to fulfill, so we just use "applyOps" to run the command directly.
 		 */
+		ops, err := oplog.NormalizeApplyOps(log.Object)
+		if err != nil {
+			return err
+		}
+
 		var store bson.D
 		for _, ele := range log.Object {
 			if utils.ApplyOpsFilter(ele.Key) {
 				continue
 			}
 			if ele.Key == "applyOps" {
-				switch v := ele.Value.(type) {
-				case []interface{}:
-					for i, ele := range v {
-						doc := ele.(bson.D)
-						v[i] = oplog.RemoveFiled(doc, uuidMark)
-					}
-				case bson.D:
-					ret := make(bson.D, 0, len(v))
-					for _, ele := range v {
-						if ele.Key == uuidMark {
-							continue
-						}
-						ret = append(ret, ele)
-					}
-					ele.Value = ret
-				case []bson.M:
-					for _, ele := range v {
-						if _, ok := ele[uuidMark]; ok {
-							delete(ele, uuidMark)
-						}
-					}
+				for i, doc := range ops {
+					ops[i] = oplog.RemoveFiled(doc, uuidMark)
 				}
-
+				ele.Value = ops
 			}
 			store = append(store, ele)
 		}
