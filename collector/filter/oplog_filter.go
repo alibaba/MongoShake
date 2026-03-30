@@ -29,14 +29,15 @@ func (chain OplogFilterChain) IterateFilter(log *oplog.PartialLog) bool {
 	return false
 }
 
+// CmdFilter filters oplogs by oplog op type instead of only command oplogs.
 type CmdFilter struct {
 	cmdMp map[string]struct{}
 }
 
+// NewCmdFilter trusts sanitize to provide normalized op type values.
 func NewCmdFilter(cmds []string) *CmdFilter {
 	mp := make(map[string]struct{}, len(cmds))
 	for _, cmd := range cmds {
-		cmd = strings.TrimSpace(strings.ToLower(cmd))
 		if cmd == "" {
 			continue
 		}
@@ -52,7 +53,7 @@ func (filter *CmdFilter) Filter(log *oplog.PartialLog) bool {
 		return false
 	}
 
-	operation := strings.TrimSpace(strings.ToLower(log.Operation))
+	operation := log.Operation
 	// Command oplogs require a dedicated path:
 	//
 	//  1. Non-`c` operations keep the original behavior and are filtered only by
@@ -77,14 +78,14 @@ func (filter *CmdFilter) Filter(log *oplog.PartialLog) bool {
 		return false
 	}
 
-	remainOps, ok := filter.filterApplyOpsDML(log.Object)
+	remainOps, filteredCount, ok := filter.filterApplyOpsDML(log.Object)
 	if !ok {
 		return false
 	}
 
 	oplog.SetFiled(log.Object, "applyOps", remainOps)
-	LOG.Info("CmdFilter applyOps DML filter?[%v], after reorganize: %v",
-		len(remainOps) == 0, log.Object)
+	LOG.Info("CmdFilter filtered %d inner applyOps ops, drop oplog?[%v], after reorganize: %v",
+		filteredCount, len(remainOps) == 0, log.Object)
 	return len(remainOps) == 0
 }
 
@@ -102,30 +103,31 @@ func (filter *CmdFilter) hasApplyOpsDMLFilter() bool {
 
 // filterApplyOpsDML removes matching DML ops inside applyOps and returns the
 // remaining inner ops.
-func (filter *CmdFilter) filterApplyOpsDML(logObject bson.D) (bson.A, bool) {
+func (filter *CmdFilter) filterApplyOpsDML(logObject bson.D) (bson.A, int, bool) {
 	ops, ok := extractApplyOps(logObject)
 	if !ok {
-		return nil, false
+		return nil, 0, false
 	}
 
 	remainOps := make(bson.A, 0, len(ops))
+	filteredCount := 0
 	for _, ele := range ops {
 		innerOperation, ok := oplog.GetKey(ele, "op").(string)
 		if !ok {
 			LOG.Warn("CmdFilter meets illegal applyOps inner op: %v", ele)
-			return nil, false
+			return nil, 0, false
 		}
 
-		innerOperation = strings.TrimSpace(strings.ToLower(innerOperation))
 		if filter.shouldFilterApplyOpsInnerOp(innerOperation) {
-			LOG.Info("CmdFilter filter inner %s op in applyOps: %v", innerOperation, ele)
+			LOG.Debug("CmdFilter filter inner %s op in applyOps: %v", innerOperation, ele)
+			filteredCount++
 			continue
 		}
 
 		remainOps = append(remainOps, ele)
 	}
 
-	return remainOps, true
+	return remainOps, filteredCount, true
 }
 
 // shouldFilterApplyOpsInnerOp reports whether the given inner applyOps op
