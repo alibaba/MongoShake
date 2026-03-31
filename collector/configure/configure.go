@@ -38,6 +38,7 @@ type Configuration struct {
 	KafkaProducerMaxMessage                int      `config:"tunnel.kafka.producer.max_message_bytes"` // add v2.8.7
 	TunnelJsonFormat                       string   `config:"tunnel.json.format"`
 	TunnelMongoSslRootCaFile               string   `config:"tunnel.mongo_ssl_root_ca_file"` // add v2.6.2
+	FilterOpTypes                          []string `config:"filter.op_types"`
 	FilterNamespaceBlack                   []string `config:"filter.namespace.black"`
 	FilterNamespaceWhite                   []string `config:"filter.namespace.white"`
 	FilterPassSpecialDb                    []string `config:"filter.pass.special.db"`

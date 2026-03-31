@@ -502,6 +502,91 @@ func TestTransformLog(t *testing.T) {
 			},
 		}), logs[0], "should be equal")
 	}
+
+	{
+		fmt.Printf("TestTransformLog case %d.\n", nr)
+		nr++
+		nsTrans := transform.NewNamespaceTransform([]string{"fdb1:fdb2"})
+
+		logs := []*OplogRecord{
+			mockTransLogs("c", "admin.$cmd", bson.D{
+				primitive.E{
+					Key: "applyOps",
+					Value: bson.A{
+						bson.D{
+							primitive.E{"op", "i"},
+							primitive.E{"ns", "fdb1.fcol1"},
+							primitive.E{"o", bson.D{primitive.E{"a", 1}}},
+						},
+					},
+				},
+			}),
+		}
+
+		logs = transformLogs(logs, nsTrans, false)
+		assert.Equal(t, mockTransLogs("c", "admin.$cmd", bson.D{
+			primitive.E{
+				Key: "applyOps",
+				Value: []bson.D{
+					{
+						primitive.E{"op", "i"},
+						primitive.E{"ns", "fdb2.fcol1"},
+						primitive.E{"o", bson.D{primitive.E{"a", 1}}},
+					},
+				},
+			},
+		}), logs[0], "should be equal")
+	}
+
+	{
+		fmt.Printf("TestTransformLog case %d.\n", nr)
+		nr++
+		nsTrans := transform.NewNamespaceTransform([]string{"fdb1:fdb2"})
+
+		logs := []*OplogRecord{
+			mockTransLogs("c", "admin.$cmd", bson.D{
+				primitive.E{
+					Key: "applyOps",
+					Value: []any{
+						bson.D{
+							primitive.E{"op", "i"},
+							primitive.E{"ns", "fdb1.fcol1"},
+							primitive.E{"o", bson.D{primitive.E{"a", 1}}},
+						},
+					},
+				},
+			}),
+		}
+
+		logs = transformLogs(logs, nsTrans, false)
+		assert.Equal(t, mockTransLogs("c", "admin.$cmd", bson.D{
+			primitive.E{
+				Key: "applyOps",
+				Value: []bson.D{
+					{
+						primitive.E{"op", "i"},
+						primitive.E{"ns", "fdb2.fcol1"},
+						primitive.E{"o", bson.D{primitive.E{"a", 1}}},
+					},
+				},
+			},
+		}), logs[0], "should be equal")
+	}
+
+	{
+		fmt.Printf("TestTransformLog case %d.\n", nr)
+		nr++
+		nsTrans := transform.NewNamespaceTransform([]string{"fdb1:fdb2"})
+		log := mockTransLogs("c", "admin.$cmd", bson.D{
+			primitive.E{
+				Key:   "applyOps",
+				Value: []any{"illegal"},
+			},
+		})
+
+		ret := transformPartialLog(log.original.partialLog, nsTrans, false)
+		assert.Nil(t, ret, "should be equal")
+	}
 }
 
 func TestCalculateTop3(t *testing.T) {

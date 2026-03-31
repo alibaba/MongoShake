@@ -2,11 +2,21 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	utils "github.com/alibaba/MongoShake/v2/common"
 )
+
+var validFilterOpTypes = map[string]struct{}{
+	"i": {},
+	"u": {},
+	"d": {},
+	"c": {},
+}
+
+const validFilterOpTypesText = "{i, u, d, c}"
 
 // priority use mongo_s_url
 func getSourceDbUrl() (string, error) {
@@ -98,6 +108,11 @@ func checkDefaultValue() error {
 	if conf.Options.LogFileName == "" {
 		conf.Options.LogFileName = "mongoshake.log"
 	}
+	filterOpTypes, err := normalizeFilterOpTypes(conf.Options.FilterOpTypes)
+	if err != nil {
+		return err
+	}
+	conf.Options.FilterOpTypes = filterOpTypes
 
 	if conf.Options.SyncMode == "" {
 		conf.Options.SyncMode = utils.VarSyncModeIncr
@@ -292,6 +307,24 @@ func checkDefaultValue() error {
 	filter.NsShouldBeIgnore[utils.APPConflictDatabase+"."] = true
 
 	return nil
+}
+
+func normalizeFilterOpTypes(opTypes []string) ([]string, error) {
+	out := make([]string, 0, len(opTypes))
+	for _, opType := range opTypes {
+		opType = strings.TrimSpace(strings.ToLower(opType))
+		if opType == "" {
+			continue
+		}
+		if opType == "n" {
+			return nil, fmt.Errorf("filter.op_types: unsupported op type %q; noop oplogs are already filtered by the built-in NoopFilter", opType)
+		}
+		if _, ok := validFilterOpTypes[opType]; !ok {
+			return nil, fmt.Errorf("filter.op_types: unknown op type %q, must be one of %s", opType, validFilterOpTypesText)
+		}
+		out = append(out, opType)
+	}
+	return out, nil
 }
 
 func checkConnection() error {

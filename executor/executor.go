@@ -347,23 +347,28 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			oplog.SetFiled(partialLog.Object, operation, partialLog.Namespace)
 			oplog.SetFiled(partialLog.Object, "to", nsTrans.Transform(toNs))
 		case "applyOps":
-			if ops := oplog.GetKey(partialLog.Object, "applyOps").([]bson.D); ops != nil {
-				// except field 'o'
-				except := map[string]struct{}{
-					"o": {},
-				}
-				for i, ele := range ops {
-					// m, keys := oplog.ConvertBsonD2M(ele)
-					m, keys := oplog.ConvertBsonD2MExcept(ele, except)
-					subLog := oplog.NewPartialLog(m)
-					transSubLog := transformPartialLog(subLog, nsTrans, transformRef)
-					if transSubLog == nil {
-						_ = LOG.Warn("transformPartialLog sub log %v return nil, ignore!", subLog)
-						return nil
-					}
-					ops[i] = transSubLog.Dump(keys, false)
-				}
+			ops, err := oplog.NormalizeApplyOps(partialLog.Object)
+			if err != nil {
+				_ = LOG.Warn("transformPartialLog meets unsupported applyOps type[%v], ignore! oplog=%v", err, partialLog.Object)
+				return nil
 			}
+
+			// except field 'o'
+			except := map[string]struct{}{
+				"o": {},
+			}
+			for i, ele := range ops {
+				// m, keys := oplog.ConvertBsonD2M(ele)
+				m, keys := oplog.ConvertBsonD2MExcept(ele, except)
+				subLog := oplog.NewPartialLog(m)
+				transSubLog := transformPartialLog(subLog, nsTrans, transformRef)
+				if transSubLog == nil {
+					_ = LOG.Warn("transformPartialLog sub log %v return nil, ignore!", subLog)
+					return nil
+				}
+				ops[i] = transSubLog.Dump(keys, false)
+			}
+			oplog.SetFiled(partialLog.Object, "applyOps", ops)
 		default:
 			// such as: dropDatabase
 			partialLog.Namespace = nsTrans.Transform(partialLog.Namespace)

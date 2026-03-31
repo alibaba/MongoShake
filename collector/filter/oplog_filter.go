@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
 	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
@@ -27,6 +26,120 @@ func (chain OplogFilterChain) IterateFilter(log *oplog.PartialLog) bool {
 		}
 	}
 	return false
+}
+
+// OpTypeFilter filters oplogs by oplog op type instead of only command oplogs.
+type OpTypeFilter struct {
+	opTypeMp map[string]struct{}
+}
+
+// NewOpTypeFilter trusts sanitize to provide normalized op type values.
+func NewOpTypeFilter(opTypes []string) *OpTypeFilter {
+	mp := make(map[string]struct{}, len(opTypes))
+	for _, opType := range opTypes {
+		if opType == "" {
+			continue
+		}
+		mp[opType] = struct{}{}
+	}
+	return &OpTypeFilter{
+		opTypeMp: mp,
+	}
+}
+
+func (filter *OpTypeFilter) Filter(log *oplog.PartialLog) bool {
+	if len(filter.opTypeMp) == 0 {
+		return false
+	}
+
+	operation := log.Operation
+	// Command oplogs require a dedicated path:
+	//
+	//  1. Non-`c` operations keep the original behavior and are filtered only by
+	//     their top-level `op`.
+	//  2. If the current oplog is `c` and `filter.op_types=c` is configured, keep
+	//     filtering the whole command oplog by its top-level `op`.
+	//  3. Only when `c` is not configured, but one of `i/u/d` is configured and
+	//     the command is `applyOps`, do we rewrite matching inner DML ops. This
+	//     keeps top-level `c` filtering higher priority than partial `applyOps`
+	//     rewriting.
+	_, topLevelMatched := filter.opTypeMp[operation]
+	if operation != "c" || topLevelMatched {
+		return topLevelMatched
+	}
+
+	if !filter.hasApplyOpsDMLFilter() {
+		return false
+	}
+
+	command, found := oplog.ExtraCommandName(log.Object)
+	if !found || command != "applyOps" {
+		return false
+	}
+
+	remainOps, filteredCount, ok := filter.filterApplyOpsDML(log.Object)
+	if !ok {
+		return false
+	}
+
+	oplog.SetFiled(log.Object, "applyOps", remainOps)
+	LOG.Info("OpTypeFilter filtered %d inner applyOps ops, drop oplog?[%v], after reorganize: %v",
+		filteredCount, len(remainOps) == 0, log.Object)
+	return len(remainOps) == 0
+}
+
+// hasApplyOpsDMLFilter reports whether inner applyOps rewriting is relevant for
+// the current filter configuration.
+func (filter *OpTypeFilter) hasApplyOpsDMLFilter() bool {
+	for _, op := range []string{"i", "u", "d"} {
+		if _, ok := filter.opTypeMp[op]; ok {
+			return true
+		}
+	}
+
+	return false
+}
+
+// filterApplyOpsDML removes matching DML ops inside applyOps and returns the
+// remaining inner ops.
+func (filter *OpTypeFilter) filterApplyOpsDML(logObject bson.D) (bson.A, int, bool) {
+	ops, err := oplog.NormalizeApplyOps(logObject)
+	if err != nil {
+		_ = LOG.Error("normalize applyOps failed: %v. log:%+v", err, logObject)
+		return nil, 0, false
+	}
+
+	remainOps := make(bson.A, 0, len(ops))
+	filteredCount := 0
+	for _, ele := range ops {
+		innerOperation, ok := oplog.GetKey(ele, "op").(string)
+		if !ok {
+			_ = LOG.Warn("OpTypeFilter meets illegal applyOps inner op: %v", ele)
+			return nil, 0, false
+		}
+
+		if filter.shouldFilterApplyOpsInnerOp(innerOperation) {
+			LOG.Debug("OpTypeFilter filter inner %s op in applyOps: %v", innerOperation, ele)
+			filteredCount++
+			continue
+		}
+
+		remainOps = append(remainOps, ele)
+	}
+
+	return remainOps, filteredCount, true
+}
+
+// shouldFilterApplyOpsInnerOp reports whether the given inner applyOps op
+// should be filtered by the current DML filter configuration.
+func (filter *OpTypeFilter) shouldFilterApplyOpsInnerOp(operation string) bool {
+	switch operation {
+	case "i", "u", "d":
+		_, ok := filter.opTypeMp[operation]
+		return ok
+	default:
+		return false
+	}
 }
 
 type GidFilter struct {
@@ -216,7 +329,7 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 		case "emptycapped":
 			col, ok := oplog.GetKey(log.Object, operation).(string)
 			if !ok {
-				_ = LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, log.Object)
+				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, log.Object)
 				return false
 			}
 			log.Namespace = fmt.Sprintf("%s.%s", db, col)
@@ -233,28 +346,16 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 		case "applyOps":
 			// parse and reorganize all inner ops within the transaction,
 			// also handle vectored insert oplog format with {multiOpType:1} introduced in 8.0
-			var ops []bson.D
+			ops, err := oplog.NormalizeApplyOps(log.Object)
+			if err != nil {
+				_ = LOG.Error("normalize applyOps failed: %v. log:%+v", err, log.Object)
+				return false
+			}
 			var remainOps bson.A
 
 			isVectoredInsert := false
 			if log.MultiOpType != nil && *log.MultiOpType == 1 {
 				isVectoredInsert = true
-			}
-			// it's very strange, some documents are []interface, some are []bson.D
-			switch v := oplog.GetKey(log.Object, "applyOps").(type) {
-			case []interface{}:
-				for _, ele := range v {
-					ops = append(ops, ele.(bson.D))
-				}
-			case []bson.D:
-				ops = v
-			case primitive.A:
-				for _, ele := range v {
-					ops = append(ops, ele.(bson.D))
-				}
-			default:
-				_ = LOG.Error("unknown applyOps type, filter can't handle. log:%+v", log.Object)
-				return false
 			}
 			for _, ele := range ops {
 				innerNs := oplog.GetKey(ele, "ns").(string)

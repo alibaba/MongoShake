@@ -1562,6 +1562,119 @@ func TestRunCommand(t *testing.T) {
 		assert.Equal(t, int32(1), result[2]["x"], "should be equal")
 	}
 
+	// applyOps with []bson.D
+	{
+		fmt.Printf("TestRunCommand case %d.\n", nr)
+		nr++
+
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		assert.Equal(t, nil, err, "should be equal")
+
+		err = conn.Client.Database("zz").Drop(nil)
+		assert.Equal(t, nil, err, "should be equal")
+
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "c",
+				Namespace: "admin.$cmd",
+				Object: bson.D{
+					bson.E{
+						Key: "applyOps",
+						Value: []bson.D{
+							{
+								{Key: "ns", Value: "zz.y"},
+								{Key: "op", Value: "i"},
+								{Key: "ui", Value: "xxxx"},
+								{Key: "o", Value: bson.D{
+									{Key: "_id", Value: "bson-d-1"},
+									{Key: "hello", Value: "world"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+		err = RunCommand(testDb, "applyOps", log, conn.Client)
+		assert.Equal(t, nil, err, "should be equal")
+
+		opts := options.Find().SetSort(bson.D{{"_id", 1}})
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, "zz", "y", opts)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, "bson-d-1", result[0]["_id"].(string), "should be equal")
+		assert.Equal(t, "world", result[0]["hello"].(string), "should be equal")
+	}
+
+	// applyOps with bson.A
+	{
+		fmt.Printf("TestRunCommand case %d.\n", nr)
+		nr++
+
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		assert.Equal(t, nil, err, "should be equal")
+
+		err = conn.Client.Database("zz").Drop(nil)
+		assert.Equal(t, nil, err, "should be equal")
+
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "c",
+				Namespace: "admin.$cmd",
+				Object: bson.D{
+					bson.E{
+						Key: "applyOps",
+						Value: bson.A{
+							bson.D{
+								{Key: "ns", Value: "zz.y"},
+								{Key: "op", Value: "i"},
+								{Key: "ui", Value: "xxxx"},
+								{Key: "o", Value: bson.D{
+									{Key: "_id", Value: "bson-a-1"},
+									{Key: "hello", Value: "world-a"},
+								}},
+							},
+						},
+					},
+				},
+			},
+		}
+		err = RunCommand(testDb, "applyOps", log, conn.Client)
+		assert.Equal(t, nil, err, "should be equal")
+
+		opts := options.Find().SetSort(bson.D{{"_id", 1}})
+		result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, "zz", "y", opts)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.Equal(t, "bson-a-1", result[0]["_id"].(string), "should be equal")
+		assert.Equal(t, "world-a", result[0]["hello"].(string), "should be equal")
+	}
+
+	// applyOps with illegal type
+	{
+		fmt.Printf("TestRunCommand case %d.\n", nr)
+		nr++
+
+		conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+		assert.Equal(t, nil, err, "should be equal")
+
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "c",
+				Namespace: "admin.$cmd",
+				Object: bson.D{
+					bson.E{
+						Key:   "applyOps",
+						Value: 1,
+					},
+				},
+			},
+		}
+		err = RunCommand(testDb, "applyOps", log, conn.Client)
+		assert.EqualError(t, err, "applyOps field has unsupported type int")
+	}
+
 	// applyOps with {multiOpType:1} which should not be treated as txn.
 	{
 		fmt.Printf("TestRunCommand case %d.\n", nr)
