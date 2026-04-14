@@ -81,7 +81,7 @@ func main() {
 	signalProfile, _ := strconv.Atoi(utils.SIGNALPROFILE)
 	signalStack, _ := strconv.Atoi(utils.SIGNALSTACK)
 	if signalProfile > 0 {
-		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile)) // syscall.SIGUSR2
+		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile))                     // syscall.SIGUSR2
 		nimo.RegisterSignalForPrintStack(syscall.Signal(signalStack), func(bytes []byte) { // syscall.SIGUSR1
 			LOG.Info(string(bytes))
 		})
@@ -105,6 +105,7 @@ func startup() {
 	// initialize http api
 	utils.FullSyncInitHttpApi(conf.Options.FullSyncHTTPListenPort)
 	utils.IncrSyncInitHttpApi(conf.Options.IncrSyncHTTPListenPort)
+	utils.PrometheusInitHttpApi(conf.Options.PromHTTPListenPort)
 	ReplCord := &coordinator.ReplicationCoordinator{
 		MongoD: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
 	}
@@ -116,6 +117,17 @@ func startup() {
 	utils.IncrSyncHttpApi.RegisterAPI("/conf", nimo.HttpGet, func([]byte) interface{} {
 		return conf.GetSafeOptions()
 	})
+
+	if utils.IsHTTPPortEnabled(conf.Options.PromHTTPListenPort) {
+		nimo.GoRoutine(func() {
+			if err := utils.PrometheusHttpApi.Listen(); err != nil {
+				_ = LOG.Critical("start prometheus server with port[%v] failed: %v",
+					conf.Options.PromHTTPListenPort, err)
+			}
+		})
+	} else {
+		LOG.Info("prometheus http api disabled. port[%v]", conf.Options.PromHTTPListenPort)
+	}
 
 	// init
 	for i, src := range conf.Options.MongoUrls {

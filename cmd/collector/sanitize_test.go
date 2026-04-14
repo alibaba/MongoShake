@@ -33,3 +33,58 @@ func TestCheckDefaultValueInvalidFilterOpTypes(t *testing.T) {
 	err := checkDefaultValue()
 	assert.EqualError(t, err, `filter.op_types: unknown op type "delete", must be one of {i, u, d, c}`)
 }
+
+func TestCheckDefaultValueKeepDisabledHTTPPorts(t *testing.T) {
+	origin := conf.Options
+	defer func() {
+		conf.Options = origin
+	}()
+
+	conf.Options = conf.Configuration{
+		FullSyncHTTPListenPort: -1,
+		IncrSyncHTTPListenPort: 0,
+		PromHTTPListenPort:     0,
+		MongoUrls:              []string{"mongodb://source-a"},
+	}
+
+	err := checkDefaultValue()
+	assert.NoError(t, err, "should be equal")
+	assert.Equal(t, -1, conf.Options.FullSyncHTTPListenPort, "should be equal")
+	assert.Equal(t, 0, conf.Options.IncrSyncHTTPListenPort, "should be equal")
+	assert.Equal(t, 0, conf.Options.PromHTTPListenPort, "should be equal")
+}
+
+func TestCheckConflictRejectPrometheusHTTPPortConflict(t *testing.T) {
+	origin := conf.Options
+	defer func() {
+		conf.Options = origin
+	}()
+
+	conf.Options = conf.Configuration{
+		FullSyncHTTPListenPort: 9101,
+		IncrSyncHTTPListenPort: 9100,
+		PromHTTPListenPort:     9101,
+		MongoUrls:              []string{"mongodb://source-a"},
+	}
+
+	err := checkConflict()
+	assert.EqualError(t, err, "prom.http_port should not equal to full_sync.http_port")
+}
+
+func TestCheckConflictRejectPrometheusSystemProfilePortConflict(t *testing.T) {
+	origin := conf.Options
+	defer func() {
+		conf.Options = origin
+	}()
+
+	conf.Options = conf.Configuration{
+		FullSyncHTTPListenPort: -1,
+		IncrSyncHTTPListenPort: 0,
+		PromHTTPListenPort:     9200,
+		SystemProfilePort:      9200,
+		MongoUrls:              []string{"mongodb://source-a"},
+	}
+
+	err := checkConflict()
+	assert.EqualError(t, err, "system_profile_port should not equal to prom.http_port")
+}

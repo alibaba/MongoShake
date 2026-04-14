@@ -2,6 +2,7 @@ package collector
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -166,7 +167,7 @@ func (sync *OplogSyncer) Init() {
 	}
 
 	sync.replMetric = utils.NewMetric(sync.Replset, utils.TypeIncr, options)
-	sync.replMetric.ReplStatus.Update(utils.WorkGood)
+	sync.replMetric.SetReplStatus(utils.WorkGood)
 
 	sync.RestAPI()
 	sync.persister.RestAPI()
@@ -441,6 +442,8 @@ func (sync *OplogSyncer) startDeserializer() {
 	for index := 0; index != len(sync.PendingQueue); index++ {
 		sync.PendingQueue[index] = make(chan [][]byte, PipelineQueueLen)
 		sync.logsQueue[index] = make(chan []*oplog.GenericOplog, PipelineQueueLen)
+		sync.updatePendingQueueMetric(index)
+		sync.updateLogsQueueMetric(index)
 		go sync.deserializer(index)
 	}
 }
@@ -458,31 +461,37 @@ func (sync *OplogSyncer) deserializer(index int) {
 		parser = func(input []byte) (*oplog.PartialLog, error) {
 			log := oplog.ParsedLog{}
 			err := bson.Unmarshal(input, &log)
-			return &oplog.PartialLog{
-				ParsedLog: log,
-			}, err
+			return &oplog.PartialLog{ParsedLog: log}, err
 		}
 	}
 
 	// combiner is used to combine data and send to downstream
-	var combiner func(raw []byte, log *oplog.PartialLog) *oplog.GenericOplog
+	var combiner func(raw []byte, log *oplog.PartialLog, sourceTime time.Time) *oplog.GenericOplog
 	// change stream && !direct && !(kafka & json)
 	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream &&
 		conf.Options.Tunnel != utils.VarTunnelDirect &&
 		!(conf.Options.Tunnel == utils.VarTunnelKafka &&
 			conf.Options.TunnelMessage == utils.VarTunnelMessageJson) {
 		// very time-consuming!
-		combiner = func(raw []byte, log *oplog.PartialLog) *oplog.GenericOplog {
-			if out, err := bson.Marshal(log.ParsedLog); err != nil {
-				LOG.Crashf("%s deserializer marshal[%v] failed: %v", sync, log.ParsedLog, err)
+		combiner = func(raw []byte, log *oplog.PartialLog, sourceTime time.Time) *oplog.GenericOplog {
+			if out, err := bson.Marshal(&log.ParsedLog); err != nil {
+				LOG.Crashf("%s deserializer marshal[%v] failed: %v", sync, log, err)
 				return nil
 			} else {
-				return &oplog.GenericOplog{Raw: out, Parsed: log}
+				return &oplog.GenericOplog{
+					Raw:        out,
+					Parsed:     log,
+					SourceTime: sourceTime.UTC(),
+				}
 			}
 		}
 	} else {
-		combiner = func(raw []byte, log *oplog.PartialLog) *oplog.GenericOplog {
-			return &oplog.GenericOplog{Raw: raw, Parsed: log}
+		combiner = func(raw []byte, log *oplog.PartialLog, sourceTime time.Time) *oplog.GenericOplog {
+			return &oplog.GenericOplog{
+				Raw:        raw,
+				Parsed:     log,
+				SourceTime: sourceTime.UTC(),
+			}
 		}
 	}
 
@@ -490,6 +499,7 @@ func (sync *OplogSyncer) deserializer(index int) {
 	for {
 		batchRawLogs := <-sync.PendingQueue[index]
 		nPending := len(sync.PendingQueue[index])
+		sync.updatePendingQueueMetric(index)
 		nimo.AssertTrue(len(batchRawLogs) != 0, "pending queue batch logs has zero length")
 		var deserializeLogs = make([]*oplog.GenericOplog, 0, len(batchRawLogs))
 
@@ -498,20 +508,85 @@ func (sync *OplogSyncer) deserializer(index int) {
 			if err != nil {
 				LOG.Crashf("%s deserializer parse data failed[%v]", sync, err)
 			}
+			sourceTime := extractSourceTime(rawLog, log)
 			log.RawSize = len(rawLog)
-			deserializeLogs = append(deserializeLogs, combiner(rawLog, log))
+			deserializeLogs = append(deserializeLogs, combiner(rawLog, log, sourceTime))
 		}
 
-		// set the fetch timestamp
-		if len(deserializeLogs) > 0 {
-			sync.LastFetchTs = deserializeLogs[0].Parsed.Timestamp
-		}
+		sync.recordLastFetchStats(deserializeLogs, time.Now().UTC())
 		sync.logsQueue[index] <- deserializeLogs
+		sync.updateLogsQueueMetric(index)
 		LOG.Debug("deserializer[%v] send %d to logsQueue, pending: %d", index, len(deserializeLogs), nPending)
 	}
 }
 
 /********************************deserializer end**********************************/
+
+func sourceTimeFromTimestamp(ts primitive.Timestamp) time.Time {
+	return time.Unix(int64(ts.T), 0).UTC()
+}
+
+func sourceTimeFromGenericOplog(log *oplog.GenericOplog) time.Time {
+	if log == nil || log.Parsed == nil {
+		return time.Time{}
+	}
+	if !log.SourceTime.IsZero() {
+		return log.SourceTime.UTC()
+	}
+	return sourceTimeFromTimestamp(log.Parsed.Timestamp)
+}
+
+func extractSourceTime(raw []byte, log *oplog.PartialLog) time.Time {
+	if conf.Options.IncrSyncMongoFetchMethod != utils.VarIncrSyncMongoFetchMethodChangeStream {
+		return sourceTimeFromTimestamp(log.Timestamp)
+	}
+
+	var meta struct {
+		WallTime primitive.DateTime `bson:"wallTime,omitempty"`
+	}
+	if err := bson.Unmarshal(raw, &meta); err == nil && meta.WallTime != 0 {
+		return meta.WallTime.Time().UTC()
+	}
+
+	return sourceTimeFromTimestamp(log.Timestamp)
+}
+
+func (sync *OplogSyncer) updatePendingQueueMetric(index int) {
+	if sync == nil || index < 0 || index >= len(sync.PendingQueue) {
+		return
+	}
+
+	utils.PendingQueueUsedProm.WithLabelValues(
+		sync.Replset,
+		utils.TypeIncr,
+		strconv.Itoa(index),
+	).Set(float64(len(sync.PendingQueue[index])))
+}
+
+func (sync *OplogSyncer) updateLogsQueueMetric(index int) {
+	if sync == nil || index < 0 || index >= len(sync.logsQueue) {
+		return
+	}
+
+	utils.LogsQueueUsedProm.WithLabelValues(
+		sync.Replset,
+		utils.TypeIncr,
+		strconv.Itoa(index),
+	).Set(float64(len(sync.logsQueue[index])))
+}
+
+func (sync *OplogSyncer) recordLastFetchStats(logs []*oplog.GenericOplog, now time.Time) {
+	if len(logs) == 0 {
+		return
+	}
+
+	latestLog := logs[len(logs)-1]
+	sync.LastFetchTs = latestLog.Parsed.Timestamp
+	if sync.replMetric != nil {
+		latestSourceTime := sourceTimeFromGenericOplog(latestLog)
+		sync.replMetric.SetOplogGetDelay(now.UTC().UnixMilli() - latestSourceTime.UnixMilli())
+	}
+}
 
 // only master(maybe several mongo-shake start) can poll oplog.
 func (sync *OplogSyncer) poll() {
@@ -553,7 +628,7 @@ func (sync *OplogSyncer) next() bool {
 		sync.replMetric.AddGet(1)
 		sync.replMetric.SetOplogMax(payload)
 		sync.replMetric.SetOplogAvg(payload)
-		sync.replMetric.ReplStatus.Clear(utils.FetchBad)
+		sync.replMetric.ClearReplStatus(utils.FetchBad)
 	} else if err != nil && err.Error() == sourceReader.CollectionCappedError.Error() {
 		_ = LOG.Error("%s oplog collection capped error, users should fix it manually", sync)
 		utils.YieldInMs(DurationTime)
@@ -566,7 +641,7 @@ func (sync *OplogSyncer) next() bool {
 			LOG.Crashf("%s I can't handle this error, please solve it manually!", sync)
 		}
 
-		sync.replMetric.ReplStatus.Update(utils.FetchBad)
+		sync.replMetric.SetReplStatus(utils.FetchBad)
 		utils.YieldInMs(DurationTime)
 
 		// alarm

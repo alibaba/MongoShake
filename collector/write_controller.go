@@ -58,6 +58,10 @@ func NewWriteController(worker *Worker) *WriteController {
 	factory := tunnel.WriterFactory{Name: conf.Options.Tunnel}
 	if writeController.tunnel = factory.Create(conf.Options.TunnelAddress, worker.id); writeController.tunnel != nil {
 		if writeController.tunnel.Prepare() {
+			if writeController.tunnel.Name() == "direct" {
+				dw := writeController.tunnel.(*tunnel.DirectWriter)
+				dw.BatchExecutor.MetricName = worker.syncer.Replset
+			}
 			return writeController
 		}
 	}

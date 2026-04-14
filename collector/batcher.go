@@ -164,8 +164,10 @@ func (batcher *Batcher) getBatch() []*oplog.GenericOplog {
 	var mergeBatch []*oplog.GenericOplog
 	if len(batcher.remainLogs) == 0 {
 		// remainLogs is empty.
+		queueIndex := batcher.currentQueue()
 		select {
-		case mergeBatch = <-syncer.logsQueue[batcher.currentQueue()]:
+		case mergeBatch = <-syncer.logsQueue[queueIndex]:
+			syncer.updateLogsQueueMetric(int(queueIndex))
 			break
 		case <-time.After(noopInterval * time.Second):
 			// return nil if timeout
@@ -178,7 +180,9 @@ func (batcher *Batcher) getBatch() []*oplog.GenericOplog {
 			len(syncer.logsQueue[batcher.currentQueue()]) > 0 {
 			// there has more pushed oplogs in next logs queue (read can't to be blocked)
 			// Hence, we fetch them by the way. and merge together
-			mergeBatch = append(mergeBatch, <-syncer.logsQueue[batcher.nextQueue]...)
+			queueIndex := batcher.nextQueue
+			mergeBatch = append(mergeBatch, <-syncer.logsQueue[queueIndex]...)
+			syncer.updateLogsQueueMetric(int(queueIndex))
 			batcher.moveToNextQueue()
 		}
 	} else {
@@ -351,7 +355,8 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 
 				for _, ele := range deliveredOps {
 					batcher.addIntoBatchGroup(&oplog.GenericOplog{
-						Raw: nil,
+						Raw:        nil,
+						SourceTime: genericLog.SourceTime,
 						Parsed: &oplog.PartialLog{
 							ParsedLog: ele,
 						},
@@ -441,7 +446,7 @@ func (batcher *Batcher) isTransaction(partialLog *oplog.PartialLog) (oplog.TxnMe
 func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta,
 	genericLog *oplog.GenericOplog) (isRet bool, mustIndividual bool,
 	deliveredOps []*oplog.GenericOplog) {
-	err := batcher.txnBuffer.AddOp(txnMeta, genericLog.Parsed.ParsedLog)
+	err := batcher.txnBuffer.AddOp(txnMeta, genericLog)
 	if err != nil {
 		LOG.Crashf("%s add oplog to txnbuffer failed, err[%v] oplog[%v]",
 			batcher.syncer, err, genericLog.Parsed.ParsedLog)
@@ -476,20 +481,12 @@ Loop:
 			if !ok {
 				break Loop
 			}
-			newOplog := &oplog.PartialLog{
-				ParsedLog: o,
-			}
-
-			if newOplog.Operation == "c" {
+			if o.Parsed.Operation == "c" {
 				haveCommandInTransaction = true
 			}
 
 			// Raw will be filling in Send->LogEntryEncode
-			deliveredOps = append(deliveredOps,
-				&oplog.GenericOplog{
-					Raw:    nil,
-					Parsed: newOplog,
-				})
+			deliveredOps = append(deliveredOps, o)
 		case err := <-errs:
 			if err != nil {
 				LOG.Crashf("error replaying transaction, err[%v]", err)
