@@ -99,6 +99,7 @@ func (metric *ReplicationMetric) init() {
 	metric.TableOperations = NewTableOps()
 	metric.setReplStatusCode(WorkGood)
 	metric.updateLSNLagMetrics()
+	metric.initPrometheusSeries()
 }
 
 func (metric *ReplicationMetric) Close() {
@@ -187,6 +188,35 @@ func (metric *ReplicationMetric) startup() {
 func (metric *ReplicationMetric) getTunnelTraffic() string {
 	traffic := atomic.LoadUint64(&metric.TunnelTraffic)
 	return GetMetricWithSize(traffic)
+}
+
+func (metric *ReplicationMetric) initPrometheusSeries() {
+	if metric.STAGE != TypeIncr {
+		return
+	}
+
+	counterLabels := []string{metric.NAME, metric.STAGE}
+	OplogFilterProm.WithLabelValues(counterLabels...).Add(0)
+	OplogGetProm.WithLabelValues(counterLabels...).Add(0)
+	OplogConsumeProm.WithLabelValues(counterLabels...).Add(0)
+	OplogApplyProm.WithLabelValues(counterLabels...).Add(0)
+	OplogSuccessProm.WithLabelValues(counterLabels...).Add(0)
+	OplogFailProm.WithLabelValues(counterLabels...).Add(0)
+	CheckpointTimesProm.WithLabelValues(counterLabels...).Add(0)
+	RetransmissionProm.WithLabelValues(counterLabels...).Add(0)
+	TunnelTrafficProm.WithLabelValues(counterLabels...).Add(0)
+
+	gaugeLabels := []string{metric.NAME, metric.STAGE}
+	LSNProm.WithLabelValues(gaugeLabels...).Set(0)
+	LSNAckProm.WithLabelValues(gaugeLabels...).Set(0)
+	LSNCheckpointProm.WithLabelValues(gaugeLabels...).Set(0)
+	OplogMaxSizeProm.WithLabelValues(gaugeLabels...).Set(0)
+	OplogAvgSizeProm.WithLabelValues(gaugeLabels...).Set(0)
+	OplogGetDelayProm.WithLabelValues(gaugeLabels...).Set(0)
+	OplogPutDelayProm.WithLabelValues(gaugeLabels...).Set(0)
+	ReplStatusCodeProm.WithLabelValues(gaugeLabels...).Set(0)
+	LSNAckLagSecondsProm.WithLabelValues(gaugeLabels...).Set(0)
+	LSNCheckpointLagSecondsProm.WithLabelValues(gaugeLabels...).Set(0)
 }
 
 func (metric *ReplicationMetric) Get() uint64 {

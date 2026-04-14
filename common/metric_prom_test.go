@@ -44,3 +44,29 @@ func TestPrometheusHandlerExposesStatusAndLagMetrics(t *testing.T) {
 	assert.Contains(t, body, `lsn_ack_lag_seconds{name="rs-prom-derived",stage="incr"} 9`, "should be equal")
 	assert.Contains(t, body, `lsn_checkpoint_lag_seconds{name="rs-prom-derived",stage="incr"} 19`, "should be equal")
 }
+
+func TestPrometheusHandlerExposesZeroValueMetricsForFreshIncrMetric(t *testing.T) {
+	metric := NewMetric("rs-prom-zero", TypeIncr, 0)
+	defer metric.Close()
+
+	request := httptest.NewRequest("GET", "/metrics", nil)
+	recorder := httptest.NewRecorder()
+	PrometheusHandler().ServeHTTP(recorder, request)
+
+	body := recorder.Body.String()
+	assert.Equal(t, 200, recorder.Code, "should be equal")
+	assert.Contains(t, body, `oplog_fail_total{name="rs-prom-zero",stage="incr"} 0`, "should be equal")
+	assert.Contains(t, body, `retransmission_total{name="rs-prom-zero",stage="incr"} 0`, "should be equal")
+	assert.Contains(t, body, `checkpoint_times_total{name="rs-prom-zero",stage="incr"} 0`, "should be equal")
+}
+
+func TestPrometheusHandlerExposesRuntimeCollectors(t *testing.T) {
+	request := httptest.NewRequest("GET", "/metrics", nil)
+	recorder := httptest.NewRecorder()
+	PrometheusHandler().ServeHTTP(recorder, request)
+
+	body := recorder.Body.String()
+	assert.Equal(t, 200, recorder.Code, "should be equal")
+	assert.Contains(t, body, `go_info`, "should be equal")
+	assert.Contains(t, body, `go_goroutines`, "should be equal")
+}

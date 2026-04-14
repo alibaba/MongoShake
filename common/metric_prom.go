@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -171,6 +172,7 @@ var ExecutorOperationsProm = prometheus.NewCounterVec(prometheus.CounterOpts{
 func InitPrometheus() {
 	prometheusInitOnce.Do(func() {
 		prometheusRegistry.MustRegister(
+			collectors.NewGoCollector(),
 			OplogFilterProm,
 			OplogGetProm,
 			OplogConsumeProm,
