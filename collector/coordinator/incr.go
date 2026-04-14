@@ -77,12 +77,16 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	}
 
 	// start http server
-	nimo.GoRoutine(func() {
-		if err := utils.IncrSyncHttpApi.Listen(); err != nil {
-			LOG.Critical("start incr sync server with port[%v] failed: %v", conf.Options.IncrSyncHTTPListenPort,
-				err)
-		}
-	})
+	if utils.IsHTTPPortEnabled(conf.Options.IncrSyncHTTPListenPort) {
+		nimo.GoRoutine(func() {
+			if err := utils.IncrSyncHttpApi.Listen(); err != nil {
+				LOG.Critical("start incr sync server with port[%v] failed: %v", conf.Options.IncrSyncHTTPListenPort,
+					err)
+			}
+		})
+	} else {
+		LOG.Info("incr sync http api disabled. port[%v]", conf.Options.IncrSyncHTTPListenPort)
+	}
 
 	return nil
 }

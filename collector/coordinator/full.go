@@ -187,13 +187,17 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 
 	// start http server.
-	nimo.GoRoutine(func() {
-		// before starting, we must register all interface
-		if err := utils.FullSyncHttpApi.Listen(); err != nil {
-			_ = LOG.Critical("start full sync server with port[%v] failed: %v",
-				conf.Options.FullSyncHTTPListenPort, err)
-		}
-	})
+	if utils.IsHTTPPortEnabled(conf.Options.FullSyncHTTPListenPort) {
+		nimo.GoRoutine(func() {
+			// before starting, we must register all interface
+			if err := utils.FullSyncHttpApi.Listen(); err != nil {
+				_ = LOG.Critical("start full sync server with port[%v] failed: %v",
+					conf.Options.FullSyncHTTPListenPort, err)
+			}
+		})
+	} else {
+		LOG.Info("full sync http api disabled. port[%v]", conf.Options.FullSyncHTTPListenPort)
+	}
 
 	// wait all db finished
 	wg.Wait()

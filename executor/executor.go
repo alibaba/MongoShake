@@ -52,6 +52,8 @@ type BatchGroupExecutor struct {
 	NsTrans *transform.NamespaceTransform
 	// init sync finish timestamp
 	FullFinishTs int64
+	// prometheus metric name
+	MetricName string
 }
 
 func (batchExecutor *BatchGroupExecutor) Start() {

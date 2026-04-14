@@ -58,6 +58,7 @@ func NewPersister(replset string, sync *OplogSyncer) *Persister {
 		fetchStage:      utils.FetchStageStoreUnknown,
 		diskQueueLastTs: -1, // initial set 1
 	}
+	p.updateBufferUsedMetric()
 
 	return p
 }
@@ -187,6 +188,7 @@ func (p *Persister) Inject(input []byte) {
 func (p *Persister) bufferInput(input []byte) {
 	p.Buffer = append(p.Buffer, input)
 	p.bufferSize += uint64(len(input))
+	p.updateBufferUsedMetric()
 }
 func (p *Persister) shouldDispatchBuffer(flush bool) bool {
 	return len(p.Buffer) >= conf.Options.IncrSyncFetcherBufferCapacity ||
@@ -198,11 +200,13 @@ func (p *Persister) dispatchBuffer() {
 	// and discard the skip situation. we assume nextQueueCursor couldn't be overflow
 	selected := int(p.nextQueuePosition % uint64(len(p.sync.PendingQueue)))
 	p.sync.PendingQueue[selected] <- p.Buffer
+	p.sync.updatePendingQueueMetric(selected)
 	// clear old Buffer, we shouldn't use "p.Buffer = p.Buffer[:0]" because these address won't
 	// be changed in the channel.
 	// p.Buffer = p.Buffer[:0]
 	p.Buffer = make([][]byte, 0, conf.Options.IncrSyncFetcherBufferCapacity)
 	p.bufferSize = 0
+	p.updateBufferUsedMetric()
 	// queue position = (queue position + 1) % n
 	p.nextQueuePosition++
 }
@@ -217,6 +221,14 @@ func (p *Persister) PushToPendingQueue(input []byte) {
 	if p.shouldDispatchBuffer(flush) {
 		p.dispatchBuffer()
 	}
+}
+
+func (p *Persister) updateBufferUsedMetric() {
+	if p == nil {
+		return
+	}
+
+	utils.PersisterBufferUsedProm.WithLabelValues(p.replset, utils.TypeIncr).Set(float64(len(p.Buffer)))
 }
 
 func (p *Persister) retrieve() {

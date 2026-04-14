@@ -88,21 +88,25 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 			err = dbWriter.doInsert(dc[0], dc[1], metadata, group.oplogRecords,
 				conf.Options.IncrSyncExecutorInsertOnDupUpdate)
 			atomic.AddUint64(&exec.metricInsert, uint64(len(group.oplogRecords)))
+			exec.addOperationMetric("insert", uint64(len(group.oplogRecords)))
 			exec.addNsMapMetric(group.ns, "i", len(group.oplogRecords))
 		case "u":
 			err = dbWriter.doUpdate(dc[0], dc[1], metadata, group.oplogRecords,
 				conf.Options.IncrSyncExecutorUpsert)
 			atomic.AddUint64(&exec.metricUpdate, uint64(len(group.oplogRecords)))
+			exec.addOperationMetric("update", uint64(len(group.oplogRecords)))
 			exec.addNsMapMetric(group.ns, "u", len(group.oplogRecords))
 		case "d":
 			err = dbWriter.doDelete(dc[0], dc[1], metadata, group.oplogRecords)
 			atomic.AddUint64(&exec.metricDelete, uint64(len(group.oplogRecords)))
+			exec.addOperationMetric("delete", uint64(len(group.oplogRecords)))
 			exec.addNsMapMetric(group.ns, "d", len(group.oplogRecords))
 		case "c":
 			LOG.Info("Replay-%d run DDL with metadata[%v] in db[%v], firstLog: %v", exec.batchExecutor.ReplayerId,
 				dc[0], metadata, group.oplogRecords[0].original.partialLog)
 			err = dbWriter.doCommand(dc[0], metadata, group.oplogRecords)
 			atomic.AddUint64(&exec.metricDDL, uint64(len(group.oplogRecords)))
+			exec.addOperationMetric("ddl", uint64(len(group.oplogRecords)))
 			exec.addNsMapMetric(group.ns, "c", len(group.oplogRecords))
 		case "n":
 			// exec.batchExecutor.ReplMetric.AddFilter(count)
@@ -110,6 +114,7 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 			exec.addNsMapMetric(group.ns, "n", len(group.oplogRecords))
 		default:
 			atomic.AddUint64(&exec.metricUnknown, uint64(len(group.oplogRecords)))
+			exec.addOperationMetric("unknown", uint64(len(group.oplogRecords)))
 			_ = LOG.Warn("Replay-%d meets unknown type oplogs found. op '%s'",
 				exec.batchExecutor.ReplayerId, group.op)
 			exec.addNsMapMetric(group.ns, "x", len(group.oplogRecords))
@@ -129,6 +134,7 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 				group.oplogRecords[0].original.partialLog)
 			exec.dropConnection()
 			atomic.AddUint64(&exec.metricError, uint64(len(group.oplogRecords)))
+			exec.addOperationMetric("error", uint64(len(group.oplogRecords)))
 			exec.addNsMapMetric(group.ns, "e", len(group.oplogRecords))
 
 			return err
@@ -144,6 +150,14 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 	//ns := group.logs[0].original.partialLog.Namespace
 	//exec.replayer.ReplMetric.AddTableOps(ns, count)
 	return nil
+}
+
+func (exec *Executor) addOperationMetric(op string, count uint64) {
+	name := conf.Options.Id
+	if exec.batchExecutor != nil && exec.batchExecutor.MetricName != "" {
+		name = exec.batchExecutor.MetricName
+	}
+	utils.ExecutorOperationsProm.WithLabelValues(name, utils.TypeIncr, op).Add(float64(count))
 }
 
 // errorIgnore will ignore some known errors

@@ -705,6 +705,102 @@ func mockDisTxnPartialOplogs(startTs int64, normalOplog bool, isCommit bool) []*
 	return output
 }
 
+func TestBatchMoreApplyOpsInheritsSourceTime(t *testing.T) {
+	utils.InitialLogger("", "", "debug", true, 1)
+
+	syncer := mockSyncer()
+	defer syncer.replMetric.Close()
+
+	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+	batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
+
+	conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
+	conf.Options.FilterDDLEnable = false
+
+	sourceTime := time.Unix(1_700_000_400, 0).UTC()
+	syncer.logsQueue[0] <- []*oplog.GenericOplog{
+		{
+			SourceTime: sourceTime,
+			Parsed: &oplog.PartialLog{
+				ParsedLog: oplog.ParsedLog{
+					Timestamp: utils.TimeToTimestamp(100),
+					Operation: "c",
+					Namespace: "admin.$cmd",
+					Object: bson.D{
+						bson.E{
+							Key: "applyOps",
+							Value: bson.A{
+								bson.D{
+									bson.E{"op", "i"},
+									bson.E{"ns", "txntest.c1"},
+									bson.E{"o", bson.D{{"_id", 1}}},
+								},
+								bson.D{
+									bson.E{"op", "i"},
+									bson.E{"ns", "txntest.c2"},
+									bson.E{"o", bson.D{{"_id", 2}}},
+								},
+								bson.D{
+									bson.E{"op", "d"},
+									bson.E{"ns", "txntest.c3"},
+									bson.E{"o", bson.D{{"_id", 3}}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	batchedOplog, barrier, allEmpty, _ := batcher.BatchMore()
+
+	assert.Equal(t, false, barrier, "should be equal")
+	assert.Equal(t, false, allEmpty, "should be equal")
+	assert.Equal(t, 3, len(batchedOplog[0]), "should be equal")
+	for _, log := range batchedOplog[0] {
+		assert.Equal(t, sourceTime, log.SourceTime, "should be equal")
+	}
+}
+
+func TestHandleTransactionInheritsSourceTime(t *testing.T) {
+	utils.InitialLogger("", "", "debug", true, 1)
+
+	syncer := mockSyncer()
+	defer syncer.replMetric.Close()
+
+	filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+	batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
+
+	logs := mockTxnPartialOplogs(100, false)
+	sourceTimes := []time.Time{
+		time.Unix(1_700_000_500, 0).UTC(),
+		time.Unix(1_700_000_510, 0).UTC(),
+		time.Unix(1_700_000_520, 0).UTC(),
+	}
+	for i := range logs {
+		logs[i].SourceTime = sourceTimes[i]
+	}
+
+	for i, log := range logs {
+		txnMeta, ok := batcher.isTransaction(log.Parsed)
+		assert.Equal(t, true, ok, "should be equal")
+
+		isRet, _, deliveredOps := batcher.handleTransaction(txnMeta, log)
+		if i < len(logs)-1 {
+			assert.Equal(t, false, isRet, "should be equal")
+			assert.Equal(t, 0, len(deliveredOps), "should be equal")
+			continue
+		}
+
+		assert.Equal(t, true, isRet, "should be equal")
+		assert.Equal(t, 9, len(deliveredOps), "should be equal")
+		for idx, op := range deliveredOps {
+			assert.Equal(t, sourceTimes[idx/3], op.SourceTime, "should be equal")
+		}
+	}
+}
+
 func TestBatchMore(t *testing.T) {
 	// test BatchMore
 

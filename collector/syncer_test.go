@@ -2,10 +2,13 @@ package collector
 
 import (
 	"fmt"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
@@ -82,8 +85,10 @@ func TestDeserializer(t *testing.T) {
 		out2 := <-syncer.logsQueue[1]
 		assert.Equal(t, 1, len(out1), "should be equal")
 		assert.Equal(t, *log1, out1[0].Parsed.ParsedLog, "should be equal")
+		assert.Equal(t, time.Unix(1, 0).UTC(), out1[0].SourceTime, "should be equal")
 		assert.Equal(t, 1, len(out2), "should be equal")
 		assert.Equal(t, *log2, out2[0].Parsed.ParsedLog, "should be equal")
+		assert.Equal(t, time.Unix(2, 0).UTC(), out2[0].SourceTime, "should be equal")
 	}
 
 	{
@@ -97,6 +102,7 @@ func TestDeserializer(t *testing.T) {
 		syncer.startDeserializer()
 
 		event1 := mockEvent("b", 1)
+		event1.WallTime = primitive.NewDateTimeFromTime(time.Unix(101, 0).UTC())
 		data1, err := bson.Marshal(event1)
 		assert.Equal(t, nil, err, "should be equal")
 
@@ -115,8 +121,10 @@ func TestDeserializer(t *testing.T) {
 
 		assert.Equal(t, 1, len(out1), "should be equal")
 		assert.Equal(t, *log1, out1[0].Parsed.ParsedLog, "should be equal")
+		assert.Equal(t, time.Unix(101, 0).UTC(), out1[0].SourceTime, "should be equal")
 		assert.Equal(t, 1, len(out2), "should be equal")
 		assert.Equal(t, *log2, out2[0].Parsed.ParsedLog, "should be equal")
+		assert.Equal(t, time.Unix(2, 0).UTC(), out2[0].SourceTime, "should be equal")
 
 		// unmarshal the raw data in log and do comparison again
 		rawParsed1 := new(oplog.ParsedLog)
@@ -185,4 +193,65 @@ func TestFilterOplogGid(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestRecordLastFetchStatsUsesLatestOplogDelay(t *testing.T) {
+	now := time.Unix(1_700_000_100, 0).UTC()
+	firstTS := now.Add(-10 * time.Second)
+	latestTS := now.Add(-11 * time.Second)
+	latestSourceTime := now.Add(-3 * time.Second)
+
+	syncer := &OplogSyncer{
+		replMetric: utils.NewMetric("rs-delay", utils.TypeIncr, 0),
+	}
+	defer syncer.replMetric.Close()
+
+	logs := []*oplog.GenericOplog{
+		{
+			SourceTime: firstTS,
+			Parsed: &oplog.PartialLog{
+				ParsedLog: oplog.ParsedLog{
+					Timestamp: primitive.Timestamp{T: uint32(firstTS.Unix()), I: 1},
+				},
+			},
+		},
+		{
+			SourceTime: latestSourceTime,
+			Parsed: &oplog.PartialLog{
+				ParsedLog: oplog.ParsedLog{
+					Timestamp: primitive.Timestamp{T: uint32(latestTS.Unix()), I: 2},
+				},
+			},
+		},
+	}
+
+	syncer.recordLastFetchStats(logs, now)
+
+	assert.Equal(t, primitive.Timestamp{T: uint32(latestTS.Unix()), I: 2}, syncer.LastFetchTs, "should be equal")
+	assert.Equal(t, int64(3_000), atomic.LoadInt64(&syncer.replMetric.OplogGetDelay), "should be equal")
+}
+
+func TestRecordLastFetchStatsFallsBackToTimestamp(t *testing.T) {
+	now := time.Unix(1_700_000_300, 0).UTC()
+	latestTS := now.Add(-9 * time.Second)
+
+	syncer := &OplogSyncer{
+		replMetric: utils.NewMetric("rs-delay-fallback", utils.TypeIncr, 0),
+	}
+	defer syncer.replMetric.Close()
+
+	logs := []*oplog.GenericOplog{
+		{
+			Parsed: &oplog.PartialLog{
+				ParsedLog: oplog.ParsedLog{
+					Timestamp: primitive.Timestamp{T: uint32(latestTS.Unix()), I: 9},
+				},
+			},
+		},
+	}
+
+	syncer.recordLastFetchStats(logs, now)
+
+	assert.Equal(t, primitive.Timestamp{T: uint32(latestTS.Unix()), I: 9}, syncer.LastFetchTs, "should be equal")
+	assert.Equal(t, int64(9_000), atomic.LoadInt64(&syncer.replMetric.OplogGetDelay), "should be equal")
 }
