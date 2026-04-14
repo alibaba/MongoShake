@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -18,8 +19,9 @@ const (
 )
 
 type GenericOplog struct {
-	Raw    []byte
-	Parsed *PartialLog
+	Raw        []byte
+	Parsed     *PartialLog
+	SourceTime time.Time // runtime only, never serialized to wire payload
 }
 
 type ParsedLog struct {

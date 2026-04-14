@@ -85,13 +85,6 @@ func checkDefaultValue() error {
 	if conf.Options.Id == "" {
 		conf.Options.Id = "mongoshake"
 	}
-
-	if conf.Options.FullSyncHTTPListenPort <= 0 {
-		conf.Options.FullSyncHTTPListenPort = 9101
-	}
-	if conf.Options.IncrSyncHTTPListenPort <= 0 {
-		conf.Options.IncrSyncHTTPListenPort = 9100
-	}
 	if conf.Options.SystemProfilePort <= 0 {
 		conf.Options.SystemProfilePort = 9200
 	}
@@ -391,10 +384,26 @@ func checkConnection() error {
 func checkConflict() error {
 	/*****************************1. global settings******************************/
 	// http_profile & system_profile
-	conf.Options.FullSyncHTTPListenPort = utils.MayBeRandom(conf.Options.FullSyncHTTPListenPort)
-	conf.Options.IncrSyncHTTPListenPort = utils.MayBeRandom(conf.Options.IncrSyncHTTPListenPort)
-	if conf.Options.FullSyncHTTPListenPort == conf.Options.IncrSyncHTTPListenPort {
-		return fmt.Errorf("full_sync.http_port should not equal to incr_sync.http_port")
+	monitorPorts := []struct {
+		name string
+		port int
+	}{
+		{name: "full_sync.http_port", port: conf.Options.FullSyncHTTPListenPort},
+		{name: "incr_sync.http_port", port: conf.Options.IncrSyncHTTPListenPort},
+		{name: "prom.http_port", port: conf.Options.PromHTTPListenPort},
+		{name: "system_profile_port", port: conf.Options.SystemProfilePort},
+	}
+	usedPorts := make(map[int]string, len(monitorPorts))
+	for _, item := range monitorPorts {
+		name := item.name
+		port := item.port
+		if !utils.IsHTTPPortEnabled(port) {
+			continue
+		}
+		if other, ok := usedPorts[port]; ok {
+			return fmt.Errorf("%s should not equal to %s", name, other)
+		}
+		usedPorts[port] = name
 	}
 
 	conf.Options.SystemProfilePort = utils.MayBeRandom(conf.Options.SystemProfilePort)

@@ -3,6 +3,7 @@ package collector
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -31,6 +32,7 @@ type Worker struct {
 	// buffered oplogs . include unack buffer
 	// and send buffer
 	listUnACK []*oplog.GenericOplog
+	unackSize int64
 
 	// ack offset (used for checkpoint)
 	ack, unack int64
@@ -50,11 +52,14 @@ type TransferEventListener struct {
 }
 
 func NewWorker(syncer *OplogSyncer, id uint32) *Worker {
-	return &Worker{
+	worker := &Worker{
 		syncer: syncer,
 		id:     id,
 		queue:  make(chan []*oplog.GenericOplog, conf.Options.IncrSyncWorkerBatchQueueSize),
 	}
+	worker.updateJobsQueuedMetric()
+	worker.updateUnackBufferMetric()
+	return worker
 }
 
 func (worker *Worker) String() string {
@@ -99,6 +104,7 @@ func (worker *Worker) Offer(batch []*oplog.GenericOplog) {
 		atomic.StoreInt64(&worker.unack, utils.TimeStampToInt64(batch[len(batch)-1].Parsed.Timestamp))
 	}
 	worker.queue <- batch
+	worker.updateJobsQueuedMetric()
 }
 
 func (worker *Worker) shouldDelay() bool {
@@ -122,6 +128,7 @@ func (worker *Worker) findFirstAvailableBatch() []*oplog.GenericOplog {
 	for {
 		select {
 		case batch = <-worker.queue:
+			worker.updateJobsQueuedMetric()
 		case <-time.After(DDLCheckpointInterval * time.Millisecond): // timeout, add probe message here
 			return nil
 		}
@@ -208,6 +215,7 @@ func (worker *Worker) transfer(batch []*oplog.GenericOplog) {
 				worker.retain(batch)
 				// update ack
 				atomic.StoreInt64(&worker.ack, replyAndAcked)
+				worker.observePutDelay(replyAndAcked, time.Now().UTC())
 				done = true
 			}
 			// remove all unack values which are smaller than worker.ack
@@ -215,7 +223,7 @@ func (worker *Worker) transfer(batch []*oplog.GenericOplog) {
 			// reset
 			worker.retransmit = false
 			// notify success listener
-			worker.syncer.replMetric.ReplStatus.Clear(utils.TunnelSendBad)
+			worker.syncer.replMetric.ClearReplStatus(utils.TunnelSendBad)
 
 		case replyAndAcked == tunnel.ReplyRetransmission:
 			LOG.Info("%s received ReplyRetransmission reply, now status %t", worker, worker.retransmit)
@@ -229,7 +237,7 @@ func (worker *Worker) transfer(batch []*oplog.GenericOplog) {
 			// notify failed retry listener
 			worker.syncer.replMetric.AddFailed(1)
 			//worker.retransmit = true
-			worker.syncer.replMetric.ReplStatus.Update(utils.TunnelSendBad)
+			worker.syncer.replMetric.SetReplStatus(utils.TunnelSendBad)
 		}
 	}
 }
@@ -239,11 +247,14 @@ func (worker *Worker) probe() {
 		// only change ack offset on reply is OK
 		worker.syncer.replMetric.SetLSNACK(replyAcked)
 		atomic.StoreInt64(&worker.ack, replyAcked)
+		worker.observePutDelay(replyAcked, time.Now().UTC())
 	}
 }
 
 func (worker *Worker) retain(batch []*oplog.GenericOplog) {
 	worker.listUnACK = append(worker.listUnACK, batch...)
+	atomic.StoreInt64(&worker.unackSize, int64(len(worker.listUnACK)))
+	worker.updateUnackBufferMetric()
 	LOG.Debug("%s copy batch oplogs [%d] to listUnACK count. UnACK remained [%d]",
 		worker, len(batch), len(worker.listUnACK))
 }
@@ -257,8 +268,50 @@ func (worker *Worker) purgeACK() {
 		LOG.Debug("%s purge unAcked [lsn_ack:%d]. keep slice position from %d util %d",
 			worker, worker.ack, bigger, len(worker.listUnACK))
 		worker.listUnACK = worker.listUnACK[bigger:]
+		atomic.StoreInt64(&worker.unackSize, int64(len(worker.listUnACK)))
+		worker.updateUnackBufferMetric()
 		worker.syncer.replMetric.AddSuccess(uint64(bigger))
 	}
+}
+
+func (worker *Worker) observePutDelay(ack int64, now time.Time) {
+	if ack <= 0 || worker.syncer == nil || worker.syncer.replMetric == nil || len(worker.listUnACK) == 0 {
+		return
+	}
+
+	bigger := sort.Search(len(worker.listUnACK), func(i int) bool {
+		return utils.TimeStampToInt64(worker.listUnACK[i].Parsed.Timestamp) > ack
+	})
+	if bigger == 0 {
+		return
+	}
+
+	sourceTime := sourceTimeFromGenericOplog(worker.listUnACK[bigger-1])
+	worker.syncer.replMetric.SetOplogPutDelay(now.UTC().UnixMilli() - sourceTime.UnixMilli())
+}
+
+func (worker *Worker) updateJobsQueuedMetric() {
+	if worker == nil || worker.syncer == nil || worker.queue == nil {
+		return
+	}
+
+	utils.WorkerJobsQueuedProm.WithLabelValues(
+		worker.syncer.Replset,
+		utils.TypeIncr,
+		strconv.FormatUint(uint64(worker.id), 10),
+	).Set(float64(len(worker.queue)))
+}
+
+func (worker *Worker) updateUnackBufferMetric() {
+	if worker == nil || worker.syncer == nil {
+		return
+	}
+
+	utils.WorkerUnackBufferUsedProm.WithLabelValues(
+		worker.syncer.Replset,
+		utils.TypeIncr,
+		strconv.FormatUint(uint64(worker.id), 10),
+	).Set(float64(atomic.LoadInt64(&worker.unackSize)))
 }
 
 func (worker *Worker) RestAPI() {

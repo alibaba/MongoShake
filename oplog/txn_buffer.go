@@ -21,14 +21,14 @@ var ErrNotTransaction = errors.New("oplog entry is not a transaction")
 
 type txnTask struct {
 	meta TxnMeta
-	op   ParsedLog
+	op   *GenericOplog
 }
 
 // txnState tracks an individual transaction, including storage of related ops
 // and communication channels.  It includes a WaitGroup for waiting on
 // transaction-related goroutines.
 type txnState struct {
-	buffer     []ParsedLog
+	buffer     []*GenericOplog
 	ingestChan chan txnTask
 	ingestDone chan struct{}
 	ingestErr  error
@@ -37,13 +37,13 @@ type txnState struct {
 	wg         sync.WaitGroup
 }
 
-func newTxnState(op ParsedLog) *txnState {
+func newTxnState(op *GenericOplog) *txnState {
 	return &txnState{
 		ingestChan: make(chan txnTask),
 		ingestDone: make(chan struct{}),
 		stopChan:   make(chan struct{}),
-		buffer:     make([]ParsedLog, 0),
-		startTime:  GetTxnOpTimeFromOplogEntry(&op),
+		buffer:     make([]*GenericOplog, 0),
+		startTime:  GetTxnOpTimeFromOplogEntry(&op.Parsed.ParsedLog),
 	}
 }
 
@@ -94,7 +94,7 @@ func (b *TxnBuffer) Size() int {
 // Must not be called concurrently with other transaction-related operations.
 // Must not be called for a given transaction after starting to stream that
 // transaction.
-func (b *TxnBuffer) AddOp(m TxnMeta, op ParsedLog) error {
+func (b *TxnBuffer) AddOp(m TxnMeta, op *GenericOplog) error {
 	b.Lock()
 	defer b.Unlock()
 
@@ -132,14 +132,19 @@ LOOP:
 		case t := <-state.ingestChan:
 			if t.meta.IsData() {
 				// process it
-				innerOps, err := ExtractInnerOps(&t.op)
+				innerOps, err := ExtractInnerOps(&t.op.Parsed.ParsedLog)
 				if err != nil {
 					state.ingestErr = err
 					break LOOP
 				}
 				// store it
 				for _, op := range innerOps {
-					state.buffer = append(state.buffer, op)
+					state.buffer = append(state.buffer, &GenericOplog{
+						Parsed: &PartialLog{
+							ParsedLog: op,
+						},
+						SourceTime: t.op.SourceTime,
+					})
 				}
 			}
 			if t.meta.IsFinal() {
@@ -161,11 +166,11 @@ LOOP:
 // Must not be called concurrently with other transaction-related operations.
 // For a given transaction, it must not be called until after a final oplog
 // entry has been passed to AddOp and it must not be called more than once.
-func (b *TxnBuffer) GetTxnStream(m TxnMeta) (<-chan ParsedLog, <-chan error) {
+func (b *TxnBuffer) GetTxnStream(m TxnMeta) (<-chan *GenericOplog, <-chan error) {
 	b.Lock()
 	defer b.Unlock()
 
-	opChan := make(chan ParsedLog)
+	opChan := make(chan *GenericOplog)
 	errChan := make(chan error, 1)
 
 	if b.stopped {
@@ -197,7 +202,7 @@ func (b *TxnBuffer) GetTxnStream(m TxnMeta) (<-chan ParsedLog, <-chan error) {
 	return opChan, errChan
 }
 
-func (b *TxnBuffer) streamer(state *txnState, opChan chan<- ParsedLog, errChan chan<- error) {
+func (b *TxnBuffer) streamer(state *txnState, opChan chan<- *GenericOplog, errChan chan<- error) {
 LOOP:
 	for _, op := range state.buffer {
 		select {
@@ -291,7 +296,7 @@ func (b *TxnBuffer) Stop() error {
 }
 
 // sendErrAndClose is a utility for putting an error on a channel before closing.
-func sendErrAndClose(o chan ParsedLog, e chan error, err error) (chan ParsedLog, chan error) {
+func sendErrAndClose(o chan *GenericOplog, e chan error, err error) (chan *GenericOplog, chan error) {
 	e <- err
 	close(o)
 	close(e)

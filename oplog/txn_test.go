@@ -101,7 +101,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-//------------- fot txn_meta.go ----------------
+// ------------- fot txn_meta.go ----------------
 func TestTxnMeta(t *testing.T) {
 	for _, c := range testCases {
 		t.Run(c.name, func(*testing.T) {
@@ -173,7 +173,7 @@ func runTxnMetaCase(t *testing.T, c *TestData) {
 	}
 }
 
-//------------- fot txn_buffer.go ----------------
+// ------------- fot txn_buffer.go ----------------
 // test each type of transaction individually and serially.
 func TestSingleTxnBuffer(t *testing.T) {
 	buffer := NewBuffer()
@@ -207,7 +207,11 @@ func testBufferOps(t *testing.T, buffer *TxnBuffer, ops []ParsedLog, txnByID map
 		if !meta.IsTxn() {
 			return
 		}
-		err := buffer.AddOp(meta, op)
+		err := buffer.AddOp(meta, &GenericOplog{
+			Parsed: &PartialLog{
+				ParsedLog: op,
+			},
+		})
 		if err != nil {
 			t.Fatalf("AddOp failed: %v", err)
 		}
@@ -337,7 +341,11 @@ func TestOldestTimestamp(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = buffer.AddOp(meta, v)
+		err = buffer.AddOp(meta, &GenericOplog{
+			Parsed: &PartialLog{
+				ParsedLog: v,
+			},
+		})
 		if err != nil {
 			t.Fatal(err)
 		}

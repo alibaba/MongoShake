@@ -15,6 +15,7 @@ type Configuration struct {
 	MasterQuorum                           bool     `config:"master_quorum"`
 	FullSyncHTTPListenPort                 int      `config:"full_sync.http_port"`
 	IncrSyncHTTPListenPort                 int      `config:"incr_sync.http_port"`
+	PromHTTPListenPort                     int      `config:"prom.http_port"`
 	SystemProfilePort                      int      `config:"system_profile_port"`
 	LogLevel                               string   `config:"log.level"`
 	LogDirectory                           string   `config:"log.dir"`

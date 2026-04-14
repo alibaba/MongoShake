@@ -70,6 +70,8 @@ type ReplicationMetric struct {
 	LSN             int64
 	LSNAck          int64
 	LSNCheckpoint   int64
+	OplogGetDelay   int64
+	OplogPutDelay   int64
 
 	OplogMaxSize int64
 	OplogAvgSize int64
@@ -95,6 +97,8 @@ func NewMetric(name, stage string, subscribe uint64) *ReplicationMetric {
 
 func (metric *ReplicationMetric) init() {
 	metric.TableOperations = NewTableOps()
+	metric.setReplStatusCode(WorkGood)
+	metric.updateLSNLagMetrics()
 }
 
 func (metric *ReplicationMetric) Close() {
@@ -203,64 +207,82 @@ func (metric *ReplicationMetric) Tps() uint64 {
 
 func (metric *ReplicationMetric) AddSuccess(incr uint64) {
 	atomic.AddUint64(&metric.OplogSuccess.Value, incr)
+	OplogSuccessProm.WithLabelValues(metric.NAME, metric.STAGE).Add(float64(incr))
 }
 
 func (metric *ReplicationMetric) AddGet(incr uint64) {
 	atomic.AddUint64(&metric.OplogGet.Value, incr)
+	OplogGetProm.WithLabelValues(metric.NAME, metric.STAGE).Add(float64(incr))
 }
 
 func (metric *ReplicationMetric) AddCheckpoint(number uint64) {
 	atomic.AddUint64(&metric.CheckpointTimes, number)
+	CheckpointTimesProm.WithLabelValues(metric.NAME, metric.STAGE).Add(float64(number))
 }
 
 func (metric *ReplicationMetric) AddRetransmission(number uint64) {
 	atomic.AddUint64(&metric.Retransmission, number)
+	RetransmissionProm.WithLabelValues(metric.NAME, metric.STAGE).Add(float64(number))
 }
 
 func (metric *ReplicationMetric) AddTunnelTraffic(number uint64) {
 	atomic.AddUint64(&metric.TunnelTraffic, number)
+	TunnelTrafficProm.WithLabelValues(metric.NAME, metric.STAGE).Add(float64(number))
 }
 
 func (metric *ReplicationMetric) AddFilter(incr uint64) {
 	atomic.AddUint64(&metric.OplogFilter.Value, incr)
+	OplogFilterProm.WithLabelValues(metric.NAME, metric.STAGE).Add(float64(incr))
 }
 
 func (metric *ReplicationMetric) AddApply(incr uint64) {
 	atomic.AddUint64(&metric.OplogApply.Value, incr)
+	OplogApplyProm.WithLabelValues(metric.NAME, metric.STAGE).Add(float64(incr))
 }
 
 func (metric *ReplicationMetric) AddFailed(incr uint64) {
 	atomic.AddUint64(&metric.OplogFail.Value, incr)
+	OplogFailProm.WithLabelValues(metric.NAME, metric.STAGE).Add(float64(incr))
 }
 
 func (metric *ReplicationMetric) AddConsume(incr uint64) {
 	atomic.AddUint64(&metric.OplogConsume.Value, incr)
+	OplogConsumeProm.WithLabelValues(metric.NAME, metric.STAGE).Add(float64(incr))
 }
 
 func (metric *ReplicationMetric) SetOplogMax(max int64) {
 	forwardCas(&metric.OplogMaxSize, max)
+	OplogMaxSizeProm.WithLabelValues(metric.NAME, metric.STAGE).Set(float64(max))
 }
 
 func (metric *ReplicationMetric) SetOplogAvg(size int64) {
 	// not atomic update ! acceptable
 	avg := (atomic.LoadInt64(&metric.OplogAvgSize) + size) / 2
 	atomic.StoreInt64(&metric.OplogAvgSize, avg)
+	OplogAvgSizeProm.WithLabelValues(metric.NAME, metric.STAGE).Set(float64(avg))
 }
 
 func (metric *ReplicationMetric) SetLSNCheckpoint(ckpt int64) {
 	forwardCas(&metric.LSNCheckpoint, ckpt)
+	LSNCheckpointProm.WithLabelValues(metric.NAME, metric.STAGE).Set(float64(ckpt))
+	metric.updateLSNLagMetrics()
 }
 
 func (metric *ReplicationMetric) SetLSN(lsn int64) {
 	forwardCas(&metric.LSN, lsn)
+	LSNProm.WithLabelValues(metric.NAME, metric.STAGE).Set(float64(lsn))
+	metric.updateLSNLagMetrics()
 }
 
 func (metric *ReplicationMetric) SetLSNACK(ack int64) {
 	forwardCas(&metric.LSNAck, ack)
+	LSNAckProm.WithLabelValues(metric.NAME, metric.STAGE).Set(float64(ack))
+	metric.updateLSNLagMetrics()
 }
 
 func (metric *ReplicationMetric) AddTableOps(table string, n uint64) {
 	metric.TableOperations.Incr(table, n)
+	TableOperationsProm.WithLabelValues(metric.NAME, metric.STAGE, table).Add(float64(n))
 }
 
 func (metric *ReplicationMetric) TableOps() map[string]uint64 {
@@ -269,9 +291,55 @@ func (metric *ReplicationMetric) TableOps() map[string]uint64 {
 
 func (metric *ReplicationMetric) AddWriteFailed(incr uint64) {
 	atomic.AddUint64(&metric.OplogWriteFail.Value, incr)
+	OplogWriteFailProm.WithLabelValues(metric.NAME, metric.STAGE).Add(float64(incr))
+}
+
+func (metric *ReplicationMetric) SetOplogGetDelay(delay int64) {
+	atomic.StoreInt64(&metric.OplogGetDelay, delay)
+	OplogGetDelayProm.WithLabelValues(metric.NAME, metric.STAGE).Set(float64(delay))
+}
+
+func (metric *ReplicationMetric) SetOplogPutDelay(delay int64) {
+	atomic.StoreInt64(&metric.OplogPutDelay, delay)
+	OplogPutDelayProm.WithLabelValues(metric.NAME, metric.STAGE).Set(float64(delay))
+}
+
+func (metric *ReplicationMetric) SetReplStatus(status uint64) {
+	metric.ReplStatus.Update(status)
+	metric.setReplStatusCode(status)
+}
+
+func (metric *ReplicationMetric) ClearReplStatus(status uint64) {
+	metric.ReplStatus.Clear(status)
+	metric.setReplStatusCode(atomic.LoadUint64((*uint64)(&metric.ReplStatus)))
+}
+
+func (metric *ReplicationMetric) setReplStatusCode(status uint64) {
+	ReplStatusCodeProm.WithLabelValues(metric.NAME, metric.STAGE).Set(float64(status))
+}
+
+func (metric *ReplicationMetric) updateLSNLagMetrics() {
+	lsn := atomic.LoadInt64(&metric.LSN)
+	ack := atomic.LoadInt64(&metric.LSNAck)
+	ckpt := atomic.LoadInt64(&metric.LSNCheckpoint)
+
+	LSNAckLagSecondsProm.WithLabelValues(metric.NAME, metric.STAGE).Set(float64(lsnLagSeconds(lsn, ack)))
+	LSNCheckpointLagSecondsProm.WithLabelValues(metric.NAME, metric.STAGE).Set(float64(lsnLagSeconds(lsn, ckpt)))
 }
 
 /************************************************************/
+
+func lsnLagSeconds(lsn, compare int64) int64 {
+	if lsn <= 0 || compare <= 0 {
+		return 0
+	}
+
+	lag := ExtractMongoTimestamp(lsn) - ExtractMongoTimestamp(compare)
+	if lag < 0 {
+		return 0
+	}
+	return lag
+}
 
 func forwardCas(v *int64, new int64) {
 	var current int64

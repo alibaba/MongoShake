@@ -336,6 +336,11 @@ type DBSyncer struct {
 	// below are metric info
 	metricNsMapLock sync.Mutex
 	metricNsMap     map[utils.NS]*CollectionMetric // namespace map: db.collection -> collection metric
+
+	totalCollections      int64
+	finishedCollections   int64
+	processingCollections int64
+	waitingCollections    int64
 }
 
 func NewDBSyncer(
@@ -360,6 +365,7 @@ func NewDBSyncer(
 		replMetric:     utils.NewMetric(fromReplset, utils.TypeFull, utils.METRIC_TPS|utils.METRIC_SUCCESS),
 		FromIsSharding: fromIsSharding,
 	}
+	syncer.updateCollectionProgressMetrics()
 
 	return syncer
 }
@@ -403,6 +409,9 @@ func (syncer *DBSyncer) Start() (syncError error) {
 	for _, ns := range nsList {
 		syncer.metricNsMap[ns] = NewCollectionMetric()
 	}
+	atomic.StoreInt64(&syncer.totalCollections, int64(len(nsList)))
+	atomic.StoreInt64(&syncer.waitingCollections, int64(len(nsList)))
+	syncer.updateCollectionProgressMetrics()
 
 	collExecutorParallel := conf.Options.FullSyncReaderCollectionParallel
 	namespaces := make(chan utils.NS, collExecutorParallel)
@@ -470,7 +479,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 
 	// metric
 	collectionMetric := syncer.metricNsMap[ns]
-	collectionMetric.CollectionStatus = StatusProcessing
+	syncer.markCollectionProcessing(collectionMetric)
 	collectionMetric.TotalCount = splitter.count
 
 	// run in several pieces
@@ -507,7 +516,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 	// fetch index
 
 	// set collection finish
-	collectionMetric.CollectionStatus = StatusFinish
+	syncer.markCollectionFinished(collectionMetric)
 
 	return nil
 }
@@ -606,4 +615,44 @@ func (syncer *DBSyncer) RestAPI() {
 
 		return ret
 	})
+}
+
+func (syncer *DBSyncer) markCollectionProcessing(collectionMetric *CollectionMetric) {
+	if collectionMetric == nil {
+		return
+	}
+
+	if collectionMetric.CollectionStatus == StatusWaitStart {
+		atomic.AddInt64(&syncer.waitingCollections, -1)
+		atomic.AddInt64(&syncer.processingCollections, 1)
+	}
+	collectionMetric.CollectionStatus = StatusProcessing
+	syncer.updateCollectionProgressMetrics()
+}
+
+func (syncer *DBSyncer) markCollectionFinished(collectionMetric *CollectionMetric) {
+	if collectionMetric == nil {
+		return
+	}
+
+	switch collectionMetric.CollectionStatus {
+	case StatusWaitStart:
+		atomic.AddInt64(&syncer.waitingCollections, -1)
+	case StatusProcessing:
+		atomic.AddInt64(&syncer.processingCollections, -1)
+	}
+	atomic.AddInt64(&syncer.finishedCollections, 1)
+	collectionMetric.CollectionStatus = StatusFinish
+	syncer.updateCollectionProgressMetrics()
+}
+
+func (syncer *DBSyncer) updateCollectionProgressMetrics() {
+	utils.FullSyncCollectionsTotalProm.WithLabelValues(syncer.fromReplset, utils.TypeFull).
+		Set(float64(atomic.LoadInt64(&syncer.totalCollections)))
+	utils.FullSyncCollectionsFinishedProm.WithLabelValues(syncer.fromReplset, utils.TypeFull).
+		Set(float64(atomic.LoadInt64(&syncer.finishedCollections)))
+	utils.FullSyncCollectionsProcessingProm.WithLabelValues(syncer.fromReplset, utils.TypeFull).
+		Set(float64(atomic.LoadInt64(&syncer.processingCollections)))
+	utils.FullSyncCollectionsWaitingProm.WithLabelValues(syncer.fromReplset, utils.TypeFull).
+		Set(float64(atomic.LoadInt64(&syncer.waitingCollections)))
 }
