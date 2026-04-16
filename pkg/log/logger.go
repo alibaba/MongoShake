@@ -177,7 +177,7 @@ func encodeLevel(level zapcore.Level, enc zapcore.PrimitiveArrayEncoder) {
 	}
 }
 
-func formatArgs(args ...interface{}) string {
+func formatArgs(args ...any) string {
 	if len(args) == 0 {
 		return ""
 	}
@@ -190,92 +190,92 @@ func (l *ZapLogger) log(level zapcore.Level, message string) {
 	}
 }
 
-func (l *ZapLogger) Printf(format string, args ...interface{}) {
+func (l *ZapLogger) Printf(format string, args ...any) {
 	l.Infof(format, args...)
 }
 
-func (l *ZapLogger) Print(args ...interface{}) {
+func (l *ZapLogger) Print(args ...any) {
 	l.Infof("%s", formatArgs(args...))
 }
 
-func (l *ZapLogger) Println(args ...interface{}) {
+func (l *ZapLogger) Println(args ...any) {
 	l.Infof("%s", formatArgs(args...))
 }
 
-func (l *ZapLogger) Debugf(format string, args ...interface{}) {
+func (l *ZapLogger) Debugf(format string, args ...any) {
 	l.logger.Debugf(format, args...)
 }
 
-func (l *ZapLogger) Infof(format string, args ...interface{}) {
+func (l *ZapLogger) Infof(format string, args ...any) {
 	l.logger.Infof(format, args...)
 }
 
-func (l *ZapLogger) Warnf(format string, args ...interface{}) {
+func (l *ZapLogger) Warnf(format string, args ...any) {
 	l.logger.Warnf(format, args...)
 }
 
-func (l *ZapLogger) Errorf(format string, args ...interface{}) {
+func (l *ZapLogger) Errorf(format string, args ...any) {
 	l.logger.Errorf(format, args...)
 }
 
-func (l *ZapLogger) Criticalf(format string, args ...interface{}) {
+func (l *ZapLogger) Criticalf(format string, args ...any) {
 	l.log(zapcore.DPanicLevel, fmt.Sprintf(format, args...))
 }
 
-func (l *ZapLogger) Fatalf(format string, args ...interface{}) {
+func (l *ZapLogger) Fatalf(format string, args ...any) {
 	message := fmt.Sprintf(format, args...)
 	l.log(zapcore.FatalLevel, message)
 	_ = l.Sync()
 	os.Exit(1)
 }
 
-func (l *ZapLogger) Panicf(format string, args ...interface{}) {
+func (l *ZapLogger) Panicf(format string, args ...any) {
 	message := fmt.Sprintf(format, args...)
 	l.log(zapcore.PanicLevel, message)
 	_ = l.Sync()
 	panic(message)
 }
 
-func (l *ZapLogger) Debug(format string, args ...interface{}) {
+func (l *ZapLogger) Debug(format string, args ...any) {
 	l.Debugf(format, args...)
 }
 
-func (l *ZapLogger) Info(format string, args ...interface{}) {
+func (l *ZapLogger) Info(format string, args ...any) {
 	l.Infof(format, args...)
 }
 
-func (l *ZapLogger) Warn(format string, args ...interface{}) {
+func (l *ZapLogger) Warn(format string, args ...any) {
 	l.Warnf(format, args...)
 }
 
-func (l *ZapLogger) Error(format string, args ...interface{}) {
+func (l *ZapLogger) Error(format string, args ...any) {
 	l.Errorf(format, args...)
 }
 
-func (l *ZapLogger) Critical(format string, args ...interface{}) {
+func (l *ZapLogger) Critical(format string, args ...any) {
 	l.Criticalf(format, args...)
 }
 
-func (l *ZapLogger) Fatal(args ...interface{}) {
+func (l *ZapLogger) Fatal(args ...any) {
 	l.Fatalf("%s", formatArgs(args...))
 }
 
-func (l *ZapLogger) Fatalln(args ...interface{}) {
+func (l *ZapLogger) Fatalln(args ...any) {
 	l.Fatalf("%s", formatArgs(args...))
 }
 
-func (l *ZapLogger) Panic(args ...interface{}) {
+func (l *ZapLogger) Panic(args ...any) {
 	message := formatArgs(args...)
 	l.log(zapcore.PanicLevel, message)
 	_ = l.Sync()
 	panic(args)
 }
 
-func (l *ZapLogger) Crashf(format string, args ...interface{}) {
+func (l *ZapLogger) Crashf(format string, args ...any) {
 	l.Panicf(format, args...)
 }
 
-func (l *ZapLogger) Crash(args ...interface{}) {
+func (l *ZapLogger) Crash(args ...any) {
 	l.Panic(args...)
 }
 
