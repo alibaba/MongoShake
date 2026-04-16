@@ -10,7 +10,7 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	sourceReader "github.com/alibaba/MongoShake/v2/collector/reader"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 /*
@@ -45,13 +45,13 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 	confTs32 := conf.Options.CheckpointStartPosition
 	confTsMongoTs := confTs32 << 32
 
-	LOG.Info("all node timestamp map: %v CheckpointStartPosition:%v", tsMap, utils.Int64ToTimestamp(confTsMongoTs))
+	l.Logger.Infof("all node timestamp map: %v CheckpointStartPosition:%v", tsMap, utils.Int64ToTimestamp(confTsMongoTs))
 
 	// fetch mongos checkpoint when using change stream
 	var mongosCkpt *ckpt.CheckpointContext
 	if coordinator.MongoS != nil &&
 		conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
-		LOG.Info("try to fetch mongos checkpoint")
+		l.Logger.Infof("try to fetch mongos checkpoint")
 		ckptManager := ckpt.NewCheckpointManager(coordinator.MongoS.ReplicaName, 0)
 		ckptVar, exist, err := ckptManager.Get()
 		if err != nil {
@@ -83,16 +83,16 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 				ckptRemote = ckptVar
 			}
 
-			LOG.Info("%s checkpoint using mongod/replica_set: %s, ckptRemote set? [%v]", replName,
+			l.Logger.Infof("%s checkpoint using mongod/replica_set: %s, ckptRemote set? [%v]", replName,
 				ckptVar, ckptRemote != nil)
 		} else {
 			ckptRemote = mongosCkpt
-			LOG.Info("%s checkpoint using mongos: %s", replName, mongosCkpt)
+			l.Logger.Infof("%s checkpoint using mongos: %s", replName, mongosCkpt)
 		}
 
 		if ckptRemote == nil {
 			if syncModeAll || confTsMongoTs > (1<<32) && ts.Oldest >= confTsMongoTs {
-				LOG.Info("%s syncModeAll[%v] ts.Oldest[%v], confTsMongoTs[%v]", replName, syncModeAll, ts.Oldest,
+				l.Logger.Infof("%s syncModeAll[%v] ts.Oldest[%v], confTsMongoTs[%v]", replName, syncModeAll, ts.Oldest,
 					confTsMongoTs)
 				return smallestNew, nil, false, nil
 			}
@@ -101,7 +101,7 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 			// checkpoint less than the oldest timestamp, ckpt.OplogDiskQueue == "" means not enable
 			// disk persist
 			if ts.Oldest >= ckptRemote.Timestamp && ckptRemote.OplogDiskQueue == "" {
-				LOG.Info("%s ts.Oldest[%v] >= ckptRemote.Timestamp[%v], need full sync", replName,
+				l.Logger.Infof("%s ts.Oldest[%v] >= ckptRemote.Timestamp[%v], need full sync", replName,
 					ts.Oldest, ckptRemote.Timestamp)
 
 				// can't run incr sync directly
@@ -117,7 +117,7 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 func (coordinator *ReplicationCoordinator) isCheckpointExist() (bool, interface{}, error) {
 	ckptManager := ckpt.NewCheckpointManager(coordinator.RealSourceFullSync[0].ReplicaName, 0)
 	ckptVar, exist, err := ckptManager.Get()
-	LOG.Info("isCheckpointExist? %v %v %v", ckptVar, exist, err)
+	l.Logger.Infof("isCheckpointExist? %v %v %v", ckptVar, exist, err)
 	if err != nil {
 		return false, 0, fmt.Errorf("get mongod[%v] checkpoint failed: %v", coordinator.RealSourceFullSync[0].ReplicaName, err)
 	} else if !exist {
@@ -134,7 +134,7 @@ func (coordinator *ReplicationCoordinator) isCheckpointExist() (bool, interface{
 			return false, 0, fmt.Errorf("fetch PBRT fail: %v", err)
 		}
 
-		LOG.Info("isCheckpointExist change stream resumeToken: %v", resumeToken)
+		l.Logger.Infof("isCheckpointExist change stream resumeToken: %v", resumeToken)
 		return false, resumeToken, nil
 	}
 	return true, ckptVar.Timestamp, nil
@@ -155,7 +155,7 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 		if syncMode == utils.VarSyncModeIncr {
 
 			_, startTsMapTmp, _, _ := coordinator.compareCheckpointAndDbTs(syncMode == utils.VarSyncModeAll)
-			LOG.Info("for only mongo_s_url address exists startTsMap[%v]", startTsMapTmp)
+			l.Logger.Infof("for only mongo_s_url address exists startTsMap[%v]", startTsMapTmp)
 
 			return syncMode, startTsMapTmp, int64(0), nil
 		}
@@ -180,7 +180,7 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 	}
 
 	if canIncrSync {
-		LOG.Info("sync mode run %v", utils.VarSyncModeIncr)
+		l.Logger.Infof("sync mode run %v", utils.VarSyncModeIncr)
 		return utils.VarSyncModeIncr, startTsMap, int64(0), nil
 	} else if syncMode == utils.VarSyncModeIncr || conf.Options.Tunnel != utils.VarTunnelDirect {
 		// bugfix v2.4.11: if can not run incr sync directly, return error when sync_mode == "incr"
@@ -199,7 +199,7 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 	var mutex sync.Mutex
 	indexMap := make(map[utils.NS][]bson.D)
 	for _, src := range sourceList {
-		LOG.Info("source[%v] url[%s] start fetching index...",
+		l.Logger.Infof("source[%v] url[%s] start fetching index...",
 			src.ReplicaName, utils.BlockMongoUrlPassword(src.URL, "***"))
 		// 1. fetch namespace
 		nsList, _, err := utils.GetDbNamespace(src.URL, filterFunc, conf.Options.MongoSslRootCaFile)
@@ -207,7 +207,7 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 			return nil, fmt.Errorf("source[%v] get namespace failed: %v", src.ReplicaName, err)
 		}
 
-		LOG.Info("index namespace list: %v", nsList)
+		l.Logger.Infof("index namespace list: %v", nsList)
 		// 2. build connection
 		conn, err := utils.NewMongoCommunityConn(src.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
 			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
@@ -233,7 +233,7 @@ func fetchIndexes(sourceList []*utils.MongoSource, filterFunc func(name string) 
 			mutex.Unlock()
 		}
 
-		LOG.Info("source[%v] url[%s] finish fetching index",
+		l.Logger.Infof("source[%v] url[%s] finish fetching index",
 			src.ReplicaName, utils.BlockMongoUrlPassword(src.URL, "***"))
 	}
 	return indexMap, nil

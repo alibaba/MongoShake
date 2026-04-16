@@ -8,7 +8,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 // OplogFilter include: AutologousFilter, NamespaceFilter, GidFilter, NoopFilter, DDLFilter
@@ -21,7 +21,7 @@ type OplogFilterChain []OplogFilter
 func (chain OplogFilterChain) IterateFilter(log *oplog.PartialLog) bool {
 	for _, filter := range chain {
 		if filter.Filter(log) {
-			LOG.Debug("%v filter oplog[%v]", reflect.TypeOf(filter), log)
+			l.Logger.Debugf("%v filter oplog[%v]", reflect.TypeOf(filter), log)
 			return true
 		}
 	}
@@ -83,7 +83,7 @@ func (filter *OpTypeFilter) Filter(log *oplog.PartialLog) bool {
 	}
 
 	oplog.SetFiled(log.Object, "applyOps", remainOps)
-	LOG.Info("OpTypeFilter filtered %d inner applyOps ops, drop oplog?[%v], after reorganize: %v",
+	l.Logger.Infof("OpTypeFilter filtered %d inner applyOps ops, drop oplog?[%v], after reorganize: %v",
 		filteredCount, len(remainOps) == 0, log.Object)
 	return len(remainOps) == 0
 }
@@ -105,7 +105,7 @@ func (filter *OpTypeFilter) hasApplyOpsDMLFilter() bool {
 func (filter *OpTypeFilter) filterApplyOpsDML(logObject bson.D) (bson.A, int, bool) {
 	ops, err := oplog.NormalizeApplyOps(logObject)
 	if err != nil {
-		_ = LOG.Error("normalize applyOps failed: %v. log:%+v", err, logObject)
+		l.Logger.Errorf("normalize applyOps failed: %v. log:%+v", err, logObject)
 		return nil, 0, false
 	}
 
@@ -114,12 +114,12 @@ func (filter *OpTypeFilter) filterApplyOpsDML(logObject bson.D) (bson.A, int, bo
 	for _, ele := range ops {
 		innerOperation, ok := oplog.GetKey(ele, "op").(string)
 		if !ok {
-			_ = LOG.Warn("OpTypeFilter meets illegal applyOps inner op: %v", ele)
+			l.Logger.Warnf("OpTypeFilter meets illegal applyOps inner op: %v", ele)
 			return nil, 0, false
 		}
 
 		if filter.shouldFilterApplyOpsInnerOp(innerOperation) {
-			LOG.Debug("OpTypeFilter filter inner %s op in applyOps: %v", innerOperation, ele)
+			l.Logger.Debugf("OpTypeFilter filter inner %s op in applyOps: %v", innerOperation, ele)
 			filteredCount++
 			continue
 		}
@@ -186,7 +186,7 @@ func (filter *AutologousFilter) Filter(log *oplog.PartialLog) bool {
 	if log.Namespace == "admin.$cmd" && operation == "applyOps" {
 		ns, err := oplog.ExtractInnerNs(&log.ParsedLog)
 		if err != nil {
-			_ = LOG.Warn("ExtractInnerNs meets error:%v", err)
+			l.Logger.Warnf("ExtractInnerNs meets error:%v", err)
 			return false
 		}
 		if ns == "config.system.sessions" || ns == "config.system.preimages" {
@@ -275,7 +275,7 @@ func NewNamespaceFilter(white, black []string) *NamespaceFilter {
 func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 	var result bool
 
-	LOG.Debug("NamespaceFilter check oplog:%v", log.Object)
+	l.Logger.Debugf("NamespaceFilter check oplog:%v", log.Object)
 
 	db := strings.SplitN(log.Namespace, ".", 2)[0]
 	if log.Operation != "c" {
@@ -295,7 +295,7 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 		// DDL
 		operation, found := oplog.ExtraCommandName(log.Object)
 		if !found {
-			_ = LOG.Warn("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
+			l.Logger.Warnf("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
 			return false
 		}
 
@@ -329,7 +329,7 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 		case "emptycapped":
 			col, ok := oplog.GetKey(log.Object, operation).(string)
 			if !ok {
-				LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, log.Object)
+				l.Logger.Warnf("extraCommandName meets illegal %v oplog %v, ignore!", operation, log.Object)
 				return false
 			}
 			log.Namespace = fmt.Sprintf("%s.%s", db, col)
@@ -338,7 +338,7 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 			// { "renameCollection" : "my.tbl", "to" : "my.my", "stayTemp" : false, "dropTarget" : false }
 			ns, ok := oplog.GetKey(log.Object, operation).(string)
 			if !ok {
-				_ = LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, log.Object)
+				l.Logger.Warnf("extraCommandName meets illegal %v oplog %v, ignore!", operation, log.Object)
 				return false
 			}
 			log.Namespace = ns
@@ -348,7 +348,7 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 			// also handle vectored insert oplog format with {multiOpType:1} introduced in 8.0
 			ops, err := oplog.NormalizeApplyOps(log.Object)
 			if err != nil {
-				_ = LOG.Error("normalize applyOps failed: %v. log:%+v", err, log.Object)
+				l.Logger.Errorf("normalize applyOps failed: %v. log:%+v", err, log.Object)
 				return false
 			}
 			var remainOps bson.A
@@ -361,17 +361,17 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 				innerNs := oplog.GetKey(ele, "ns").(string)
 				if filter.FilterNs(innerNs) {
 					if isVectoredInsert {
-						LOG.Info("filter vectored insert ops with ns:%v in o.applyOps oplog", innerNs)
+						l.Logger.Infof("filter vectored insert ops with ns:%v in o.applyOps oplog", innerNs)
 						return true
 					}
-					LOG.Info("filter inner op with ns:%v in txn:%v", innerNs, log.Object)
+					l.Logger.Infof("filter inner op with ns:%v in txn:%v", innerNs, log.Object)
 					continue
 				} else {
 					remainOps = append(remainOps, ele)
 				}
 			}
 			oplog.SetFiled(log.Object, "applyOps", remainOps)
-			LOG.Info("NamespaceFilter applyOps filter?[%v], after reorganize: %v", len(remainOps) == 0, log.Object)
+			l.Logger.Infof("NamespaceFilter applyOps filter?[%v], after reorganize: %v", len(remainOps) == 0, log.Object)
 			return len(remainOps) == 0
 		default:
 			// such as: dropDatabase

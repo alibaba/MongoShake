@@ -9,7 +9,7 @@ import (
 	"github.com/alibaba/MongoShake/v2/collector"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition interface{},
@@ -18,7 +18,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 
 	// prepare all syncer. only one syncer while source is ReplicaSet or mongos
 	// otherwise one syncer connects to one shard
-	LOG.Info("start incr replication")
+	l.Logger.Infof("start incr replication")
 	for i, src := range coordinator.RealSourceIncrSync {
 		var syncerTs interface{}
 
@@ -36,16 +36,16 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		} else {
 			// read from mongos
 			syncerTs = oplogStartPosition
-			LOG.Info("read from mongos src.ReplicaName:%s ts:%v", src.ReplicaName, startTsMap[src.ReplicaName])
+			l.Logger.Infof("read from mongos src.ReplicaName:%s ts:%v", src.ReplicaName, startTsMap[src.ReplicaName])
 			if len(conf.Options.MongoSUrl) > 0 && len(conf.Options.MongoCsUrl) == 0 && len(conf.Options.MongoUrls) == 0 {
 				if v, ok := startTsMap[src.ReplicaName]; ok {
 					syncerTs = v
-					LOG.Info("read from mongos and set ts src.ReplicaName:%s ts:%v", src.ReplicaName, startTsMap[src.ReplicaName])
+					l.Logger.Infof("read from mongos and set ts src.ReplicaName:%s ts:%v", src.ReplicaName, startTsMap[src.ReplicaName])
 				}
 			}
 		}
 
-		LOG.Info("RealSourceIncrSync[%d]: %s, startTimestamp[%v]", i, src, syncerTs)
+		l.Logger.Infof("RealSourceIncrSync[%d]: %s, startTimestamp[%v]", i, src, syncerTs)
 		syncer := collector.NewOplogSyncer(src.ReplicaName, syncerTs, fullSyncFinishPosition, src.URL,
 			src.Gids)
 		// syncerGroup http api registry
@@ -80,12 +80,12 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	if utils.IsHTTPPortEnabled(conf.Options.IncrSyncHTTPListenPort) {
 		nimo.GoRoutine(func() {
 			if err := utils.IncrSyncHttpApi.Listen(); err != nil {
-				LOG.Critical("start incr sync server with port[%v] failed: %v", conf.Options.IncrSyncHTTPListenPort,
+				l.Logger.Criticalf("start incr sync server with port[%v] failed: %v", conf.Options.IncrSyncHTTPListenPort,
 					err)
 			}
 		})
 	} else {
-		LOG.Info("incr sync http api disabled. port[%v]", conf.Options.IncrSyncHTTPListenPort)
+		l.Logger.Infof("incr sync http api disabled. port[%v]", conf.Options.IncrSyncHTTPListenPort)
 	}
 
 	return nil

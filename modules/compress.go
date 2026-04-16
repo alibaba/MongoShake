@@ -10,7 +10,7 @@ import (
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 	"github.com/alibaba/MongoShake/v2/tunnel"
 )
 
@@ -87,7 +87,7 @@ func (compressor *Compressor) IsRegistered() bool {
 func (compressor *Compressor) Install() bool {
 	var err error
 	if compressor.zipper, err = GetCompressorByName(conf.Options.IncrSyncWorkerOplogCompressor); err != nil {
-		LOG.Critical("Worker create compressor %s failed", conf.Options.IncrSyncWorkerOplogCompressor)
+		l.Logger.Criticalf("Worker create compressor %s failed", conf.Options.IncrSyncWorkerOplogCompressor)
 		return false
 	}
 
@@ -113,11 +113,11 @@ func (compressor *Compressor) Handle(message *tunnel.WMessage) int64 {
 		}
 
 		if compressedSize == 0 || len(compressed) != len(message.RawLogs) {
-			LOG.Critical("Compressor result isn't equivalent. len(compressed) %d, len(Logs) %d", len(compressed), len(message.RawLogs))
+			l.Logger.Criticalf("Compressor result isn't equivalent. len(compressed) %d, len(Logs) %d", len(compressed), len(message.RawLogs))
 			return tunnel.ReplyServerFault
 		}
 
-		LOG.Debug("Compressor-%s condense raw_size(%d), compress_size(%d), compress_ratio %d%%", compressor.zipper.Name(),
+		l.Logger.Debugf("Compressor-%s condense raw_size(%d), compress_size(%d), compress_ratio %d%%", compressor.zipper.Name(),
 			originSize, compressedSize, compressedSize*100/originSize)
 		message.Compress = compressor.zipper.Id()
 		message.RawLogs = compressed

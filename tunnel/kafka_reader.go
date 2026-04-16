@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 	"github.com/alibaba/MongoShake/v2/tunnel/kafka"
 )
 
@@ -17,7 +17,7 @@ type KafkaReader struct {
 func (tunnel *KafkaReader) Link(replayer []Replayer) error {
 	reader, err := kafka.NewReader(tunnel.address)
 	if err != nil {
-		LOG.Critical("KafkaReader link[%v] create reader error[%v]", tunnel.address, err)
+		l.Logger.Criticalf("KafkaReader link[%v] create reader error[%v]", tunnel.address, err)
 		return err
 	}
 

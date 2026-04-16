@@ -11,7 +11,7 @@ import (
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 // DocumentSplitter pre-split the big collection into several pieces
@@ -44,7 +44,7 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 	ds.client, err = utils.NewMongoCommunityConn(ds.src, conf.Options.MongoConnectMode, false,
 		utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, sslRootCaFile)
 	if err != nil {
-		LOG.Error("splitter[%s] connection mongo[%v] failed[%v]", ds,
+		l.Logger.Errorf("splitter[%s] connection mongo[%v] failed[%v]", ds,
 			utils.BlockMongoUrlPassword(ds.src, "***"), err)
 		return nil
 	}
@@ -58,7 +58,7 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 	if err := ds.client.Client.Database(ds.ns.Database).RunCommand(nil,
 		bson.D{{"collStats", ds.ns.Collection}}).Decode(&res); err != nil {
 
-		LOG.Error("splitter[%s] connection mongo[%v] failed[%v]", ds,
+		l.Logger.Errorf("splitter[%s] connection mongo[%v] failed[%v]", ds,
 			utils.BlockMongoUrlPassword(ds.src, "***"), err)
 		return nil
 	}
@@ -70,7 +70,7 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 		ds.pieceByteSize = 1024 * utils.MB
 	}
 
-	LOG.Info("NewDocumentSplitter db[%v] col[%v] res[%v], pieceByteSize[%v]",
+	l.Logger.Infof("NewDocumentSplitter db[%v] col[%v] res[%v], pieceByteSize[%v]",
 		ds.ns.Database, ds.ns.Collection, res, ds.pieceByteSize)
 
 	if conf.Options.FullSyncReaderParallelThread <= 1 {
@@ -81,7 +81,7 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 
 	go func() {
 		if err := ds.Run(); err != nil {
-			LOG.Crash(err)
+			l.Logger.Panicf("%v", err)
 		}
 	}()
 	return ds
@@ -102,9 +102,9 @@ func (ds *DocumentSplitter) Run() error {
 
 	// disable split
 	if conf.Options.FullSyncReaderParallelThread <= 1 {
-		LOG.Info("splitter[%s] disable split or no need", ds)
+		l.Logger.Infof("splitter[%s] disable split or no need", ds)
 		ds.readerChan <- NewDocumentReader(0, ds.src, ds.ns, "", nil, nil, ds.sslRootCaFile)
-		LOG.Info("splitter[%s] exits", ds)
+		l.Logger.Infof("splitter[%s] exits", ds)
 		return nil
 	}
 
@@ -118,22 +118,22 @@ func (ds *DocumentSplitter) Run() error {
 		// {"maxSplitPoints", ds.pieceNumber - 1},
 		{"maxChunkSize", maxChunkSize},
 	}
-	LOG.Info("splitter[%s] splitVector cmd: %v, waiting splitVector return...", ds, splitVectorCmd)
+	l.Logger.Infof("splitter[%s] splitVector cmd: %v, waiting splitVector return...", ds, splitVectorCmd)
 
 	res := SplitVectorResult{}
 	err := ds.client.Client.Database(ds.ns.Database).RunCommand(context.Background(), splitVectorCmd).Decode(&res)
 	// if failed, do not panic, run single thread fetching
 	if err != nil {
-		LOG.Warn("splitter[%s] run splitVector failed[%v], give up parallel fetching", ds, err)
+		l.Logger.Warnf("splitter[%s] run splitVector failed[%v], give up parallel fetching", ds, err)
 		ds.readerChan <- NewDocumentReader(0, ds.src, ds.ns, "", nil, nil, ds.sslRootCaFile)
-		LOG.Info("splitter[%s] exits", ds)
+		l.Logger.Infof("splitter[%s] exits", ds)
 		return nil
 	}
 	// only print if len(splitKeys) < 100
 	if len(res.SplitKeys) > 100 {
-		LOG.Info("splitter[%s] run splitVector result len(splitKeys): %v", ds, len(res.SplitKeys))
+		l.Logger.Infof("splitter[%s] run splitVector result len(splitKeys): %v", ds, len(res.SplitKeys))
 	} else {
-		LOG.Info("splitter[%s] run splitVector result splitKeys: %v", ds, res)
+		l.Logger.Infof("splitter[%s] run splitVector result splitKeys: %v", ds, res)
 	}
 
 	if len(res.SplitKeys) > 0 {
@@ -147,17 +147,17 @@ func (ds *DocumentSplitter) Run() error {
 			doc := bson.M{}
 			err := bson.Unmarshal(keyDoc, &doc)
 			if err != nil {
-				LOG.Crash("splitter[%s] unmarshal doc [%v] failed: %v", ds, keyDoc, err)
+				l.Logger.Panicf("splitter[%s] unmarshal doc [%v] failed: %v", ds, keyDoc, err)
 			}
 			key, val, err := parseDocKeyValue(doc)
 			if err != nil {
-				LOG.Crash("splitter[%s] parse doc key failed: %v", ds, err)
+				l.Logger.Panicf("splitter[%s] parse doc key failed: %v", ds, err)
 			}
 			if key != conf.Options.FullSyncReaderParallelIndex {
-				LOG.Crash("splitter[%s] parse doc invalid key: %v", ds, key)
+				l.Logger.Panicf("splitter[%s] parse doc invalid key: %v", ds, key)
 			}
 
-			LOG.Info("splitter[%s] piece[%d] create reader with boundary(%v, %v]", ds, cnt, start, val)
+			l.Logger.Infof("splitter[%s] piece[%d] create reader with boundary(%v, %v]", ds, cnt, start, val)
 			// inject new DocumentReader into channel
 			ds.readerChan <- NewDocumentReader(cnt, ds.src, ds.ns, key, start, val, ds.sslRootCaFile)
 
@@ -167,7 +167,7 @@ func (ds *DocumentSplitter) Run() error {
 
 			// last one
 			if i == len(res.SplitKeys)-1 {
-				LOG.Info("splitter[%s] piece[%d] create reader with boundary(%v, INF)", ds, cnt, start)
+				l.Logger.Infof("splitter[%s] piece[%d] create reader with boundary(%v, INF)", ds, cnt, start)
 				// inject new DocumentReader into channel
 				ds.readerChan <- NewDocumentReader(cnt, ds.src, ds.ns, key, start, nil, ds.sslRootCaFile)
 			}
@@ -175,14 +175,14 @@ func (ds *DocumentSplitter) Run() error {
 
 		return nil
 	} else {
-		LOG.Warn("splitter[%s] run splitVector return null result[%v]", ds, res)
+		l.Logger.Warnf("splitter[%s] run splitVector return null result[%v]", ds, res)
 	}
 
-	LOG.Warn("splitter[%s] give up parallel fetching", ds, err)
+	l.Logger.Warnf("splitter[%s] give up parallel fetching", ds, err)
 	ds.readerChan <- NewDocumentReader(0, ds.src, ds.ns, "", nil, nil, ds.sslRootCaFile)
-	LOG.Info("splitter[%s] exits", ds)
+	l.Logger.Infof("splitter[%s] exits", ds)
 
-	LOG.Info("splitter[%s] exits", ds)
+	l.Logger.Infof("splitter[%s] exits", ds)
 	return nil
 }
 
@@ -270,7 +270,7 @@ func (reader *DocumentReader) NextDoc() (doc bson.Raw, err error) {
 			reader.releaseCursor()
 			return nil, err
 		} else {
-			LOG.Info("reader[%s] finish", reader.String())
+			l.Logger.Infof("reader[%s] finish", reader.String())
 			return nil, nil
 		}
 	}
@@ -286,7 +286,7 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	}
 
 	if reader.client == nil {
-		LOG.Info("reader[%s] client is empty, create one", reader.String())
+		l.Logger.Infof("reader[%s] client is empty, create one", reader.String())
 		reader.client, err = utils.NewMongoCommunityConn(reader.src, conf.Options.MongoConnectMode, true,
 			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
@@ -323,24 +323,24 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 		return fmt.Errorf("run find failed: %v", err)
 	}
 
-	LOG.Info("reader[%s] generates new cursor", reader.String())
+	l.Logger.Infof("reader[%s] generates new cursor", reader.String())
 
 	return nil
 }
 
 func (reader *DocumentReader) releaseCursor() {
 	if reader.docCursor != nil {
-		LOG.Info("reader[%s] closes cursor[%v]", reader, reader.docCursor.ID())
+		l.Logger.Infof("reader[%s] closes cursor[%v]", reader, reader.docCursor.ID())
 		err := reader.docCursor.Close(reader.ctx)
 		if err != nil {
-			LOG.Error("release cursor fail: %v", err)
+			l.Logger.Errorf("release cursor fail: %v", err)
 		}
 	}
 	reader.docCursor = nil
 }
 
 func (reader *DocumentReader) Close() {
-	LOG.Info("reader[%s] close", reader)
+	l.Logger.Infof("reader[%s] close", reader)
 	if reader.docCursor != nil {
 		reader.docCursor.Close(reader.ctx)
 	}

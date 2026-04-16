@@ -12,7 +12,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 func YieldInMs(n int64) {
@@ -155,7 +155,7 @@ func WritePidById(dir, id string) bool {
 
 	pidFile := filepath.Join(dir, id) + ".pid"
 	if err := WritePid(pidFile); err != nil {
-		_ = LOG.Critical("Process write pid and lock file failed : %v", err)
+		l.Logger.Criticalf("Process write pid and lock file failed : %v", err)
 		return false
 	}
 	return true
@@ -173,7 +173,7 @@ func Welcome() {
 ------------------------------
 `
 	startMsg := "if you have any problem, please visit https://github.com/alibaba/MongoShake/wiki/FAQ"
-	_ = LOG.Warn(fmt.Sprintf("\n%s\n%s\n", welcome, startMsg))
+	l.Logger.Warnf(fmt.Sprintf("\n%s\n%s\n", welcome, startMsg))
 }
 
 func Goodbye() {
@@ -198,5 +198,5 @@ Oh we finish ? # _ _ #|# _ _ #
                     #####
 `
 
-	_ = LOG.Warn(goodbye)
+	l.Logger.Warnf(goodbye)
 }

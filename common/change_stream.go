@@ -10,7 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 const (
@@ -86,7 +86,7 @@ func NewChangeStreamConn(src string,
 		// TODO(jianyou) deprecate aliyun_serverless
 		//ops.SetMultiDbSelections("(" + strings.Join(dbList, "|") + ")")
 
-		LOG.Info("change stream options with aliyun_serverless: %v", printCsOption(ops))
+		l.Logger.Infof("change stream options with aliyun_serverless: %v", printCsOption(ops))
 		// csHandler, err = client.Database("non-exist-database-shake").Watch(ctx, mongo.Pipeline{}, ops)
 		csHandler, err = conn.Client.Database("serverless-shake-fake-db").
 			Collection("serverless-shake-fake-collection").
@@ -96,12 +96,12 @@ func NewChangeStreamConn(src string,
 			return nil, fmt.Errorf("client[%v] create change stream handler failed[%v]", src, err)
 		}
 	} else {
-		LOG.Info("new change stream with options: %v", printCsOption(ops))
+		l.Logger.Infof("new change stream with options: %v", printCsOption(ops))
 
 		csHandler, err = conn.Client.Watch(conn.ctx, mongo.Pipeline{}, ops)
 		if err != nil {
 			conn.Close()
-			_ = LOG.Error("client[%v] create change stream handler failed[%v]", src, err)
+			l.Logger.Errorf("client[%v] create change stream handler failed[%v]", src, err)
 			return nil, fmt.Errorf("client[%v] create change stream handler failed[%v]", src, err)
 		}
 	}
