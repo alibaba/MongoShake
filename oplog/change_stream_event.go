@@ -7,7 +7,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 const (
@@ -919,6 +919,6 @@ func ConvertEvent2Oplog(input []byte, fullDoc bool) (*PartialLog, error) {
 		oplog.Query = bson.D{}
 	}
 
-	LOG.Debug("ConvertEvent2Oplog Event[%v] to Oplog[%v]", event, oplog)
+	l.Logger.Debugf("ConvertEvent2Oplog Event[%v] to Oplog[%v]", event, oplog)
 	return oplog, nil
 }

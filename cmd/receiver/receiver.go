@@ -12,9 +12,9 @@ import (
 	nimo "github.com/gugemichael/nimo4go"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 	replayer "github.com/alibaba/MongoShake/v2/receiver"
 	conf "github.com/alibaba/MongoShake/v2/receiver/configure"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 	"github.com/alibaba/MongoShake/v2/tunnel"
 )
 
@@ -23,7 +23,11 @@ type Exit struct{ Code int }
 func main() {
 	var err error
 	defer handleExit()
-	defer LOG.Close()
+	defer func() {
+		if l.Logger != nil {
+			_ = l.Logger.Sync()
+		}
+	}()
 
 	// argument options
 	configuration := flag.String("conf", "", "configure file absolute path")
@@ -51,7 +55,9 @@ func main() {
 		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
 	}
 
-	if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogFlush, *verbose); err != nil {
+	if err := utils.InitialLoggerWithRotation(conf.Options.LogDirectory,
+		conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogFlush,
+		*verbose, conf.Options.LogMaxSizeMb, conf.Options.LogMaxAge); err != nil {
 		crash(fmt.Sprintf("initial log.dir[%v] log.name[%v] failed[%v].", conf.Options.LogDirectory,
 			conf.Options.LogFileName, err), -2)
 	}
@@ -60,9 +66,9 @@ func main() {
 	signalProfile, _ := strconv.Atoi(utils.SIGNALPROFILE)
 	signalStack, _ := strconv.Atoi(utils.SIGNALSTACK)
 	if signalProfile > 0 {
-		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile)) // syscall.SIGUSR2
+		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile))                     // syscall.SIGUSR2
 		nimo.RegisterSignalForPrintStack(syscall.Signal(signalStack), func(bytes []byte) { // syscall.SIGUSR1
-			LOG.Info(string(bytes))
+			l.Logger.Infof("%s", string(bytes))
 		})
 	}
 
@@ -72,6 +78,21 @@ func main() {
 }
 
 func sanitizeOptions() error {
+	if conf.Options.LogDirectory == "" {
+		conf.Options.LogDirectory = "logs"
+	}
+	if conf.Options.LogLevel == "" {
+		conf.Options.LogLevel = utils.VarLogLevelInfo
+	}
+	if conf.Options.LogFileName == "" {
+		conf.Options.LogFileName = "receiver.log"
+	}
+	if conf.Options.LogMaxSizeMb == 0 {
+		conf.Options.LogMaxSizeMb = 20
+	}
+	if conf.Options.LogMaxAge == 0 {
+		conf.Options.LogMaxAge = 7
+	}
 	if conf.Options.Tunnel == "" {
 		return errors.New("tunnel is empty")
 	}
@@ -99,9 +120,9 @@ func startup() {
 		repList[i] = replayer.NewExampleReplayer(i)
 	}
 
-	LOG.Info("receiver is starting...")
+	l.Logger.Infof("receiver is starting...")
 	if err := reader.Link(repList); err != nil {
-		LOG.Critical("Replayer link to tunnel error %v", err)
+		l.Logger.Errorf("Replayer link to tunnel error %v", err)
 		return
 	}
 }

@@ -16,7 +16,7 @@ import (
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/journal"
 	"github.com/alibaba/MongoShake/v2/oplog"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 const (
@@ -256,7 +256,7 @@ func (exec *Executor) doSync(logs []*OplogRecord) error {
 		}
 	}
 
-	LOG.Info("Replay-%d Executor-%d doSync oplogRecords received[%d] merged[%d]. merge to %.2f%% chunks",
+	l.Logger.Infof("Replay-%d Executor-%d doSync oplogRecords received[%d] merged[%d]. merge to %.2f%% chunks",
 		exec.batchExecutor.ReplayerId, exec.id, count, len(oplogGroups), float32(len(oplogGroups))*100.00/float32(count))
 	return nil
 }
@@ -293,7 +293,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 	} else {
 		operation, found := oplog.ExtraCommandName(partialLog.Object)
 		if !found {
-			_ = LOG.Warn("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
+			l.Logger.Warnf("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
 			return nil
 		}
 		switch operation {
@@ -304,7 +304,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 					oplog.SetFiled(idIndex.(bson.D), "ns", nsTrans.Transform(ns.(string)))
 				}
 			} else {
-				_ = LOG.Warn("transformLogs meet unknown create command: %v", partialLog.Object)
+				l.Logger.Warnf("transformLogs meet unknown create command: %v", partialLog.Object)
 			}
 			fallthrough
 		case "createIndexes":
@@ -328,7 +328,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		case "emptycapped":
 			col, ok := oplog.GetKey(partialLog.Object, operation).(string)
 			if !ok {
-				_ = LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
+				l.Logger.Warnf("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
 				return nil
 			}
 			fullNs := fmt.Sprintf("%s.%s", db, col)
@@ -338,12 +338,12 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			// { "renameCollection" : "my.tbl", "to" : "my.my", "stayTemp" : false, "dropTarget" : false }
 			fromNs, ok := oplog.GetKey(partialLog.Object, operation).(string)
 			if !ok {
-				_ = LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
+				l.Logger.Warnf("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
 				return nil
 			}
 			toNs, ok := oplog.GetKey(partialLog.Object, "to").(string)
 			if !ok {
-				_ = LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
+				l.Logger.Warnf("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
 				return nil
 			}
 			// NOTE: Time series collections do not support renameCollection/reIndex command,
@@ -356,7 +356,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		case "applyOps":
 			ops, err := oplog.NormalizeApplyOps(partialLog.Object)
 			if err != nil {
-				_ = LOG.Warn("transformPartialLog meets unsupported applyOps type[%v], ignore! oplog=%v", err, partialLog.Object)
+				l.Logger.Warnf("transformPartialLog meets unsupported applyOps type[%v], ignore! oplog=%v", err, partialLog.Object)
 				return nil
 			}
 
@@ -370,7 +370,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 				subLog := oplog.NewPartialLog(m)
 				transSubLog := transformPartialLog(subLog, nsTrans, transformRef)
 				if transSubLog == nil {
-					_ = LOG.Warn("transformPartialLog sub log %v return nil, ignore!", subLog)
+					l.Logger.Warnf("transformPartialLog sub log %v return nil, ignore!", subLog)
 					return nil
 				}
 				ops[i] = transSubLog.Dump(keys, false)

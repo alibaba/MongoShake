@@ -11,7 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 const (
@@ -64,7 +64,7 @@ func LogEntryEncode(logs []*GenericOplog) [][]byte {
 	for _, log := range logs {
 		if log.Raw == nil {
 			if out, err := bson.Marshal(log.Parsed); err != nil {
-				LOG.Crashf("LogEntryEncode marshal Oplog[%v] failed[%v]", log.Parsed, err)
+				l.Logger.Panicf("LogEntryEncode marshal Oplog[%v] failed[%v]", log.Parsed, err)
 			} else {
 				encodedLogs = append(encodedLogs, out)
 			}

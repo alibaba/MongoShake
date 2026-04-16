@@ -17,8 +17,8 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/coordinator"
 	utils "github.com/alibaba/MongoShake/v2/common"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 	"github.com/alibaba/MongoShake/v2/quorum"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 type Exit struct{ Code int }
@@ -26,8 +26,11 @@ type Exit struct{ Code int }
 func main() {
 	var err error
 	defer handleExit()
-	defer LOG.Close()
-	defer utils.Goodbye()
+	defer func() {
+		if l.Logger != nil {
+			_ = l.Logger.Sync()
+		}
+	}()
 
 	// argument options
 	configuration := flag.String("conf", "", "configure file absolute path")
@@ -60,20 +63,21 @@ func main() {
 		crash(fmt.Sprintf("Configure file %s parse failed. %v", *configuration, err), -2)
 	}
 
+	if err := utils.InitialLoggerWithRotation(conf.Options.LogDirectory,
+		conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogFlush,
+		*verbose, conf.Options.LogMaxSizeMb, conf.Options.LogMaxAge); err != nil {
+		crash(fmt.Sprintf("initial log.dir[%v] log.name[%v] failed[%v].", conf.Options.LogDirectory,
+			conf.Options.LogFileName, err), -2)
+	}
+	defer utils.Goodbye()
+	l.Logger.Infof("log init succeed. log.dir[%v] log.name[%v] log.level[%v]",
+		conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel)
+
 	// verify collector options and revise
 	if err = SanitizeOptions(); err != nil {
 		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
 	}
-
-	if err := utils.InitialLogger(conf.Options.LogDirectory, conf.Options.LogFileName,
-		conf.Options.LogLevel, conf.Options.LogFlush, *verbose); err != nil {
-		crash(fmt.Sprintf("initial log.dir[%v] log.name[%v] failed[%v].", conf.Options.LogDirectory,
-			conf.Options.LogFileName, err), -2)
-	} else {
-		LOG.Info("log init succeed. log.dir[%v] log.name[%v] log.level[%v]",
-			conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel)
-	}
-	LOG.Info("MongoDB Version Source[%v] Target[%v]", conf.Options.SourceDBVersion, conf.Options.TargetDBVersion)
+	l.Logger.Infof("MongoDB Version Source[%v] Target[%v]", conf.Options.SourceDBVersion, conf.Options.TargetDBVersion)
 
 	conf.Options.Version = utils.BRANCH
 
@@ -83,7 +87,7 @@ func main() {
 	if signalProfile > 0 {
 		nimo.RegisterSignalForProfiling(syscall.Signal(signalProfile))                     // syscall.SIGUSR2
 		nimo.RegisterSignalForPrintStack(syscall.Signal(signalStack), func(bytes []byte) { // syscall.SIGUSR1
-			LOG.Info(string(bytes))
+			l.Logger.Infof("%s", string(bytes))
 		})
 	}
 
@@ -121,12 +125,12 @@ func startup() {
 	if utils.IsHTTPPortEnabled(conf.Options.PromHTTPListenPort) {
 		nimo.GoRoutine(func() {
 			if err := utils.PrometheusHttpApi.Listen(); err != nil {
-				_ = LOG.Critical("start prometheus server with port[%v] failed: %v",
+				l.Logger.Errorf("start prometheus server with port[%v] failed: %v",
 					conf.Options.PromHTTPListenPort, err)
 			}
 		})
 	} else {
-		LOG.Info("prometheus http api disabled. port[%v]", conf.Options.PromHTTPListenPort)
+		l.Logger.Infof("prometheus http api disabled. port[%v]", conf.Options.PromHTTPListenPort)
 	}
 
 	// init
@@ -161,7 +165,7 @@ func startup() {
 	// start mongodb replication
 	if err := ReplCord.Run(); err != nil {
 		// initial or connection established failed
-		_ = LOG.Critical(fmt.Sprintf("run replication failed: %v", err))
+		l.Logger.Errorf("run replication failed: %v", err)
 		crash(err.Error(), -6)
 	}
 

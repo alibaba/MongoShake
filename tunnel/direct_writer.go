@@ -6,7 +6,7 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/executor"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 type DirectWriter struct {
@@ -25,7 +25,7 @@ func (writer *DirectWriter) Prepare() bool {
 	first := writer.RemoteAddrs[0]
 	if _, err := utils.NewMongoCommunityConn(first, utils.VarMongoConnectModeSecondaryPreferred, true,
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.TunnelMongoSslRootCaFile); err != nil {
-		LOG.Critical("target mongo server[%s] connect failed: %s", first, err.Error())
+		l.Logger.Criticalf("target mongo server[%s] connect failed: %s", first, err.Error())
 		return false
 	}
 

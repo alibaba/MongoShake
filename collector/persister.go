@@ -15,7 +15,7 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 const (
@@ -70,7 +70,7 @@ func (p *Persister) Start() {
 }
 
 func (p *Persister) SetFetchStage(fetchStage int32) {
-	LOG.Info("persister replset[%v] update fetch status to: %v", p.replset, utils.LogFetchStage(fetchStage))
+	l.Logger.Infof("persister replset[%v] update fetch status to: %v", p.replset, utils.LogFetchStage(fetchStage))
 	atomic.StoreInt32(&p.fetchStage, fetchStage)
 }
 
@@ -82,11 +82,11 @@ func (p *Persister) InitDiskQueue(dqName string) {
 	fetchStage := p.GetFetchStage()
 	// fetchStage shouldn't change between here
 	if fetchStage != utils.FetchStageStoreDiskNoApply && fetchStage != utils.FetchStageStoreDiskApply {
-		LOG.Crashf("persister replset[%v] init disk queue in illegal fetchStage %v",
+		l.Logger.Panicf("persister replset[%v] init disk queue in illegal fetchStage %v",
 			p.replset, utils.LogFetchStage(fetchStage))
 	}
 	if p.DiskQueue != nil {
-		LOG.Crashf("init disk queue failed: already exist")
+		l.Logger.Panicf("init disk queue failed: already exist")
 	}
 
 	p.DiskQueue = diskQueue.NewDiskQueue(dqName, conf.Options.LogDirectory,
@@ -97,7 +97,7 @@ func (p *Persister) InitDiskQueue(dqName string) {
 
 func (p *Persister) GetQueryTsFromDiskQueue() primitive.Timestamp {
 	if p.DiskQueue == nil {
-		LOG.Crashf("persister replset[%v] get query timestamp from nil disk queue", p.replset)
+		l.Logger.Panicf("persister replset[%v] get query timestamp from nil disk queue", p.replset)
 	}
 
 	logData := p.DiskQueue.GetLastWriteData()
@@ -108,24 +108,24 @@ func (p *Persister) GetQueryTsFromDiskQueue() primitive.Timestamp {
 	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
 		log := new(oplog.PartialLog)
 		if err := bson.Unmarshal(logData, log); err != nil {
-			LOG.Crashf("unmarshal oplog[%v] failed[%v]", logData, err)
+			l.Logger.Panicf("unmarshal oplog[%v] failed[%v]", logData, err)
 		}
 
 		// assert
 		if log.Namespace == "" {
-			LOG.Crashf("unmarshal data to oplog failed: %v", log)
+			l.Logger.Panicf("unmarshal data to oplog failed: %v", log)
 		}
 		return log.Timestamp
 	} else {
 		// change_stream
 		log := new(oplog.Event)
 		if err := bson.Unmarshal(logData, log); err != nil {
-			LOG.Crashf("unmarshal oplog[%v] failed[%v]", logData, err)
+			l.Logger.Panicf("unmarshal oplog[%v] failed[%v]", logData, err)
 		}
 
 		// assert
 		if log.OperationType == "" {
-			LOG.Crashf("unmarshal data to change stream event failed: %v", log)
+			l.Logger.Panicf("unmarshal data to change stream event failed: %v", log)
 		}
 		return log.ClusterTime
 	}
@@ -143,10 +143,10 @@ func (p *Persister) Inject(input []byte) {
 		var test interface{}
 		err := bson.Unmarshal(input, &test)
 		if err != nil {
-			_ = LOG.Error("unmarshal failed: %v", err)
+			l.Logger.Errorf("unmarshal failed: %v", err)
 			return
 		}
-		LOG.Info("print debug: %v", test)
+		l.Logger.Infof("print debug: %v", test)
 	default:
 		break
 	}
@@ -169,7 +169,7 @@ func (p *Persister) Inject(input []byte) {
 				// should send to diskQueue
 				atomic.AddUint64(&p.diskWriteCount, 1)
 				if err := p.DiskQueue.Put(input); err != nil {
-					LOG.Crashf("persister inject replset[%v] put oplog to disk queue failed[%v]",
+					l.Logger.Panicf("persister inject replset[%v] put oplog to disk queue failed[%v]",
 						p.replset, err)
 				}
 			} else {
@@ -177,7 +177,7 @@ func (p *Persister) Inject(input []byte) {
 				p.PushToPendingQueue(input)
 			}
 		} else {
-			LOG.Crashf("persister inject replset[%v] has no diskQueue with fetch stage[%v]",
+			l.Logger.Panicf("persister inject replset[%v] has no diskQueue with fetch stage[%v]",
 				p.replset, utils.LogFetchStage(fetchStage))
 		}
 	} else {
@@ -247,11 +247,11 @@ func (p *Persister) retrieve() {
 		case utils.FetchStageStoreDiskNoApply:
 			// do nothing
 		default:
-			LOG.Crashf("invalid fetch stage[%v]", utils.LogFetchStage(stage))
+			l.Logger.Panicf("invalid fetch stage[%v]", utils.LogFetchStage(stage))
 		}
 	}
 
-	LOG.Info("persister retrieve for replset[%v] begin to read from disk queue with depth[%v]",
+	l.Logger.Infof("persister retrieve for replset[%v] begin to read from disk queue with depth[%v]",
 		p.replset, p.DiskQueue.Depth())
 	ticker := time.NewTicker(time.Second)
 Loop:
@@ -269,7 +269,7 @@ Loop:
 
 			// move to next read
 			if err := p.DiskQueue.Next(); err != nil {
-				LOG.Crashf("persister replset[%v] retrieve get next failed[%v]", p.replset, err)
+				l.Logger.Panicf("persister replset[%v] retrieve get next failed[%v]", p.replset, err)
 			}
 		case <-ticker.C:
 			// check no more data batching?
@@ -279,7 +279,7 @@ Loop:
 		}
 	}
 
-	LOG.Info("persister retrieve for replset[%v] block fetch with disk queue depth[%v]",
+	l.Logger.Infof("persister retrieve for replset[%v] block fetch with disk queue depth[%v]",
 		p.replset, p.DiskQueue.Depth())
 
 	// wait to finish retrieve and continue fetch to store to memory
@@ -297,19 +297,19 @@ Loop:
 		p.diskQueueLastTs = utils.TimeStampToInt64(p.GetQueryTsFromDiskQueue())
 
 		if err := p.DiskQueue.Next(); err != nil {
-			LOG.Crash(err)
+			l.Logger.Panicf("%v", err)
 		}
 	}
 	if p.DiskQueue.Depth() != 0 {
-		LOG.Crashf("persister retrieve for replset[%v] finish, but disk queue depth[%v] is not empty",
+		l.Logger.Panicf("persister retrieve for replset[%v] finish, but disk queue depth[%v] is not empty",
 			p.replset, p.DiskQueue.Depth())
 	}
 	p.SetFetchStage(utils.FetchStageStoreMemoryApply)
 
 	if err := p.DiskQueue.Delete(); err != nil {
-		_ = LOG.Critical("persister retrieve for replset[%v] close disk queue error. %v", p.replset, err)
+		l.Logger.Criticalf("persister retrieve for replset[%v] close disk queue error. %v", p.replset, err)
 	}
-	LOG.Info("persister retriever for replset[%v] exits", p.replset)
+	l.Logger.Infof("persister retriever for replset[%v] exits", p.replset)
 }
 
 func (p *Persister) RestAPI() {

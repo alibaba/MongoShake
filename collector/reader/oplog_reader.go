@@ -15,7 +15,7 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 const (
@@ -87,14 +87,14 @@ func (or *OplogReader) Name() string {
 func (or *OplogReader) SetQueryTimestampOnEmpty(ts interface{}) {
 	tsB := ts.(int64)
 	if _, exist := or.query[QueryTs]; !exist {
-		LOG.Info("set query timestamp: %v", utils.ExtractTimestampForLog(tsB))
+		l.Logger.Infof("set query timestamp: %v", utils.ExtractTimestampForLog(tsB))
 		or.UpdateQueryTimestamp(tsB)
 	}
 }
 
 func (or *OplogReader) UpdateQueryTimestamp(ts int64) {
 	or.query[QueryTs] = bson.M{QueryOpGT: utils.Int64ToTimestamp(ts)}
-	LOG.Info("update or.query to %v", or.query)
+	l.Logger.Infof("update or.query to %v", or.query)
 }
 
 func (or *OplogReader) getQueryTimestamp() int64 {
@@ -147,7 +147,7 @@ func (or *OplogReader) StartFetcher() {
 
 // fetch oplog tp store disk queue or memory
 func (or *OplogReader) fetcher() {
-	LOG.Info("start %s fetcher with src[%v] replica-name[%v] query-ts[%v]",
+	l.Logger.Infof("start %s fetcher with src[%v] replica-name[%v] query-ts[%v]",
 		or.String(), utils.BlockMongoUrlPassword(or.src, "***"), or.replset,
 		or.query[QueryTs].(bson.M)[QueryOpGT].(primitive.Timestamp))
 	for {
@@ -156,7 +156,7 @@ func (or *OplogReader) fetcher() {
 			// Count consecutive capped errors and escalate to fatal after MaxCappedRetry.
 			if errors.Is(err, CollectionCappedError) {
 				or.cappedErrorCount++
-				_ = LOG.Error("oplog collection capped error from EnsureNetwork [%d/%d]",
+				l.Logger.Errorf("oplog collection capped error from EnsureNetwork [%d/%d]",
 					or.cappedErrorCount, MaxCappedRetry)
 				if or.cappedErrorCount > MaxCappedRetry {
 					or.oplogChan <- &retOplog{nil, CollectionCappedFatalError}
@@ -176,10 +176,10 @@ func (or *OplogReader) fetcher() {
 				or.releaseCursor()
 				if utils.IsCollectionCappedError(err) {
 					or.cappedErrorCount++
-					_ = LOG.Error("oplog collection capped may happen [%d/%d]: %v",
+					l.Logger.Errorf("oplog collection capped may happen [%d/%d]: %v",
 						or.cappedErrorCount, MaxCappedRetry, err)
 					if or.cappedErrorCount > MaxCappedRetry {
-						_ = LOG.Error("oplog collection capped error persists after %d retries, treating as fatal",
+						l.Logger.Errorf("oplog collection capped error persists after %d retries, treating as fatal",
 							MaxCappedRetry)
 						or.oplogChan <- &retOplog{nil, CollectionCappedFatalError}
 					} else {
@@ -210,7 +210,7 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 	if or.oplogsCursor != nil {
 		return nil
 	}
-	LOG.Info("%s ensure network", or.String())
+	l.Logger.Infof("%s ensure network", or.String())
 
 	if or.conn == nil || (or.conn != nil && !or.conn.IsGood()) {
 		if or.conn != nil {
@@ -238,7 +238,7 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 		newestTs := or.getNewestTimestamp()
 		queryTs = or.getQueryTimestamp()
 		if newestTs < queryTs {
-			_ = LOG.Warn("oplog_reader current starting point[%v] is bigger than the newest timestamp[%v]!",
+			l.Logger.Warnf("oplog_reader current starting point[%v] is bigger than the newest timestamp[%v]!",
 				utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(newestTs))
 			queryTs = newestTs
 		}
@@ -252,11 +252,11 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 	queryTs = or.getQueryTimestamp()
 	if oldestTs > queryTs {
 		if !or.firstRead {
-			_ = LOG.Error("oplog_reader queryTs[%v] is behind oldest oplog[%v], oplog may have been overwritten (CappedPositionLost)",
+			l.Logger.Errorf("oplog_reader queryTs[%v] is behind oldest oplog[%v], oplog may have been overwritten (CappedPositionLost)",
 				utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(oldestTs))
 			return CollectionCappedError
 		} else {
-			_ = LOG.Warn("oplog_reader current starting point[%v] is smaller than the oldest timestamp[%v]!",
+			l.Logger.Warnf("oplog_reader current starting point[%v] is smaller than the oldest timestamp[%v]!",
 				utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(oldestTs))
 		}
 	}
@@ -266,11 +266,11 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 		or.query, findOptions)
 	if or.oplogsCursor == nil || err != nil {
 		err = fmt.Errorf("oplog_reader Find mongo instance [%s] error. %s", or.src, err.Error())
-		_ = LOG.Warn("oplog_reader failed err[%v] or.query[%v]", err, or.query)
+		l.Logger.Warnf("oplog_reader failed err[%v] or.query[%v]", err, or.query)
 		return err
 	}
 
-	LOG.Info("%s generates new cursor query[%v]", or.String(), or.query)
+	l.Logger.Infof("%s generates new cursor query[%v]", or.String(), or.query)
 
 	return
 }

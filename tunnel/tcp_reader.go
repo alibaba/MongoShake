@@ -8,7 +8,7 @@ import (
 
 	nimo "github.com/gugemichael/nimo4go"
 
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 type TCPReader struct {
@@ -32,7 +32,7 @@ func (reader *TCPReader) Link(replayer []Replayer) (err error) {
 		reader.channel[i] = new(ListenSocket)
 		reader.channel[i].addr, err = net.ResolveTCPAddr("tcp4", reader.listenAddress)
 		if err != nil {
-			LOG.Critical("Resolve channel listenAddress error: %s", err.Error())
+			l.Logger.Criticalf("Resolve channel listenAddress error: %s", err.Error())
 			return err
 		}
 	}
@@ -40,7 +40,7 @@ func (reader *TCPReader) Link(replayer []Replayer) (err error) {
 	for i := 0; i != TotalQueueNum; i++ {
 		reader.channel[i].listener, err = net.ListenTCP("tcp", reader.channel[i].addr)
 		if err != nil {
-			LOG.Critical("Tcp reader server listen %v error: %s", reader.channel[i].addr, err.Error())
+			l.Logger.Criticalf("Tcp reader server listen %v error: %s", reader.channel[i].addr, err.Error())
 			return err
 		}
 	}
@@ -49,7 +49,7 @@ func (reader *TCPReader) Link(replayer []Replayer) (err error) {
 	nimo.GoRoutineInLoop(func() {
 		socket, err := reader.channel[TransferChannel].listener.AcceptTCP()
 		if err != nil {
-			LOG.Warn("Server accept channel error : %s", err.Error())
+			l.Logger.Warnf("Server accept channel error : %s", err.Error())
 			return
 		}
 		socket.SetNoDelay(false)
@@ -64,7 +64,7 @@ func (reader *TCPReader) Link(replayer []Replayer) (err error) {
 	nimo.GoRoutineInLoop(func() {
 		socket, err := reader.channel[RecvAckChannel].listener.AcceptTCP()
 		if err != nil {
-			LOG.Warn("Server ACK accept ch error : %s", err.Error())
+			l.Logger.Warnf("Server ACK accept ch error : %s", err.Error())
 			return
 		}
 		socket.SetNoDelay(true)
@@ -84,20 +84,20 @@ func (reader *TCPReader) recvTransfer(socket *net.TCPConn) {
 		socketTimeout(socket, NetworkDefaultTimeout*10)
 		// read util entire header
 		if _, err := io.ReadAtLeast(socket, header[:], HeaderLen); err != nil {
-			LOG.Warn("Server transfer read header at least failed readAtLeast %d, %s",
+			l.Logger.Warnf("Server transfer read header at least failed readAtLeast %d, %s",
 				HeaderLen, err.Error())
 			return
 		}
 		packet := NewPacketV1(PacketIncomplete, nil)
 		if !packet.decodeHeader(header[:]) {
-			LOG.Warn("Server transfer decode header failed")
+			l.Logger.Warnf("Server transfer decode header failed")
 			return
 		}
 		nimo.AssertTrue(packet.typeOf == PacketWrite && packet.length != 0, "transfer receive bad type packet")
 
 		payload := make([]byte, packet.length)
 		if _, err := io.ReadAtLeast(socket, payload, int(packet.length)); err != nil {
-			LOG.Warn("Server transfer read packet at least failed readAtLeast %d, %s",
+			l.Logger.Warnf("Server transfer read packet at least failed readAtLeast %d, %s",
 				packet.length, err.Error())
 			return
 		}
@@ -120,13 +120,13 @@ func (reader *TCPReader) recvGetAck(socket *net.TCPConn) {
 		socketTimeout(socket, NetworkDefaultTimeout)
 		// read util entire header
 		if _, err := io.ReadAtLeast(socket, header[:], HeaderLen); err != nil {
-			LOG.Warn("Server ack read header at least failed readAtLeast %d, %s",
+			l.Logger.Warnf("Server ack read header at least failed readAtLeast %d, %s",
 				HeaderLen, err.Error())
 			return
 		}
 		packet := NewPacketV1(PacketIncomplete, nil)
 		if !packet.decodeHeader(header[:]) {
-			LOG.Warn("Server ack decode header failed")
+			l.Logger.Warnf("Server ack decode header failed")
 			return
 		}
 		nimo.AssertTrue(packet.typeOf == PacketGetACK && packet.length == 0, "ack receive bad type packet")
@@ -137,7 +137,7 @@ func (reader *TCPReader) recvGetAck(socket *net.TCPConn) {
 		packet = NewPacketV1(PacketReturnACK, buffer.Bytes())
 		if _, err := socket.Write(packet.encode()); err != nil {
 			if err, ok := err.(net.Error); ok && err.Timeout() {
-				LOG.Warn("Tcp ack send ack back timeout")
+				l.Logger.Warnf("Tcp ack send ack back timeout")
 			}
 		}
 		nimo.AssertTrue(packet.length != 0, "ack send bad PacketReturnACK packet len")

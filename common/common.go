@@ -9,7 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 // Build info
@@ -66,57 +66,24 @@ func RunStatusMessage(status uint64) string {
 //
 // verbose: where log goes to: 0 - file，1 - file+stdout，2 - stdout
 func InitialLogger(logDir, logFile, level string, logFlush bool, verbose int) error {
-	logLevel := parseLogLevel(level)
-	if verbose > 0 {
-		writer := LOG.NewConsoleLogWriter()
-		writer.SetFormat("[%D %T] [%L] %M")
-		LOG.AddFilter("console", logLevel, writer)
-	}
-	if verbose == 2 {
-		return nil
-	}
-
-	if len(logDir) == 0 {
-		logDir = "logs"
-	}
-	// check directory exists
-	if _, err := os.Stat(logDir); err != nil && os.IsNotExist(err) {
-		if err := os.MkdirAll(logDir, os.ModeDir|os.ModePerm); err != nil {
-			return fmt.Errorf("create log.dir[%v] failed[%v]", logDir, err)
-		}
-	}
-
-	if len(logFile) != 0 {
-		if !logFlush {
-			LOG.LogBufferLength = 32
-		} else {
-			LOG.LogBufferLength = 0
-		}
-		fileLogger := LOG.NewFileLogWriter(fmt.Sprintf("%s/%s", logDir, logFile), true)
-		fileLogger.SetRotateDaily(true)
-		fileLogger.SetFormat("[%D %T] [%L] %M")
-		fileLogger.SetRotateMaxBackup(7)
-		LOG.AddFilter("file", logLevel, fileLogger)
-	} else {
-		return fmt.Errorf("log.file[%v] shouldn't be empty", logFile)
-	}
-
-	return nil
+	return InitialLoggerWithRotation(logDir, logFile, level, logFlush, verbose, 20, 7)
 }
 
-func parseLogLevel(level string) LOG.Level {
-	switch strings.ToLower(level) {
-	case "debug":
-		return LOG.DEBUG
-	case "info":
-		return LOG.INFO
-	case "warning":
-		return LOG.WARNING
-	case "error":
-		return LOG.ERROR
-	default:
-		return LOG.DEBUG
+func InitialLoggerWithRotation(logDir, logFile, level string,
+	logFlush bool, verbose, maxSizeMB, maxAge int) error {
+	if logDir == "" {
+		logDir = "logs"
 	}
+
+	if verbose != 2 {
+		if _, err := os.Stat(logDir); err != nil && os.IsNotExist(err) {
+			if err := os.MkdirAll(logDir, os.ModeDir|os.ModePerm); err != nil {
+				return fmt.Errorf("create log.dir[%v] failed[%v]", logDir, err)
+			}
+		}
+	}
+
+	return l.New(level, logDir, logFile, logFlush, maxSizeMB, maxAge, verbose)
 }
 
 func WritePid(id string) (err error) {

@@ -10,6 +10,7 @@ require (
 	github.com/getlantern/deepcopy v0.0.0-20160317154340-7f45deb8130a
 	github.com/gugemichael/nimo4go v0.0.0-20210413043712-ccb2ff0d7b40
 	github.com/mongodb/mongo-tools-common v4.0.18+incompatible
+	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/nightlyone/lockfile v1.0.0
 	github.com/prometheus/client_golang v1.20.5
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475
@@ -18,6 +19,7 @@ require (
 	github.com/vinllen/go-diskqueue v1.0.2-0.20210318091137-9e570abf8db4
 	github.com/xdg-go/scram v1.1.2
 	go.mongodb.org/mongo-driver v1.17.9
+	go.uber.org/zap v1.27.0
 )
 
 require (
@@ -47,6 +49,7 @@ require (
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	golang.org/x/crypto v0.26.0 // indirect
+	go.uber.org/multierr v1.10.0 // indirect
 	golang.org/x/net v0.26.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
 	golang.org/x/sys v0.23.0 // indirect
@@ -56,5 +59,6 @@ require (
 	gopkg.in/jcmturner/dnsutils.v1 v1.0.1 // indirect
 	gopkg.in/jcmturner/gokrb5.v7 v7.5.0 // indirect
 	gopkg.in/jcmturner/rpc.v1 v1.1.0 // indirect
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

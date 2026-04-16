@@ -11,7 +11,7 @@ import (
 	nimo "github.com/gugemichael/nimo4go"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 // Network packet structure
@@ -135,7 +135,7 @@ func (tcp *TcpSocket) ensureNetwork() error {
 		var err error
 		tcp.socket, err = net.DialTCP("tcp4", nil, tcp.addr)
 		if err != nil {
-			LOG.Critical("channel connect to %s error %s", tcp.addr.String(), err.Error())
+			l.Logger.Criticalf("channel connect to %s error %s", tcp.addr.String(), err.Error())
 			return err
 		}
 		tcp.socket.SetNoDelay(false)
@@ -208,7 +208,7 @@ func (writer *TCPWriter) Send(message *WMessage) int64 {
 	socketTimeout(tcp.socket, 0)
 	if _, err = tcp.socket.Write(packet.encode()); err != nil {
 		if err, ok := err.(net.Error); ok && err.Timeout() {
-			LOG.Warn("Tcp writer send data packet timeout")
+			l.Logger.Warnf("Tcp writer send data packet timeout")
 			return ReplyNetworkTimeout
 		}
 		tcp.release()
@@ -223,7 +223,7 @@ func (writer *TCPWriter) Prepare() bool {
 	for i := 0; i != TotalQueueNum; i++ {
 		writer.channel[i].addr, err = net.ResolveTCPAddr("tcp4", writer.RemoteAddr)
 		if err != nil {
-			LOG.Critical("Resolve channel listenAddress error: %s", err.Error())
+			l.Logger.Criticalf("Resolve channel listenAddress error: %s", err.Error())
 			return false
 		}
 	}
@@ -257,6 +257,6 @@ func socketTimeout(socket *net.TCPConn, duration time.Duration) {
 }
 
 func tcpErrorAndRelease(socket *TcpSocket, err string) {
-	LOG.Critical("tcp operation error and release, %s", err)
+	l.Logger.Criticalf("tcp operation error and release, %s", err)
 	socket.release()
 }

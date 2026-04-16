@@ -101,6 +101,12 @@ func checkDefaultValue() error {
 	if conf.Options.LogFileName == "" {
 		conf.Options.LogFileName = "mongoshake.log"
 	}
+	if conf.Options.LogMaxSizeMb == 0 {
+		conf.Options.LogMaxSizeMb = 20
+	}
+	if conf.Options.LogMaxAge == 0 {
+		conf.Options.LogMaxAge = 7
+	}
 	filterOpTypes, err := normalizeFilterOpTypes(conf.Options.FilterOpTypes)
 	if err != nil {
 		return err

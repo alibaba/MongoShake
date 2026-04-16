@@ -14,7 +14,7 @@ import (
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 const (
@@ -42,7 +42,7 @@ func masterChanged(status int) {
 	if status == PromoteMaster {
 		if len(MasterPromotionNotifier) == 0 {
 			MasterPromotionNotifier <- true
-			LOG.Info("become the master and notify waiter")
+			l.Logger.Infof("become the master and notify waiter")
 		}
 		master = true
 	} else {
@@ -113,10 +113,10 @@ func BecomeMaster(uri string, db string) error {
 							status = STATUS_FOLLOW
 						}
 					case mongo.ErrNoDocuments:
-						LOG.Debug("No master node found. we elect myself")
+						l.Logger.Debugf("No master node found. we elect myself")
 						status = STATUS_COMPETE_MASTER
 					default:
-						LOG.Warn("Fetch master election info %s failed. %v", electionObjectId, err)
+						l.Logger.Warnf("Fetch master election info %s failed. %v", electionObjectId, err)
 						status = STATUS_SESSION_CLOSE
 					}
 
@@ -126,7 +126,7 @@ func BecomeMaster(uri string, db string) error {
 						bson.M{"$set": promotion()}); err == nil {
 						masterChanged(PromoteMaster)
 					} else {
-						LOG.Warn("Update master election info failed. %v", err)
+						l.Logger.Warnf("Update master election info failed. %v", err)
 						status = STATUS_LOOKASIDE
 					}
 
@@ -146,12 +146,12 @@ func BecomeMaster(uri string, db string) error {
 						// I wanna be the master. DON'T care about the success of update
 						masterCollection.UpdateOne(context.Background(),
 							bson.D{{"_id", electionObjectId}}, bson.M{"$set": promotion()})
-						LOG.Info("Expired master found. compete to become master")
+						l.Logger.Infof("Expired master found. compete to become master")
 						// wait random time. just disrupt others compete
 						wait(time.Millisecond * time.Duration(rand.Uint32()%2500+1))
 					} else {
 						// follow current master
-						LOG.Info("Follow current master %v", entry)
+						l.Logger.Infof("Follow current master %v", entry)
 					}
 					status = STATUS_LOOKASIDE
 
@@ -170,10 +170,10 @@ func BecomeMaster(uri string, db string) error {
 
 func competeMaster(coll *mongo.Collection) bool {
 	if _, err := coll.InsertOne(context.Background(), promotion()); err == nil {
-		LOG.Info("This node become master with election info %v", master)
+		l.Logger.Infof("This node become master with election info %v", master)
 		return true
 	} else if utils.DuplicateKey(err) {
-		LOG.Warn("Another node is compete to master. we hold on a second")
+		l.Logger.Warnf("Another node is compete to master. we hold on a second")
 	}
 	return false
 }
@@ -203,7 +203,7 @@ func wait(duration time.Duration) {
 func getNetAddr() string {
 	addressArray, err := net.InterfaceAddrs()
 	if err != nil {
-		LOG.Critical("Get network interface address failed. %v", err)
+		l.Logger.Criticalf("Get network interface address failed. %v", err)
 		return "error"
 	}
 

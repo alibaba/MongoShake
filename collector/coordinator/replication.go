@@ -13,7 +13,7 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 var (
@@ -43,7 +43,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	if err := coordinator.sanitizeMongoDB(); err != nil {
 		return err
 	}
-	LOG.Info("Collector startup. shard_by[%s] gids[%s]", conf.Options.IncrSyncShardKey, conf.Options.IncrSyncOplogGIDS)
+	l.Logger.Infof("Collector startup. shard_by[%s] gids[%s]", conf.Options.IncrSyncShardKey, conf.Options.IncrSyncOplogGIDS)
 
 	// run extra job if we need
 	if err := RunExtraJob(coordinator.RealSourceIncrSync); err != nil {
@@ -53,7 +53,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	// all configurations have changed to immutable
 	// opts, _ := json.Marshal(conf.Options)
 	opts, _ := json.Marshal(conf.GetSafeOptions())
-	LOG.Info("Collector configuration %s", string(opts))
+	l.Logger.Infof("Collector configuration %s", string(opts))
 
 	// sentinel: full and incr
 	coordinator.fullSentinel = utils.NewSentinel(utils.TypeFull)
@@ -75,17 +75,17 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	if val, ok := fullBegin.(int64); ok {
 		fullBegin = utils.ExtractTimestampForLog(val)
 	}
-	LOG.Info("start running with mode[%v], fullBeginTs[%v]", syncMode, fullBegin)
+	l.Logger.Infof("start running with mode[%v], fullBeginTs[%v]", syncMode, fullBegin)
 
 	switch syncMode {
 	case utils.VarSyncModeAll:
 		if conf.Options.FullSyncReaderOplogStoreDisk {
-			LOG.Info("run parallel document oplog")
+			l.Logger.Infof("run parallel document oplog")
 			if err := coordinator.parallelDocumentOplog(fullBeginTs); err != nil {
 				return err
 			}
 		} else {
-			LOG.Info("run serialize document oplog")
+			l.Logger.Infof("run serialize document oplog")
 			if err := coordinator.serializeDocumentOplog(fullBeginTs); err != nil {
 				return err
 			}
@@ -99,7 +99,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			return err
 		}
 	default:
-		_ = LOG.Critical("unknown sync mode %v", conf.Options.SyncMode)
+		l.Logger.Criticalf("unknown sync mode %v", conf.Options.SyncMode)
 		return errors.New("unknown sync mode " + conf.Options.SyncMode)
 	}
 
@@ -117,7 +117,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	if conn, err = utils.NewMongoCommunityConn(checkpointStorageUrl, utils.VarMongoConnectModePrimary, true,
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault,
 		conf.Options.CheckpointStorageUrlMongoSslRootCaFile); conn == nil || !conn.IsGood() || err != nil {
-		_ = LOG.Critical("Connect checkpointStorageUrl[%v] error[%v]. Please add primary node into 'mongo_urls' "+
+		l.Logger.Criticalf("Connect checkpointStorageUrl[%v] error[%v]. Please add primary node into 'mongo_urls' "+
 			"if 'context.storage.url' is empty", checkpointStorageUrl, err)
 		return err
 	}
@@ -128,7 +128,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault,
 			conf.Options.MongoSslRootCaFile); conn == nil || !conn.IsGood() || err != nil {
 
-			_ = LOG.Critical("Connect mongo server error. %v, url : %s. "+
+			l.Logger.Criticalf("Connect mongo server error. %v, url : %s. "+
 				"See https://github.com/alibaba/MongoShake/wiki/FAQ"+
 				"#q-how-to-solve-the-oplog-tailer-initialize-failed-no-reachable-servers-error", err, src.URL)
 			return err
@@ -140,7 +140,7 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 			conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog &&
 			!conn.HasOplogNs(utils.GetListCollectionQueryCondition(conn)) {
 
-			_ = LOG.Critical("There has no oplog collection in mongo db server")
+			l.Logger.Criticalf("There has no oplog collection in mongo db server")
 			conn.Close()
 			return errors.New("no oplog ns in mongo. " +
 				"See https://github.com/alibaba/MongoShake/wiki/FAQ" +
@@ -152,12 +152,12 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		// rsName will be set to default if empty
 		if rsName == "" {
 			rsName = fmt.Sprintf("default-%d", i)
-			_ = LOG.Warn("Source mongodb have empty replica set name, url[%s], change to default[%s]",
+			l.Logger.Warnf("Source mongodb have empty replica set name, url[%s], change to default[%s]",
 				utils.BlockMongoUrlPassword(src.URL, "***"), rsName)
 		}
 
 		if _, exist := rs[rsName]; exist {
-			_ = LOG.Critical("There has duplicate replica set name : %s", rsName)
+			l.Logger.Criticalf("There has duplicate replica set name : %s", rsName)
 			conn.Close()
 			return errors.New("duplicated replica set source")
 		}
@@ -208,7 +208,7 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 		fullFinishTs = int64(math.MaxInt64)
 	}
 
-	LOG.Info("------------------------full sync done!------------------------")
+	l.Logger.Infof("------------------------full sync done!------------------------")
 
 	fullBegin := fullBeginTs
 	if val, ok := fullBeginTs.(int64); ok {
@@ -219,15 +219,15 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 			err = fmt.Errorf("incr sync ts[%v] is less than current oldest ts[%v], this error means user's "+
 				"oplog collection size is too small or full sync continues too long",
 				fullBegin, utils.ExtractTimestampForLog(oldestTs))
-			_ = LOG.Error(err)
+			l.Logger.Errorf("%v", err)
 			return err
 		}
 
-		LOG.Info("oldestTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractTimestampForLog(oldestTs),
+		l.Logger.Infof("oldestTs[%v] fullBeginTs[%v] fullFinishTs[%v]", utils.ExtractTimestampForLog(oldestTs),
 			fullBegin, utils.ExtractTimestampForLog(fullFinishTs))
 	}
 
-	LOG.Info("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
+	l.Logger.Infof("finish full sync, start incr sync with timestamp: fullBeginTs[%v], fullFinishTs[%v]",
 		fullBegin, utils.ExtractTimestampForLog(fullFinishTs))
 
 	return coordinator.startOplogReplication(fullBeginTs, fullFinishTs, nil)
@@ -242,22 +242,24 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs int
 	nimo.GoRoutine(func() {
 		defer docWg.Done()
 		if err := coordinator.startDocumentReplication(); err != nil {
-			docError = LOG.Critical("document Replication error. %v", err)
+			l.Logger.Criticalf("document Replication error. %v", err)
+			docError = err
 			return
 		}
-		LOG.Info("------------------------full sync done!------------------------")
+		l.Logger.Infof("------------------------full sync done!------------------------")
 	})
 	// during document replication, oplog syncer fetch oplog and store on disk, in order to avoid oplog roll up
 	// fullSyncFinishPosition means no need to check the end time to disable DDL
 	if err := coordinator.startOplogReplication(fullBeginTs, int64(0), nil); err != nil {
-		return LOG.Critical("start oplog replication failed: %v", err)
+		l.Logger.Criticalf("start oplog replication failed: %v", err)
+		return err
 	}
 	// wait for document replication to finish, set docEndTs to oplog syncer, start oplog replication
 	docWg.Wait()
 	if docError != nil {
 		return docError
 	}
-	LOG.Info("finish document replication, change oplog replication to %v",
+	l.Logger.Infof("finish document replication, change oplog replication to %v",
 		utils.LogFetchStage(utils.FetchStageStoreDiskApply))
 	for _, syncer := range coordinator.syncerGroup {
 		syncer.StartDiskApply()

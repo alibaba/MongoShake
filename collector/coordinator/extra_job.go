@@ -9,7 +9,7 @@ import (
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 const (
@@ -27,7 +27,7 @@ type extraJob interface {
 }
 
 func AddExtraJob(name string, interval int, input ...interface{}) {
-	LOG.Info("start run extra job[%v] with interval[%v]", name, interval)
+	l.Logger.Infof("start run extra job[%v] with interval[%v]", name, interval)
 
 	lock.Lock()
 	defer lock.Unlock()
@@ -78,7 +78,7 @@ func (cui *CheckUniqueIndexExistsJob) innerRun() error {
 		conns[i], err = utils.NewMongoCommunityConn(source.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
 			utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
-			_ = LOG.Error("extra job[%s] connect source[%v] failed: %v",
+			l.Logger.Errorf("extra job[%s] connect source[%v] failed: %v",
 				cui.Name(), utils.BlockMongoUrlPassword(source.URL, "***"), err)
 			return nil
 		}
@@ -91,15 +91,14 @@ func (cui *CheckUniqueIndexExistsJob) innerRun() error {
 	}
 
 	for range time.NewTicker(time.Duration(cui.interval) * time.Second).C {
-		LOG.Debug("extra job[%s] check", cui.Name())
+		l.Logger.Debugf("extra job[%s] check", cui.Name())
 		for i, source := range cui.urls {
 			for _, ns := range nsList {
-
-				LOG.Debug("extra job[%s] check[%v]", cui.Name(), ns)
+				l.Logger.Debugf("extra job[%s] check[%v]", cui.Name(), ns)
 				cursor, err := conns[i].Client.Database(ns.Database).Collection(ns.Collection).
 					Indexes().List(context.Background())
 				if err != nil {
-					_ = LOG.Error("extra job[%s] list indexes for [%s.%s] failed: %v",
+					l.Logger.Errorf("extra job[%s] list indexes for [%s.%s] failed: %v",
 						cui.Name(), ns.Database, ns.Collection, err)
 					continue
 				}
@@ -133,6 +132,6 @@ func (cui *CheckUniqueIndexExistsJob) Run() {
 	var err error
 	err = cui.innerRun()
 	if err != nil {
-		LOG.Crashf("%v", err)
+		l.Logger.Panicf("%v", err)
 	}
 }

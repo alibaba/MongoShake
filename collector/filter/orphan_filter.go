@@ -9,8 +9,8 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 	"github.com/alibaba/MongoShake/v2/sharding"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 const (
@@ -37,7 +37,7 @@ func NewOrphanFilter(replset string, chunkMap sharding.DBChunkMap) *OrphanFilter
 
 func (filter *OrphanFilter) Filter(docD bson.D, namespace string) bool {
 	if filter.chunkMap == nil {
-		LOG.Warn("chunk map is nil")
+		l.Logger.Warnf("chunk map is nil")
 		return false
 	}
 
@@ -52,7 +52,7 @@ NextChunk:
 		for keyInd, keyName := range shardCol.Keys {
 			key := oplog.GetKey(docD, keyName)
 			if key == nil {
-				LOG.Crashf("OrphanFilter find no shard key[%v] in doc %v", keyName, docD)
+				l.Logger.Panicf("OrphanFilter find no shard key[%v] in doc %v", keyName, docD)
 			}
 			if shardCol.ShardType == sharding.HashedShard {
 				key = ComputeHash(key)
@@ -68,7 +68,7 @@ NextChunk:
 		for keyInd, keyName := range shardCol.Keys {
 			key := oplog.GetKey(docD, keyName)
 			if key == nil {
-				LOG.Crashf("OrphanFilter find no shard ke[%v] in doc %v", keyName, docD)
+				l.Logger.Panicf("OrphanFilter find no shard ke[%v] in doc %v", keyName, docD)
 			}
 			if shardCol.ShardType == sharding.HashedShard {
 				key = ComputeHash(key)
@@ -86,7 +86,7 @@ NextChunk:
 		// current key in the chunk, therefore dont filter
 		return false
 	}
-	LOG.Warn("document syncer %v filter orphan document %v with shard key %v in ns[%v]",
+	l.Logger.Warnf("document syncer %v filter orphan document %v with shard key %v in ns[%v]",
 		filter.replset, docD, shardCol.Keys, namespace)
 	return true
 }
@@ -127,7 +127,7 @@ func ComputeHash(data interface{}) int64 {
 		buf = rd[:]
 		w.Write(buf)
 	default:
-		LOG.Crashf("ComputeHash unsupported bson type %T %#v\n", data, data)
+		l.Logger.Panicf("ComputeHash unsupported bson type %T %#v\n", data, data)
 	}
 	out := w.Sum(nil)
 	result := int64(binary.LittleEndian.Uint64(out))
@@ -165,7 +165,7 @@ func chunkGt(x, y interface{}) bool {
 	case BsonTypeString:
 		return rx.(string) > ry.(string)
 	default:
-		LOG.Crashf("chunkGt meet unknown type %v", xType)
+		l.Logger.Panicf("chunkGt meet unknown type %v", xType)
 	}
 	return true
 }
@@ -188,7 +188,7 @@ func chunkEqual(x, y interface{}) bool {
 	case BsonTypeString:
 		return rx.(string) == ry.(string)
 	default:
-		LOG.Crashf("chunkEqual meet unknown type %v", xType)
+		l.Logger.Panicf("chunkEqual meet unknown type %v", xType)
 	}
 	return true
 }
@@ -211,7 +211,7 @@ func chunkLt(x, y interface{}) bool {
 	case BsonTypeString:
 		return rx.(string) < ry.(string)
 	default:
-		LOG.Crashf("chunkLt meet unknown type %v", xType)
+		l.Logger.Panicf("chunkLt meet unknown type %v", xType)
 	}
 	return true
 }
@@ -239,7 +239,7 @@ func getBsonType(x interface{}) (int, interface{}) {
 	case primitive.ObjectID:
 		return BsonTypeOid, rx.Hex()
 	default:
-		LOG.Crashf("chunkLt meet unknown type %T", x)
+		l.Logger.Panicf("chunkLt meet unknown type %T", x)
 	}
 	return BsonInvalid, nil
 }

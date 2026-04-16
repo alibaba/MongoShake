@@ -21,6 +21,8 @@ type Configuration struct {
 	LogDirectory                           string   `config:"log.dir"`
 	LogFileName                            string   `config:"log.file"`
 	LogFlush                               bool     `config:"log.flush"`
+	LogMaxSizeMb                           int      `config:"log.max_size_mb"`
+	LogMaxAge                              int      `config:"log.max_age"`
 	SyncMode                               string   `config:"sync_mode"`
 	MongoUrls                              []string `config:"mongo_urls"`
 	MongoCsUrl                             string   `config:"mongo_cs_url"`

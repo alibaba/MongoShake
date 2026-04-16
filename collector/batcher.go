@@ -11,7 +11,7 @@ import (
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 const (
@@ -122,14 +122,14 @@ func (batcher *Batcher) getLastOplog() (*oplog.PartialLog, *oplog.PartialLog) {
 func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 	// filter oplog such like Noop or Gid-filtered
 	if batcher.filterList.IterateFilter(log) {
-		LOG.Debug("%s oplog is filtered. %v", batcher.syncer, log)
+		l.Logger.Debugf("%s oplog is filtered. %v", batcher.syncer, log)
 		batcher.syncer.replMetric.AddFilter(1)
 		return true
 	}
 
 	if moveChunkFilter.Filter(log) {
-		_ = LOG.Critical("shake exit, must close balancer in sharding + oplog")
-		LOG.Crashf("move chunk oplog found, must close balancer in sharding + oplog [%v]", log)
+		l.Logger.Criticalf("shake exit, must close balancer in sharding + oplog")
+		l.Logger.Panicf("move chunk oplog found, must close balancer in sharding + oplog [%v]", log)
 		return false
 	}
 
@@ -138,7 +138,7 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 	if ddlFilter.Filter(log) &&
 		primitive.CompareTimestamp(log.Timestamp, batcher.syncer.fullSyncFinishPosition) <= 0 &&
 		conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
-		LOG.Crashf("%s ddl oplog found[%v] when oplog timestamp[%v] less than fullSyncFinishPosition[%v]",
+		l.Logger.Panicf("%s ddl oplog found[%v] when oplog timestamp[%v] less than fullSyncFinishPosition[%v]",
 			batcher.syncer, log, log.Timestamp,
 			batcher.syncer.fullSyncFinishPosition)
 		return false
@@ -223,12 +223,12 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 		primitive.CompareTimestamp(lastOplog.Timestamp, batcher.syncer.fullSyncFinishPosition) > 0 &&
 		primitive.CompareTimestamp(exitPoint, lastOplog.Timestamp) < 0 {
 		// only run detail judgement when exit point is bigger than the last one
-		LOG.Info("%s exitPoint[%v] < lastOplog.Timestamp[%v]", batcher.syncer, exitPoint, lastOplog.Timestamp)
+		l.Logger.Infof("%s exitPoint[%v] < lastOplog.Timestamp[%v]", batcher.syncer, exitPoint, lastOplog.Timestamp)
 		var i int
 		for i = range mergeBatch {
 			// fmt.Println(exitPoint, mergeBatch[i].Parsed.Timestamp)
 			if primitive.CompareTimestamp(exitPoint, mergeBatch[i].Parsed.Timestamp) < 0 {
-				LOG.Info("%s exitPoint[%v] < current.Timestamp[%v]", batcher.syncer,
+				l.Logger.Infof("%s exitPoint[%v] < current.Timestamp[%v]", batcher.syncer,
 					exitPoint, mergeBatch[i].Parsed.Timestamp)
 				break
 			}
@@ -249,7 +249,7 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
 				delayBoundary := time.Now().Unix() - delay + 3 // 3 is for NTP drift
 
 				if utils.ExtractMongoTimestamp(firstOplog.Timestamp) > delayBoundary {
-					LOG.Info("%s --- wait target delay[%v seconds]: "+
+					l.Logger.Infof("%s --- wait target delay[%v seconds]: "+
 						"first oplog timestamp[%v] > delayBoundary[%v], fullSyncFinishPosition[%v]",
 						batcher.syncer, delay, firstOplog.Timestamp, delayBoundary,
 						batcher.syncer.fullSyncFinishPosition)
@@ -296,7 +296,7 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 			}
 
 			batcher.addIntoBatchGroup(v, true)
-			//LOG.Info("%s transfer barrierOplogs into batchGroup, i[%d], oplog[%v]", batcher.syncer, i, v.Parsed)
+			//l.Logger.Infof("%s transfer barrierOplogs into batchGroup, i[%d], oplog[%v]", batcher.syncer, i, v.Parsed)
 		}
 		batcher.barrierOplogs = nil
 
@@ -316,13 +316,13 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		if batcher.filter(genericLog.Parsed) {
 			// don't push to worker, set lastFilterOplog
 			batcher.lastFilterOplog = genericLog.Parsed
-			//LOG.Debug("~~~~~~~~~filter %v %v", i, genericLog.Parsed)
+			//l.Logger.Debugf("~~~~~~~~~filter %v %v", i, genericLog.Parsed)
 			continue
 		}
 
 		// Transaction
 		if txnMeta, txnOk := batcher.isTransaction(genericLog.Parsed); txnOk {
-			//LOG.Debug("~~~~~~~~~transaction %v %v", i, genericLog.Parsed)
+			//l.Logger.Debugf("~~~~~~~~~transaction %v %v", i, genericLog.Parsed)
 			isRet, mustIndividual, deliveredOps := batcher.handleTransaction(txnMeta, genericLog)
 			if !isRet {
 				continue
@@ -349,7 +349,7 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 			if operation == "applyOps" {
 				deliveredOps, err := oplog.ExtractInnerOps(&genericLog.Parsed.ParsedLog)
 				if err != nil {
-					LOG.Crashf("applyOps extract failed. err[%v] oplog[%v]",
+					l.Logger.Panicf("applyOps extract failed. err[%v] oplog[%v]",
 						err, genericLog.Parsed.ParsedLog)
 				}
 
@@ -425,11 +425,11 @@ func (batcher *Batcher) addIntoBatchGroup(genericLog *oplog.GenericOplog, isBarr
 	}
 	batcher.batchGroup[which] = append(batcher.batchGroup[which], genericLog)
 
-	// LOG.Debug("add into worker[%v]: %v", which, genericLog.Parsed.ParsedLog)
+	// l.Logger.Debugf("add into worker[%v]: %v", which, genericLog.Parsed.ParsedLog)
 }
 
 func (batcher *Batcher) isTransaction(partialLog *oplog.PartialLog) (oplog.TxnMeta, bool) {
-	//LOG.Info("isTransaction input oplog:%v lsid[%v] TxnNumber[%v] Object[%v]", partialLog,
+	//l.Logger.Infof("isTransaction input oplog:%v lsid[%v] TxnNumber[%v] Object[%v]", partialLog,
 	//	partialLog.ParsedLog.LSID, partialLog.ParsedLog.TxnNumber, partialLog.ParsedLog.Object)
 	if partialLog.Operation == "c" {
 		txnMeta, err := oplog.NewTxnMeta(partialLog.ParsedLog)
@@ -448,7 +448,7 @@ func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta,
 	deliveredOps []*oplog.GenericOplog) {
 	err := batcher.txnBuffer.AddOp(txnMeta, genericLog)
 	if err != nil {
-		LOG.Crashf("%s add oplog to txnbuffer failed, err[%v] oplog[%v]",
+		l.Logger.Panicf("%s add oplog to txnbuffer failed, err[%v] oplog[%v]",
 			batcher.syncer, err, genericLog.Parsed.ParsedLog)
 	}
 
@@ -456,7 +456,7 @@ func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta,
 	if txnMeta.IsAbort() {
 		err := batcher.txnBuffer.PurgeTxn(txnMeta)
 		if err != nil {
-			LOG.Crashf("%s cleaning up txnBuffer failed, err[%v] oplog[%v]",
+			l.Logger.Panicf("%s cleaning up txnBuffer failed, err[%v] oplog[%v]",
 				batcher.syncer, err, genericLog.Parsed.ParsedLog)
 		}
 
@@ -489,7 +489,7 @@ Loop:
 			deliveredOps = append(deliveredOps, o)
 		case err := <-errs:
 			if err != nil {
-				LOG.Crashf("error replaying transaction, err[%v]", err)
+				l.Logger.Panicf("error replaying transaction, err[%v]", err)
 			}
 			break Loop
 		}
@@ -507,7 +507,7 @@ Loop:
 
 	err = batcher.txnBuffer.PurgeTxn(txnMeta)
 	if err != nil {
-		LOG.Crashf("error cleaning up transaction buffer, err[%v]", err)
+		l.Logger.Panicf("error cleaning up transaction buffer, err[%v]", err)
 	}
 
 	return true, mustIndividual, deliveredOps

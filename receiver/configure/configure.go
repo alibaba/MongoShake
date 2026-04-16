@@ -8,6 +8,8 @@ type Configuration struct {
 	LogLevel          string `config:"log.level"`
 	LogFileName       string `config:"log.file"`
 	LogFlush          bool   `config:"log.flush"`
+	LogMaxSizeMb      int    `config:"log.max_size_mb"`
+	LogMaxAge         int    `config:"log.max_age"`
 	ReplayerNum       int    `config:"replayer"`
 }
 

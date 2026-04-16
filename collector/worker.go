@@ -12,7 +12,7 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 	"github.com/alibaba/MongoShake/v2/tunnel"
 )
 
@@ -142,7 +142,7 @@ func (worker *Worker) findFirstAvailableBatch() []*oplog.GenericOplog {
 }
 
 func (worker *Worker) StartWorker() {
-	LOG.Info("%s start working with jobs batch queue. buffer capacity %d",
+	l.Logger.Infof("%s start working with jobs batch queue. buffer capacity %d",
 		worker, cap(worker.queue))
 
 	var batch []*oplog.GenericOplog
@@ -203,7 +203,7 @@ func (worker *Worker) transfer(batch []*oplog.GenericOplog) {
 		}
 		replyAndAcked := worker.writeController.Send(logs, tag)
 
-		LOG.Info("%s transfer retransmit:%t send [%d] logs. reply_acked [%v], list_unack [%d] ",
+		l.Logger.Infof("%s transfer retransmit:%t send [%d] logs. reply_acked [%v], list_unack [%d] ",
 			worker, worker.retransmit, len(logs), utils.ExtractTimestampForLog(replyAndAcked), len(worker.listUnACK))
 
 		switch {
@@ -226,13 +226,13 @@ func (worker *Worker) transfer(batch []*oplog.GenericOplog) {
 			worker.syncer.replMetric.ClearReplStatus(utils.TunnelSendBad)
 
 		case replyAndAcked == tunnel.ReplyRetransmission:
-			LOG.Info("%s received ReplyRetransmission reply, now status %t", worker, worker.retransmit)
+			l.Logger.Infof("%s received ReplyRetransmission reply, now status %t", worker, worker.retransmit)
 			// next step. keep trying with retransmission util we received
 			// a non-retransmission message
 			worker.retransmit = true
 
 		default:
-			_ = LOG.Warn("%s transfer oplogs failed with reply value %d", worker, replyAndAcked)
+			l.Logger.Warnf("%s transfer oplogs failed with reply value %d", worker, replyAndAcked)
 			// we treat batched logs fail as just one time failed. and
 			// notify failed retry listener
 			worker.syncer.replMetric.AddFailed(1)
@@ -255,7 +255,7 @@ func (worker *Worker) retain(batch []*oplog.GenericOplog) {
 	worker.listUnACK = append(worker.listUnACK, batch...)
 	atomic.StoreInt64(&worker.unackSize, int64(len(worker.listUnACK)))
 	worker.updateUnackBufferMetric()
-	LOG.Debug("%s copy batch oplogs [%d] to listUnACK count. UnACK remained [%d]",
+	l.Logger.Debugf("%s copy batch oplogs [%d] to listUnACK count. UnACK remained [%d]",
 		worker, len(batch), len(worker.listUnACK))
 }
 
@@ -265,7 +265,7 @@ func (worker *Worker) purgeACK() {
 	})
 
 	if bigger != 0 {
-		LOG.Debug("%s purge unAcked [lsn_ack:%d]. keep slice position from %d util %d",
+		l.Logger.Debugf("%s purge unAcked [lsn_ack:%d]. keep slice position from %d util %d",
 			worker, worker.ack, bigger, len(worker.listUnACK))
 		worker.listUnACK = worker.listUnACK[bigger:]
 		atomic.StoreInt64(&worker.unackSize, int64(len(worker.listUnACK)))

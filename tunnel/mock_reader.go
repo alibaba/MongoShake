@@ -9,7 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 const (
@@ -32,7 +32,7 @@ type FakeGenerator struct {
 func (tunnel *MockReader) Link(replayer []Replayer) error {
 	tunnel.generator = make([]*FakeGenerator, len(replayer))
 	for i := 0; i != len(replayer); i++ {
-		LOG.Info("mock receiver generator-%d start", i)
+		l.Logger.Infof("mock receiver generator-%d start", i)
 		tunnel.generator[i] = &FakeGenerator{replayer: replayer}
 		tunnel.generator[i].index = uint32(i)
 		go tunnel.generator[i].start()
@@ -109,6 +109,6 @@ func (generator *FakeGenerator) start() {
 			RawLogs:  oplog.LogEntryEncode(batch),
 		}, nil)
 
-		LOG.Info("mock generator-index-%d generate and apply logs %d", generator.index, len(batch))
+		l.Logger.Infof("mock generator-index-%d generate and apply logs %d", generator.index, len(batch))
 	}
 }
