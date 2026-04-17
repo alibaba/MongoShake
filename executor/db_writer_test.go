@@ -979,7 +979,7 @@ func TestBulkWriter(t *testing.T) {
 		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts2, true)
 		fmt.Printf("err:%v\n", err)
 		assert.Equal(t, nil, err, "should be equal")
-		//assert.Equal(t, true, strings.Contains(err.Error(), "Must run update to shard key"), "should be equal")
+		// assert.Equal(t, true, strings.Contains(err.Error(), "Must run update to shard key"), "should be equal")
 
 		// query
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
@@ -1472,7 +1472,7 @@ func TestCommandWriter(t *testing.T) {
 
 		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts2, true)
 		fmt.Printf("err:%v\n", err)
-		//assert.Equal(t, nil, err, "should be equal")
+		// assert.Equal(t, nil, err, "should be equal")
 
 		// query
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
@@ -1480,7 +1480,7 @@ func TestCommandWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 3, len(res), "should be equal")
 		assert.Equal(t, int32(1), res[0]["x"], "should be equal")
-		//assert.Equal(t, int32(20), res[1]["x"], "should be equal")
+		// assert.Equal(t, int32(20), res[1]["x"], "should be equal")
 		assert.Equal(t, int32(3), res[2]["x"], "should be equal")
 	}
 }
@@ -1574,6 +1574,9 @@ func TestRunCommand(t *testing.T) {
 		err = conn.Client.Database("zz").Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
+		_, err = conn.Client.Database("zz").Collection("y").InsertOne(context.Background(), bson.M{"x": 1})
+		assert.Equal(t, nil, err, "should be equal")
+
 		log := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Operation: "c",
@@ -1616,6 +1619,9 @@ func TestRunCommand(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		err = conn.Client.Database("zz").Drop(nil)
+		assert.Equal(t, nil, err, "should be equal")
+
+		_, err = conn.Client.Database("zz").Collection("y").InsertOne(context.Background(), bson.M{"x": 1})
 		assert.Equal(t, nil, err, "should be equal")
 
 		log := &oplog.PartialLog{

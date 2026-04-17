@@ -11,7 +11,7 @@ This is a brief introduction of Mongo-Shake, please visit [english wiki](https:/
 # Mongo-Shake
 ---
 Mongo-Shake is developed and maintained by Nosql Team in Alibaba-Cloud.<br>
-Mongo-Shake is a universal platform for services based on MongoDB's oplog. It fetches oplog from source mongo database, and replays in the target mongo database or sends to other ends in different tunnels. If the target side is mongo database which means replay oplog directly, it's like a syncing tool that used to copy data from source MongoDB to another MongoDB to build redundant replication or active-active replication. Except for this direct way, there are others tunnel types such like rpc, file, tcp, kafka. Receivers wrote by users must define their own interfaces to connecting to these tunnels respectively. Users can also define there own tunnel type which is pluggable. If connecting to a third-party message middleware like kafka, the consumer can get the subscriber data in an asynchronous way in pub/sub module flexibly.
+Mongo-Shake is a universal platform for services based on MongoDB's oplog. It fetches oplog from source mongo database, and replays in the target mongo database or sends to other ends in different tunnels. If the target side is mongo database which means replay oplog directly, it's like a syncing tool that used to copy data from source MongoDB to another MongoDB to build redundant replication or active-active replication. Except for this direct way, there are others tunnel types such like rpc, file, tcp, kafka. Receivers wrote by users must define their own interfaces to connecting to these tunnels respectively. Users can also define their own tunnel type which is pluggable. If connecting to a third-party message middleware like kafka, the consumer can get the subscriber data in an asynchronous way in pub/sub module flexibly.
 Here comes general data flow, <br>
 ![pic1](resources/dataflow.png)<br>
 The source can be either single mongod, replica set or sharding while target can be mongod or mongos. If the source is replica set, we suggest fetching data from secondary/hidden to ease the primary pressure. If the source is sharding, every shard should connect to Mongo-Shake. There can be several mongos on the target side to keep high availability, and different data will be hashed and written to different mongos.
@@ -31,7 +31,7 @@ Support filtering database and collection namespace with whitelist and blacklist
 
 # DDL Syncing
 ---
-Starting with version 1.5, MongoShake supports syncing DDL by using global barrier. Once fetching DDL oplog, MongoShake adds a barrier so that all the belowing oplogs waiting in the queue until this oplog is written into the target MongoDB or tunnel and the checkpoint is updated. Currently, DDL is only support for ReplicaSet on the source side(target side can be RelicaSet or Sharding), we will support Sharding in the later version.<br>
+Starting with version 1.5, MongoShake supports syncing DDL by using global barrier. Once fetching DDL oplog, MongoShake adds a barrier so that all the subsequent oplogs wait in the queue until this oplog is written into the target MongoDB or tunnel and the checkpoint is updated. Currently, DDL is only support for ReplicaSet on the source side(target side can be RelicaSet or Sharding), we will support Sharding in the later version.<br>
 ![ddl](resources/ddl_support.png)<br>
 
 # Global ID
@@ -121,4 +121,5 @@ We also provide some tools for synchronization in Shake series.<br>
 | zemul | zemiaozhou@gmail.com  |
 | renheqiang |                       |
 | dobesv |   dobesv@gmail.com    |
- | pengzhenyi2015 | 503282373@qq.com |
+| pengzhenyi2015 | 503282373@qq.com |
+| SisyphusSQ | |
