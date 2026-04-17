@@ -99,6 +99,11 @@ const (
 
 	// oplog reader constants
 	VarOplogReaderMaxCappedRetry = 10 // max consecutive CappedPositionLost retries before fatal exit
+
+	// time-series collection
+	VarSystemBucketsPrefix   = "system.buckets."
+	VarSystemViewsCollection = "system.views"
+	VarOplogKeyOriginalSpec  = "originalSpec"
 )
 
 type Pair struct {

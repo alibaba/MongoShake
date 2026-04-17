@@ -723,3 +723,59 @@ func TestV2OplogWithDiff(t *testing.T) {
 		}}},
 	}, result1, "should be equal")
 }
+
+// TestDiffUpdateOplogToNormal_TimeSeries tests that time-series bucket updates
+// with column-store binary diff (sdata.b) correctly return an error,
+// triggering the applyOps fallback path in the executor.
+func TestDiffUpdateOplogToNormal_TimeSeries(t *testing.T) {
+	nr := 0
+	// Case: sdata.b column-store binary diff should return error
+	{
+		fmt.Printf("TestDiffUpdateOplogToNormal_TimeSeries case %d. sdata.b returns error\n", nr)
+		nr++
+		// Simulate a time-series bucket update oplog with $v:2 diff containing
+		// sdata -> b (binary column-store diff) which cannot be parsed
+		updateObj := bson.D{
+			{Key: "$v", Value: int32(2)},
+			{Key: "diff", Value: bson.D{
+				{Key: "sdata", Value: bson.D{
+					{Key: "b", Value: bson.D{
+						{Key: "temperature", Value: bson.D{
+							{Key: "o", Value: int32(10)},
+							{Key: "d", Value: primitive.Binary{Subtype: 0, Data: []byte{0x01, 0x02, 0x03}}},
+						}},
+					}},
+				}},
+			}},
+		}
+		_, err := DiffUpdateOplogToNormal(updateObj)
+		assert.NotNil(t, err, "sdata.b column-store diff should return error")
+		assert.Contains(t, err.Error(), "parse diffOplog failed", "error should indicate diff parse failure")
+	}
+	// Case: scontrol with normal u/s keys should parse successfully
+	{
+		fmt.Printf("TestDiffUpdateOplogToNormal_TimeSeries case %d. scontrol normal diff parses OK\n", nr)
+		nr++
+		// Simulate a time-series bucket update oplog with scontrol containing
+		// normal update keys (u for set field)
+		updateObj := bson.D{
+			{Key: "$v", Value: int32(2)},
+			{Key: "diff", Value: bson.D{
+				{Key: "scontrol", Value: bson.D{
+					{Key: "u", Value: bson.D{
+						{Key: "count", Value: int32(5)},
+					}},
+					{Key: "smin", Value: bson.D{
+						{Key: "u", Value: bson.D{{Key: "humidity", Value: 50}}},
+					}},
+					{Key: "smax", Value: bson.D{
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 30}}},
+					}},
+				}},
+			}},
+		}
+		result, err := DiffUpdateOplogToNormal(updateObj)
+		assert.Nil(t, err, "scontrol with normal u/s keys should parse without error")
+		assert.NotNil(t, result, "result should not be nil")
+	}
+}

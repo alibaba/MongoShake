@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
 
@@ -84,7 +85,7 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 		} else {
 			_ = LOG.Warn("Insert on duplicated update _id look up failed. %v", log)
 		}
-		LOG.Debug("command_writer:: updateOnInsert %v", log.original.partialLog)
+		LOG.Debug("command_writer doUpdateOnInsert %v", log.original.partialLog)
 	}
 
 	var err error
@@ -131,6 +132,16 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.E, 
 		// handle oplog {o.$v:2} with 'diff' field
 		if ok && oplogVer == 2 {
 			if newObject, transErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); transErr != nil {
+				// Time-series bucket update with column-store binary diff (e.g., sdata.b)
+				// cannot be converted to normal $set/$unset. Fall back to applyOps replay.
+				if strings.HasPrefix(collection, utils.VarSystemBucketsPrefix) {
+					LOG.Info("command_writer: fall back to applyOps for time-series bucket update on %s.%s: %v",
+						database, collection, transErr)
+					if applyErr := replayUpdateViaApplyOps(cw.conn.Client, log.original.partialLog); applyErr != nil {
+						return applyErr
+					}
+					continue
+				}
 				_ = LOG.Error("doUpdate run failed err[%v] org_doc[%v]", transErr, log.original.partialLog)
 				return transErr
 			}
@@ -145,6 +156,10 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.E, 
 			{"upsert", upsert},
 			{"multi", false}})
 		LOG.Debug("command_writer:: update %v", log.original.partialLog)
+	}
+
+	if len(updates) == 0 {
+		return nil
 	}
 
 	var err error

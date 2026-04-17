@@ -16,11 +16,11 @@ type NamespaceTransform struct {
 }
 
 func (transform *NamespaceTransform) Transform(namespace string) string {
-	for _, rule_pair := range transform.ruleList {
-		re := regexp.MustCompile(rule_pair[0])
+	for _, rulePair := range transform.ruleList {
+		re := regexp.MustCompile(rulePair[0])
 		params := re.FindStringSubmatch(namespace)
 		if len(params) > 0 {
-			return rule_pair[1] + params[1]
+			return rulePair[1] + params[1]
 		}
 	}
 	return namespace

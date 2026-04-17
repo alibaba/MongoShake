@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -48,6 +49,19 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.E, o
 	var upserts []*OplogRecord
 
 	for _, log := range oplogs {
+		// Time-series: use applyOps for 'system.views' insert to bypass EnforceConstraints limitation,
+		// we couldn't directly insert to 'system.views' as it's protected collection
+		if log.original.partialLog.Operation == "i" &&
+			strings.HasSuffix(log.original.partialLog.Namespace, utils.VarSystemViewsCollection) {
+			_ = LOG.Warn("use 'applyOps' to handle insert op to ns[%v]", log.original.partialLog.Namespace)
+			result := sw.conn.Client.Database("admin").RunCommand(
+				nil, bson.D{{Key: "applyOps", Value: []oplog.ParsedLog{log.original.partialLog.ParsedLog}}})
+			if result.Err() != nil {
+				return result.Err()
+			}
+			continue
+		}
+
 		opts := options.InsertOne()
 		if conf.Options.IncrSyncBypassDocumentValidation {
 			opts = opts.SetBypassDocumentValidation(true)
@@ -91,9 +105,9 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
 			updates = append(updates, &pair{id: log.original.partialLog.DocumentKey, data: newObject, index: i})
 		} else {
-			//if upsert {
+			// if upsert {
 			//	_ = LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
-			//}
+			// }
 			// insert must have _id
 			if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
 				updates = append(updates, &pair{id: bson.D{{"_id", id}}, data: newObject, index: i})
@@ -233,6 +247,16 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 
 			if ok && oplogVer == 2 {
 				if update, oplogErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); oplogErr != nil {
+					// Time-series bucket update with column-store binary diff (e.g., sdata.b)
+					// cannot be converted to normal $set/$unset. Fall back to applyOps replay.
+					if strings.HasPrefix(collection, utils.VarSystemBucketsPrefix) {
+						LOG.Info("fall back to applyOps for time-series bucket update on %s.%s: %v",
+							database, collection, oplogErr)
+						if applyErr := replayUpdateViaApplyOps(sw.conn.Client, log.original.partialLog); applyErr != nil {
+							return applyErr
+						}
+						continue
+					}
 					_ = LOG.Error("doUpdate run failed err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
 					return oplogErr
 				}
@@ -252,9 +276,9 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.DocumentKey,
 					update, opts)
 			} else {
-				//if upsert {
+				// if upsert {
 				//	_ = LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
-				//}
+				// }
 
 				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.Query,
 					update, opts)

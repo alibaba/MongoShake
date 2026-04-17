@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -26,10 +27,26 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 
 	var models []mongo.WriteModel
 	for _, log := range oplogs {
-		models = append(models, mongo.NewInsertOneModel().SetDocument(log.original.partialLog.Object))
+		if log.original.partialLog.Operation == "i" &&
+			strings.HasSuffix(log.original.partialLog.Namespace, utils.VarSystemViewsCollection) {
+			// zhongli: use applyOps directly, since we couldn't set
+			// {EnforceConstraints:false} outside the mongo server
+			_ = LOG.Warn("use 'applyOps' to handle insert op to ns[%v]", log.original.partialLog.Namespace)
+			result := bw.conn.Client.Database("admin").RunCommand(
+				nil, bson.D{{Key: "applyOps", Value: []oplog.ParsedLog{log.original.partialLog.ParsedLog}}})
+			if result.Err() != nil {
+				return result.Err()
+			}
+		} else {
+			models = append(models, mongo.NewInsertOneModel().SetDocument(log.original.partialLog.Object))
 
-		LOG.Debug("bulk_writer: insert org_oplog:%v insert_doc:%v",
-			log.original.partialLog, log.original.partialLog.Object)
+			LOG.Debug("bulk_writer: insert org_oplog:%v insert_doc:%v",
+				log.original.partialLog, log.original.partialLog.Object)
+		}
+	}
+
+	if len(models) == 0 { // nothing to insert for bulkWriter
+		return nil
 	}
 
 	opts := options.BulkWrite().SetOrdered(false)
@@ -39,7 +56,8 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, opts)
 
 	if err != nil {
-		bulkErr, ok := err.(mongo.BulkWriteException)
+		var bulkErr mongo.BulkWriteException
+		ok := errors.As(err, &bulkErr)
 		if !ok {
 			_ = LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[type:%T err:%v] res[%v]",
 				len(models), database+"."+collection, err, err, res)
@@ -73,9 +91,9 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 				SetFilter(log.original.partialLog.DocumentKey).
 				SetUpdate(bson.D{{"$set", newObject}}).SetUpsert(true))
 		} else {
-			//if upsert {
+			// if upsert {
 			//	_ = LOG.Warn("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
-			//}
+			// }
 			// insert must have _id
 			if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
 
@@ -263,6 +281,16 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 
 			if ok && oplogVer == 2 {
 				if newObject, oplogErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); oplogErr != nil {
+					// Time-series bucket update with column-store binary diff (e.g., sdata.b)
+					// cannot be converted to normal $set/$unset. Fall back to replay with 'applyOps' command.
+					if strings.HasPrefix(collection, utils.VarSystemBucketsPrefix) {
+						LOG.Info("bulk_writer fall back to applyOps for time-series bucket update on %s.%s: %v",
+							database, collection, oplogErr)
+						if applyErr := replayUpdateViaApplyOps(bw.conn.Client, log.original.partialLog); applyErr != nil {
+							return applyErr
+						}
+						continue
+					}
 					_ = LOG.Error("doUpdate run failed err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
 					return oplogErr
 				}
@@ -276,9 +304,9 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 					SetFilter(log.original.partialLog.DocumentKey).
 					SetUpdate(newObject).SetUpsert(true))
 			} else {
-				//if upsert {
+				// if upsert {
 				//	_ = LOG.Warn("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
-				//}
+				// }
 
 				model := mongo.NewUpdateOneModel().
 					SetFilter(log.original.partialLog.Query).

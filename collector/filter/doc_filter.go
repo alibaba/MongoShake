@@ -67,8 +67,8 @@ func (chain DocFilterChain) IterateFilter(namespace string) bool {
 }
 
 func (filter *AutologousFilter) FilterNs(namespace string) bool {
-	// for namespace. we filter noop operation and collection name
-	// that are admin, local, config, mongoshake, mongoshake_conflict
+	// for namespace, we filter noop operation and collection name that belong to
+	// [admin, local, config, mongoshake, mongoshake_conflict]
 
 	// v2.4.13, don't filter admin.$cmd which may include transaction
 	for key, val := range NsShouldNotBeIgnore {
@@ -99,6 +99,26 @@ func (filter *NamespaceFilter) FilterNs(namespace string) bool {
 			return false
 		}
 	}
+
+	// Time-series collection support:
+	// system.views should always pass through (stores view definitions for time-series and other views).
+	// system.buckets.xxx should also check the logical collection name db.xxx.
+	parts := strings.SplitN(namespace, ".", 2)
+	if len(parts) == 2 {
+		col := parts[1]
+		if col == utils.VarSystemViewsCollection {
+			return false
+		}
+		if strings.HasPrefix(col, utils.VarSystemBucketsPrefix) {
+			logicalNs := parts[0] + "." + strings.TrimPrefix(col, utils.VarSystemBucketsPrefix)
+			return filter.filterNsByRules(logicalNs)
+		}
+	}
+	return filter.filterNsByRules(namespace)
+}
+
+// filterNsByRules checks namespace against white/black list regex rules.
+func (filter *NamespaceFilter) filterNsByRules(namespace string) bool {
 	if filter.whiteRule != "" {
 		if match, _ := regexp.MatchString(filter.whiteRule, namespace); !match {
 			// filter

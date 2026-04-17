@@ -558,6 +558,99 @@ func TestNamespaceFilter(t *testing.T) {
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
 		assert.Equal(t, 2, len(log.Object[0].Value.(bson.A)), "should be equal")
 	}
+
+	// ---- Time-series collection tests ----
+	// Case1: whitelist test.weather, DML on test.system.buckets.weather should NOT be filtered
+	{
+		fmt.Printf("TestNamespaceFilter case %d. [timeseries] whitelist DML system.buckets pass\n", nr)
+		nr++
+		filter := NewNamespaceFilter([]string{"test.weather"}, nil)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "test.system.buckets.weather",
+				Operation: "i",
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log),
+			"whitelist test.weather should pass system.buckets.weather DML")
+	}
+	// Case2: whitelist test.weather, DML on test.system.views should NOT be filtered
+	{
+		fmt.Printf("TestNamespaceFilter case %d. [timeseries] whitelist DML system.views pass\n", nr)
+		nr++
+		filter := NewNamespaceFilter([]string{"test.weather"}, nil)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "test.system.views",
+				Operation: "i",
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log),
+			"whitelist test.weather should pass system.views DML")
+	}
+	// Case3: whitelist test.weather, DDL create on system.buckets.weather should NOT be filtered
+	{
+		fmt.Printf("TestNamespaceFilter case %d. [timeseries] whitelist DDL create system.buckets pass\n", nr)
+		nr++
+		filter := NewNamespaceFilter([]string{"test.weather"}, nil)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "test.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{Key: "create", Value: "system.buckets.weather"},
+				},
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log),
+			"whitelist test.weather should pass DDL create system.buckets.weather")
+	}
+	// Case4: whitelist test.weather, DDL commitIndexBuild on system.buckets.weather should NOT be filtered
+	{
+		fmt.Printf("TestNamespaceFilter case %d. [timeseries] whitelist DDL commitIndexBuild system.buckets pass\n", nr)
+		nr++
+		filter := NewNamespaceFilter([]string{"test.weather"}, nil)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "test.$cmd",
+				Operation: "c",
+				Object: bson.D{
+					{Key: "commitIndexBuild", Value: "system.buckets.weather"},
+					{Key: "indexes", Value: bson.A{}},
+				},
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log),
+			"whitelist test.weather should pass DDL commitIndexBuild system.buckets.weather")
+	}
+	// Case5: blacklist test.weather, DML on test.system.buckets.weather SHOULD be filtered
+	{
+		fmt.Printf("TestNamespaceFilter case %d. [timeseries] blacklist DML system.buckets filtered\n", nr)
+		nr++
+		filter := NewNamespaceFilter(nil, []string{"test.weather"})
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "test.system.buckets.weather",
+				Operation: "u",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log),
+			"blacklist test.weather should filter system.buckets.weather DML")
+	}
+	// Case6: whitelist test.other, DML on test.system.buckets.weather SHOULD be filtered
+	{
+		fmt.Printf("TestNamespaceFilter case %d. [timeseries] whitelist mismatch DML system.buckets filtered\n", nr)
+		nr++
+		filter := NewNamespaceFilter([]string{"test.other"}, nil)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "test.system.buckets.weather",
+				Operation: "i",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log),
+			"whitelist test.other should filter system.buckets.weather DML")
+	}
 }
 
 func TestGidFilter(t *testing.T) {
@@ -1278,6 +1371,23 @@ func TestAutologousFilter(t *testing.T) {
 		assert.NoError(t, err, "should be equal")
 		assert.Equal(t, "zz.mmm", ns, "should be equal")
 		assert.Equal(t, false, filter.Filter(log), "should be equal")
+	}
+
+	// Time-series: system.buckets.xxx should NOT be filtered by AutologousFilter
+	{
+		fmt.Printf("TestAutologousFilter case %d. [timeseries] system.buckets not filtered\n", nr)
+		nr++
+		deepcopy.Copy(&NsShouldBeIgnore, &rec)
+		InitNs([]string{})
+		filter := new(AutologousFilter)
+		log := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "test.system.buckets.weather",
+				Operation: "i",
+			},
+		}
+		assert.Equal(t, false, filter.Filter(log),
+			"system.buckets.weather should not be filtered by AutologousFilter")
 	}
 }
 
