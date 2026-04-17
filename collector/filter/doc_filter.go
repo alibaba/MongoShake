@@ -12,22 +12,22 @@ import (
 // NsShouldBeIgnore defines namespaces which should be filtered.
 // key: ns, value: true means prefix, false means contain
 var NsShouldBeIgnore = map[string]bool{
-	"admin.": true,
-	"local.": true,
-	//"config.": true
-	utils.AppDatabase + ".":           true,
-	utils.APPConflictDatabase + ".":   true,
-	"config.cache.":                   true,
-	"config.transactions":             true,
-	"config.transaction_coordinators": true,
-	"config.image_collection":         true,
-	"config.mongos":                   true,
-	"config.system.sessions":          true,
-	"config.system.indexBuilds":       true,
-	"config.system.preimages":         true,
-	"config.migrationCoordinators":    true,
-	"config.rangeDeletions":           true,
-	//"system.views":                    false,
+	"admin.":                        true,
+	"local.":                        true,
+	"config.":                       true,
+	utils.AppDatabase + ".":         true,
+	utils.APPConflictDatabase + ".": true,
+	// "config.cache.":                   true,
+	// "config.transactions":             true,
+	// "config.transaction_coordinators": true,
+	// "config.image_collection":         true,
+	// "config.mongos":                   true,
+	// "config.system.sessions":          true,
+	// "config.system.indexBuilds":       true,
+	// "config.system.preimages":         true,
+	// "config.migrationCoordinators":    true,
+	// "config.rangeDeletions":           true,
+	// "system.views":                    false,
 	"system.profile": false,
 }
 
