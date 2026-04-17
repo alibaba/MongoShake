@@ -1046,6 +1046,27 @@ func TestAutologousFilter(t *testing.T) {
 			},
 		}
 		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "config.shards",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "config.preimages",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
+
+		log = &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Namespace: "config.someNewCollection",
+			},
+		}
+		assert.Equal(t, true, filter.Filter(log), "should be equal")
 	}
 
 	rec := make(map[string]bool)

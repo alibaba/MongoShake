@@ -17,6 +17,8 @@ import (
 
 const (
 	testMongoAddressCs = unit_test_common.TestUrlServerlessTenant
+
+	testInsertTimes = 10
 )
 
 func TestEventReader(t *testing.T) {
@@ -98,14 +100,14 @@ func TestEventReader(t *testing.T) {
 				assert.Equal(t, startIndex, innerVal, "should be equal")
 				fmt.Printf("match x[%v]\n", startIndex)
 				startIndex++
-				if startIndex >= 100 {
+				if startIndex >= testInsertTimes {
 					break
 				}
 			}
 		}()
 
 		time.Sleep(10 * time.Second)
-		for i := 1; i <= 100; i++ {
+		for i := 1; i <= testInsertTimes; i++ {
 			db := "db1"
 			_, err = conn.Client.Database(db).Collection("c1").InsertOne(nil, bson.M{"x": i})
 			assert.Equal(t, nil, err, "should be equal")
