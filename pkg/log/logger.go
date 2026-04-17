@@ -16,13 +16,14 @@ import (
 
 const (
 	defaultLogDir    = "logs"
+	defaultLogFile   = "mongoshake.log"
 	defaultMaxSizeMB = 20
 	defaultMaxAge    = 7
 	timeLayout       = "2006/01/02 15:04:05 MST"
 	bufferSize       = 32 * 1024
 )
 
-var Logger *ZapLogger
+var Logger = &ZapLogger{logger: zap.NewNop().Sugar()}
 
 var logLevelMap = map[string]zapcore.Level{
 	"all":     zapcore.DebugLevel,
@@ -70,6 +71,7 @@ func New(logLevel, logDir, logFile string,
 	logFlush bool, maxSizeMB, maxAge, verbose int) error {
 	level := parseLogLevel(logLevel)
 	logDir = normalizeLogDir(logDir)
+	logFile = normalizeLogFile(logFile)
 	maxSizeMB = normalizeMaxSize(maxSizeMB)
 	maxAge = normalizeMaxAge(maxAge)
 
@@ -90,10 +92,6 @@ func New(logLevel, logDir, logFile string,
 
 	var cores []zapcore.Core
 	if verbose == 0 || verbose == 1 {
-		if logFile == "" {
-			return fmt.Errorf("log.file[%v] shouldn't be empty", logFile)
-		}
-
 		if err := os.MkdirAll(logDir, os.ModeDir|os.ModePerm); err != nil {
 			return fmt.Errorf("create log.dir[%v] failed[%v]", logDir, err)
 		}
@@ -133,6 +131,13 @@ func normalizeLogDir(logDir string) string {
 		return defaultLogDir
 	}
 	return logDir
+}
+
+func normalizeLogFile(logFile string) string {
+	if logFile == "" {
+		return defaultLogFile
+	}
+	return logFile
 }
 
 func normalizeMaxSize(maxSizeMB int) int {
@@ -184,10 +189,21 @@ func formatArgs(args ...any) string {
 	return fmt.Sprintf(strings.Repeat(" %v", len(args))[1:], args...)
 }
 
-func (l *ZapLogger) log(level zapcore.Level, message string) {
-	if checked := l.logger.Desugar().Check(level, message); checked != nil {
-		checked.Write()
+func (l *ZapLogger) write(level zapcore.Level, message string) {
+	if l == nil || l.logger == nil {
+		return
 	}
+
+	core := l.logger.Desugar().Core()
+	if !core.Enabled(level) {
+		return
+	}
+
+	_ = core.Write(zapcore.Entry{
+		Level:   level,
+		Time:    time.Now(),
+		Message: message,
+	}, nil)
 }
 
 func (l *ZapLogger) Printf(format string, args ...any) {
@@ -219,19 +235,19 @@ func (l *ZapLogger) Errorf(format string, args ...any) {
 }
 
 func (l *ZapLogger) Criticalf(format string, args ...any) {
-	l.log(zapcore.DPanicLevel, fmt.Sprintf(format, args...))
+	l.write(zapcore.DPanicLevel, fmt.Sprintf(format, args...))
 }
 
 func (l *ZapLogger) Fatalf(format string, args ...any) {
 	message := fmt.Sprintf(format, args...)
-	l.log(zapcore.FatalLevel, message)
+	l.write(zapcore.FatalLevel, message)
 	_ = l.Sync()
 	os.Exit(1)
 }
 
 func (l *ZapLogger) Panicf(format string, args ...any) {
 	message := fmt.Sprintf(format, args...)
-	l.log(zapcore.PanicLevel, message)
+	l.write(zapcore.PanicLevel, message)
 	_ = l.Sync()
 	panic(message)
 }
@@ -266,7 +282,7 @@ func (l *ZapLogger) Fatalln(args ...any) {
 
 func (l *ZapLogger) Panic(args ...any) {
 	message := formatArgs(args...)
-	l.log(zapcore.PanicLevel, message)
+	l.write(zapcore.PanicLevel, message)
 	_ = l.Sync()
 	panic(args)
 }

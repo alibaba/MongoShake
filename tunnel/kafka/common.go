@@ -60,7 +60,7 @@ func NewConfig(rootCaFile string) (*Config, error) {
 		}
 		caCert, err := ioutil.ReadFile(rootCaFile)
 		if err != nil {
-			l.Logger.Criticalf("failed to load the ca cert file[%s]: %s failed: %s", rootCaFile, err.Error())
+			l.Logger.Criticalf("failed to load the ca cert file[%s] failed: %s", rootCaFile, err.Error())
 			return nil, err
 		}
 		caCertPool := x509.NewCertPool()
