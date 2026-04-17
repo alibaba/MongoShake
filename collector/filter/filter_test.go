@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/x/mongo/driver/uuid"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
@@ -1204,7 +1203,10 @@ func TestAutologousFilter(t *testing.T) {
 								bson.E{Key: "op", Value: "d"},
 								bson.E{Key: "ns", Value: "config.system.sessions"},
 								bson.E{Key: "o", Value: bson.D{
-									bson.E{Key: "_id", Value: uuid.UUID{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10}},
+									bson.E{Key: "_id", Value: primitive.Binary{
+										Subtype: 4,
+										Data:    []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10},
+									}},
 								}},
 							},
 							bson.D{

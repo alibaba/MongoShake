@@ -87,15 +87,15 @@ func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 			LOG.Error("%s MongoCheckpoint failed to parse dbVersion: %v", ckpt.Name, err)
 			return false
 		}
-		version36, _ := semver.StrictNewVersion(utils.MongoVersion36)
+		version36, _ := semver.StrictNewVersion(utils.VarMongoVersion36)
 		rc := utils.ReadWriteConcernLocal
 		if version.GreaterThanEqual(version36) {
 			LOG.Info("%s MongoCheckpoint dbVersion %s >= %s, use readConcern:majority",
-				ckpt.Name, version.String(), utils.MongoVersion36)
+				ckpt.Name, version.String(), utils.VarMongoVersion36)
 			rc = utils.ReadWriteConcernMajority
 		} else {
 			LOG.Info("%s MongoCheckpoint dbVersion %s < %s, use readConcern:local",
-				ckpt.Name, version.String(), utils.MongoVersion36)
+				ckpt.Name, version.String(), utils.VarMongoVersion36)
 		}
 
 		if client, err := utils.NewMongoCommunityConn(ckpt.URL, utils.VarMongoConnectModePrimary, true,

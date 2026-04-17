@@ -184,7 +184,7 @@ func GetAllTimestamp(sources []*MongoSource, sslRootFile string) (map[string]Tim
 
 	for _, src := range sources {
 		fromMongos := false
-		if src.ReplicaName == ReplicaNameMongos {
+		if src.ReplicaName == VarReplicaNameMongos {
 			fromMongos = true
 		}
 		newest, err := GetNewestTimestampByUrl(src.URL, fromMongos, sslRootFile)

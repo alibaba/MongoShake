@@ -25,7 +25,7 @@ func TestChangeStreamConn(t *testing.T) {
 		nr++
 
 		cs, err := NewChangeStreamConn(testMongoAddressCs, VarMongoConnectModePrimary,
-			false,
+			true,
 			"",
 			nil,
 			nil,
@@ -34,7 +34,7 @@ func TestChangeStreamConn(t *testing.T) {
 			"")
 		assert.Equal(t, nil, err, "should be equal")
 		optionStr := printCsOption(cs.Ops)
-		assert.Equal(t, " BatchSize[1024] FullDocument[default] MaxAwaitTime[24h0m0s]", optionStr, "should be equal")
+		assert.Equal(t, " BatchSize[1024] FullDocument[updateLookup] MaxAwaitTime[24h0m0s]", optionStr, "should be equal")
 
 		cs.Close()
 	}
@@ -73,7 +73,7 @@ func TestChangeStreamConn(t *testing.T) {
 		tsStr := fmt.Sprintf("{%v %v}", ExtractMongoTimestamp(newest), ExtractMongoTimestampCounter(newest))
 
 		cs, err := NewChangeStreamConn(testMongoAddressCs, VarMongoConnectModePrimary,
-			false,
+			true,
 			"",
 			nil,
 			newest,
@@ -83,7 +83,7 @@ func TestChangeStreamConn(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		optionStr := printCsOption(cs.Ops)
-		expect := fmt.Sprintf(" BatchSize[1024] FullDocument[default] MaxAwaitTime[24h0m0s] StartAtOperationTime[%s]", tsStr)
+		expect := fmt.Sprintf(" BatchSize[1024] FullDocument[updateLookup] MaxAwaitTime[24h0m0s] StartAtOperationTime[%s]", tsStr)
 		assert.Equal(t, expect, optionStr, "should be equal")
 
 		// trigger update ResumeToken

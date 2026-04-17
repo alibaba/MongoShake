@@ -16,7 +16,7 @@ import (
 )
 
 var ErrorsShouldSkip = map[int]string{
-	//2: "BadValue",
+	// 2: "BadValue",
 	61: "ShardKeyNotFound",
 }
 
@@ -36,7 +36,7 @@ func (exec *Executor) ensureConnection() bool {
 			return false
 		} else {
 			exec.conn = conn
-			if exec.bulkInsert, err = utils.GetAndCompareVersion(exec.conn, utils.MongoVersion32,
+			if exec.bulkInsert, err = utils.GetAndCompareVersion(exec.conn, utils.VarMongoVersion32,
 				conf.Options.TargetDBVersion); err != nil {
 				LOG.Info("compare version with return[%v], bulkInsert disable", err)
 			}
@@ -147,8 +147,8 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 	}
 
 	// group logs have the equivalent namespace
-	//ns := group.logs[0].original.partialLog.Namespace
-	//exec.replayer.ReplMetric.AddTableOps(ns, count)
+	// ns := group.logs[0].original.partialLog.Namespace
+	// exec.replayer.ReplMetric.AddTableOps(ns, count)
 	return nil
 }
 

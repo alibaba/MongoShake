@@ -26,16 +26,16 @@ const (
 	// AdaptiveBatchingMaxSize = 16384 // 16k
 
 	// bson deserialize workload is CPU-intensive task
-	PipelineQueueMaxNr    = 4
-	PipelineQueueMiddleNr = 2
-	PipelineQueueMinNr    = 1
-	PipelineQueueLen      = 64
+	PipelineQueueMaxNr    = utils.VarSyncerPipelineQueueMaxNr
+	PipelineQueueMiddleNr = utils.VarSyncerPipelineQueueMiddleNr
+	PipelineQueueMinNr    = utils.VarSyncerPipelineQueueMinNr
+	PipelineQueueLen      = utils.VarSyncerPipelineQueueLen
 
-	DurationTime                  = 6000 // unit: ms.
-	DDLCheckpointInterval         = 300  // unit: ms.
-	FilterCheckpointGap           = 180  // unit: seconds. no checkpoint update, flush checkpoint mandatory
-	FilterCheckpointCheckInterval = 180  // unit: seconds.
-	CheckCheckpointUpdateTimes    = 10   // at most times of time check
+	SyncerFetchErrorRetryMs       = utils.VarSyncerFetchErrorRetryMs
+	DDLCheckpointInterval         = utils.VarSyncerDDLCheckpointIntervalMs
+	FilterCheckpointGap           = utils.VarSyncerFilterCheckpointGap
+	FilterCheckpointCheckInterval = utils.VarSyncerFilterCheckpointCheckInterval
+	CheckCheckpointUpdateTimes    = utils.VarSyncerCheckCheckpointUpdateTimes
 )
 
 type OplogHandler interface {
@@ -90,6 +90,9 @@ type OplogSyncer struct {
 	CanClose        bool
 	SyncGroup       []*OplogSyncer
 	shutdownWorking bool // shutdown routine starts?
+
+	// fetcher health state: "normal", "degraded", "error"
+	fetcherState string
 }
 
 // NewOplogSyncer return a new OplogSyncer.
@@ -117,8 +120,9 @@ func NewOplogSyncer(
 		fullSyncFinishPosition: utils.Int64ToTimestamp(fullSyncFinishPosition),
 		journal: journal.NewJournal(journal.FileName(
 			fmt.Sprintf("%s.%s", conf.Options.Id, replset))),
-		reader: reader,
-		qos:    utils.StartQoS(0, 1, &utils.IncrSentinelOptions.TPS), // default is 0 which means do not limit
+		reader:       reader,
+		qos:          utils.StartQoS(0, 1, &utils.IncrSentinelOptions.TPS), // default is 0 which means do not limit
+		fetcherState: "normal",
 	}
 
 	// concurrent level hasher
@@ -227,8 +231,8 @@ func (sync *OplogSyncer) Start() {
 		sync.poll()
 
 		// error or exception occur
-		_ = LOG.Warn("%s polling yield. master:%t, yield:%dms", sync, quorum.IsMaster(), DurationTime)
-		utils.YieldInMs(DurationTime)
+		_ = LOG.Warn("%s polling yield. master:%t, yield:%dms", sync, quorum.IsMaster(), SyncerFetchErrorRetryMs)
+		utils.YieldInMs(SyncerFetchErrorRetryMs)
 	}
 }
 
@@ -243,7 +247,7 @@ func (sync *OplogSyncer) startBatcher() {
 		 * judge self is master?
 		 */
 		if !quorum.IsMaster() {
-			utils.YieldInMs(DurationTime)
+			utils.YieldInMs(SyncerFetchErrorRetryMs)
 			return
 		}
 
@@ -629,9 +633,19 @@ func (sync *OplogSyncer) next() bool {
 		sync.replMetric.SetOplogMax(payload)
 		sync.replMetric.SetOplogAvg(payload)
 		sync.replMetric.ClearReplStatus(utils.FetchBad)
+		sync.fetcherState = "normal"
+	} else if err != nil && err.Error() == sourceReader.CollectionCappedFatalError.Error() {
+		// capped error persists after max retries, crash the process
+		sync.fetcherState = "error"
+		sync.replMetric.SetReplStatus(utils.FetchBad)
+		LOG.Crashf("%s oplog collection capped error is fatal after max retries,"+
+			" please check oplog window and fix manually!", sync)
+		return false
 	} else if err != nil && err.Error() == sourceReader.CollectionCappedError.Error() {
-		_ = LOG.Error("%s oplog collection capped error, users should fix it manually", sync)
-		utils.YieldInMs(DurationTime)
+		_ = LOG.Error("%s oplog collection capped error, auto-resetting cursor (retrying)", sync)
+		sync.fetcherState = "degraded"
+		sync.replMetric.SetReplStatus(utils.FetchBad)
+		utils.YieldInMs(SyncerFetchErrorRetryMs)
 		return false
 	} else if err != nil && err.Error() != sourceReader.TimeoutError.Error() {
 		_ = LOG.Error("%s %s internal error: %v", sync, sync.reader.Name(), err)
@@ -640,9 +654,6 @@ func (sync *OplogSyncer) next() bool {
 		if sync.isCrashError(err.Error()) {
 			LOG.Crashf("%s I can't handle this error, please solve it manually!", sync)
 		}
-
-		sync.replMetric.SetReplStatus(utils.FetchBad)
-		utils.YieldInMs(DurationTime)
 
 		// alarm
 	}
@@ -732,19 +743,20 @@ func (sync *OplogSyncer) RestAPI() {
 	}
 
 	type Info struct {
-		Who         string     `json:"who"`
-		Tag         string     `json:"tag"`
-		ReplicaSet  string     `json:"replset"`
-		Logs        uint64     `json:"logs_get"`
-		LogsRepl    uint64     `json:"logs_repl"`
-		LogsSuccess uint64     `json:"logs_success"`
-		Tps         uint64     `json:"tps"`
-		Lsn         *MongoTime `json:"lsn"`
-		LsnAck      *MongoTime `json:"lsn_ack"`
-		LsnCkpt     *MongoTime `json:"lsn_ckpt"`
-		Now         *Time      `json:"now"`
-		OplogAvg    string     `json:"log_size_avg"`
-		OplogMax    string     `json:"log_size_max"`
+		Who           string     `json:"who"`
+		Tag           string     `json:"tag"`
+		ReplicaSet    string     `json:"replset"`
+		Logs          uint64     `json:"logs_get"`
+		LogsRepl      uint64     `json:"logs_repl"`
+		LogsSuccess   uint64     `json:"logs_success"`
+		Tps           uint64     `json:"tps"`
+		Lsn           *MongoTime `json:"lsn"`
+		LsnAck        *MongoTime `json:"lsn_ack"`
+		LsnCkpt       *MongoTime `json:"lsn_ckpt"`
+		Now           *Time      `json:"now"`
+		OplogAvg      string     `json:"log_size_avg"`
+		OplogMax      string     `json:"log_size_max"`
+		FetcherStatus string     `json:"fetcher_status"`
 	}
 
 	// total replication info
@@ -779,8 +791,9 @@ func (sync *OplogSyncer) RestAPI() {
 				TimestampUnix: time.Now().Unix(),
 				TimestampTime: utils.TimestampToString(time.Now().Unix()),
 			},
-			OplogAvg: utils.GetMetricWithSize(sync.replMetric.OplogAvgSize),
-			OplogMax: utils.GetMetricWithSize(sync.replMetric.OplogMaxSize),
+			OplogAvg:      utils.GetMetricWithSize(sync.replMetric.OplogAvgSize),
+			OplogMax:      utils.GetMetricWithSize(sync.replMetric.OplogMaxSize),
+			FetcherStatus: sync.fetcherState,
 		}
 	})
 
