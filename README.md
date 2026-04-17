@@ -32,7 +32,7 @@ Support filtering database and collection namespace with whitelist and blacklist
 # DDL Syncing
 ---
 Starting with version 1.5, MongoShake supports syncing DDL by using global barrier. Once fetching DDL oplog, MongoShake adds a barrier so that all the subsequent oplogs wait in the queue until this oplog is written into the target MongoDB or tunnel and the checkpoint is updated. Currently, DDL is only support for ReplicaSet on the source side(target side can be RelicaSet or Sharding), we will support Sharding in the later version.<br>
-![ddl](resources/ddl_support.png)<br>
+![ddl](resources/ddl_support.png)
 
 # Global ID
 ---
@@ -50,7 +50,13 @@ Gzip, zlib, deflate compressor are supported in batched oplogs before sending.
 
 # Monitor & Debug
 ---
-User can monitor or debug Mongo-Shake through RESTful API, please visit [FAQ document](https://github.com/aliyun/mongo-shake/wiki/FAQ) to see more details.
+Users could monitor or debug Mongo-Shake through RESTful API, please visit [FAQ document](https://github.com/aliyun/mongo-shake/wiki/FAQ) to see more details.
+
+Users could also monitor replication metrics with Prometheus exporter. See more details in [mongoshake-prometheus-exporter](https://github.com/osgurisdosre/mongoshake-prometheus-exporter) and [issue#859](https://github.com/alibaba/MongoShake/issues/859)
+
+Since v2.8.8, MongoShake also support prometheus metrics. See more details in [README](/docs/monitor). The following is an example:
+![monitor_prometheus_example2](resources/monitor_prometheus_example1.png )
+![monitor_prometheus_example2](resources/monitor_prometheus_example2.png )
 
 # Other Details
 ---
