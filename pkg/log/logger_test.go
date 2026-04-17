@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"go.uber.org/zap"
 )
 
 func TestNewWritesExpectedTextFormat(t *testing.T) {
@@ -65,6 +67,77 @@ func TestPanicfLogsAndPanics(t *testing.T) {
 	}()
 
 	Logger.Panicf("boom %d", 7)
+}
+
+func TestPanicfFlushesBufferedWriterBeforePanicking(t *testing.T) {
+	t.Helper()
+
+	logDir := t.TempDir()
+	if err := New("info", logDir, "panic-buffered.log", false, 20, 7, 0); err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = Logger.Sync()
+	})
+
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatal("expected panic from Panicf")
+		}
+		if recovered != "boom buffered" {
+			t.Fatalf("unexpected panic value: %#v", recovered)
+		}
+
+		content, err := os.ReadFile(filepath.Join(logDir, "panic-buffered.log"))
+		if err != nil {
+			t.Fatalf("ReadFile() returned error: %v", err)
+		}
+		if !strings.Contains(string(content), "[CRITICAL] boom buffered") {
+			t.Fatalf("expected buffered critical log in output, got %q", string(content))
+		}
+	}()
+
+	Logger.Panicf("boom %s", "buffered")
+}
+
+func TestNewUsesDefaultLogFileForFileSink(t *testing.T) {
+	t.Helper()
+
+	logDir := t.TempDir()
+	if err := New("info", logDir, "", true, 20, 7, 0); err != nil {
+		t.Fatalf("expected default log file to be used: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = Logger.Sync()
+	})
+
+	Logger.Infof("default file")
+	_ = Logger.Sync()
+
+	content, err := os.ReadFile(filepath.Join(logDir, defaultLogFile))
+	if err != nil {
+		t.Fatalf("ReadFile() returned error: %v", err)
+	}
+	if !strings.Contains(string(content), "[INFO] default file") {
+		t.Fatalf("expected info log in default log file, got %q", string(content))
+	}
+}
+
+func TestDefaultLoggerIsSafeBeforeInitialization(t *testing.T) {
+	t.Helper()
+
+	previous := Logger
+	Logger = &ZapLogger{logger: zap.NewNop().Sugar()}
+	t.Cleanup(func() {
+		Logger = previous
+	})
+
+	Logger.Debugf("debug %d", 1)
+	Logger.Infof("info %d", 2)
+	Logger.Warnf("warn %d", 3)
+	Logger.Errorf("error %d", 4)
+	Logger.Criticalf("critical %d", 5)
 }
 
 func TestNewVerboseStdoutOnlyDoesNotRequireLogFile(t *testing.T) {

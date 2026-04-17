@@ -63,6 +63,11 @@ func main() {
 		crash(fmt.Sprintf("Configure file %s parse failed. %v", *configuration, err), -2)
 	}
 
+	// verify collector options and revise
+	if err = SanitizeOptions(); err != nil {
+		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
+	}
+
 	if err := utils.InitialLoggerWithRotation(conf.Options.LogDirectory,
 		conf.Options.LogFileName, conf.Options.LogLevel, conf.Options.LogFlush,
 		*verbose, conf.Options.LogMaxSizeMb, conf.Options.LogMaxAge); err != nil {
@@ -72,11 +77,6 @@ func main() {
 	defer utils.Goodbye()
 	l.Logger.Infof("log init succeed. log.dir[%v] log.name[%v] log.level[%v]",
 		conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel)
-
-	// verify collector options and revise
-	if err = SanitizeOptions(); err != nil {
-		crash(fmt.Sprintf("Conf.Options check failed: %s", err.Error()), -4)
-	}
 	l.Logger.Infof("MongoDB Version Source[%v] Target[%v]", conf.Options.SourceDBVersion, conf.Options.TargetDBVersion)
 
 	conf.Options.Version = utils.BRANCH

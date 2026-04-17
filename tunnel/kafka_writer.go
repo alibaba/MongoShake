@@ -185,7 +185,7 @@ func (tunnel *KafkaWriter) encode(id int) {
 			}
 
 		default:
-			l.Logger.Panicf("%s unknown tunnel.message type: ", tunnel, conf.Options.TunnelMessage)
+			l.Logger.Panicf("%s unknown tunnel.message type: %s", tunnel, conf.Options.TunnelMessage)
 		}
 	}
 }
