@@ -70,7 +70,8 @@ func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 	if ckpt.client == nil {
 		// mongodb3.6- doesn't support {readConcern:majority}, here we use 'local' first to get dbVersion,
 		// then change to 'majority' if possible.
-		tmpClient, err := utils.NewMongoCommunityConn(ckpt.URL, utils.VarMongoConnectModePrimary, true, "local", "", "")
+		tmpClient, err := utils.NewMongoCommunityConn(ckpt.URL, utils.VarMongoConnectModePrimary, true,
+			"local", "", conf.Options.CheckpointStorageUrlMongoSslRootCaFile)
 		if err != nil {
 			LOG.Error("%s MongoCheckpoint create client failed:%v", ckpt.Name, err)
 			return false
@@ -86,15 +87,15 @@ func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 			LOG.Error("%s MongoCheckpoint failed to parse dbVersion: %v", ckpt.Name, err)
 			return false
 		}
-		version36, _ := semver.StrictNewVersion(utils.MongoVersion36)
+		version36, _ := semver.StrictNewVersion(utils.VarMongoVersion36)
 		rc := utils.ReadWriteConcernLocal
 		if version.GreaterThanEqual(version36) {
 			LOG.Info("%s MongoCheckpoint dbVersion %s >= %s, use readConcern:majority",
-				ckpt.Name, version.String(), utils.MongoVersion36)
+				ckpt.Name, version.String(), utils.VarMongoVersion36)
 			rc = utils.ReadWriteConcernMajority
 		} else {
 			LOG.Info("%s MongoCheckpoint dbVersion %s < %s, use readConcern:local",
-				ckpt.Name, version.String(), utils.MongoVersion36)
+				ckpt.Name, version.String(), utils.VarMongoVersion36)
 		}
 
 		if client, err := utils.NewMongoCommunityConn(ckpt.URL, utils.VarMongoConnectModePrimary, true,

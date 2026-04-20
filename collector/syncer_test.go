@@ -20,7 +20,7 @@ func mockLog(ns string, ts int64, withDefault bool, gid string) *oplog.ParsedLog
 	switch withDefault {
 	case true:
 		return &oplog.ParsedLog{
-			Timestamp:     utils.Int64ToTimestamp(ts),
+			Timestamp:     utils.TimeToTimestamp(ts),
 			Operation:     "i",
 			Namespace:     ns,
 			Object:        bson.D{},
@@ -31,7 +31,7 @@ func mockLog(ns string, ts int64, withDefault bool, gid string) *oplog.ParsedLog
 		}
 	case false:
 		return &oplog.ParsedLog{
-			Timestamp: utils.Int64ToTimestamp(ts),
+			Timestamp: utils.TimeToTimestamp(ts),
 			Operation: "i",
 			Namespace: ns,
 			Object:    bson.D{},
@@ -50,7 +50,7 @@ func mockEvent(nsCollection string, ts int64) *oplog.Event {
 			"coll": nsCollection,
 		},
 		OperationType: "insert",
-		ClusterTime:   utils.Int64ToTimestamp(ts),
+		ClusterTime:   utils.TimeToTimestamp(ts),
 	}
 }
 

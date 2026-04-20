@@ -587,6 +587,58 @@ func TestTransformLog(t *testing.T) {
 		ret := transformPartialLog(log.original.partialLog, nsTrans, false)
 		assert.Nil(t, ret, "should be equal")
 	}
+
+	// ---- Time-series collection tests ----
+	// Case: DML on system.buckets.xxx with collection-level transform rule
+	{
+		fmt.Printf("TestTransformLog case %d. [timeseries] DML system.buckets col-level transform\n", nr)
+		nr++
+		nsTrans := transform.NewNamespaceTransform([]string{"fdb1.weather:tdb1.weather2"})
+		logs := []*OplogRecord{
+			mockTransLogs("i", "fdb1.system.buckets.weather", bson.D{primitive.E{Key: "data", Value: 1}}),
+		}
+		logs = transformLogs(logs, nsTrans, false)
+		assert.Equal(t, "tdb1.system.buckets.weather2", logs[0].original.partialLog.Namespace,
+			"system.buckets.weather should be transformed to tdb1.system.buckets.weather2")
+	}
+	// Case: DML on system.buckets.xxx with db-level transform rule
+	{
+		fmt.Printf("TestTransformLog case %d. [timeseries] DML system.buckets db-level transform\n", nr)
+		nr++
+		nsTrans := transform.NewNamespaceTransform([]string{"fdb1:tdb1"})
+		logs := []*OplogRecord{
+			mockTransLogs("i", "fdb1.system.buckets.weather", bson.D{primitive.E{Key: "data", Value: 1}}),
+		}
+		logs = transformLogs(logs, nsTrans, false)
+		assert.Equal(t, "tdb1.system.buckets.weather", logs[0].original.partialLog.Namespace,
+			"system.buckets.weather should be transformed to tdb1.system.buckets.weather")
+	}
+	// Case: DDL create on system.buckets.xxx with collection-level transform
+	{
+		fmt.Printf("TestTransformLog case %d. [timeseries] DDL create system.buckets col-level transform\n", nr)
+		nr++
+		nsTrans := transform.NewNamespaceTransform([]string{"fdb1.weather:tdb1.weather2"})
+		logs := []*OplogRecord{
+			mockTransLogs("c", "fdb1.$cmd", bson.D{
+				primitive.E{Key: "create", Value: "system.buckets.weather"},
+			}),
+		}
+		logs = transformLogs(logs, nsTrans, false)
+		assert.Equal(t, "tdb1.system.buckets.weather2", logs[0].original.partialLog.Namespace,
+			"DDL create system.buckets.weather should be transformed to tdb1.system.buckets.weather2")
+	}
+	// Case: DML on non-matching system.buckets stays unchanged
+	{
+		fmt.Printf("TestTransformLog case %d. [timeseries] DML system.buckets no matching rule\n", nr)
+		nr++
+		nsTrans := transform.NewNamespaceTransform([]string{"fdb1.other:tdb1.other2"})
+		logs := []*OplogRecord{
+			mockTransLogs("i", "fdb1.system.buckets.weather", bson.D{primitive.E{Key: "data", Value: 1}}),
+		}
+		logs = transformLogs(logs, nsTrans, false)
+		assert.Equal(t, "fdb1.system.buckets.weather", logs[0].original.partialLog.Namespace,
+			"system.buckets.weather with no matching rule should stay unchanged")
+	}
 }
 
 func TestCalculateTop3(t *testing.T) {

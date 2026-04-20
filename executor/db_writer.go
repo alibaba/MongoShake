@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	nimo "github.com/gugemichael/nimo4go"
 	"go.mongodb.org/mongo-driver/bson"
@@ -158,21 +159,36 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 					}
 				}
 		*/
+		collName := log.Object[0].Value.(string)
+		nimo.AssertTrue(log.Object[0].Key == "commitIndexBuild",
+			"should panic when ele.Name != 'commitIndexBuild'")
+		// Time-series: if indexes contain originalSpec, convert to createIndexes on the
+		// logical collection using originalSpec (which has logical field names).
+		// MongoDB server will automatically map logical fields to physical bucket fields.
+		if hasOriginalSpec(log.Object) {
+			logicalColl := strings.TrimPrefix(collName, utils.VarSystemBucketsPrefix)
+			logicalIndexes := extractOriginalSpecs(log.Object)
+			command := bson.D{
+				{Key: "createIndexes", Value: logicalColl},
+				{Key: "indexes", Value: logicalIndexes},
+			}
+			LOG.Info("RunCommand commitIndexBuild with originalSpec, converted to createIndexes on "+
+				"logical collection [%s.%s]: %v", database, logicalColl, command)
+			err = dbHandler.RunCommand(nil, command).Err()
+			break
+		}
+
 		var command bson.D
-		for i, ele := range log.Object {
-			if i == 0 {
+		command = append(command, primitive.E{
+			Key:   "createIndexes",
+			Value: collName,
+		})
+		for _, ele := range log.Object {
+			if ele.Key == "indexes" {
 				command = append(command, primitive.E{
-					Key:   "createIndexes",
-					Value: ele.Value.(string),
+					Key:   "indexes",
+					Value: ele.Value,
 				})
-				nimo.AssertTrue(ele.Key == "commitIndexBuild", "should panic when ele.Name != 'commitIndexBuild'")
-			} else {
-				if ele.Key == "indexes" {
-					command = append(command, primitive.E{
-						Key:   "indexes",
-						Value: ele.Value,
-					})
-				}
 			}
 		}
 
@@ -208,7 +224,7 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 	case "renameCollection":
 		// handle '"dropTarget": UUID("52c1c147-2408-4d96-9d0f-889a759ab079")' in object,
 		// change to {dropTarget: true} as described in:
-		//https://www.mongodb.com/docs/v5.0/reference/method/db.collection.renameCollection/
+		// https://www.mongodb.com/docs/v5.0/reference/method/db.collection.renameCollection/
 		tmpCmd := log.Object
 		if log.Object != nil && oplog.GetKey(log.Object, "dropTarget") != nil {
 			oplog.SetFiled(tmpCmd, "dropTarget", true)
@@ -267,7 +283,7 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 		fallthrough
 
 		// NOTE: below commands are carefully-constructed oplogs transformed from change events which could call
-		//'runCommand()' directly, this does not mean that these exist in the native MongoDB oplog.
+		// 'runCommand()' directly, this does not mean that these exist in the native MongoDB oplog.
 	case "shardCollection":
 		fallthrough
 	case "reshardCollection":
@@ -357,4 +373,80 @@ func parseLastTimestamp(oplogs []*OplogRecord) int64 {
 	}
 
 	return utils.TimeStampToInt64(oplogs[len(oplogs)-1].original.partialLog.Timestamp)
+}
+
+// hasOriginalSpec checks if a commitIndexBuild/createIndexes oplog contains
+// originalSpec in any of its indexes. Time-series collection indexes have
+// originalSpec that maps logical field names to physical bucket field names.
+func hasOriginalSpec(obj bson.D) bool {
+	indexesVal := oplog.GetKey(obj, "indexes")
+	if indexesVal == nil {
+		return false
+	}
+	switch indexes := indexesVal.(type) {
+	case bson.A:
+		for _, idx := range indexes {
+			if idxDoc, ok := idx.(bson.D); ok {
+				if oplog.GetKey(idxDoc, utils.VarOplogKeyOriginalSpec) != nil {
+					return true
+				}
+			}
+		}
+	case []bson.D:
+		for _, idxDoc := range indexes {
+			if oplog.GetKey(idxDoc, utils.VarOplogKeyOriginalSpec) != nil {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// extractOriginalSpecs extracts originalSpec from each index in a commitIndexBuild oplog.
+// For indexes that have originalSpec, it uses the originalSpec as the index definition;
+// for indexes without originalSpec, it uses the original index spec (minus originalSpec key).
+func extractOriginalSpecs(obj bson.D) bson.A {
+	indexesVal := oplog.GetKey(obj, "indexes")
+	var result bson.A
+	var indexDocs []bson.D
+	switch indexes := indexesVal.(type) {
+	case bson.A:
+		for _, idx := range indexes {
+			if idxDoc, ok := idx.(bson.D); ok {
+				indexDocs = append(indexDocs, idxDoc)
+			}
+		}
+	case []bson.D:
+		indexDocs = indexes
+	}
+	for _, idxDoc := range indexDocs {
+		if spec := oplog.GetKey(idxDoc, utils.VarOplogKeyOriginalSpec); spec != nil {
+			// Use originalSpec which has logical field names
+			if specDoc, ok := spec.(bson.D); ok {
+				result = append(result, specDoc)
+			}
+		} else {
+			// No originalSpec, use the index as-is
+			result = append(result, idxDoc)
+		}
+	}
+	return result
+}
+
+// replayUpdateViaApplyOps replays an update oplog directly via applyOps command,
+// preserving the original $v:2 diff format. This is used for time-series bucket
+// updates that contain column-store binary diffs which cannot be converted to
+// standard $set/$unset operations.
+func replayUpdateViaApplyOps(client *mongo.Client, pLog *oplog.PartialLog) error {
+	doc := bson.D{
+		{Key: "op", Value: pLog.Operation},
+		{Key: "ns", Value: pLog.Namespace},
+		{Key: "o", Value: pLog.Object},
+		{Key: "o2", Value: pLog.Query},
+	}
+	if pLog.UI != nil {
+		doc = append(doc, bson.E{Key: "ui", Value: pLog.UI})
+	}
+	return client.Database("admin").RunCommand(context.Background(),
+		bson.D{{Key: "applyOps", Value: []interface{}{doc}}}).Err()
 }

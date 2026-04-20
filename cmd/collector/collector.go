@@ -140,7 +140,7 @@ func startup() {
 	if conf.Options.MongoSUrl != "" {
 		ReplCord.MongoS = &utils.MongoSource{
 			URL:         conf.Options.MongoSUrl,
-			ReplicaName: utils.ReplicaNameMongos,
+			ReplicaName: utils.VarReplicaNameMongos,
 		}
 		ReplCord.RealSourceFullSync = []*utils.MongoSource{ReplCord.MongoS}
 		ReplCord.RealSourceIncrSync = []*utils.MongoSource{ReplCord.MongoS}

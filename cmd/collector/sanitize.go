@@ -251,7 +251,7 @@ func checkDefaultValue() error {
 	}
 	if conf.Options.IncrSyncFetcherBufferCapacity <= 0 {
 		// to reduce memory consumption
-		//conf.Options.IncrSyncFetcherBufferCapacity = 256
+		// conf.Options.IncrSyncFetcherBufferCapacity = 256
 		conf.Options.IncrSyncFetcherBufferCapacity = 64
 	}
 	if conf.Options.IncrSyncFetcherBufferSizeThresholdInKB <= 0 {
@@ -371,7 +371,7 @@ func checkConnection() error {
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 	// ignore error
 	conf.Options.SourceDBVersion, _ = utils.GetDBVersion(sourceConn)
-	if ok, err := utils.GetAndCompareVersion(sourceConn, utils.MongoVersion26,
+	if ok, err := utils.GetAndCompareVersion(sourceConn, utils.VarMongoVersion26,
 		conf.Options.SourceDBVersion); err != nil {
 		return err
 	} else if !ok {
@@ -503,11 +503,11 @@ func checkConflict() error {
 			return fmt.Errorf("connect source[%v] failed[%v]",
 				utils.BlockMongoUrlPassword(source, "***"), err)
 		}
-		if isOk, err := utils.GetAndCompareVersion(conn, utils.MongoVersion401, conf.Options.SourceDBVersion); err != nil {
-			return fmt.Errorf("compare source[%v] to %s failed[%v]", source, utils.MongoVersion401, err)
+		if isOk, err := utils.GetAndCompareVersion(conn, utils.VarMongoVersion401, conf.Options.SourceDBVersion); err != nil {
+			return fmt.Errorf("compare source[%v] to %s failed[%v]", source, utils.VarMongoVersion401, err)
 		} else if !isOk {
 			return fmt.Errorf("source[%v] version should >= %s when incr_sync.mongo_fetch_method == %v",
-				conf.Options.MongoUrls[0], utils.MongoVersion401, utils.VarIncrSyncMongoFetchMethodChangeStream)
+				conf.Options.MongoUrls[0], utils.VarMongoVersion401, utils.VarIncrSyncMongoFetchMethodChangeStream)
 		}
 	} else {
 		// disable mongos if fetch method != 'change_stream'

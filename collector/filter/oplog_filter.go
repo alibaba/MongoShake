@@ -194,8 +194,6 @@ func (filter *AutologousFilter) Filter(log *oplog.PartialLog) bool {
 		}
 	}
 
-	// for namespace. we filter noop operation and collection name
-	// that are admin, local, config, mongoshake, mongoshake_conflict
 	return filter.FilterNs(log.Namespace)
 }
 

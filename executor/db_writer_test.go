@@ -979,7 +979,7 @@ func TestBulkWriter(t *testing.T) {
 		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts2, true)
 		fmt.Printf("err:%v\n", err)
 		assert.Equal(t, nil, err, "should be equal")
-		//assert.Equal(t, true, strings.Contains(err.Error(), "Must run update to shard key"), "should be equal")
+		// assert.Equal(t, true, strings.Contains(err.Error(), "Must run update to shard key"), "should be equal")
 
 		// query
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
@@ -1472,7 +1472,7 @@ func TestCommandWriter(t *testing.T) {
 
 		err = writer.doInsert(testDb, testCollection, bson.E{}, inserts2, true)
 		fmt.Printf("err:%v\n", err)
-		//assert.Equal(t, nil, err, "should be equal")
+		// assert.Equal(t, nil, err, "should be equal")
 
 		// query
 		opts = options.Find().SetSort(bson.D{{"_id", 1}})
@@ -1480,7 +1480,7 @@ func TestCommandWriter(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, 3, len(res), "should be equal")
 		assert.Equal(t, int32(1), res[0]["x"], "should be equal")
-		//assert.Equal(t, int32(20), res[1]["x"], "should be equal")
+		// assert.Equal(t, int32(20), res[1]["x"], "should be equal")
 		assert.Equal(t, int32(3), res[2]["x"], "should be equal")
 	}
 }
@@ -1574,6 +1574,9 @@ func TestRunCommand(t *testing.T) {
 		err = conn.Client.Database("zz").Drop(nil)
 		assert.Equal(t, nil, err, "should be equal")
 
+		_, err = conn.Client.Database("zz").Collection("y").InsertOne(context.Background(), bson.M{"x": 1})
+		assert.Equal(t, nil, err, "should be equal")
+
 		log := &oplog.PartialLog{
 			ParsedLog: oplog.ParsedLog{
 				Operation: "c",
@@ -1616,6 +1619,9 @@ func TestRunCommand(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 
 		err = conn.Client.Database("zz").Drop(nil)
+		assert.Equal(t, nil, err, "should be equal")
+
+		_, err = conn.Client.Database("zz").Collection("y").InsertOne(context.Background(), bson.M{"x": 1})
 		assert.Equal(t, nil, err, "should be equal")
 
 		log := &oplog.PartialLog{
@@ -2120,4 +2126,508 @@ func TestIgnoreError(t *testing.T) {
 		ignore = IgnoreError(err, "d", false)
 		assert.Equal(t, false, ignore, "should be equal")
 	}
+}
+
+func TestHasOriginalSpec(t *testing.T) {
+	var nr int
+	// Case1: no indexes field → false
+	{
+		fmt.Printf("TestHasOriginalSpec case %d. no indexes field\n", nr)
+		nr++
+		obj := bson.D{
+			{Key: "commitIndexBuild", Value: "system.buckets.weather"},
+		}
+		assert.Equal(t, false, hasOriginalSpec(obj))
+	}
+	// Case2: indexes without originalSpec → false
+	{
+		fmt.Printf("TestHasOriginalSpec case %d. indexes without originalSpec\n", nr)
+		nr++
+		obj := bson.D{
+			{Key: "commitIndexBuild", Value: "system.buckets.weather"},
+			{Key: "indexes", Value: bson.A{
+				bson.D{
+					{Key: "key", Value: bson.D{
+						{Key: "meta", Value: 1},
+						{Key: "control.min.temperature", Value: 1},
+						{Key: "control.max.temperature", Value: 1},
+					}},
+					{Key: "name", Value: "sensor_1_temperature_1"},
+				},
+			}},
+		}
+		assert.Equal(t, false, hasOriginalSpec(obj))
+	}
+	// Case3: indexes with originalSpec (bson.A) → true
+	{
+		fmt.Printf("TestHasOriginalSpec case %d. indexes with originalSpec bson.A\n", nr)
+		nr++
+		obj := bson.D{
+			{Key: "commitIndexBuild", Value: "system.buckets.weather"},
+			{Key: "indexes", Value: bson.A{
+				bson.D{
+					{Key: "key", Value: bson.D{
+						{Key: "meta", Value: 1},
+						{Key: "control.min.temperature", Value: 1},
+						{Key: "control.max.temperature", Value: 1},
+					}},
+					{Key: "name", Value: "sensor_1_temperature_1"},
+					{Key: "originalSpec", Value: bson.D{
+						{Key: "key", Value: bson.D{
+							{Key: "sensor", Value: 1},
+							{Key: "temperature", Value: 1},
+						}},
+						{Key: "name", Value: "sensor_1_temperature_1"},
+					}},
+				},
+			}},
+		}
+		assert.Equal(t, true, hasOriginalSpec(obj))
+	}
+	// Case4: indexes with originalSpec ([]bson.D) → true
+	{
+		fmt.Printf("TestHasOriginalSpec case %d. indexes with originalSpec []bson.D\n", nr)
+		nr++
+		obj := bson.D{
+			{Key: "commitIndexBuild", Value: "system.buckets.weather"},
+			{Key: "indexes", Value: []bson.D{
+				{
+					{Key: "key", Value: bson.D{
+						{Key: "meta", Value: 1},
+						{Key: "control.min.temperature", Value: 1},
+						{Key: "control.max.temperature", Value: 1},
+					}},
+					{Key: "name", Value: "sensor_1_temperature_1"},
+					{Key: "originalSpec", Value: bson.D{
+						{Key: "key", Value: bson.D{
+							{Key: "sensor", Value: 1},
+							{Key: "temperature", Value: 1},
+						}},
+						{Key: "name", Value: "sensor_1_temperature_1"},
+					}},
+				},
+			}},
+		}
+		assert.Equal(t, true, hasOriginalSpec(obj))
+	}
+	// Case5: multiple indexes, only second has originalSpec → true
+	{
+		fmt.Printf("TestHasOriginalSpec case %d. multiple indexes partial originalSpec\n", nr)
+		nr++
+		obj := bson.D{
+			{Key: "commitIndexBuild", Value: "system.buckets.weather"},
+			{Key: "indexes", Value: bson.A{
+				bson.D{
+					{Key: "key", Value: bson.D{{Key: "_id", Value: 1}}},
+					{Key: "name", Value: "_id_"},
+				},
+				bson.D{
+					{Key: "key", Value: bson.D{
+						{Key: "meta", Value: 1},
+						{Key: "control.min.temperature", Value: 1},
+						{Key: "control.max.temperature", Value: 1},
+					}},
+					{Key: "name", Value: "sensor_1_temperature_1"},
+					{Key: "originalSpec", Value: bson.D{
+						{Key: "key", Value: bson.D{
+							{Key: "sensor", Value: 1},
+							{Key: "temperature", Value: 1},
+						}},
+						{Key: "name", Value: "sensor_1_temperature_1"},
+					}},
+				},
+			}},
+		}
+		assert.Equal(t, true, hasOriginalSpec(obj))
+	}
+}
+
+// TestTimeSeriesIntegration tests time-series collection support against a real MongoDB instance.
+// It covers:
+//   - doInsert: system.views insert bypassed via 'applyOps' command
+//   - doUpdate: system.buckets $v:2 diff with unparseable binary falls back to 'applyOps' command
+//   - RunCommand: commitIndexBuild with originalSpec converted to createIndexes on logical collection
+//   instead of system.buckets.xx
+func TestTimeSeriesIntegration(t *testing.T) {
+	utils.InitialLogger("", "", "debug", true, 1)
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	assert.Equal(t, nil, err, "should be equal")
+	tsTestDb := "ts_test"
+	tsCollection := "weather"
+	// Clean up first
+	_ = conn.Client.Database(tsTestDb).Drop(nil)
+	// Create a time-series collection
+	err = conn.Client.Database(tsTestDb).RunCommand(nil, bson.D{
+		{Key: "create", Value: tsCollection},
+		{Key: "timeseries", Value: bson.D{
+			{Key: "timeField", Value: "timestamp"},
+			{Key: "metaField", Value: "metadata"},
+			{Key: "granularity", Value: "hours"},
+		}},
+	}).Err()
+	if err != nil {
+		// If server doesn't support time-series (< 5.0), skip
+		t.Skipf("skip time-series test: server may not support time-series collections: %v", err)
+		return
+	}
+	var nr int
+	// ---- doInsert: system.views applyOps bypass ----
+	{
+		fmt.Printf("TestTimeSeriesIntegration case %d. doInsert system.views applyOps bypass\n", nr)
+		nr++
+		// Drop ts_test2 to test inserting a view definition via applyOps
+		viewTestDb := "ts_test2"
+		_ = conn.Client.Database(viewTestDb).Drop(nil)
+		// applyOps insert requires the target namespace (system.views) to exist.
+		// In real replay, "create" DDL for the time-series collection runs first,
+		// which automatically creates system.views. Simulate that here.
+		err = conn.Client.Database(viewTestDb).RunCommand(nil, bson.D{
+			{Key: "create", Value: "dummy_ts"},
+			{Key: "timeseries", Value: bson.D{
+				{Key: "timeField", Value: "t"},
+			}},
+		}).Err()
+		assert.Equal(t, nil, err, "create dummy time-series to init system.views")
+		// Drop the dummy ts collection but keep system.views alive
+		_ = conn.Client.Database(viewTestDb).Collection("system.buckets.dummy_ts").Drop(nil)
+		writer := NewDbWriter(conn, bson.E{}, false, 0)
+		// Mock an oplog that inserts a view definition into system.views
+		viewDoc := bson.D{
+			{Key: "_id", Value: viewTestDb + "." + tsCollection},
+			{Key: "viewOn", Value: "system.buckets." + tsCollection},
+			{Key: "pipeline", Value: bson.A{
+				bson.D{{Key: "$_internalUnpackBucket", Value: bson.D{
+					{Key: "timeField", Value: "timestamp"},
+					{Key: "metaField", Value: "metadata"},
+					{Key: "bucketMaxSpanSeconds", Value: 2592000},
+				}}},
+			}},
+		}
+		insertOplogs := []*OplogRecord{
+			{
+				original: &PartialLogWithCallback{
+					partialLog: &oplog.PartialLog{
+						ParsedLog: oplog.ParsedLog{
+							Operation: "i",
+							Namespace: viewTestDb + ".system.views",
+							Object:    viewDoc,
+						},
+					},
+				},
+			},
+		}
+		err = writer.doInsert(viewTestDb, "system.views", bson.E{}, insertOplogs, false)
+		if err != nil {
+			// applyOps require special privileges ('__system' role).
+			// If we get an auth error, it confirms the applyOps code path was taken.
+			if strings.Contains(err.Error(), "Unauthorized") ||
+				strings.Contains(err.Error(), "not authorized") {
+				fmt.Printf("[ok] system.views insert correctly use applyOps(auth denied as expected): %v\n", err)
+			} else {
+				t.Errorf("doInsert system.views unexpected error: %v", err)
+			}
+		} else {
+			// Verify the view was inserted
+			result, fetchErr := unit_test_common.FetchAllDocumentBsonM(conn.Client, viewTestDb, "system.views", nil)
+			assert.Equal(t, nil, fetchErr, "should be equal")
+			assert.Equal(t, 1, len(result), "should have 1 view definition")
+		}
+		_ = conn.Client.Database(viewTestDb).Drop(nil)
+	}
+	// ---- doUpdate: system.buckets applyOps fallback ----
+	{
+		fmt.Printf("TestTimeSeriesIntegration case %d. doUpdate system.buckets applyOps fallback\n", nr)
+		nr++
+		// Insert some data into the time-series collection first
+		tsColl := conn.Client.Database(tsTestDb).Collection(tsCollection)
+		_, err = tsColl.InsertOne(nil, bson.D{
+			{Key: "timestamp", Value: time.Now()},
+			{Key: "metadata", Value: bson.D{{Key: "sensorId", Value: 1}}},
+			{Key: "temperature", Value: 22.5},
+		})
+		assert.Equal(t, nil, err, "insert time-series data should succeed")
+		// Find the bucket document to get its _id
+		bucketResults, err := unit_test_common.FetchAllDocumentBsonM(
+			conn.Client, tsTestDb, "system.buckets."+tsCollection, nil)
+		assert.Equal(t, nil, err, "should be equal")
+		assert.True(t, len(bucketResults) > 0, "should have at least 1 bucket")
+		bucketId := bucketResults[0]["_id"]
+		// Mock a $v:2 diff update oplog with only scontrol section (parseable).
+		// Reference: real time-series update oplog from MongoDB 5.0+
+		bucketNs := tsTestDb + ".system.buckets." + tsCollection
+		updateObj := bson.D{
+			{Key: "$v", Value: int32(2)},
+			{Key: "diff", Value: bson.D{
+				{Key: "scontrol", Value: bson.D{
+					{Key: "u", Value: bson.D{
+						{Key: "count", Value: int32(5)},
+					}},
+					{Key: "smin", Value: bson.D{
+						{Key: "u", Value: bson.D{{Key: "humidity", Value: 50}}},
+					}},
+					{Key: "smax", Value: bson.D{
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 30}}},
+					}},
+				}},
+			}},
+		}
+		updateOplogs := []*OplogRecord{
+			{
+				original: &PartialLogWithCallback{
+					partialLog: &oplog.PartialLog{
+						ParsedLog: oplog.ParsedLog{
+							Operation: "u",
+							Namespace: bucketNs,
+							Object:    updateObj,
+							Query:     bson.D{{Key: "_id", Value: bucketId}},
+						},
+					},
+				},
+			},
+		}
+		writer := NewDbWriter(conn, bson.E{}, false, 0)
+		// This should succeed via normal $v:2 diff parsing (scontrol fields are parseable)
+		err = writer.doUpdate(tsTestDb, "system.buckets."+tsCollection, bson.E{}, updateOplogs, false)
+		assert.Equal(t, nil, err, "doUpdate with parseable $v:2 diff should succeed")
+		// Now test with scontrol + sdata.b that triggers applyOps fallback.
+		// sdata.b contains column-store binary diffs which DiffUpdateOplogToNormal cannot parse.
+		updateObjWithBinary := bson.D{
+			{Key: "$v", Value: int32(2)},
+			{Key: "diff", Value: bson.D{
+				{Key: "scontrol", Value: bson.D{
+					{Key: "u", Value: bson.D{
+						{Key: "count", Value: int32(5)},
+					}},
+					{Key: "smin", Value: bson.D{
+						{Key: "u", Value: bson.D{{Key: "humidity", Value: 50}}},
+					}},
+					{Key: "smax", Value: bson.D{
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 30}}},
+					}},
+				}},
+				{Key: "sdata", Value: bson.D{
+					{Key: "b", Value: bson.D{
+						{Key: "temperature", Value: bson.D{
+							{Key: "o", Value: int32(10)},
+							{Key: "d", Value: primitive.Binary{Subtype: 0, Data: []byte("oGsAMAAoAh4BAA==")}},
+						}},
+						{Key: "time", Value: bson.D{
+							{Key: "o", Value: int32(10)},
+							{Key: "d", Value: primitive.Binary{Subtype: 0, Data: []byte("gQx8ksAn+XuSDgAAAAAAAAAA")}},
+						}},
+						{Key: "humidity", Value: bson.D{
+							{Key: "o", Value: int32(10)},
+							{Key: "d", Value: primitive.Binary{Subtype: 0, Data: []byte("kBsACAAQADoAAA==")}},
+						}},
+						{Key: "pressure", Value: bson.D{
+							{Key: "o", Value: int32(10)},
+							{Key: "d", Value: primitive.Binary{Subtype: 0, Data: []byte("sJsASABQABIAAA==")}},
+						}},
+					}},
+				}},
+			}},
+		}
+		updateOplogsWithBinary := []*OplogRecord{
+			{
+				original: &PartialLogWithCallback{
+					partialLog: &oplog.PartialLog{
+						ParsedLog: oplog.ParsedLog{
+							Operation: "u",
+							Namespace: bucketNs,
+							Object:    updateObjWithBinary,
+							Query:     bson.D{{Key: "_id", Value: bucketId}},
+						},
+					},
+				},
+			},
+		}
+		// This should fall back to applyOps because sdata.b cannot be parsed.
+		// The applyOps may fail on the server side (auth or because the diff is fabricated),
+		// but it should NOT fail with the "unknow Key[b]" parse error.
+		err = writer.doUpdate(tsTestDb, "system.buckets."+tsCollection, bson.E{}, updateOplogsWithBinary, false)
+		if err != nil {
+			assert.NotContains(t, err.Error(), "unknow Key",
+				"error should NOT be from DiffUpdateOplogToNormal parse; should be from applyOps server-side")
+			if strings.Contains(err.Error(), "Unauthorized") ||
+				strings.Contains(err.Error(), "not authorized") {
+				fmt.Printf("  [ok] system.buckets update correctly routed to applyOps (auth denied): %v\n", err)
+			} else {
+				fmt.Printf("  [expected] applyOps fallback returned server-side error: %v\n", err)
+			}
+		} else {
+			fmt.Println("  applyOps fallback succeeded (server accepted the fabricated diff)")
+		}
+	}
+	// ---- CommandWriter.doUpdate: system.buckets $v:2 diff handling ----
+	{
+		fmt.Printf("TestTimeSeriesIntegration case %d. CommandWriter doUpdate system.buckets\n", nr)
+		nr++
+		// Reuse the bucket doc from previous case
+		bucketResults, err := unit_test_common.FetchAllDocumentBsonM(
+			conn.Client, tsTestDb, "system.buckets."+tsCollection, nil)
+		assert.Equal(t, nil, err)
+		assert.True(t, len(bucketResults) > 0, "should have at least 1 bucket")
+		bucketId := bucketResults[0]["_id"]
+		bucketNs := tsTestDb + ".system.buckets." + tsCollection
+		// CommandWriter is created when metadata has "g" (gid)
+		gid := bson.E{Key: "g", Value: "test-gid"}
+		cmdWriter := NewDbWriter(conn, gid, false, 0)
+		// Test 1: parseable scontrol-only diff should succeed via DiffUpdateOplogToNormal
+		controlOnlyObj := bson.D{
+			{Key: "$v", Value: int32(2)},
+			{Key: "diff", Value: bson.D{
+				{Key: "scontrol", Value: bson.D{
+					{Key: "u", Value: bson.D{
+						{Key: "count", Value: int32(5)},
+					}},
+					{Key: "smin", Value: bson.D{
+						{Key: "u", Value: bson.D{{Key: "humidity", Value: 50}}},
+					}},
+					{Key: "smax", Value: bson.D{
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 30}}},
+					}},
+				}},
+			}},
+		}
+		controlOplogs := []*OplogRecord{{
+			original: &PartialLogWithCallback{
+				partialLog: &oplog.PartialLog{
+					ParsedLog: oplog.ParsedLog{
+						Operation: "u",
+						Namespace: bucketNs,
+						Object:    controlOnlyObj,
+						Query:     bson.D{{Key: "_id", Value: bucketId}},
+					},
+				},
+			},
+		}}
+		err = cmdWriter.doUpdate(tsTestDb, "system.buckets."+tsCollection, gid, controlOplogs, false)
+		assert.Equal(t, nil, err, "CommandWriter doUpdate with parseable scontrol diff should succeed")
+		// Test 2: scontrol + sdata.b should fall back to applyOps
+		binaryObj := bson.D{
+			{Key: "$v", Value: int32(2)},
+			{Key: "diff", Value: bson.D{
+				{Key: "scontrol", Value: bson.D{
+					{Key: "u", Value: bson.D{
+						{Key: "count", Value: int32(5)},
+					}},
+				}},
+				{Key: "sdata", Value: bson.D{
+					{Key: "b", Value: bson.D{
+						{Key: "temperature", Value: bson.D{
+							{Key: "o", Value: int32(10)},
+							{Key: "d", Value: primitive.Binary{Subtype: 0, Data: []byte("oGsAMAAoAh4BAA==")}},
+						}},
+					}},
+				}},
+			}},
+		}
+		binaryOplogs := []*OplogRecord{{
+			original: &PartialLogWithCallback{
+				partialLog: &oplog.PartialLog{
+					ParsedLog: oplog.ParsedLog{
+						Operation: "u",
+						Namespace: bucketNs,
+						Object:    binaryObj,
+						Query:     bson.D{{Key: "_id", Value: bucketId}},
+					},
+				},
+			},
+		}}
+		err = cmdWriter.doUpdate(tsTestDb, "system.buckets."+tsCollection, gid, binaryOplogs, false)
+		if err != nil {
+			assert.NotContains(t, err.Error(), "unknow Key",
+				"CommandWriter error should NOT be from DiffUpdateOplogToNormal parse")
+			fmt.Printf("  [expected] CommandWriter applyOps fallback returned: %v\n", err)
+		} else {
+			fmt.Println("  CommandWriter applyOps fallback succeeded")
+		}
+	}
+	// ---- RunCommand: commitIndexBuild with originalSpec ----
+	{
+		fmt.Printf("TestTimeSeriesIntegration case %d. RunCommand commitIndexBuild with originalSpec\n", nr)
+		nr++
+		// Create a fresh time-series collection for index test
+		idxTestDb := "ts_test_idx"
+		_ = conn.Client.Database(idxTestDb).Drop(nil)
+		err = conn.Client.Database(idxTestDb).RunCommand(nil, bson.D{
+			{Key: "create", Value: tsCollection},
+			{Key: "timeseries", Value: bson.D{
+				{Key: "timeField", Value: "timestamp"},
+				{Key: "metaField", Value: "metadata"},
+				{Key: "granularity", Value: "hours"},
+			}},
+		}).Err()
+		assert.Equal(t, nil, err, "create time-series collection should succeed")
+		// Test that hasOriginalSpec correctly detects the flag and RunCommand
+		// takes the applyOps path. We simulate a commitIndexBuild oplog with
+		// originalSpec using the DDL applyOps approach.
+		// First, create an index via createIndexes on the logical collection
+		err = conn.Client.Database(idxTestDb).RunCommand(nil, bson.D{
+			{Key: "createIndexes", Value: tsCollection},
+			{Key: "indexes", Value: bson.A{
+				bson.D{
+					{Key: "key", Value: bson.D{{Key: "metadata.sensorId", Value: 1}}},
+					{Key: "name", Value: "metadata.sensorId_1"},
+				},
+			}},
+		}).Err()
+		assert.Equal(t, nil, err, "createIndexes on time-series should succeed")
+		// Verify the index exists
+		cursor, err := conn.Client.Database(idxTestDb).Collection("system.buckets." + tsCollection).Indexes().List(nil)
+		assert.Equal(t, nil, err)
+		var indexes []bson.M
+		err = cursor.All(nil, &indexes)
+		assert.Equal(t, nil, err)
+		fmt.Printf("  indexes on system.buckets.%s: %d\n", tsCollection, len(indexes))
+		// Now test RunCommand with a commitIndexBuild oplog that has originalSpec.
+		// Drop the index first, then replay via RunCommand.
+		_ = conn.Client.Database(idxTestDb).RunCommand(nil, bson.D{
+			{Key: "dropIndexes", Value: "system.buckets." + tsCollection},
+			{Key: "index", Value: "metadata.sensorId_1"},
+		}).Err()
+		// Simulate a commitIndexBuild oplog with originalSpec
+		pLog := &oplog.PartialLog{
+			ParsedLog: oplog.ParsedLog{
+				Operation: "c",
+				Namespace: idxTestDb + ".$cmd",
+				Version:   2,
+				Object: bson.D{
+					{Key: "commitIndexBuild", Value: "system.buckets." + tsCollection},
+					{Key: "indexes", Value: bson.A{
+						bson.D{
+							{Key: "v", Value: int32(2)},
+							{Key: "key", Value: bson.D{{Key: "meta.sensorId", Value: int32(1)}}},
+							{Key: "name", Value: "metadata.sensorId_1"},
+							{Key: "originalSpec", Value: bson.D{
+								{Key: "key", Value: bson.D{{Key: "metadata.sensorId", Value: int32(1)}}},
+								{Key: "name", Value: "metadata.sensorId_1"},
+								{Key: "v", Value: int32(2)},
+							}},
+						},
+					}},
+				},
+			},
+		}
+		// Verify hasOriginalSpec detects it
+		assert.True(t, hasOriginalSpec(pLog.Object), "should detect originalSpec")
+		// Verify extractOriginalSpecs extracts the logical index spec
+		specs := extractOriginalSpecs(pLog.Object)
+		assert.Equal(t, 1, len(specs), "should extract 1 originalSpec")
+		// RunCommand should convert to createIndexes on the logical collection
+		err = RunCommand(idxTestDb, "commitIndexBuild", pLog, conn.Client)
+		assert.Equal(t, nil, err, "commitIndexBuild with originalSpec should succeed via createIndexes")
+		// Verify the index was re-created on system.buckets
+		cursor, listErr := conn.Client.Database(idxTestDb).Collection("system.buckets." + tsCollection).Indexes().List(nil)
+		assert.Equal(t, nil, listErr)
+		var newIndexes []bson.M
+		listErr = cursor.All(nil, &newIndexes)
+		assert.Equal(t, nil, listErr)
+		fmt.Printf("  indexes after commitIndexBuild replay: %d\n", len(newIndexes))
+		assert.True(t, len(newIndexes) >= 2, "should have at least 2 indexes (default + replayed)")
+		_ = conn.Client.Database(idxTestDb).Drop(nil)
+	}
+	// Final cleanup
+	_ = conn.Client.Database(tsTestDb).Drop(nil)
 }

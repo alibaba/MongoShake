@@ -26,9 +26,16 @@ const (
 	localDB = "local"
 )
 
+const (
+	// MaxCappedRetry is the maximum number of automatic cursor reset retries
+	// when CappedPositionLost error occurs before treating it as fatal.
+	MaxCappedRetry = utils.VarOplogReaderMaxCappedRetry
+)
+
 // TimeoutError defines mongodb query executed timeout
 var TimeoutError = errors.New("read next log timeout, It shouldn't be happen")
 var CollectionCappedError = errors.New("collection capped error")
+var CollectionCappedFatalError = errors.New("collection capped error persists after max retries, fatal")
 
 // OplogReader represents stream reader from mongodb that specified
 // by an url. And with query options. user can iterate oplogs.
@@ -50,6 +57,9 @@ type OplogReader struct {
 	fetcherLock  sync.Mutex
 
 	firstRead bool
+
+	// cappedErrorCount tracks consecutive CappedPositionLost errors
+	cappedErrorCount int
 }
 
 // NewOplogReader creates reader with mongodb url
@@ -142,7 +152,21 @@ func (or *OplogReader) fetcher() {
 		or.query[QueryTs].(bson.M)[QueryOpGT].(primitive.Timestamp))
 	for {
 		if err := or.EnsureNetwork(); err != nil {
-			or.oplogChan <- &retOplog{nil, err}
+			// EnsureNetwork returns CollectionCappedError when queryTs falls behind oldest oplog.
+			// Count consecutive capped errors and escalate to fatal after MaxCappedRetry.
+			if errors.Is(err, CollectionCappedError) {
+				or.cappedErrorCount++
+				_ = LOG.Error("oplog collection capped error from EnsureNetwork [%d/%d]",
+					or.cappedErrorCount, MaxCappedRetry)
+				if or.cappedErrorCount > MaxCappedRetry {
+					or.oplogChan <- &retOplog{nil, CollectionCappedFatalError}
+				} else {
+					or.oplogChan <- &retOplog{nil, err}
+				}
+			} else {
+				or.oplogChan <- &retOplog{nil, err}
+			}
+			time.Sleep(1 * time.Second)
 			continue
 		}
 
@@ -151,8 +175,16 @@ func (or *OplogReader) fetcher() {
 				// some internal error. need rebuild the oplogsCursor
 				or.releaseCursor()
 				if utils.IsCollectionCappedError(err) {
-					_ = LOG.Error("oplog collection capped may happen: %v", err)
-					or.oplogChan <- &retOplog{nil, CollectionCappedError}
+					or.cappedErrorCount++
+					_ = LOG.Error("oplog collection capped may happen [%d/%d]: %v",
+						or.cappedErrorCount, MaxCappedRetry, err)
+					if or.cappedErrorCount > MaxCappedRetry {
+						_ = LOG.Error("oplog collection capped error persists after %d retries, treating as fatal",
+							MaxCappedRetry)
+						or.oplogChan <- &retOplog{nil, CollectionCappedFatalError}
+					} else {
+						or.oplogChan <- &retOplog{nil, CollectionCappedError}
+					}
 				} else {
 					e := fmt.Errorf("get next oplog failed, release oplogsIterator, %s", err.Error())
 					or.oplogChan <- &retOplog{nil, e}
@@ -166,6 +198,8 @@ func (or *OplogReader) fetcher() {
 			continue
 		}
 
+		// successfully read data, reset capped error counter
+		or.cappedErrorCount = 0
 		or.oplogChan <- &retOplog{or.oplogsCursor.Current, nil}
 	}
 }
@@ -218,6 +252,8 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 	queryTs = or.getQueryTimestamp()
 	if oldestTs > queryTs {
 		if !or.firstRead {
+			_ = LOG.Error("oplog_reader queryTs[%v] is behind oldest oplog[%v], oplog may have been overwritten (CappedPositionLost)",
+				utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(oldestTs))
 			return CollectionCappedError
 		} else {
 			_ = LOG.Warn("oplog_reader current starting point[%v] is smaller than the oldest timestamp[%v]!",

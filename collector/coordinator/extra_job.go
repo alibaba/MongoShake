@@ -96,19 +96,32 @@ func (cui *CheckUniqueIndexExistsJob) innerRun() error {
 			for _, ns := range nsList {
 
 				LOG.Debug("extra job[%s] check[%v]", cui.Name(), ns)
-				cursor, _ := conns[i].Client.Database(ns.Database).Collection(ns.Collection).Indexes().List(nil)
+				cursor, err := conns[i].Client.Database(ns.Database).Collection(ns.Collection).
+					Indexes().List(context.Background())
+				if err != nil {
+					_ = LOG.Error("extra job[%s] list indexes for [%s.%s] failed: %v",
+						cui.Name(), ns.Database, ns.Collection, err)
+					continue
+				}
 				for cursor.Next(context.Background()) {
+					nameVal, nErr := cursor.Current.LookupErr("name")
+					uniqueVal, uErr := cursor.Current.LookupErr("unique")
+					if nErr != nil || uErr != nil {
+						continue
+					}
 
-					name, nErr := cursor.Current.LookupErr("name")
-					unique, uErr := cursor.Current.LookupErr("unique")
-					if uErr == nil && nErr == nil &&
-						!strings.HasPrefix(name.String(), "_id") && unique.Boolean() == true {
+					nameStr, nameOk := nameVal.StringValueOK()
+					uniqueBool, uniqueOk := uniqueVal.BooleanOK()
+					if nameOk && uniqueOk && uniqueBool &&
+						!strings.HasPrefix(nameStr, "_id") {
+						cursor.Close(context.Background())
 						return fmt.Errorf("extra job[%s] with source[%v] query "+
 							"collection[%s - %s] find unique[%v]", cui.Name(),
 							utils.BlockMongoUrlPassword(source.URL, "***"),
 							ns.Database, ns.Collection, cursor.Current)
 					}
 				}
+				cursor.Close(context.Background())
 			}
 		}
 	}

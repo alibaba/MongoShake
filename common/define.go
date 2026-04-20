@@ -76,13 +76,34 @@ const (
 	VarSpecialSourceDBFlagAliyunServerless = "aliyun_serverless"
 
 	// mongo dbVersions
-	MongoVersion26  = "2.6.0"
-	MongoVersion32  = "3.2.0"
-	MongoVersion36  = "3.6.0"
-	MongoVersion401 = "4.0.1"
+	VarMongoVersion26  = "2.6.0"
+	VarMongoVersion32  = "3.2.0"
+	VarMongoVersion36  = "3.6.0"
+	VarMongoVersion401 = "4.0.1"
 
 	// replica name for ReplicationCoordinator
-	ReplicaNameMongos = "mongos"
+	VarReplicaNameMongos = "mongos"
+
+	// syncer timing constants
+	VarSyncerFetchErrorRetryMs             = 6000 // interval(ms) to wait after fetch error before retrying
+	VarSyncerDDLCheckpointIntervalMs       = 300  // interval(ms) between DDL checkpoint checks
+	VarSyncerFilterCheckpointGap           = 180  // duration(seconds) without checkpoint update before mandatory flush
+	VarSyncerFilterCheckpointCheckInterval = 180  // interval(seconds) between filter-only checkpoint checks
+	VarSyncerCheckCheckpointUpdateTimes    = 10   // max retry count for checkpoint update verification
+
+	// pipeline queue sizing
+	VarSyncerPipelineQueueMaxNr    = 4
+	VarSyncerPipelineQueueMiddleNr = 2
+	VarSyncerPipelineQueueMinNr    = 1
+	VarSyncerPipelineQueueLen      = 64
+
+	// oplog reader constants
+	VarOplogReaderMaxCappedRetry = 10 // max consecutive CappedPositionLost retries before fatal exit
+
+	// time-series collection
+	VarSystemBucketsPrefix   = "system.buckets."
+	VarSystemViewsCollection = "system.views"
+	VarOplogKeyOriginalSpec  = "originalSpec"
 )
 
 type Pair struct {

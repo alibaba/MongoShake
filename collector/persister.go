@@ -191,9 +191,14 @@ func (p *Persister) bufferInput(input []byte) {
 	p.updateBufferUsedMetric()
 }
 func (p *Persister) shouldDispatchBuffer(flush bool) bool {
-	return len(p.Buffer) >= conf.Options.IncrSyncFetcherBufferCapacity ||
-		p.bufferSize >= uint64(conf.Options.IncrSyncFetcherBufferSizeThresholdInKB*1024) ||
-		(flush && len(p.Buffer) != 0)
+	if len(p.Buffer) >= conf.Options.IncrSyncFetcherBufferCapacity {
+		return true
+	}
+	if conf.Options.IncrSyncFetcherBufferSizeThresholdInKB > 0 &&
+		p.bufferSize >= uint64(conf.Options.IncrSyncFetcherBufferSizeThresholdInKB*1024) {
+		return true
+	}
+	return flush && len(p.Buffer) != 0
 }
 func (p *Persister) dispatchBuffer() {
 	// we could simply ++syncer.resolverIndex. The max uint64 is 9223372036854774807

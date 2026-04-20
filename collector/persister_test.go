@@ -33,6 +33,7 @@ func TestInject(t *testing.T) {
 		nr++
 
 		conf.Options.IncrSyncFetcherBufferCapacity = 5
+		conf.Options.IncrSyncFetcherBufferSizeThresholdInKB = 10240
 		conf.Options.FullSyncReaderOplogStoreDisk = false
 
 		syncer := mockSyncer()

@@ -286,7 +286,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			value := oplog.GetKey(partialLog.Object, "ns")
 			oplog.SetFiled(partialLog.Object, "ns", nsTrans.Transform(value.(string)))
 		}
-		partialLog.Namespace = nsTrans.Transform(partialLog.Namespace)
+		partialLog.Namespace = transformTimeseriesNs(partialLog.Namespace, nsTrans)
 		if transformRef {
 			partialLog.Object = transform.TransformDBRef(partialLog.Object, db, nsTrans)
 		}
@@ -331,7 +331,8 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 				_ = LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
 				return nil
 			}
-			partialLog.Namespace = nsTrans.Transform(fmt.Sprintf("%s.%s", db, col))
+			fullNs := fmt.Sprintf("%s.%s", db, col)
+			partialLog.Namespace = transformTimeseriesNs(fullNs, nsTrans)
 			oplog.SetFiled(partialLog.Object, operation, strings.SplitN(partialLog.Namespace, ".", 2)[1])
 		case "renameCollection":
 			// { "renameCollection" : "my.tbl", "to" : "my.my", "stayTemp" : false, "dropTarget" : false }
@@ -345,6 +346,10 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 				_ = LOG.Warn("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
 				return nil
 			}
+			// NOTE: Time series collections do not support renameCollection/reIndex command,
+			// so we do not use transformTimeseriesNs() here.
+			// See details in:
+			// https://www.mongodb.com/docs/manual/core/timeseries/timeseries-limitations/?#unsupported-features
 			partialLog.Namespace = nsTrans.Transform(fromNs)
 			oplog.SetFiled(partialLog.Object, operation, partialLog.Namespace)
 			oplog.SetFiled(partialLog.Object, "to", nsTrans.Transform(toNs))
@@ -373,10 +378,27 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			oplog.SetFiled(partialLog.Object, "applyOps", ops)
 		default:
 			// such as: dropDatabase
-			partialLog.Namespace = nsTrans.Transform(partialLog.Namespace)
+			partialLog.Namespace = transformTimeseriesNs(partialLog.Namespace, nsTrans)
 		}
 	}
 	return partialLog
+}
+
+// transformTimeseriesNs transforms a namespace that may belong to a time-series collection.
+// For 'system.buckets.xxx', it uses the logical collection name for rule matching,
+// then re-applies the 'system.buckets.' prefix to the transformed result.
+func transformTimeseriesNs(ns string, nsTrans *transform.NamespaceTransform) string {
+	parts := strings.SplitN(ns, ".", 2)
+	if len(parts) == 2 && strings.HasPrefix(parts[1], utils.VarSystemBucketsPrefix) {
+		logicalCol := strings.TrimPrefix(parts[1], utils.VarSystemBucketsPrefix)
+		logicalNs := parts[0] + "." + logicalCol
+		transformed := nsTrans.Transform(logicalNs)
+		tParts := strings.SplitN(transformed, ".", 2)
+		if len(tParts) == 2 {
+			return tParts[0] + "." + utils.VarSystemBucketsPrefix + tParts[1]
+		}
+	}
+	return nsTrans.Transform(ns)
 }
 
 type Item struct {
