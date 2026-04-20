@@ -172,7 +172,7 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 				{Key: "createIndexes", Value: logicalColl},
 				{Key: "indexes", Value: logicalIndexes},
 			}
-			LOG.Info("RunCommand commitIndexBuild with originalSpec, converted to createIndexes on "+
+			l.Logger.Infof("RunCommand commitIndexBuild with originalSpec, converted to createIndexes on "+
 				"logical collection [%s.%s]: %v", database, logicalColl, command)
 			err = dbHandler.RunCommand(nil, command).Err()
 			break
