@@ -1,7 +1,6 @@
 package log
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,19 +8,20 @@ import (
 	"sync"
 	"time"
 
-	"github.com/natefinch/lumberjack"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 const (
-	defaultLogDir    = "logs"
-	defaultLogFile   = "mongoshake.log"
-	defaultMaxSizeMB = 20
-	defaultMaxAge    = 7
-	timeLayout       = "2006/01/02 15:04:05 MST"
-	bufferSize       = 32 * 1024
+	defaultMaxSizeMB                 = 20
+	defaultMaxAge                    = 7
+	timeLayout                       = "2006/01/02 15:04:05 MST"
+	bufferedWriteSyncerSize          = 32 * 1024
+	bufferedWriteSyncerFlushInterval = time.Second
 )
+
+const criticalLevel zapcore.Level = zapcore.FatalLevel + 1
 
 var Logger = &ZapLogger{logger: zap.NewNop().Sugar()}
 
@@ -34,44 +34,15 @@ var logLevelMap = map[string]zapcore.Level{
 	"error":   zapcore.ErrorLevel,
 }
 
-type bufferedWriteSyncer struct {
-	mu     sync.Mutex
-	buffer *bufio.Writer
-	target zapcore.WriteSyncer
-}
-
-func newBufferedWriteSyncer(target zapcore.WriteSyncer) zapcore.WriteSyncer {
-	return &bufferedWriteSyncer{
-		buffer: bufio.NewWriterSize(target, bufferSize),
-		target: target,
-	}
-}
-
-func (b *bufferedWriteSyncer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buffer.Write(p)
-}
-
-func (b *bufferedWriteSyncer) Sync() error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if err := b.buffer.Flush(); err != nil {
-		return err
-	}
-	return b.target.Sync()
-}
-
 type ZapLogger struct {
-	logger *zap.SugaredLogger
+	logger              *zap.SugaredLogger
+	stopBufferedWriters []func() error
+	stopOnce            sync.Once
 }
 
 func New(logLevel, logDir, logFile string,
 	logFlush bool, maxSizeMB, maxAge, verbose int) error {
 	level := parseLogLevel(logLevel)
-	logDir = normalizeLogDir(logDir)
-	logFile = normalizeLogFile(logFile)
 	maxSizeMB = normalizeMaxSize(maxSizeMB)
 	maxAge = normalizeMaxAge(maxAge)
 
@@ -90,10 +61,14 @@ func New(logLevel, logDir, logFile string,
 	}
 	encoder := zapcore.NewConsoleEncoder(encoderConfig)
 
-	var cores []zapcore.Core
+	var (
+		cores               []zapcore.Core
+		stopBufferedWriters []func() error
+	)
+
 	if verbose == 0 || verbose == 1 {
-		if err := os.MkdirAll(logDir, os.ModeDir|os.ModePerm); err != nil {
-			return fmt.Errorf("create log.dir[%v] failed[%v]", logDir, err)
+		if logFile == "" {
+			return fmt.Errorf("log.file is empty")
 		}
 
 		fileWriter := &lumberjack.Logger{
@@ -102,17 +77,17 @@ func New(logLevel, logDir, logFile string,
 			MaxAge:   maxAge,
 			Compress: false,
 		}
-		fileSyncer := zapcore.AddSync(fileWriter)
-		if !logFlush {
-			fileSyncer = newBufferedWriteSyncer(fileSyncer)
+		fileSyncer, stop := buildWriteSyncer(zapcore.AddSync(fileWriter), logFlush)
+		if stop != nil {
+			stopBufferedWriters = append(stopBufferedWriters, stop)
 		}
 		cores = append(cores, zapcore.NewCore(encoder, fileSyncer, level))
 	}
 
 	if verbose == 1 || verbose == 2 {
-		consoleSyncer := zapcore.AddSync(os.Stdout)
-		if !logFlush {
-			consoleSyncer = newBufferedWriteSyncer(consoleSyncer)
+		consoleSyncer, stop := buildWriteSyncer(zapcore.AddSync(os.Stdout), logFlush)
+		if stop != nil {
+			stopBufferedWriters = append(stopBufferedWriters, stop)
 		}
 		cores = append(cores, zapcore.NewCore(encoder, consoleSyncer, level))
 	}
@@ -122,22 +97,27 @@ func New(logLevel, logDir, logFile string,
 	}
 
 	baseLogger := zap.New(zapcore.NewTee(cores...)).Sugar()
-	Logger = &ZapLogger{logger: baseLogger}
+	Logger = &ZapLogger{
+		logger:              baseLogger,
+		stopBufferedWriters: stopBufferedWriters,
+	}
 	return nil
 }
 
-func normalizeLogDir(logDir string) string {
-	if logDir == "" {
-		return defaultLogDir
+func buildWriteSyncer(
+	target zapcore.WriteSyncer,
+	logFlush bool,
+) (zapcore.WriteSyncer, func() error) {
+	if logFlush {
+		return target, nil
 	}
-	return logDir
-}
 
-func normalizeLogFile(logFile string) string {
-	if logFile == "" {
-		return defaultLogFile
+	buffered := &zapcore.BufferedWriteSyncer{
+		WS:            target,
+		Size:          bufferedWriteSyncerSize,
+		FlushInterval: bufferedWriteSyncerFlushInterval,
 	}
-	return logFile
+	return buffered, buffered.Stop
 }
 
 func normalizeMaxSize(maxSizeMB int) int {
@@ -175,7 +155,7 @@ func encodeLevel(level zapcore.Level, enc zapcore.PrimitiveArrayEncoder) {
 		enc.AppendString("[WARNING]")
 	case zapcore.ErrorLevel:
 		enc.AppendString("[ERROR]")
-	case zapcore.DPanicLevel, zapcore.PanicLevel, zapcore.FatalLevel:
+	case criticalLevel, zapcore.DPanicLevel, zapcore.PanicLevel, zapcore.FatalLevel:
 		enc.AppendString("[CRITICAL]")
 	default:
 		enc.AppendString("[" + strings.ToUpper(level.String()) + "]")
@@ -189,21 +169,11 @@ func formatArgs(args ...any) string {
 	return fmt.Sprintf(strings.Repeat(" %v", len(args))[1:], args...)
 }
 
-func (l *ZapLogger) write(level zapcore.Level, message string) {
+func (l *ZapLogger) log(level zapcore.Level, message string) {
 	if l == nil || l.logger == nil {
 		return
 	}
-
-	core := l.logger.Desugar().Core()
-	if !core.Enabled(level) {
-		return
-	}
-
-	_ = core.Write(zapcore.Entry{
-		Level:   level,
-		Time:    time.Now(),
-		Message: message,
-	}, nil)
+	l.logger.Desugar().Log(level, message)
 }
 
 func (l *ZapLogger) Printf(format string, args ...any) {
@@ -219,35 +189,47 @@ func (l *ZapLogger) Println(args ...any) {
 }
 
 func (l *ZapLogger) Debugf(format string, args ...any) {
+	if l == nil || l.logger == nil {
+		return
+	}
 	l.logger.Debugf(format, args...)
 }
 
 func (l *ZapLogger) Infof(format string, args ...any) {
+	if l == nil || l.logger == nil {
+		return
+	}
 	l.logger.Infof(format, args...)
 }
 
 func (l *ZapLogger) Warnf(format string, args ...any) {
+	if l == nil || l.logger == nil {
+		return
+	}
 	l.logger.Warnf(format, args...)
 }
 
 func (l *ZapLogger) Errorf(format string, args ...any) {
+	if l == nil || l.logger == nil {
+		return
+	}
 	l.logger.Errorf(format, args...)
 }
 
 func (l *ZapLogger) Criticalf(format string, args ...any) {
-	l.write(zapcore.DPanicLevel, fmt.Sprintf(format, args...))
+	l.log(criticalLevel, fmt.Sprintf(format, args...))
 }
 
 func (l *ZapLogger) Fatalf(format string, args ...any) {
 	message := fmt.Sprintf(format, args...)
-	l.write(zapcore.FatalLevel, message)
+	l.log(criticalLevel, message)
 	_ = l.Sync()
 	os.Exit(1)
 }
 
 func (l *ZapLogger) Panicf(format string, args ...any) {
 	message := fmt.Sprintf(format, args...)
-	l.write(zapcore.PanicLevel, message)
+	l.log(criticalLevel, message)
 	_ = l.Sync()
 	panic(message)
 }
@@ -282,9 +264,9 @@ func (l *ZapLogger) Fatalln(args ...any) {
 
 func (l *ZapLogger) Panic(args ...any) {
 	message := formatArgs(args...)
-	l.write(zapcore.PanicLevel, message)
+	l.log(criticalLevel, message)
 	_ = l.Sync()
-	panic(args)
+	panic(message)
 }
 
 func (l *ZapLogger) Crashf(format string, args ...any) {
@@ -303,5 +285,17 @@ func (l *ZapLogger) Sync() error {
 }
 
 func (l *ZapLogger) Close() error {
-	return l.Sync()
+	if l == nil {
+		return nil
+	}
+
+	syncErr := l.Sync()
+	l.stopOnce.Do(func() {
+		for _, stop := range l.stopBufferedWriters {
+			if stopErr := stop(); syncErr == nil && stopErr != nil {
+				syncErr = stopErr
+			}
+		}
+	})
+	return syncErr
 }
