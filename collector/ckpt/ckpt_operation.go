@@ -14,7 +14,7 @@ import (
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 const (
@@ -73,28 +73,28 @@ func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 		tmpClient, err := utils.NewMongoCommunityConn(ckpt.URL, utils.VarMongoConnectModePrimary, true,
 			"local", "", conf.Options.CheckpointStorageUrlMongoSslRootCaFile)
 		if err != nil {
-			LOG.Error("%s MongoCheckpoint create client failed:%v", ckpt.Name, err)
+			l.Logger.Errorf("%s MongoCheckpoint create client failed:%v", ckpt.Name, err)
 			return false
 		}
 		defer tmpClient.Close()
 		dbVersion, err := utils.GetDBVersion(tmpClient)
 		if err != nil {
-			LOG.Error("%s MongoCheckpoint get db version failed:%v", ckpt.Name, err)
+			l.Logger.Errorf("%s MongoCheckpoint get db version failed:%v", ckpt.Name, err)
 			return false
 		}
 		version, err := semver.StrictNewVersion(dbVersion)
 		if err != nil {
-			LOG.Error("%s MongoCheckpoint failed to parse dbVersion: %v", ckpt.Name, err)
+			l.Logger.Errorf("%s MongoCheckpoint failed to parse dbVersion: %v", ckpt.Name, err)
 			return false
 		}
 		version36, _ := semver.StrictNewVersion(utils.VarMongoVersion36)
 		rc := utils.ReadWriteConcernLocal
 		if version.GreaterThanEqual(version36) {
-			LOG.Info("%s MongoCheckpoint dbVersion %s >= %s, use readConcern:majority",
+			l.Logger.Infof("%s MongoCheckpoint dbVersion %s >= %s, use readConcern:majority",
 				ckpt.Name, version.String(), utils.VarMongoVersion36)
 			rc = utils.ReadWriteConcernMajority
 		} else {
-			LOG.Info("%s MongoCheckpoint dbVersion %s < %s, use readConcern:local",
+			l.Logger.Infof("%s MongoCheckpoint dbVersion %s < %s, use readConcern:local",
 				ckpt.Name, version.String(), utils.VarMongoVersion36)
 		}
 
@@ -103,7 +103,7 @@ func (ckpt *MongoCheckpoint) ensureNetwork() bool {
 			conf.Options.CheckpointStorageUrlMongoSslRootCaFile); err == nil {
 			ckpt.client = client
 		} else {
-			LOG.Error("%s MongoCheckpoint connect to mongo cluster failed. %v", ckpt.Name, err)
+			l.Logger.Errorf("%s MongoCheckpoint connect to mongo cluster failed. %v", ckpt.Name, err)
 			return false
 		}
 	}
@@ -118,7 +118,7 @@ func (ckpt *MongoCheckpoint) close() {
 
 func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 	if !ckpt.ensureNetwork() {
-		LOG.Error("%s MongoCheckpoint ensureNetwork failed", ckpt.Name)
+		l.Logger.Errorf("%s MongoCheckpoint ensureNetwork failed", ckpt.Name)
 		return nil, false
 	}
 
@@ -127,7 +127,7 @@ func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 	if err = ckpt.client.Client.Database(ckpt.DB).Collection(ckpt.Table).FindOne(nil,
 		bson.M{CheckpointName: ckpt.Name}).Decode(value); err == nil {
 
-		LOG.Info("%s Load exist checkpoint. content %v", ckpt.Name, value)
+		l.Logger.Infof("%s Load exist checkpoint. content %v", ckpt.Name, value)
 		return value, true
 	} else if err.Error() == mongo.ErrNoDocuments.Error() {
 		if InitCheckpoint > ckpt.Timestamp {
@@ -138,18 +138,18 @@ func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 		value.Version = ckpt.Version
 		value.OplogDiskQueue = ckpt.OplogDiskQueue
 		value.OplogDiskQueueFinishTs = ckpt.OplogDiskQueueFinishTs
-		LOG.Info("%s Regenerate checkpoint but won't persist. content: %s", ckpt.Name, value)
+		l.Logger.Infof("%s Regenerate checkpoint but won't persist. content: %s", ckpt.Name, value)
 		return value, false
 	}
 
 	ckpt.close()
-	LOG.Error("%s Reload ckpt find context fail. %v", ckpt.Name, err)
+	l.Logger.Errorf("%s Reload ckpt find context fail. %v", ckpt.Name, err)
 	return nil, false
 }
 
 func (ckpt *MongoCheckpoint) Insert(updates *CheckpointContext) error {
 	if !ckpt.ensureNetwork() {
-		LOG.Warn("%s Record ckpt ensure network failed. %v", ckpt.Name, ckpt.client)
+		l.Logger.Warnf("%s Record ckpt ensure network failed. %v", ckpt.Name, ckpt.client)
 		return fmt.Errorf("%s record ckpt network failed", ckpt.Name)
 	}
 
@@ -159,12 +159,12 @@ func (ckpt *MongoCheckpoint) Insert(updates *CheckpointContext) error {
 
 	_, err := ckpt.client.Client.Database(ckpt.DB).Collection(ckpt.Table).UpdateOne(nil, filter, update, opts)
 	if err != nil {
-		LOG.Warn("%s Record checkpoint %v upsert error %v", ckpt.Name, updates, err)
+		l.Logger.Warnf("%s Record checkpoint %v upsert error %v", ckpt.Name, updates, err)
 		ckpt.close()
 		return err
 	}
 
-	LOG.Info("%s Record new checkpoint in MongoDB success [%d]", ckpt.Name,
+	l.Logger.Infof("%s Record new checkpoint in MongoDB success [%d]", ckpt.Name,
 		utils.ExtractMongoTimestamp(updates.Timestamp))
 	return nil
 }
@@ -182,7 +182,7 @@ func (ckpt *HttpApiCheckpoint) Get() (*CheckpointContext, bool) {
 	var stream []byte
 	value := new(CheckpointContext)
 	if resp, err = http.Get(ckpt.URL); err != nil {
-		LOG.Warn("%s Http api ckpt request failed, %v", ckpt.Name, err)
+		l.Logger.Warnf("%s Http api ckpt request failed, %v", ckpt.Name, err)
 		return nil, false
 	}
 
@@ -206,13 +206,12 @@ func (ckpt *HttpApiCheckpoint) Get() (*CheckpointContext, bool) {
 
 func (ckpt *HttpApiCheckpoint) Insert(insert *CheckpointContext) error {
 	body, _ := json.Marshal(insert)
-	if resp, err := http.Post(ckpt.URL, "application/json", bytes.NewReader(body));
-		err != nil || resp.StatusCode != http.StatusOK {
-		LOG.Warn("%s Context api manager write request failed, %v", ckpt.Name, err)
+	if resp, err := http.Post(ckpt.URL, "application/json", bytes.NewReader(body)); err != nil || resp.StatusCode != http.StatusOK {
+		l.Logger.Warnf("%s Context api manager write request failed, %v", ckpt.Name, err)
 		return err
 	}
 
-	LOG.Info("%s Record new checkpoint in HttpApi success [%d]",
+	l.Logger.Infof("%s Record new checkpoint in HttpApi success [%d]",
 		ckpt.Name, utils.ExtractMongoTimestamp(insert.Timestamp))
 	return nil
 }

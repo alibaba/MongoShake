@@ -13,8 +13,8 @@ import (
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	"github.com/alibaba/MongoShake/v2/collector/transform"
 	utils "github.com/alibaba/MongoShake/v2/common"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 	"github.com/alibaba/MongoShake/v2/sharding"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
 )
 
 func fetchChunkMap(isSharding bool) (sharding.ShardingChunkMap, error) {
@@ -34,7 +34,7 @@ func fetchChunkMap(isSharding bool) (sharding.ShardingChunkMap, error) {
 
 	// enable filter orphan document
 	if conf.Options.FullSyncExecutorFilterOrphanDocument {
-		LOG.Info("begin to get chunk map from config.chunks of source mongodb sharding")
+		l.Logger.Infof("begin to get chunk map from config.chunks of source mongodb sharding")
 		return sharding.GetChunkMapByUrl(conf.Options.MongoCsUrl)
 	}
 
@@ -66,14 +66,14 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	var err error
 	// init orphan sharding chunk map if source is mongod(get data directly from mongod)
 	if fromIsSharding && coordinator.MongoS == nil {
-		LOG.Info("source is mongod, need to fetching chunk map")
+		l.Logger.Infof("source is mongod, need to fetching chunk map")
 		shardingChunkMap, err = fetchChunkMap(fromIsSharding)
 		if err != nil {
-			_ = LOG.Critical("fetch chunk map failed[%v]", err)
+			l.Logger.Criticalf("fetch chunk map failed[%v]", err)
 			return err
 		}
 	} else {
-		LOG.Info("source is replica or mongos, no need to fetching chunk map")
+		l.Logger.Infof("source is replica or mongos, no need to fetching chunk map")
 	}
 
 	filterList := filter.NewDocFilterList()
@@ -83,7 +83,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	if err != nil {
 		return err
 	}
-	LOG.Info("all namespace: %v", nsSet)
+	l.Logger.Infof("all namespace: %v", nsSet)
 
 	// init ckptMap with source of full sync, no matter mongod or mongos
 	var ckptMap map[string]utils.TimestampNode
@@ -137,12 +137,12 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		}
 
 		// print
-		LOG.Info("index list below: ----------")
+		l.Logger.Infof("index list below: ----------")
 		for ns, index := range indexMap {
-			// LOG.Info("collection[%v] -> %s", ns, utils.MarshalStruct(index))
-			LOG.Info("collection[%v] -> %v", ns, index)
+			// l.Logger.Infof("collection[%v] -> %s", ns, utils.MarshalStruct(index))
+			l.Logger.Infof("collection[%v] -> %v", ns, index)
 		}
-		LOG.Info("index list above: ----------")
+		l.Logger.Infof("index list above: ----------")
 
 		if conf.Options.FullSyncCreateIndex == utils.VarFullSyncCreateIndexBackground {
 			if err := docsyncer.StartIndexSync(indexMap, toUrl, trans, true); err != nil {
@@ -164,21 +164,21 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 			if chunkMap, ok := shardingChunkMap[src.ReplicaName]; ok {
 				dbChunkMap = chunkMap
 			} else {
-				_ = LOG.Warn("document syncer %v has no chunk map", src.ReplicaName)
+				l.Logger.Warnf("document syncer %v has no chunk map", src.ReplicaName)
 			}
 			orphanFilter = filter.NewOrphanFilter(src.ReplicaName, dbChunkMap)
 		}
 
 		dbSyncer := docsyncer.NewDBSyncer(i, src.URL, src.ReplicaName, toUrl, trans, orphanFilter, qos, fromIsSharding)
 		dbSyncer.Init()
-		LOG.Info("document syncer-%d do replication for url=%v",
+		l.Logger.Infof("document syncer-%d do replication for url=%v",
 			i, utils.BlockMongoUrlPassword(src.URL, "***"))
 
 		wg.Add(1)
 		nimo.GoRoutine(func() {
 			defer wg.Done()
 			if err := dbSyncer.Start(); err != nil {
-				_ = LOG.Critical("document replication for url=%v failed. %v",
+				l.Logger.Criticalf("document replication for url=%v failed. %v",
 					utils.BlockMongoUrlPassword(src.URL, "***"), err)
 				replError = err
 			}
@@ -191,12 +191,12 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 		nimo.GoRoutine(func() {
 			// before starting, we must register all interface
 			if err := utils.FullSyncHttpApi.Listen(); err != nil {
-				_ = LOG.Critical("start full sync server with port[%v] failed: %v",
+				l.Logger.Criticalf("start full sync server with port[%v] failed: %v",
 					conf.Options.FullSyncHTTPListenPort, err)
 			}
 		})
 	} else {
-		LOG.Info("full sync http api disabled. port[%v]", conf.Options.FullSyncHTTPListenPort)
+		l.Logger.Infof("full sync http api disabled. port[%v]", conf.Options.FullSyncHTTPListenPort)
 	}
 
 	// wait all db finished
@@ -232,13 +232,13 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 			}
 		}
 
-		LOG.Info("try to set checkpoint with map[%v]", ckptMap)
+		l.Logger.Infof("try to set checkpoint with map[%v]", ckptMap)
 		if err := docsyncer.Checkpoint(ckptMap); err != nil {
 			return err
 		}
 	}
 
-	LOG.Info("document syncer sync end")
+	l.Logger.Infof("document syncer sync end")
 	return nil
 }
 

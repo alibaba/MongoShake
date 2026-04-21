@@ -12,7 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 var (
@@ -217,7 +217,7 @@ func GetAllTimestamp(sources []*MongoSource, sslRootFile string) (map[string]Tim
 		}
 	}
 
-	LOG.Info("GetAllTimestamp biggestNew:%v, smallestNew:%v, biggestOld:%v, smallestOld:%v,"+
+	l.Logger.Infof("GetAllTimestamp biggestNew:%v, smallestNew:%v, biggestOld:%v, smallestOld:%v,"+
 		" MongoSource:%v, tsMap:%v",
 		Int64ToTimestamp(biggestNew), Int64ToTimestamp(smallestNew),
 		Int64ToTimestamp(biggestOld), Int64ToTimestamp(smallestOld),
@@ -322,7 +322,7 @@ func GetDbNamespace(url string, filterFunc func(name string) bool, sslRootFile s
 	}
 	// sort by db names
 	sort.Strings(dbNames)
-	LOG.Debug("dbNames:%v queryCondition:%v", dbNames, queryCondition)
+	l.Logger.Debugf("dbNames:%v queryCondition:%v", dbNames, queryCondition)
 
 	nsList := make([]NS, 0, 128)
 	for _, db := range dbNames {
@@ -333,14 +333,14 @@ func GetDbNamespace(url string, filterFunc func(name string) bool, sslRootFile s
 			return nil, nil, err
 		}
 
-		LOG.Debug("db[%v] colNames: %v queryCondition:%v", db, colNames, queryCondition)
+		l.Logger.Debugf("db[%v] colNames: %v queryCondition:%v", db, colNames, queryCondition)
 		for _, col := range colNames {
 			ns := NS{Database: db, Collection: col}
 			if strings.HasPrefix(col, "system.") {
 				continue
 			}
 			if filterFunc != nil && filterFunc(ns.Str()) {
-				LOG.Debug("Namespace is filtered. %v", ns.Str())
+				l.Logger.Debugf("Namespace is filtered. %v", ns.Str())
 				continue
 			}
 			nsList = append(nsList, ns)

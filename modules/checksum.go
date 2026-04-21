@@ -1,7 +1,7 @@
 package module
 
 import (
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 	"github.com/alibaba/MongoShake/v2/tunnel"
 )
 
@@ -23,7 +23,7 @@ func (coder *ChecksumCalculator) Handle(message *tunnel.WMessage) int64 {
 	// write checksum value
 	if len(message.RawLogs) != 0 {
 		message.Checksum = message.Crc32()
-		LOG.Debug("Tunnel message checksum value 0x%x", message.Checksum)
+		l.Logger.Debugf("Tunnel message checksum value 0x%x", message.Checksum)
 	}
 
 	return tunnel.ReplyOK

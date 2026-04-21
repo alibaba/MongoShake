@@ -3,8 +3,12 @@
 
 package utils
 
-import LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+import l "github.com/alibaba/MongoShake/v2/pkg/log"
 
 func DEBUG_LOG(arg0 interface{}, args ...interface{}) {
-	LOG.Debug(arg0, args)
+	if format, ok := arg0.(string); ok {
+		l.Logger.Debugf(format, args...)
+		return
+	}
+	l.Logger.Debugf("%v", arg0)
 }

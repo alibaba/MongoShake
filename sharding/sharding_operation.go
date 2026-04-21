@@ -12,7 +12,7 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 const (
@@ -94,7 +94,7 @@ func GetChunkMapByUrl(csUrl string) (ShardingChunkMap, error) {
 	for shardCursor.Next(context.Background()) {
 		err = shardCursor.Decode(&shardDoc)
 		if err != nil {
-			LOG.Warn("GetChunkMapByUrl Decode Failed, err[%v]", err)
+			l.Logger.Warnf("GetChunkMapByUrl Decode Failed, err[%v]", err)
 			continue
 		}
 
@@ -118,7 +118,7 @@ func GetChunkMapByUrl(csUrl string) (ShardingChunkMap, error) {
 	for chunkCursor.Next(context.Background()) {
 		err = chunkCursor.Decode(&chunkDoc)
 		if err != nil {
-			LOG.Warn("GetChunkMapByUrl Decode Failed, err[%v]", err)
+			l.Logger.Warnf("GetChunkMapByUrl Decode Failed, err[%v]", err)
 			continue
 		}
 

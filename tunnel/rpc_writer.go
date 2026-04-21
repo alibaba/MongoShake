@@ -5,7 +5,7 @@ import (
 	"net/rpc"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 type RPCWriter struct {
@@ -26,7 +26,7 @@ func (tunnel *RPCWriter) Send(message *WMessage) int64 {
 	if tunnel.rpcConn == nil {
 		// we try just one time as higher layer will handle this error
 		if tunnel.rpcConn, err = net.DialTCP("tcp", nil, tunnel.tcpAddr); err != nil {
-			LOG.Critical("Remote rpc server connect failed. %v", err)
+			l.Logger.Criticalf("Remote rpc server connect failed. %v", err)
 			utils.YieldInMs(3000)
 			tunnel.rpcConn = nil
 			return ReplyNetworkOpFail
@@ -42,7 +42,7 @@ func (tunnel *RPCWriter) Send(message *WMessage) int64 {
 	err = tunnel.rpcClient.Call("TunnelRPC.Transfer", message.TMessage, &reply)
 
 	if err != nil {
-		LOG.Error("Remote rpc server send error[%v]", err)
+		l.Logger.Errorf("Remote rpc server send error[%v]", err)
 		// error is from network or rpc system.
 		tunnel.rpcClient.Close()
 		tunnel.rpcConn.Close()
@@ -57,7 +57,7 @@ func (tunnel *RPCWriter) Prepare() bool {
 	var conn *net.TCPConn
 	var err error
 	if address, err = net.ResolveTCPAddr("tcp", tunnel.RemoteAddr); err != nil {
-		LOG.Critical("Resolve rpc server address failed. %v", err)
+		l.Logger.Criticalf("Resolve rpc server address failed. %v", err)
 		return false
 	}
 	tunnel.tcpAddr = address
@@ -68,7 +68,7 @@ func (tunnel *RPCWriter) Prepare() bool {
 	}
 
 	if conn, err = net.DialTCP("tcp", nil, address); err != nil {
-		LOG.Critical("Remote rpc server connect failed. %v", err)
+		l.Logger.Criticalf("Remote rpc server connect failed. %v", err)
 		return false
 	}
 	// just test the connection

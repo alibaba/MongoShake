@@ -14,7 +14,7 @@ import (
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 var (
@@ -60,7 +60,7 @@ func NewConfig(rootCaFile string) (*Config, error) {
 		}
 		caCert, err := ioutil.ReadFile(rootCaFile)
 		if err != nil {
-			LOG.Critical("failed to load the ca cert file[%s]: %s failed: %s", rootCaFile, err.Error())
+			l.Logger.Criticalf("failed to load the ca cert file[%s] failed: %s", rootCaFile, err.Error())
 			return nil, err
 		}
 		caCertPool := x509.NewCertPool()
@@ -126,7 +126,7 @@ func parseAuth(auth string) (string, string, error) {
 	return arr[0], arr[1], nil
 }
 
-//getKafkaCompression 根据kafkaCompression值获取对应的枚举
+// getKafkaCompression 根据kafkaCompression值获取对应的枚举
 func getKafkaCompression(compression string) sarama.CompressionCodec {
 	compressions := map[string]sarama.CompressionCodec{
 		"none":   sarama.CompressionNone,

@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 const (
@@ -122,7 +122,7 @@ func (tunnel *FileWriter) SyncToDisk() {
 			tunnel.dataFile.filehandle.Write(buffer.Bytes())
 			buffer.Reset()
 		case <-time.After(time.Millisecond * 1000):
-			LOG.Info("File tunnel sync flush. total oplogs %d", tunnel.logs)
+			l.Logger.Infof("File tunnel sync flush. total oplogs %d", tunnel.logs)
 			tunnel.dataFile.filehandle.Sync()
 		}
 	}
@@ -132,7 +132,7 @@ func _Open(path string) (*os.File, bool) {
 	if file, err := os.OpenFile(path, OPEN_FILE_FLAGS, os.ModePerm); err == nil {
 		return file, true
 	}
-	LOG.Critical("File tunnel create data file failed")
+	l.Logger.Criticalf("File tunnel create data file failed")
 	return nil, false
 }
 
@@ -141,12 +141,12 @@ func (tunnel *FileWriter) Prepare() bool {
 		if file, ok := _Open(tunnel.Local); ok {
 			tunnel.dataFile = &DataFile{filehandle: file}
 		} else {
-			LOG.Critical("File tunnel open failed")
+			l.Logger.Criticalf("File tunnel open failed")
 			return false
 		}
 
 		if info, err := os.Stat(tunnel.Local); err != nil || info.IsDir() {
-			LOG.Critical("File tunnel check path failed. %v", err)
+			l.Logger.Criticalf("File tunnel check path failed. %v", err)
 			return false
 		}
 		tunnel.dataFile.WriteHeader()

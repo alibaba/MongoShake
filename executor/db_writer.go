@@ -12,7 +12,7 @@ import (
 
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 const (
@@ -52,20 +52,20 @@ type BasicWriter interface {
 // 3) CommandWriter; (for gid enabled)
 func NewDbWriter(conn *utils.MongoCommunityConn, metadata bson.E, bulkInsert bool, fullFinishTs int64) BasicWriter {
 	if !bulkInsert { // bulk insertion disable
-		// LOG.Info("db writer create: SingleWriter")
+		// l.Logger.Infof("db writer create: SingleWriter")
 		return &SingleWriter{conn: conn, fullFinishTs: fullFinishTs}
 	} else if metadata.Key == "g" { // has gid
-		// LOG.Info("db writer create: CommandWriter")
+		// l.Logger.Infof("db writer create: CommandWriter")
 		return &CommandWriter{conn: conn, fullFinishTs: fullFinishTs}
 	}
-	// LOG.Info("db writer create: BulkWriter")
+	// l.Logger.Infof("db writer create: BulkWriter")
 	return &BulkWriter{conn: conn, fullFinishTs: fullFinishTs} // bulk insertion enable
 }
 
 func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo.Client) error {
-	defer LOG.Debug("RunCommand run DDL: %v", log.Dump(nil, true))
+	defer l.Logger.Debugf("RunCommand run DDL: %v", log.Dump(nil, true))
 	dbHandler := client.Database(database)
-	LOG.Info("RunCommand run DDL with type[%s]", operation)
+	l.Logger.Infof("RunCommand run DDL with type[%s]", operation)
 	var err error
 	switch operation {
 	case "createIndexes":
@@ -172,7 +172,7 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 				{Key: "createIndexes", Value: logicalColl},
 				{Key: "indexes", Value: logicalIndexes},
 			}
-			LOG.Info("RunCommand commitIndexBuild with originalSpec, converted to createIndexes on "+
+			l.Logger.Infof("RunCommand commitIndexBuild with originalSpec, converted to createIndexes on "+
 				"logical collection [%s.%s]: %v", database, logicalColl, command)
 			err = dbHandler.RunCommand(nil, command).Err()
 			break
@@ -193,7 +193,7 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 		}
 
 		nimo.AssertTrue(len(command) >= 2, "createIndexes command must at least have two elements")
-		LOG.Debug("RunCommand commitIndexBuild oplog after conversion[%v]", command)
+		l.Logger.Debugf("RunCommand commitIndexBuild oplog after conversion[%v]", command)
 		err = dbHandler.RunCommand(nil, command).Err()
 	case "applyOps":
 		/*
@@ -270,11 +270,11 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 		if log.UI != nil && (log.UI.Subtype == 3 || log.UI.Subtype == 4) {
 			doc["ui"] = log.UI
 		}
-		LOG.Info("run applyOps for %s: %v", operation, doc)
+		l.Logger.Infof("run applyOps for %s: %v", operation, doc)
 		err = client.Database("admin").RunCommand(context.Background(),
 			bson.D{{"applyOps", []interface{}{doc}}}, nil).Err()
 		if err != nil {
-			_ = LOG.Error("run applyOps[%v] for %s failed: %v", doc, operation, err)
+			l.Logger.Errorf("run applyOps[%v] for %s failed: %v", doc, operation, err)
 			return err
 		}
 	case "convertToCapped":
@@ -295,7 +295,7 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 			err = client.Database("admin").RunCommand(nil, log.Object).Err()
 		}
 	default:
-		LOG.Info("type[%s] not found, use applyOps", operation)
+		l.Logger.Infof("type[%s] not found, use applyOps", operation)
 
 		// filter log.Object
 		var rec bson.D

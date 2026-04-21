@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 const (
@@ -177,11 +177,12 @@ func (metric *ReplicationMetric) startup() {
 			}
 			verbose += "]"
 
-			LOG.Info(verbose, metric.NAME, metric.STAGE,
-				atomic.LoadUint64(&metric.OplogGet.Value))
+			l.Logger.Infof("%s",
+				fmt.Sprintf(verbose, metric.NAME, metric.STAGE,
+					atomic.LoadUint64(&metric.OplogGet.Value)))
 		}
 
-		LOG.Info("metric[%v] exit", metric)
+		l.Logger.Infof("metric[%v] exit", metric)
 	}()
 }
 

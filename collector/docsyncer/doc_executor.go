@@ -12,7 +12,7 @@ import (
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 var (
@@ -106,7 +106,7 @@ func (colExecutor *CollectionExecutor) Wait() error {
 	colExecutor.wg.Wait()
 	/*for v := atomic.LoadInt64(&colExecutor.batchCount); v != 0; {
 		utils.YieldInMs(1000)
-		LOG.Info("CollectionExecutor[%v %v] wait batchCount[%v] == 0", colExecutor.ns, colExecutor.id, v)
+		l.Logger.Infof("CollectionExecutor[%v %v] wait batchCount[%v] == 0", colExecutor.ns, colExecutor.id, v)
 	}*/
 
 	close(colExecutor.docBatch)
@@ -169,7 +169,7 @@ func (exec *DocExecutor) start() {
 			if err := exec.doSync(docs); err != nil {
 				exec.error = err
 				// since v2.4.11: panic directly if meets error
-				LOG.Crashf("%s sync failed: %v", exec, err)
+				l.Logger.Panicf("%s sync failed: %v", exec, err)
 			}
 		}
 
@@ -192,11 +192,11 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 		if conf.Options.FullSyncExecutorFilterOrphanDocument && exec.syncer.orphanFilter != nil {
 			var docData bson.D
 			if err := bson.Unmarshal(*doc, &docData); err != nil {
-				_ = LOG.Error("doSync do bson unmarshal %v failed. %v", doc, err)
+				l.Logger.Errorf("doSync do bson unmarshal %v failed. %v", doc, err)
 			}
 			// judge whether is orphan document, pass if so
 			if exec.syncer.orphanFilter.Filter(docData, ns.Database+"."+ns.Collection) {
-				LOG.Info("orphan document [%v] filter", doc)
+				l.Logger.Infof("orphan document [%v] filter", doc)
 				continue
 			}
 		}
@@ -214,10 +214,10 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 		errUnmarshalBeg := bson.Unmarshal(*docs[0], &docBeg)
 		errUnmarshalEnd := bson.Unmarshal(*docs[len(docs)-1], &docEnd)
 		if errUnmarshalBeg == nil && errUnmarshalEnd == nil {
-			LOG.Debug("DBSyncer id[%v] doSync BulkWrite with table[%v] batch _id interval [%v, %v]",
+			l.Logger.Debugf("DBSyncer id[%v] doSync BulkWrite with table[%v] batch _id interval [%v, %v]",
 				exec.syncer.id, ns, docBeg, docEnd)
 		} else {
-			_ = LOG.Error("unmarshal doc failed, begin:[%v], end:[%v]", errUnmarshalBeg, errUnmarshalEnd)
+			l.Logger.Errorf("unmarshal doc failed, begin:[%v], end:[%v]", errUnmarshalBeg, errUnmarshalEnd)
 		}
 	}
 
@@ -227,10 +227,10 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 	if err != nil {
 		bulkErr, ok := err.(mongo.BulkWriteException)
 		if !ok {
-			_ = LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[type:%T err:%v] res[%v]",
+			l.Logger.Warnf("insert docs with length[%v] into ns[%v] of dest mongo failed[type:%T err:%v] res[%v]",
 				len(models), ns, err, err, res)
 		} else {
-			_ = LOG.Warn("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
+			l.Logger.Warnf("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
 				len(models), ns, bulkErr, res)
 		}
 
@@ -271,7 +271,7 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 			if err != nil {
 				return fmt.Errorf("bulk run updateForInsert failed[%v]", err)
 			}
-			LOG.Debug("updateForInsert succeed, updateModels.len:%d updateModules[0]:%v",
+			l.Logger.Debugf("updateForInsert succeed, updateModels.len:%d updateModules[0]:%v",
 				len(updateModels), updateModels[0])
 		} else {
 			return fmt.Errorf("bulk run failed[%v]", err)

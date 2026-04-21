@@ -8,7 +8,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
-	LOG "github.com/alibaba/MongoShake/v2/third_party/log4go"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 type NamespaceTransform struct {
@@ -32,7 +32,7 @@ func NewNamespaceTransform(transRule []string) *NamespaceTransform {
 		rulePair := strings.SplitN(rule, ":", 2)
 		if len(rulePair) != 2 ||
 			len(strings.SplitN(rulePair[0], ".", 2)) != len(strings.SplitN(rulePair[1], ".", 2)) {
-			LOG.Crashf("transform rule %v is illegal", rule)
+			l.Logger.Panicf("transform rule %v is illegal", rule)
 		}
 		fromRule := strings.Replace(rulePair[0], ".", "\\.", -1)
 		fromPattern := fmt.Sprintf("^%s$|^%s(\\..*)$", fromRule, fromRule)
@@ -58,7 +58,7 @@ func NewDBTransform(transRule []string) *DBTransform {
 		rulePair := strings.SplitN(rule, ":", 2)
 		if len(rulePair) != 2 ||
 			len(strings.SplitN(rulePair[0], ".", 2)) != len(strings.SplitN(rulePair[1], ".", 2)) {
-			LOG.Crashf("transform rule %v is illegal", rule)
+			l.Logger.Panicf("transform rule %v is illegal", rule)
 		}
 		fromDB := strings.SplitN(rulePair[0], ".", 2)[0]
 		toDB := strings.SplitN(rulePair[1], ".", 2)[0]
