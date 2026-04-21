@@ -20,6 +20,8 @@ var SIGNALSTACK = "$"
 const (
 	GlobalDiagnosticPath = "diagnostic"
 	GolangSecurityTime   = "2006-01-02T15:04:05Z"
+	defaultLogDir        = "logs"
+	defaultLogFile       = "mongoshake.log"
 
 	WorkGood       uint64 = 0
 	GetReady       uint64 = 1
@@ -72,14 +74,15 @@ func InitialLogger(logDir, logFile, level string, logFlush bool, verbose int) er
 func InitialLoggerWithRotation(logDir, logFile, level string,
 	logFlush bool, verbose, maxSizeMB, maxAge int) error {
 	if logDir == "" {
-		logDir = "logs"
+		logDir = defaultLogDir
+	}
+	if logFile == "" {
+		logFile = defaultLogFile
 	}
 
 	if verbose != 2 {
-		if _, err := os.Stat(logDir); err != nil && os.IsNotExist(err) {
-			if err := os.MkdirAll(logDir, os.ModeDir|os.ModePerm); err != nil {
-				return fmt.Errorf("create log.dir[%v] failed[%v]", logDir, err)
-			}
+		if err := os.MkdirAll(logDir, os.ModeDir|os.ModePerm); err != nil {
+			return fmt.Errorf("create log.dir[%v] failed[%v]", logDir, err)
 		}
 	}
 

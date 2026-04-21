@@ -25,7 +25,7 @@ func main() {
 	defer handleExit()
 	defer func() {
 		if l.Logger != nil {
-			_ = l.Logger.Sync()
+			_ = l.Logger.Close()
 		}
 	}()
 
