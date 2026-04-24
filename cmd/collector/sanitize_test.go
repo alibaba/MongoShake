@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	utils "github.com/alibaba/MongoShake/v2/common"
 )
 
 func TestNormalizeFilterOpTypes(t *testing.T) {
@@ -52,6 +53,55 @@ func TestCheckDefaultValueKeepDisabledHTTPPorts(t *testing.T) {
 	assert.Equal(t, -1, conf.Options.FullSyncHTTPListenPort, "should be equal")
 	assert.Equal(t, 0, conf.Options.IncrSyncHTTPListenPort, "should be equal")
 	assert.Equal(t, 0, conf.Options.PromHTTPListenPort, "should be equal")
+}
+
+func TestCheckDefaultValueRequireMasterQuorumElectionID(t *testing.T) {
+	origin := conf.Options
+	defer func() {
+		conf.Options = origin
+	}()
+
+	conf.Options = conf.Configuration{
+		MasterQuorum: true,
+		MongoUrls:    []string{"mongodb://source-a"},
+	}
+
+	err := checkDefaultValue()
+	assert.EqualError(t, err, "master_quorum.election_id should be given while master election enabled")
+}
+
+func TestCheckDefaultValueRejectInvalidMasterQuorumElectionID(t *testing.T) {
+	origin := conf.Options
+	defer func() {
+		conf.Options = origin
+	}()
+
+	conf.Options = conf.Configuration{
+		MasterQuorum:           true,
+		MasterQuorumElectionID: "invalid-object-id",
+		MongoUrls:              []string{"mongodb://source-a"},
+	}
+
+	err := checkDefaultValue()
+	assert.Error(t, err, "should be equal")
+	assert.Contains(t, err.Error(), "master_quorum.election_id should be a valid ObjectID")
+}
+
+func TestCheckDefaultValueAcceptMasterQuorumElectionID(t *testing.T) {
+	origin := conf.Options
+	defer func() {
+		conf.Options = origin
+	}()
+
+	conf.Options = conf.Configuration{
+		MasterQuorum:           true,
+		MasterQuorumElectionID: "66e3ffdd9df1af8e2308fb53",
+		MongoUrls:              []string{"mongodb://source-a"},
+	}
+
+	err := checkDefaultValue()
+	assert.NoError(t, err, "should be equal")
+	assert.Equal(t, utils.VarCheckpointStorageDatabase, conf.Options.CheckpointStorage, "should be equal")
 }
 
 func TestCheckConflictRejectPrometheusHTTPPortConflict(t *testing.T) {

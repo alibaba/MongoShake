@@ -13,6 +13,7 @@ type Configuration struct {
 	// 1. global
 	Id                                     string   `config:"id"`
 	MasterQuorum                           bool     `config:"master_quorum"`
+	MasterQuorumElectionID                 string   `config:"master_quorum.election_id"`
 	FullSyncHTTPListenPort                 int      `config:"full_sync.http_port"`
 	IncrSyncHTTPListenPort                 int      `config:"incr_sync.http_port"`
 	PromHTTPListenPort                     int      `config:"prom.http_port"`

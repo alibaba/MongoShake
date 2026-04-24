@@ -24,6 +24,7 @@ There are three options for parallel replication which we call 'shad\_key': __id
 ---
 Mongo-Shake periodically persistent its context into register center which by default is the source database. Currently, the context is checkpoint which marks the position of successfully replay oplog.<br>
 Hypervisor mechanism is also supported so that it will restart immediately when dies(`master_quorum` in configuration).
+`master_quorum` only supports `checkpoint.storage=database`; when `master_quorum=true`, `master_quorum.election_id` must be set to a valid MongoDB ObjectID and kept unique per independent sync job or HA group.
 
 # Filter
 ---
