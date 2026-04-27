@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"go.mongodb.org/mongo-driver/bson/primitive"
+
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	utils "github.com/alibaba/MongoShake/v2/common"
@@ -166,6 +168,9 @@ func checkDefaultValue() error {
 	if conf.Options.CheckpointInterval <= 0 {
 		conf.Options.CheckpointInterval = 5000 // ms
 	}
+	if err := checkMasterQuorumOptions(); err != nil {
+		return err
+	}
 
 	// 2. full sync
 	if conf.Options.FullSyncReaderCollectionParallel <= 0 {
@@ -305,6 +310,22 @@ func checkDefaultValue() error {
 	filter.NsShouldBeIgnore[utils.AppDatabase+"."] = true
 	filter.NsShouldBeIgnore[utils.APPConflictDatabase+"."] = true
 
+	return nil
+}
+
+func checkMasterQuorumOptions() error {
+	if !conf.Options.MasterQuorum {
+		return nil
+	}
+	if conf.Options.CheckpointStorage != utils.VarCheckpointStorageDatabase {
+		return fmt.Errorf("context storage should set to 'database' while master election enabled")
+	}
+	if conf.Options.MasterQuorumElectionID == "" {
+		return fmt.Errorf("master_quorum.election_id should be given while master election enabled")
+	}
+	if _, err := primitive.ObjectIDFromHex(conf.Options.MasterQuorumElectionID); err != nil {
+		return fmt.Errorf("master_quorum.election_id should be a valid ObjectID: %v", err)
+	}
 	return nil
 }
 

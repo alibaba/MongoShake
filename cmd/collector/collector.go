@@ -23,6 +23,24 @@ import (
 
 type Exit struct{ Code int }
 
+var (
+	fullSyncInitHttpApiFunc    = utils.FullSyncInitHttpApi
+	incrSyncInitHttpApiFunc    = utils.IncrSyncInitHttpApi
+	prometheusInitHttpApiFunc  = utils.PrometheusInitHttpApi
+	startPrometheusHttpApiFunc = startPrometheusHttpApi
+	registerConfHttpApiFunc    = registerConfHttpApi
+	selectLeaderFunc           = selectLeader
+	useElectionObjectIdFunc    = quorum.UseElectionObjectId
+	becomeMasterFunc           = quorum.BecomeMaster
+	alwaysMasterFunc           = quorum.AlwaysMaster
+	waitMasterPromotionFunc    = func() {
+		<-quorum.MasterPromotionNotifier
+	}
+	runReplicationFunc = func(replCord *coordinator.ReplicationCoordinator) error {
+		return replCord.Run()
+	}
+)
+
 func main() {
 	var err error
 	defer handleExit()
@@ -103,34 +121,10 @@ func main() {
 }
 
 func startup() {
-	// leader election at the beginning
-	selectLeader()
+	initStartupHTTPApis()
 
-	// initialize http api
-	utils.FullSyncInitHttpApi(conf.Options.FullSyncHTTPListenPort)
-	utils.IncrSyncInitHttpApi(conf.Options.IncrSyncHTTPListenPort)
-	utils.PrometheusInitHttpApi(conf.Options.PromHTTPListenPort)
 	ReplCord := &coordinator.ReplicationCoordinator{
 		MongoD: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
-	}
-
-	// register conf
-	utils.FullSyncHttpApi.RegisterAPI("/conf", nimo.HttpGet, func([]byte) interface{} {
-		return conf.GetSafeOptions()
-	})
-	utils.IncrSyncHttpApi.RegisterAPI("/conf", nimo.HttpGet, func([]byte) interface{} {
-		return conf.GetSafeOptions()
-	})
-
-	if utils.IsHTTPPortEnabled(conf.Options.PromHTTPListenPort) {
-		nimo.GoRoutine(func() {
-			if err := utils.PrometheusHttpApi.Listen(); err != nil {
-				l.Logger.Errorf("start prometheus server with port[%v] failed: %v",
-					conf.Options.PromHTTPListenPort, err)
-			}
-		})
-	} else {
-		l.Logger.Infof("prometheus http api disabled. port[%v]", conf.Options.PromHTTPListenPort)
 	}
 
 	// init
@@ -163,7 +157,7 @@ func startup() {
 	}
 
 	// start mongodb replication
-	if err := ReplCord.Run(); err != nil {
+	if err := runReplicationFunc(ReplCord); err != nil {
 		// initial or connection established failed
 		l.Logger.Errorf("run replication failed: %v", err)
 		crash(err.Error(), -6)
@@ -178,20 +172,57 @@ func startup() {
 	select {}
 }
 
+func initStartupHTTPApis() {
+	prometheusInitHttpApiFunc(conf.Options.PromHTTPListenPort)
+	startPrometheusHttpApiFunc()
+
+	// leader election blocks standby nodes before full/incr runtime APIs are exposed.
+	selectLeaderFunc()
+
+	fullSyncInitHttpApiFunc(conf.Options.FullSyncHTTPListenPort)
+	incrSyncInitHttpApiFunc(conf.Options.IncrSyncHTTPListenPort)
+	registerConfHttpApiFunc()
+}
+
+func registerConfHttpApi() {
+	utils.FullSyncHttpApi.RegisterAPI("/conf", nimo.HttpGet, func([]byte) interface{} {
+		return conf.GetSafeOptions()
+	})
+	utils.IncrSyncHttpApi.RegisterAPI("/conf", nimo.HttpGet, func([]byte) interface{} {
+		return conf.GetSafeOptions()
+	})
+}
+
+func startPrometheusHttpApi() {
+	if utils.IsHTTPPortEnabled(conf.Options.PromHTTPListenPort) {
+		nimo.GoRoutine(func() {
+			if err := utils.PrometheusHttpApi.Listen(); err != nil {
+				l.Logger.Errorf("start prometheus server with port[%v] failed: %v",
+					conf.Options.PromHTTPListenPort, err)
+			}
+		})
+	} else {
+		l.Logger.Infof("prometheus http api disabled. port[%v]", conf.Options.PromHTTPListenPort)
+	}
+}
+
 func selectLeader() {
 	// first of all. ensure we are the Master
 	if conf.Options.MasterQuorum && conf.Options.CheckpointStorage == utils.VarCheckpointStorageDatabase {
 		// election become to Master. keep waiting if we are the candidate. election id must be fixed
-		objectId, _ := primitive.ObjectIDFromHex("5204af979955496907000001")
-		quorum.UseElectionObjectId(objectId)
+		objectId, err := primitive.ObjectIDFromHex(conf.Options.MasterQuorumElectionID)
+		if err != nil {
+			crash(fmt.Sprintf("master_quorum.election_id is invalid: %v", err), -4)
+		}
+		useElectionObjectIdFunc(objectId)
 		go func() {
-			_ = quorum.BecomeMaster(conf.Options.CheckpointStorageUrl, utils.VarCheckpointStorageDbReplicaDefault)
+			_ = becomeMasterFunc(conf.Options.CheckpointStorageUrl, utils.VarCheckpointStorageDbReplicaDefault)
 		}()
 
 		// wait until become to a real master
-		<-quorum.MasterPromotionNotifier
+		waitMasterPromotionFunc()
 	} else {
-		quorum.AlwaysMaster()
+		alwaysMasterFunc()
 	}
 }
 
