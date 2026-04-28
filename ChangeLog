@@ -1,3 +1,18 @@
+2026-04-28 Alibaba Cloud.
+    * version: 2.8.8
+    * FEATURE: #949, support filtering oplog by op type with filter.cmds (thanks @SisyphusSQ)
+    * FEATURE: #957, add prometheus metrics endpoint (thanks @SisyphusSQ)
+    * BUGFIX: comparison_3x.py support handle NaN value
+    * BUGFIX: #947, ckpt ensureNetwork should also handle sslRootFile config
+    * REFINE: fix unit test for RunCommand introduced by #949
+    * BUGFIX: #956, fetcher can handle CappedPositionLost error and add fetcher state
+    * REFINE: #961, update NsShouldBeIgnore to filter all collection in config db
+    * REFINE: #859, add prometheus support in README
+    * FEATURE: add time-series collection support
+    * REFINE: #959, replace log4go with zap-based pkg logger
+    * FEATURE: #966, support master quorum election id (thanks @SisyphusSQ)
+    * FEATURE: #927, add checkIndexKeyTypeConsistency for splitter
+
 2025-12-17 Alibaba Cloud.
     * version: 2.8.7
     * FEATURE: add new option incr_sync.executor.bypass_document_validation
