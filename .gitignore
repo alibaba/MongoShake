@@ -1,5 +1,6 @@
 .gopath
 .idea
+.qoder
 *.iml
 *.pprof
 *.output

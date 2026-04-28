@@ -2,10 +2,12 @@ package docsyncer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/bsontype"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
@@ -108,6 +110,14 @@ func (ds *DocumentSplitter) Run() error {
 		return nil
 	}
 
+	// check index key type consistency before parallel split
+	if !ds.checkIndexKeyTypeConsistency() {
+		l.Logger.Warnf("splitter[%s] detected mixed types on index key [%s], give up parallel fetching",
+			ds, conf.Options.FullSyncReaderParallelIndex)
+		ds.readerChan <- NewDocumentReader(0, ds.src, ds.ns, "", nil, nil, ds.sslRootCaFile)
+		return nil
+	}
+
 	maxChunkSize := conf.Options.FullSyncReaderSplitMaxChunkSize // default 1024MB, could be set by user
 	if uint64(maxChunkSize*utils.MB) > ds.pieceByteSize {
 		maxChunkSize = int(ds.pieceByteSize / uint64(utils.MB))
@@ -178,12 +188,93 @@ func (ds *DocumentSplitter) Run() error {
 		l.Logger.Warnf("splitter[%s] run splitVector return null result[%v]", ds, res)
 	}
 
-	l.Logger.Warnf("splitter[%s] give up parallel fetching", ds, err)
+	l.Logger.Warnf("splitter[%s] give up parallel fetching", ds)
 	ds.readerChan <- NewDocumentReader(0, ds.src, ds.ns, "", nil, nil, ds.sslRootCaFile)
 	l.Logger.Infof("splitter[%s] exits", ds)
 
 	l.Logger.Infof("splitter[%s] exits", ds)
 	return nil
+}
+
+// isNumericBsonType returns true if the BSON type is a numeric type.
+// MongoDB treats int32, int64, double, and decimal128 as comparable in sort order,
+// so range queries ($gt/$lte) across these types will not lose data.
+func isNumericBsonType(t bsontype.Type) bool {
+	return t == bson.TypeInt32 || t == bson.TypeInt64 ||
+		t == bson.TypeDouble || t == bson.TypeDecimal128
+}
+
+// checkIndexKeyTypeConsistency checks whether the min and max values of the parallel index key
+// share the same BSON type. If they differ (excluding numeric type normalization), parallel
+// fetching with range queries could silently miss data.
+// Returns true if types are consistent (safe to split), false otherwise.
+func (ds *DocumentSplitter) checkIndexKeyTypeConsistency() bool {
+	indexKey := conf.Options.FullSyncReaderParallelIndex
+	coll := ds.client.Client.Database(ds.ns.Database).Collection(ds.ns.Collection)
+
+	// find min value: sort ascending, limit 1
+	minOpts := options.FindOne().SetSort(bson.D{{indexKey, 1}}).SetProjection(bson.D{{indexKey, 1}})
+	minResult := coll.FindOne(context.Background(), bson.D{}, minOpts)
+	if minResult.Err() != nil {
+		if errors.Is(minResult.Err(), mongo.ErrNoDocuments) {
+			// empty collection, safe to proceed
+			return true
+		}
+		l.Logger.Warnf("splitter[%s] check type consistency: find min failed: %v", ds, minResult.Err())
+		// on error, be conservative and allow parallel (splitVector will fail anyway if there's a real problem)
+		return true
+	}
+
+	// find max value: sort descending, limit 1
+	maxOpts := options.FindOne().SetSort(bson.D{{indexKey, -1}}).SetProjection(bson.D{{indexKey, 1}})
+	maxResult := coll.FindOne(context.Background(), bson.D{}, maxOpts)
+	if maxResult.Err() != nil {
+		l.Logger.Warnf("splitter[%s] check type consistency: find max failed: %v", ds, maxResult.Err())
+		return true
+	}
+
+	// decode raw documents
+	minRaw, err := minResult.Raw()
+	if err != nil {
+		l.Logger.Warnf("splitter[%s] check type consistency: decode min failed: %v", ds, err)
+		return true
+	}
+	maxRaw, err := maxResult.Raw()
+	if err != nil {
+		l.Logger.Warnf("splitter[%s] check type consistency: decode max failed: %v", ds, err)
+		return true
+	}
+
+	// extract the index key field type
+	minVal, err := minRaw.LookupErr(indexKey)
+	if err != nil {
+		l.Logger.Warnf("splitter[%s] check type consistency: lookup min key [%s] failed: %v", ds, indexKey, err)
+		return true
+	}
+	maxVal, err := maxRaw.LookupErr(indexKey)
+	if err != nil {
+		l.Logger.Warnf("splitter[%s] check type consistency: lookup max key [%s] failed: %v", ds, indexKey, err)
+		return true
+	}
+
+	minType := minVal.Type
+	maxType := maxVal.Type
+
+	// normalize numeric types
+	if isNumericBsonType(minType) && isNumericBsonType(maxType) {
+		l.Logger.Infof("splitter[%s] index key [%s] type check passed: min=%v, max=%v (both numeric)",
+			ds, indexKey, minType, maxType)
+		return true
+	}
+
+	if minType == maxType {
+		l.Logger.Infof("splitter[%s] index key [%s] type check passed: type=%v", ds, indexKey, minType)
+		return true
+	}
+
+	l.Logger.Warnf("splitter[%s] index key [%s] has inconsistent types: min=%v, max=%v",
+		ds, indexKey, minType, maxType)
+	return false
 }
 
 func parseDocKeyValue(x interface{}) (string, interface{}, error) {

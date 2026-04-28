@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
@@ -446,7 +447,7 @@ func TestStartIndexSync(t *testing.T) {
 	}
 
 	// serverless deprecate
-	//{
+	// {
 	//	fmt.Printf("TestStartIndexSync case %d.\n", nr)
 	//	nr++
 	//
@@ -506,7 +507,7 @@ func TestStartIndexSync(t *testing.T) {
 	//	assert.Equal(t, nil, err, "should be equal")
 	//	assert.Equal(t, len(indexes), len(indexInput), "should be equal")
 	//	assert.Equal(t, isEqual(indexInput, indexes), true, "should be equal")
-	//}
+	// }
 }
 
 func isEqual(x, y []bson.D, t *testing.T) {
@@ -523,9 +524,122 @@ func isEqual(x, y []bson.D, t *testing.T) {
 	}
 }
 
-func removeField(x []bson.M) {
-	for _, ele := range x {
-		delete(ele, "v")
-		delete(ele, "ns")
+// TestCheckIndexKeyTypeConsistency tests the type consistency check for parallel split.
+func TestCheckIndexKeyTypeConsistency(t *testing.T) {
+	utils.InitialLogger("", "", "debug", true, 1)
+	conf.Options.LogLevel = "debug"
+	conf.Options.MongoConnectMode = utils.VarMongoConnectModePrimary
+	conf.Options.FullSyncReaderParallelIndex = "_id"
+	conf.Options.FullSyncReaderParallelThread = 4 // enable parallel
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, utils.VarMongoConnectModePrimary, false,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	assert.Equal(t, nil, err, "should be equal")
+
+	db := "test_type_check"
+	coll := "test_type_coll"
+
+	// cleanup
+	conn.Client.Database(db).Collection(coll).Drop(nil)
+
+	type testCase struct {
+		name     string
+		docs     []interface{}
+		expected bool // true = consistent (parallel safe)
 	}
+
+	cases := []testCase{
+		{
+			name:     "empty collection",
+			docs:     nil,
+			expected: true,
+		},
+		{
+			name:     "single document",
+			docs:     []interface{}{bson.D{{"_id", 1}}},
+			expected: true,
+		},
+		{
+			name: "all ObjectId",
+			docs: []interface{}{
+				bson.D{{"_id", "aaa"}}, // use string here; we test ObjectId below
+				bson.D{{"_id", "bbb"}},
+				bson.D{{"_id", "ccc"}},
+			},
+			expected: true,
+		},
+		{
+			name: "all int (same numeric type)",
+			docs: []interface{}{
+				bson.D{{"_id", int32(1)}},
+				bson.D{{"_id", int32(2)}},
+				bson.D{{"_id", int32(3)}},
+			},
+			expected: true,
+		},
+		{
+			name: "mixed numeric types (int32 + int64) - should be safe",
+			docs: []interface{}{
+				bson.D{{"_id", int32(1)}},
+				bson.D{{"_id", int64(999999999999)}},
+			},
+			expected: true,
+		},
+		{
+			name: "mixed numeric types (int32 + double) - should be safe",
+			docs: []interface{}{
+				bson.D{{"_id", int32(1)}},
+				bson.D{{"_id", float64(3.14)}},
+			},
+			expected: true,
+		},
+		{
+			name: "mixed types: int + string - should fail",
+			docs: []interface{}{
+				bson.D{{"_id", int32(1)}},
+				bson.D{{"_id", "abc"}},
+			},
+			expected: false,
+		},
+		{
+			name: "mixed types: int + ObjectId - should fail",
+			docs: []interface{}{
+				bson.D{{"_id", int32(1)}},
+				bson.D{{"_id", primitive.NewObjectID()}},
+			},
+			expected: false,
+		},
+		{
+			name: "mixed types: string + ObjectId - should fail",
+			docs: []interface{}{
+				bson.D{{"_id", "hello"}},
+				bson.D{{"_id", primitive.NewObjectID()}},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// drop and re-insert
+			conn.Client.Database(db).Collection(coll).Drop(nil)
+			if len(tc.docs) > 0 {
+				_, err := conn.Client.Database(db).Collection(coll).InsertMany(nil, tc.docs)
+				assert.Equal(t, nil, err, "insert should succeed")
+			}
+
+			// create a DocumentSplitter manually (don't call NewDocumentSplitter which runs splitVector)
+			ds := &DocumentSplitter{
+				src:    testMongoAddress,
+				ns:     utils.NS{Database: db, Collection: coll},
+				client: conn,
+			}
+
+			result := ds.checkIndexKeyTypeConsistency()
+			assert.Equal(t, tc.expected, result, tc.name)
+		})
+	}
+
+	// cleanup
+	conn.Client.Database(db).Collection(coll).Drop(nil)
 }
