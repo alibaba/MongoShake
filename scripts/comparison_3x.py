@@ -216,9 +216,9 @@ def data_comparison(srcColl, dstColl, mode):
 
 def usage():
     print('|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|')
-    print("| Usage: ./comparison.py --src=localhost:27017/db? --dest=localhost:27018/db? --count=10000 (the sample number) --excludeDbs=admin,local --excludeCollections=system.profile --comparisonMode=sample/all/no (sample: comparison sample number, default; all: comparison all data; no: only comparison outline without data)  |")
+    print("| Usage: ./comparison_3x.py --src=localhost:27017/db? --dest=localhost:27018/db? --count=10000 (the sample number) --excludeDbs=admin,local --excludeCollections=system.profile --comparisonMode=sample/all/no (sample: comparison sample number, default; all: comparison all data; no: only comparison outline without data)  |")
     print('|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|')
-    print('| Like : ./comparison.py --src="localhost:3001" --dest=localhost:3100  --count=1000  --excludeDbs=admin,local,mongoshake --excludeCollections=system.profile --comparisonMode=sample  |')
+    print('| Like : ./comparison_3x.py --src="localhost:3001" --dest=localhost:3100  --count=1000  --excludeDbs=admin,local,mongoshake --excludeCollections=system.profile --comparisonMode=sample  |')
     print('|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|')
     exit(0)
 
