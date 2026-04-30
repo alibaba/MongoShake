@@ -4,7 +4,6 @@
 
 import pymongo
 import time
-import random
 import sys
 import getopt
 
@@ -256,5 +255,3 @@ if __name__ == "__main__":
 
     src.close()
     dst.close()
-
-
