@@ -8,6 +8,18 @@ import sys
 import getopt
 import math
 
+
+def _safe_close_mongo_cluster(cluster):
+    if cluster is None:
+        return
+    conn = getattr(cluster, "conn", None)
+    if conn is None:
+        return
+    try:
+        cluster.close()
+    except Exception:
+        pass
+
 # constant
 COMPARISON_COUNT = "comparison_count"
 COMPARISON_MODE = "comparisonMode"
@@ -267,23 +279,27 @@ if __name__ == "__main__":
     # dump configuration
     log_info("Configuration [sample=%s, count=%d, excludeDbs=%s, excludeColls=%s]" % (configure[SAMPLE], configure[COMPARISON_COUNT], configure[EXCLUDE_DBS], configure[EXCLUDE_COLLS]))
 
-    try :
+    src, dst = None, None
+    try:
         src, dst = MongoCluster(srcUrl), MongoCluster(dstUrl)
         print("[src = %s]" % srcUrl)
         print("[dst = %s]" % dstUrl)
         src.connect()
         dst.connect()
-    except (Exception, e):
+    except Exception as e:
         print(e)
         log_error("create mongo connection failed %s|%s" % (srcUrl, dstUrl))
-        exit()
+        _safe_close_mongo_cluster(src)
+        _safe_close_mongo_cluster(dst)
+        sys.exit(1)
 
-    if check(src, dst):
-        print("SUCCESS")
-        exit(0)
-    else:
-        print("FAIL")
-        exit(-1)
-
-    src.close()
-    dst.close()
+    try:
+        if check(src, dst):
+            print("SUCCESS")
+            sys.exit(0)
+        else:
+            print("FAIL")
+            sys.exit(-1)
+    finally:
+        _safe_close_mongo_cluster(src)
+        _safe_close_mongo_cluster(dst)
