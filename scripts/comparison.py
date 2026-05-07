@@ -264,10 +264,10 @@ if __name__ == "__main__":
     try:
         if check(src, dst):
             print("SUCCESS")
-            exit(0)
+            sys.exit(0)
         else:
             print("FAIL")
-            exit(-1)
+            sys.exit(-1)
     finally:
         _safe_close_mongo_cluster(src)
         _safe_close_mongo_cluster(dst)
