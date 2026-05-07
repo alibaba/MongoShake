@@ -4,10 +4,21 @@
 
 import pymongo
 import time
-import random
 import sys
 import getopt
 import math
+
+
+def _safe_close_mongo_cluster(cluster):
+    if cluster is None:
+        return
+    conn = getattr(cluster, "conn", None)
+    if conn is None:
+        return
+    try:
+        cluster.close()
+    except Exception:
+        pass
 
 # constant
 COMPARISON_COUNT = "comparison_count"
@@ -217,9 +228,9 @@ def data_comparison(srcColl, dstColl, mode):
 
 def usage():
     print('|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|')
-    print("| Usage: ./comparison.py --src=localhost:27017/db? --dest=localhost:27018/db? --count=10000 (the sample number) --excludeDbs=admin,local --excludeCollections=system.profile --comparisonMode=sample/all/no (sample: comparison sample number, default; all: comparison all data; no: only comparison outline without data)  |")
+    print("| Usage: ./comparison_3x.py --src=localhost:27017/db? --dest=localhost:27018/db? --count=10000 (the sample number) --excludeDbs=admin,local --excludeCollections=system.profile --comparisonMode=sample/all/no (sample: comparison sample number, default; all: comparison all data; no: only comparison outline without data)  |")
     print('|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|')
-    print('| Like : ./comparison.py --src="localhost:3001" --dest=localhost:3100  --count=1000  --excludeDbs=admin,local,mongoshake --excludeCollections=system.profile --comparisonMode=sample  |')
+    print('| Like : ./comparison_3x.py --src="localhost:3001" --dest=localhost:3100  --count=1000  --excludeDbs=admin,local,mongoshake --excludeCollections=system.profile --comparisonMode=sample  |')
     print('|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|')
     exit(0)
 
@@ -268,25 +279,27 @@ if __name__ == "__main__":
     # dump configuration
     log_info("Configuration [sample=%s, count=%d, excludeDbs=%s, excludeColls=%s]" % (configure[SAMPLE], configure[COMPARISON_COUNT], configure[EXCLUDE_DBS], configure[EXCLUDE_COLLS]))
 
-    try :
+    src, dst = None, None
+    try:
         src, dst = MongoCluster(srcUrl), MongoCluster(dstUrl)
         print("[src = %s]" % srcUrl)
         print("[dst = %s]" % dstUrl)
         src.connect()
         dst.connect()
-    except (Exception, e):
+    except Exception as e:
         print(e)
         log_error("create mongo connection failed %s|%s" % (srcUrl, dstUrl))
-        exit()
+        _safe_close_mongo_cluster(src)
+        _safe_close_mongo_cluster(dst)
+        sys.exit(1)
 
-    if check(src, dst):
-        print("SUCCESS")
-        exit(0)
-    else:
-        print("FAIL")
-        exit(-1)
-
-    src.close()
-    dst.close()
-
-
+    try:
+        if check(src, dst):
+            print("SUCCESS")
+            sys.exit(0)
+        else:
+            print("FAIL")
+            sys.exit(-1)
+    finally:
+        _safe_close_mongo_cluster(src)
+        _safe_close_mongo_cluster(dst)
