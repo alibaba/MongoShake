@@ -254,7 +254,7 @@ if __name__ == "__main__":
         print("[dst = %s]" % dstUrl)
         src.connect()
         dst.connect()
-    except (Exception, e):
+    except Exception as e:
         print(e)
         log_error("create mongo connection failed %s|%s" % (srcUrl, dstUrl))
         _safe_close_mongo_cluster(src)
