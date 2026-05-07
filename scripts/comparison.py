@@ -259,7 +259,7 @@ if __name__ == "__main__":
         log_error("create mongo connection failed %s|%s" % (srcUrl, dstUrl))
         _safe_close_mongo_cluster(src)
         _safe_close_mongo_cluster(dst)
-        exit()
+        sys.exit(1)
 
     try:
         if check(src, dst):
