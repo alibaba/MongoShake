@@ -48,7 +48,14 @@ class MongoCluster:
         self.url = url
 
     def connect(self):
-        self.conn = pymongo.MongoClient(self.url)
+        self.conn = pymongo.MongoClient(
+            self.url,
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=30000,
+            maxPoolSize=10,
+            maxIdleTimeMS=45000
+        )
 
     def close(self):
         self.conn.close()
@@ -131,11 +138,13 @@ def check(src, dst):
 
             log_info("compare count for collection [%s]" % coll)
             # comparison collection records number
-            if srcColl.estimated_document_count() != dstColl.estimated_document_count():
-                log_error("DIFF => collection [%s] record count not equals" % (coll))
+            src_count = srcColl.estimated_document_count()
+            dst_count = dstColl.estimated_document_count()
+            if src_count != dst_count:
+                log_error("DIFF => collection [%s] record count not equals: src[%d], dst[%d]" % (coll, src_count, dst_count))
                 return False
             else:
-                log_info("EQUL => collection [%s] record count equals" % (coll))
+                log_info("EQUL => collection [%s] record count equals: %d" % (coll, src_count))
 
             log_info("compare index for collection [%s]" % coll)
             # comparison collection index number
@@ -153,7 +162,7 @@ def check(src, dst):
                 log_error("DIFF => collection [%s] data comparison not equals" % (coll))
                 return False
             else:
-                log_info("EQUL => collection [%s] data data comparison exactly equals" % (coll))
+                log_info("EQUL => collection [%s] data comparison exactly equals" % (coll))
 
     return True
 
@@ -199,16 +208,25 @@ def data_comparison(srcColl, dstColl, mode):
         return True
 
     rec_count = count
-    batch = 16
-    show_progress = (batch * 64)
+    batch = 100  # Increased batch size for better performance
+    show_progress = (batch * 10)  # Adjust progress frequency
     total = 0
-    while count > 0:
-        # sample a bunch of docs
 
-        docs = srcColl.aggregate([{"$sample": {"size":batch}}])
-        while docs.alive:
-            doc = docs.next()
-            migrated = dstColl.find_one(doc["_id"])
+    # Pre-compile the aggregation pipeline
+    while count > 0:
+        current_batch = min(batch, count)
+        # Sample a batch of docs
+        docs = list(srcColl.aggregate([{"$sample": {"size": current_batch}}]))
+
+        # Collect all IDs for batch lookup
+        doc_ids = [doc["_id"] for doc in docs]
+
+        # Batch find the migrated docs
+        migrated_docs = {doc["_id"]: doc for doc in dstColl.find({"_id": {"$in": doc_ids}})}
+
+        # Compare each doc
+        for doc in docs:
+            migrated = migrated_docs.get(doc["_id"])
             # both origin and migrated bson is Map . so use ==
             if doc != migrated:
                 # handle NaN special case since 'NaN != NaN' is always true
@@ -216,11 +234,11 @@ def data_comparison(srcColl, dstColl, mode):
                     log_error("DIFF => src_record[%s], dst_record[%s]" % (doc, migrated))
                     return False
 
-        total += batch
-        count -= batch
+        total += current_batch
+        count -= current_batch
 
-        if total % show_progress == 0:
-            log_info("  ... process %d docs, %.2f %% !" % (total, total * 100.0 / rec_count))
+        if total % show_progress == 0 or count == 0:
+            log_info("  ... processed %d docs, %.2f%% complete" % (total, total * 100.0 / rec_count))
             
 
     return True

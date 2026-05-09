@@ -20,8 +20,8 @@ def _safe_close_mongo_cluster(cluster):
         pass
 
 # constant
-COMPARISION_COUNT = "comparison_count"
-COMPARISION_MODE = "comparisonMode"
+COMPARISON_COUNT = "comparison_count"
+COMPARISON_MODE = "comparisonMode"
 EXCLUDE_DBS = "excludeDbs"
 EXCLUDE_COLLS = "excludeColls"
 SAMPLE = "sample"
@@ -47,7 +47,14 @@ class MongoCluster:
         self.url = url
 
     def connect(self):
-        self.conn = pymongo.MongoClient(self.url)
+        self.conn = pymongo.MongoClient(
+            self.url,
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=30000,
+            maxPoolSize=10,
+            maxIdleTimeMS=45000
+        )
 
     def close(self):
         self.conn.close()
@@ -67,8 +74,8 @@ def check(src, dst):
     #
     # check metadata 
     #
-    srcDbNames = src.conn.database_names()
-    dstDbNames = dst.conn.database_names()
+    srcDbNames = src.conn.list_database_names()
+    dstDbNames = dst.conn.list_database_names()
     srcDbNames = [db for db in srcDbNames if db not in configure[EXCLUDE_DBS]]
     dstDbNames = [db for db in dstDbNames if db not in configure[EXCLUDE_DBS]]
     if len(srcDbNames) != len(dstDbNames):
@@ -106,8 +113,8 @@ def check(src, dst):
         #     log_info("EQUL => database [%s] stats equals" % db)
 
         # for collections in db
-        srcColls = srcDb.collection_names()
-        dstColls = dstDb.collection_names()
+        srcColls = srcDb.list_collection_names()
+        dstColls = dstDb.list_collection_names()
         srcColls = [coll for coll in srcColls if coll not in configure[EXCLUDE_COLLS] and srcColls.count(coll) > 0]
         dstColls = [coll for coll in dstColls if coll not in configure[EXCLUDE_COLLS] and dstColls.count(coll) > 0]
         if len(srcColls) != len(dstColls):
@@ -128,11 +135,13 @@ def check(src, dst):
             srcColl = srcDb[coll]
             dstColl = dstDb[coll]
             # comparison collection records number
-            if srcColl.count() != dstColl.count():
-                log_error("DIFF => collection [%s] record count not equals" % (coll))
+            src_count = srcColl.estimated_document_count()
+            dst_count = dstColl.estimated_document_count()
+            if src_count != dst_count:
+                log_error("DIFF => collection [%s] record count not equals: src[%d], dst[%d]" % (coll, src_count, dst_count))
                 return False
             else:
-                log_info("EQUL => collection [%s] record count equals" % (coll))
+                log_info("EQUL => collection [%s] record count equals: %d" % (coll, src_count))
 
             # comparison collection index number
             src_index_length = len(srcColl.index_information())
@@ -144,11 +153,11 @@ def check(src, dst):
                 log_info("EQUL => collection [%s] index number equals" % (coll))
 
             # check sample data
-            if not data_comparison(srcColl, dstColl, configure[COMPARISION_MODE]):
+            if not data_comparison(srcColl, dstColl, configure[COMPARISON_MODE]):
                 log_error("DIFF => collection [%s] data comparison not equals" % (coll))
                 return False
             else:
-                log_info("EQUL => collection [%s] data data comparison exactly eauals" % (coll))
+                log_info("EQUL => collection [%s] data comparison exactly equals" % (coll))
 
     return True
 
@@ -159,36 +168,47 @@ def check(src, dst):
 def data_comparison(srcColl, dstColl, mode):
     if mode == "no":
         return True
-    elif mode == "sample":
-        # srcColl.count() mus::t equals to dstColl.count()
-        count = configure[COMPARISION_COUNT] if configure[COMPARISION_COUNT] <= srcColl.count() else srcColl.count()
+
+    src_total_count = srcColl.estimated_document_count()
+
+    if mode == "sample":
+        # srcColl.count() must equals to dstColl.count()
+        count = min(configure[COMPARISON_COUNT], src_total_count)
     else: # all
-        count = srcColl.count()
+        count = src_total_count
 
     if count == 0:
         return True
 
     rec_count = count
-    batch = 16
-    show_progress = (batch * 64)
+    batch = 100  # Increased batch size for better performance
+    show_progress = (batch * 10)  # Adjust progress frequency
     total = 0
-    while count > 0:
-        # sample a bounch of docs
 
-        docs = srcColl.aggregate([{"$sample": {"size":batch}}])
-        while docs.alive:
-            doc = docs.next()
-            migrated = dstColl.find_one(doc["_id"])
-            # both origin and migrated bson is Map . so use ==
+    # Pre-compile the aggregation pipeline
+    while count > 0:
+        current_batch = min(batch, count)
+        # Sample a batch of docs
+        docs = list(srcColl.aggregate([{"$sample": {"size": current_batch}}]))
+
+        # Collect all IDs for batch lookup
+        doc_ids = [doc["_id"] for doc in docs]
+
+        # Batch find the migrated docs
+        migrated_docs = {doc["_id"]: doc for doc in dstColl.find({"_id": {"$in": doc_ids}})}
+
+        # Compare each doc
+        for doc in docs:
+            migrated = migrated_docs.get(doc["_id"])
             if doc != migrated:
                 log_error("DIFF => src_record[%s], dst_record[%s]" % (doc, migrated))
                 return False
 
-        total += batch
-        count -= batch
+        total += current_batch
+        count -= current_batch
 
-        if total % show_progress == 0:
-            log_info("  ... process %d docs, %.2f %% !" % (total, total * 100.0 / rec_count))
+        if total % show_progress == 0 or count == 0:
+            log_info("  ... processed %d docs, %.2f%% complete" % (total, total * 100.0 / rec_count))
             
 
     return True
@@ -218,7 +238,7 @@ if __name__ == "__main__":
         if key in ("-d", "--dest"):
             dstUrl = value
         if key in ("-n", "--count"):
-            configure[COMPARISION_COUNT] = int(value)
+            configure[COMPARISON_COUNT] = int(value)
         if key in ("-e", "--excludeDbs"):
             configure[EXCLUDE_DBS] = value.split(",")
         if key in ("-x", "--excludeCollections"):
@@ -228,24 +248,24 @@ if __name__ == "__main__":
             if value != "all" and value != "no" and value != "sample":
                 log_info("comparisonMode[%r] illegal" % (value))
                 exit(1)
-            configure[COMPARISION_MODE] = value
-    if COMPARISION_MODE not in configure:
-        configure[COMPARISION_MODE] = "sample"
+            configure[COMPARISON_MODE] = value
+    if COMPARISON_MODE not in configure:
+        configure[COMPARISON_MODE] = "sample"
 
     # params verify
     if len(srcUrl) == 0 or len(dstUrl) == 0:
         usage()
 
     # default count is 10000
-    if configure.get(COMPARISION_COUNT) is None or configure.get(COMPARISION_COUNT) <= 0:
-        configure[COMPARISION_COUNT] = 10000
+    if configure.get(COMPARISON_COUNT) is None or configure.get(COMPARISON_COUNT) <= 0:
+        configure[COMPARISON_COUNT] = 10000
 
     # ignore databases
     configure[EXCLUDE_DBS] += ["admin", "local"]
     configure[EXCLUDE_COLLS] += ["system.profile"]
 
     # dump configuration
-    log_info("Configuration [sample=%s, count=%d, excludeDbs=%s, excludeColls=%s]" % (configure[SAMPLE], configure[COMPARISION_COUNT], configure[EXCLUDE_DBS], configure[EXCLUDE_COLLS]))
+    log_info("Configuration [sample=%s, count=%d, excludeDbs=%s, excludeColls=%s]" % (configure[SAMPLE], configure[COMPARISON_COUNT], configure[EXCLUDE_DBS], configure[EXCLUDE_COLLS]))
 
     src, dst = None, None
     try :
