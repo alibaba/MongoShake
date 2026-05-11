@@ -167,29 +167,51 @@ def check(src, dst):
     return True
 
 """
-    Recursive processing of nested dictionaries and handle NaN special case
+    Recursive equality check for BSON documents.
+    Handles nested dicts, lists/arrays, and the NaN special case
+    (float('nan') != float('nan') by default).
 """
 def documents_equal(doc1, doc2):
-    if set(doc1.keys()) != set(doc2.keys()):
-        return False
-
-    for key in doc1.keys():
-        val1, val2 = doc1[key], doc2[key]
-
-        # recursive processing
-        if isinstance(val1, dict) and isinstance(val2, dict):
-            if not documents_equal(val1, val2):
-                return False
-        # handle NaN
-        elif isinstance(val1, float) and isinstance(val2, float):
-            if math.isnan(val1) and math.isnan(val2):
-                continue  # both NaN, considered equal
-            elif val1 != val2:
-                return False
-        # other cases
-        elif val1 != val2:
+    # handle dict
+    if isinstance(doc1, dict) and isinstance(doc2, dict):
+        if set(doc1.keys()) != set(doc2.keys()):
             return False
+        for key in doc1.keys():
+            if not documents_equal(doc1[key], doc2[key]):
+                return False
+        return True
 
+    # handle list / array
+    if isinstance(doc1, list) and isinstance(doc2, list):
+        if len(doc1) != len(doc2):
+            return False
+        for a, b in zip(doc1, doc2):
+            if not documents_equal(a, b):
+                return False
+        return True
+
+    # handle NaN (both NaN -> considered equal)
+    if isinstance(doc1, float) and isinstance(doc2, float):
+        if math.isnan(doc1) and math.isnan(doc2):
+            return True
+
+    return doc1 == doc2
+
+"""
+    Batch compare a list of source docs against dst by _id lookup.
+    Uses a single $in query on dst to reduce network round-trips.
+"""
+def _compare_batch(src_docs, dstColl):
+    doc_ids = [d["_id"] for d in src_docs]
+    migrated_docs = {d["_id"]: d for d in dstColl.find({"_id": {"$in": doc_ids}})}
+    for d in src_docs:
+        m = migrated_docs.get(d["_id"])
+        # both origin and migrated bson is Map . so use ==
+        if d != m:
+            # handle NaN / list edge cases via deep equality
+            if not documents_equal(d, m):
+                log_error("DIFF => src_record[%s], dst_record[%s]" % (d, m))
+                return False
     return True
 
 """
@@ -198,48 +220,52 @@ def documents_equal(doc1, doc2):
 def data_comparison(srcColl, dstColl, mode):
     if mode == "no":
         return True
-    elif mode == "sample":
-        # srcColl.count() mus::t equals to dstColl.count()
-        count = configure[COMPARISON_COUNT] if configure[COMPARISON_COUNT] <= srcColl.estimated_document_count() else srcColl.estimated_document_count()
-    else: # all
-        count = srcColl.count_documents({})
 
-    if count == 0:
-        return True
+    if mode == "sample":
+        src_total_count = srcColl.estimated_document_count()
+        count = min(configure[COMPARISON_COUNT], src_total_count)
+        if count == 0:
+            return True
+        # one-shot $sample of `count` docs without replacement
+        src_cursor = srcColl.aggregate([{"$sample": {"size": count}}])
+    else:  # all
+        count = srcColl.count_documents({})
+        if count == 0:
+            return True
+        # iterate every source doc; avoid $sample here because repeated $sample batches
+        # may return duplicates and miss documents, causing incomplete coverage.
+        # Rely on the server's default cursorTimeoutMillis (10min idle) for safety:
+        # since we iterate continuously and each dst find returns in ms, the cursor's
+        # idle timer is refreshed every batch and never expires mid-scan.
+        src_cursor = srcColl.find({})
 
     rec_count = count
-    batch = 100  # Increased batch size for better performance
-    show_progress = (batch * 10)  # Adjust progress frequency
+    batch = 100
+    show_progress = batch * 10
     total = 0
-
-    # Pre-compile the aggregation pipeline
-    while count > 0:
-        current_batch = min(batch, count)
-        # Sample a batch of docs
-        docs = list(srcColl.aggregate([{"$sample": {"size": current_batch}}]))
-
-        # Collect all IDs for batch lookup
-        doc_ids = [doc["_id"] for doc in docs]
-
-        # Batch find the migrated docs
-        migrated_docs = {doc["_id"]: doc for doc in dstColl.find({"_id": {"$in": doc_ids}})}
-
-        # Compare each doc
-        for doc in docs:
-            migrated = migrated_docs.get(doc["_id"])
-            # both origin and migrated bson is Map . so use ==
-            if doc != migrated:
-                # handle NaN special case since 'NaN != NaN' is always true
-                if not documents_equal(doc, migrated):
-                    log_error("DIFF => src_record[%s], dst_record[%s]" % (doc, migrated))
-                    return False
-
-        total += current_batch
-        count -= current_batch
-
-        if total % show_progress == 0 or count == 0:
+    buf = []
+    try:
+        for doc in src_cursor:
+            buf.append(doc)
+            if len(buf) < batch:
+                continue
+            if not _compare_batch(buf, dstColl):
+                return False
+            total += len(buf)
+            buf = []
+            if total % show_progress == 0 or total == rec_count:
+                log_info("  ... processed %d docs, %.2f%% complete" % (total, total * 100.0 / rec_count))
+        # drain remainder
+        if buf:
+            if not _compare_batch(buf, dstColl):
+                return False
+            total += len(buf)
             log_info("  ... processed %d docs, %.2f%% complete" % (total, total * 100.0 / rec_count))
-            
+    finally:
+        try:
+            src_cursor.close()
+        except Exception:
+            pass
 
     return True
 
