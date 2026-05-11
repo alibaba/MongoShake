@@ -26,7 +26,7 @@ COMPARISON_MODE = "comparisonMode"
 EXCLUDE_DBS = "excludeDbs"
 EXCLUDE_COLLS = "excludeColls"
 SAMPLE = "sample"
-# we don't check collections and index here because sharding's collection(`db.stats`) is splitted.
+# we don't check collections and index here because sharding's collection(`db.stats`) is split.
 CheckList = {"objects": 1, "numExtents": 1, "ok": 1}
 configure = {}
 
@@ -80,7 +80,7 @@ def check(src, dst):
     srcDbNames = [db for db in srcDbNames if db not in configure[EXCLUDE_DBS]]
     dstDbNames = [db for db in dstDbNames if db not in configure[EXCLUDE_DBS]]
     if len(srcDbNames) != len(dstDbNames):
-        log_error("DIFF => database count not equals src[%s] != dst[%s].\nsrc: %s\ndst: %s" % (len(srcDbNames),
+        log_error("DIFF => database count not equals src[%s] != dst[%s].\n src: %s\n dst: %s" % (len(srcDbNames),
                                                                                               len(dstDbNames),
                                                                                               srcDbNames,
                                                                                               dstDbNames))
@@ -135,6 +135,8 @@ def check(src, dst):
 
             srcColl = srcDb[coll]
             dstColl = dstDb[coll]
+
+            log_info("compare count for collection [%s]" % coll)
             # comparison collection records number
             src_count = srcColl.estimated_document_count()
             dst_count = dstColl.estimated_document_count()
@@ -144,6 +146,7 @@ def check(src, dst):
             else:
                 log_info("EQUL => collection [%s] record count equals: %d" % (coll, src_count))
 
+            log_info("compare index for collection [%s]" % coll)
             # comparison collection index number
             src_index_length = len(srcColl.index_information())
             dst_index_length = len(dstColl.index_information())
@@ -153,6 +156,7 @@ def check(src, dst):
             else:
                 log_info("EQUL => collection [%s] index number equals" % (coll))
 
+            log_info("compare data sample for collection [%s]" % coll)
             # check sample data
             if not data_comparison(srcColl, dstColl, configure[COMPARISON_MODE]):
                 log_error("DIFF => collection [%s] data comparison not equals" % (coll))
@@ -161,7 +165,6 @@ def check(src, dst):
                 log_info("EQUL => collection [%s] data comparison exactly equals" % (coll))
 
     return True
-
 
 """
     Recursive equality check for BSON documents.
@@ -203,6 +206,7 @@ def _compare_batch(src_docs, dstColl):
     migrated_docs = {d["_id"]: d for d in dstColl.find({"_id": {"$in": doc_ids}})}
     for d in src_docs:
         m = migrated_docs.get(d["_id"])
+        # both origin and migrated bson is Map . so use ==
         if d != m:
             # handle NaN / list edge cases via deep equality
             if not documents_equal(d, m):
@@ -320,7 +324,7 @@ if __name__ == "__main__":
     log_info("Configuration [sample=%s, count=%d, excludeDbs=%s, excludeColls=%s]" % (configure[SAMPLE], configure[COMPARISON_COUNT], configure[EXCLUDE_DBS], configure[EXCLUDE_COLLS]))
 
     src, dst = None, None
-    try :
+    try:
         src, dst = MongoCluster(srcUrl), MongoCluster(dstUrl)
         print("[src = %s]" % srcUrl)
         print("[dst = %s]" % dstUrl)
