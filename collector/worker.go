@@ -129,7 +129,7 @@ func (worker *Worker) findFirstAvailableBatch() []*oplog.GenericOplog {
 		select {
 		case batch = <-worker.queue:
 			worker.updateJobsQueuedMetric()
-		case <-time.After(DDLCheckpointInterval * time.Millisecond): // timeout, add probe message here
+		case <-time.After(time.Duration(DDLCheckpointInterval) * time.Millisecond): // timeout, add probe message here
 			return nil
 		}
 
