@@ -125,6 +125,9 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 		if utils.DuplicateKey(err) {
 			// create single writer to write one by one
 			sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
+			if index < 0 || index >= len(oplogs) {
+				return err
+			}
 			return sw.doUpdateOnInsert(database, collection, metadata, oplogs[index:], upsert)
 		}
 

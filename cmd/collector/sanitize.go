@@ -298,6 +298,9 @@ func checkDefaultValue() error {
 		conf.Options.IncrSyncConflictWriteTo != utils.VarIncrSyncConflictWriteToSdk {
 		return fmt.Errorf("incr_sync.conflict_write_to in {none, db, sdk}")
 	}
+	if err := parseSkipDupKeyOnInsertRules(); err != nil {
+		return err
+	}
 	if conf.Options.IncrSyncReaderBufferTime <= 0 {
 		conf.Options.IncrSyncReaderBufferTime = 1
 	}
@@ -310,6 +313,49 @@ func checkDefaultValue() error {
 	filter.NsShouldBeIgnore[utils.AppDatabase+"."] = true
 	filter.NsShouldBeIgnore[utils.APPConflictDatabase+"."] = true
 
+	return nil
+}
+
+func parseSkipDupKeyOnInsertRules() error {
+	ruleMap := make(map[string]map[string]struct{})
+	for _, rule := range conf.Options.IncrSyncExecutorSkipDupKeyOnInsertRules {
+		rule = strings.TrimSpace(rule)
+		if rule == "" {
+			continue
+		}
+
+		parts := strings.Split(rule, ":")
+		if len(parts) != 2 {
+			return fmt.Errorf("incr_sync.executor.skip_dup_key_on_insert.rules should be ns:index1,index2; got [%s]", rule)
+		}
+
+		ns := strings.TrimSpace(parts[0])
+		if ns == "" || !strings.Contains(ns, ".") {
+			return fmt.Errorf("incr_sync.executor.skip_dup_key_on_insert.rules namespace should be db.collection; got [%s]", rule)
+		}
+
+		indexes := strings.Split(parts[1], ",")
+		if len(indexes) == 0 {
+			return fmt.Errorf("incr_sync.executor.skip_dup_key_on_insert.rules index list is empty for [%s]", ns)
+		}
+
+		if _, ok := ruleMap[ns]; !ok {
+			ruleMap[ns] = make(map[string]struct{})
+		}
+		for _, index := range indexes {
+			index = strings.TrimSpace(index)
+			if index == "" {
+				return fmt.Errorf("incr_sync.executor.skip_dup_key_on_insert.rules contains empty index for [%s]", ns)
+			}
+			ruleMap[ns][index] = struct{}{}
+		}
+	}
+
+	if conf.Options.IncrSyncExecutorSkipDupKeyOnInsert && len(ruleMap) == 0 {
+		return fmt.Errorf("incr_sync.executor.skip_dup_key_on_insert.rules must be set when incr_sync.executor.skip_dup_key_on_insert is true")
+	}
+
+	conf.Options.IncrSyncExecutorSkipDupKeyOnInsertRuleMap = ruleMap
 	return nil
 }
 

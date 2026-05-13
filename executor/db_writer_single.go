@@ -159,6 +159,12 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 						continue
 					}
 				}
+				if skip, indexName := shouldSkipDupKeyOnInsert(database, collection, err); skip {
+					RecordDuplicatedOplog(sw.conn, collection, []*OplogRecord{oplogs[update.index]})
+					l.Logger.Warnf("skip duplicated insert after update_on_insert failed, ns[%s.%s], index[%s], id[%v], ts[%v], err[%v]",
+						database, collection, indexName, update.id, oplogs[update.index].original.partialLog.Timestamp, err)
+					continue
+				}
 
 				l.Logger.Errorf("upsert _id[%v] with data[%v] failed[%v]", update.id, update.data, err)
 				return err
