@@ -133,10 +133,31 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 				l.Logger.Warnf("upsert _id[%v] with data[%v] meets err[%v] res[%v], try to solve",
 					update.id, update.data, err, res)
 
-				// error can be ignored(insert fail & oplog is before full end)
-				if utils.DuplicateKey(err) &&
-					utils.TimeStampToInt64(oplogs[update.index].original.partialLog.Timestamp) <= sw.fullFinishTs {
-					continue
+				if utils.DuplicateKey(err) {
+					if utils.TimeStampToInt64(oplogs[update.index].original.partialLog.Timestamp) <= sw.fullFinishTs {
+						continue
+					}
+
+					resolved, delErr := deleteConflictAndRetry(collectionHandle, update.id, update.data, err, nil)
+					if delErr != nil {
+						return delErr
+					}
+					if resolved {
+						retryRes, retryErr := collectionHandle.UpdateOne(context.Background(), update.id,
+							bson.D{{"$set", update.data}}, opts)
+						if retryErr != nil {
+							l.Logger.Errorf("retry upsert _id[%v] after conflict delete still failed: %v",
+								update.id, retryErr)
+							return retryErr
+						}
+						if retryRes != nil && retryRes.MatchedCount != 1 && retryRes.UpsertedCount != 1 {
+							return fmt.Errorf("retry upsert fail(MatchedCount:%d ModifiedCount:%d UpsertedCount:%d) "+
+								"upsert _id[%v] with data[%v]",
+								retryRes.MatchedCount, retryRes.ModifiedCount, retryRes.UpsertedCount,
+								update.id, update.data)
+						}
+						continue
+					}
 				}
 
 				l.Logger.Errorf("upsert _id[%v] with data[%v] failed[%v]", update.id, update.data, err)

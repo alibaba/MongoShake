@@ -90,7 +90,8 @@ type Configuration struct {
 	IncrSyncFetcherBufferSizeThresholdInKB int      `config:"incr_sync.fetcher.buffer_size_threshold_in_kb"` // add v2.8.6
 	IncrSyncExecutorUpsert                 bool     `config:"incr_sync.executor.upsert"`
 	IncrSyncExecutorInsertOnDupUpdate      bool     `config:"incr_sync.executor.insert_on_dup_update"`
-	IncrSyncConflictWriteTo                string   `config:"incr_sync.conflict_write_to"` // remove "sdk" option since v2.4.21
+	IncrSyncExecutorDeleteOnNonIdDupKey    bool     `config:"incr_sync.executor.delete_on_non_id_dup_key"` // add v2.8.9
+	IncrSyncConflictWriteTo                string   `config:"incr_sync.conflict_write_to"`                 // remove "sdk" option since v2.4.21
 	IncrSyncExecutorMajorityEnable         bool     `config:"incr_sync.executor.majority_enable"`
 	IncrSyncBypassDocumentValidation       bool     `config:"incr_sync.executor.bypass_document_validation"` // add v2.8.7
 

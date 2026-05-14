@@ -2631,3 +2631,229 @@ func TestTimeSeriesIntegration(t *testing.T) {
 	// Final cleanup
 	_ = conn.Client.Database(tsTestDb).Drop(nil)
 }
+
+func TestParseDupKeyIndexName(t *testing.T) {
+	tests := []struct {
+		errMsg   string
+		expected string
+	}{
+		{
+			errMsg:   `E11000 duplicate key error collection: db.coll index: account_1 dup key: { account: "abc" }`,
+			expected: "account_1",
+		},
+		{
+			errMsg:   `E11000 duplicate key error collection: db.coll index: _id_ dup key: { _id: ObjectId("123") }`,
+			expected: "_id_",
+		},
+		{
+			errMsg:   `E11000 duplicate key error collection: db.coll index: a_1_b_1 dup key: { a: "x", b: "y" }`,
+			expected: "a_1_b_1",
+		},
+		{
+			errMsg:   `E11000 duplicate key error collection: db.coll index: my_custom_name dup key: { x: 1 }`,
+			expected: "my_custom_name",
+		},
+		{
+			errMsg:   `some other error`,
+			expected: "",
+		},
+	}
+
+	for i, tt := range tests {
+		fmt.Printf("TestParseDupKeyIndexName case %d.\n", i)
+		err := fmt.Errorf("%s", tt.errMsg)
+		result := parseDupKeyIndexName(err)
+		assert.Equal(t, tt.expected, result)
+	}
+	assert.Equal(t, "", parseDupKeyIndexName(nil))
+}
+
+func TestGetFieldValue(t *testing.T) {
+	doc := bson.D{
+		{"name", "alice"},
+		{"age", 30},
+		{"address", bson.D{
+			{"city", "shanghai"},
+			{"zip", "200000"},
+		}},
+		{"nullable", nil},
+	}
+
+	val, found := getFieldValue(doc, "name")
+	assert.True(t, found)
+	assert.Equal(t, "alice", val)
+
+	val, found = getFieldValue(doc, "age")
+	assert.True(t, found)
+	assert.Equal(t, 30, val)
+
+	val, found = getFieldValue(doc, "address.city")
+	assert.True(t, found)
+	assert.Equal(t, "shanghai", val)
+
+	val, found = getFieldValue(doc, "nonexist")
+	assert.False(t, found)
+	assert.Nil(t, val)
+
+	val, found = getFieldValue(doc, "address.nonexist")
+	assert.False(t, found)
+	assert.Nil(t, val)
+
+	// null value should be distinguishable from missing field
+	val, found = getFieldValue(doc, "nullable")
+	assert.True(t, found)
+	assert.Nil(t, val)
+}
+
+func TestSplitDotted(t *testing.T) {
+	assert.Equal(t, []string{"a"}, splitDotted("a"))
+	assert.Equal(t, []string{"a", "b"}, splitDotted("a.b"))
+	assert.Equal(t, []string{"a", "b", "c"}, splitDotted("a.b.c"))
+	assert.Nil(t, splitDotted(""))
+}
+
+func TestParseDupKeyFields(t *testing.T) {
+	tests := []struct {
+		errMsg   string
+		expected []string
+	}{
+		{
+			errMsg:   `E11000 duplicate key error collection: db.coll index: account_1 dup key: { account: "abc" }`,
+			expected: []string{"account"},
+		},
+		{
+			errMsg:   `E11000 duplicate key error collection: db.coll index: a_1_b_1 dup key: { a: "x", b: "y" }`,
+			expected: []string{"a", "b"},
+		},
+		{
+			errMsg:   `E11000 duplicate key error collection: db.coll index: addr_idx dup key: { address.city: "shanghai" }`,
+			expected: []string{"address.city"},
+		},
+		{
+			errMsg:   `E11000 duplicate key error collection: db.coll index: _id_ dup key: { _id: ObjectId("123") }`,
+			expected: []string{"_id"},
+		},
+		{
+			errMsg:   `some other error`,
+			expected: nil,
+		},
+	}
+
+	for i, tt := range tests {
+		fmt.Printf("TestParseDupKeyFields case %d.\n", i)
+		err := fmt.Errorf("%s", tt.errMsg)
+		result := parseDupKeyFields(err)
+		assert.Equal(t, tt.expected, result)
+	}
+	assert.Nil(t, parseDupKeyFields(nil))
+}
+
+func TestResolveConflictFilter(t *testing.T) {
+	doc := bson.D{{"_id", "test1"}, {"x", "hello"}, {"y", 42}, {"z", "extra"}}
+
+	// single field
+	err := fmt.Errorf(`E11000 duplicate key error collection: db.coll index: x_1 dup key: { x: "hello" }`)
+	filter := resolveConflictFilter(err, doc)
+	assert.Equal(t, bson.D{{"x", "hello"}}, filter)
+
+	// compound index
+	err = fmt.Errorf(`E11000 duplicate key error collection: db.coll index: x_1_y_1 dup key: { x: "hello", y: 42 }`)
+	filter = resolveConflictFilter(err, doc)
+	assert.Equal(t, bson.D{{"x", "hello"}, {"y", 42}}, filter)
+
+	// missing field in doc returns nil
+	docMissing := bson.D{{"_id", "test2"}, {"x", "hello"}}
+	err = fmt.Errorf(`E11000 duplicate key error collection: db.coll index: x_1_y_1 dup key: { x: "hello", y: 42 }`)
+	filter = resolveConflictFilter(err, docMissing)
+	assert.Nil(t, filter)
+
+	// unparseable error returns nil
+	err = fmt.Errorf(`some other error`)
+	filter = resolveConflictFilter(err, doc)
+	assert.Nil(t, filter)
+
+	// dotted path
+	docNested := bson.D{{"_id", "n1"}, {"address", bson.D{{"city", "shanghai"}}}}
+	err = fmt.Errorf(`E11000 duplicate key error collection: db.coll index: addr_idx dup key: { address.city: "shanghai" }`)
+	filter = resolveConflictFilter(err, docNested)
+	assert.Equal(t, bson.D{{"address.city", "shanghai"}}, filter)
+}
+
+func TestSingleWriterDeleteOnNonIdDupKey(t *testing.T) {
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	if err != nil {
+		t.Skipf("skip integration test, cannot connect to MongoDB: %v", err)
+	}
+
+	conf.Options.IncrSyncExecutorDeleteOnNonIdDupKey = true
+	defer func() { conf.Options.IncrSyncExecutorDeleteOnNonIdDupKey = false }()
+
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	writer := NewDbWriter(conn, bson.E{}, false, -1)
+
+	_ = conn.Client.Database(testDb).Drop(nil)
+	coll := conn.Client.Database(testDb).Collection(testCollection)
+
+	// create unique index on field 'x'
+	_, err = coll.Indexes().CreateOne(context.Background(), mongo.IndexModel{
+		Keys:    bson.D{{"x", 1}},
+		Options: options.Index().SetUnique(true),
+	})
+	assert.NoError(t, err)
+
+	// insert doc {_id: A, x: 1}
+	idA := primitive.NewObjectID()
+	idB := primitive.NewObjectID()
+	inserts := []*OplogRecord{mockOplogRecord(idA, int32(1), -1)}
+	err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
+	assert.NoError(t, err)
+
+	// upsert {_id: B, x: 1} — different _id, same unique field value
+	upserts := []*OplogRecord{mockOplogRecord(idB, int32(1), -1)}
+	err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, upserts, true)
+	assert.NoError(t, err)
+
+	// verify: should have exactly 1 document with _id=B, x=1
+	result, err := unit_test_common.FetchAllDocumentBsonM(conn.Client, testDb, testCollection, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(result))
+	assert.Equal(t, idB, result[0]["_id"])
+	assert.Equal(t, int32(1), result[0]["x"])
+
+	_ = conn.Client.Database(testDb).Drop(nil)
+}
+
+func TestSingleWriterDeleteOnNonIdDupKeyDisabled(t *testing.T) {
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	if err != nil {
+		t.Skipf("skip integration test, cannot connect to MongoDB: %v", err)
+	}
+
+	conf.Options.IncrSyncExecutorDeleteOnNonIdDupKey = false
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	writer := NewDbWriter(conn, bson.E{}, false, -1)
+
+	_ = conn.Client.Database(testDb).Drop(nil)
+	coll := conn.Client.Database(testDb).Collection(testCollection)
+
+	_, err = coll.Indexes().CreateOne(context.Background(), mongo.IndexModel{
+		Keys:    bson.D{{"x", 1}},
+		Options: options.Index().SetUnique(true),
+	})
+	assert.NoError(t, err)
+
+	idA := primitive.NewObjectID()
+	idB := primitive.NewObjectID()
+	inserts := []*OplogRecord{mockOplogRecord(idA, int32(1), -1)}
+	err = writer.doInsert(testDb, testCollection, bson.E{}, inserts, false)
+	assert.NoError(t, err)
+
+	// with feature disabled, upsert should fail
+	upserts := []*OplogRecord{mockOplogRecord(idB, int32(1), -1)}
+	err = writer.doUpdateOnInsert(testDb, testCollection, bson.E{}, upserts, true)
+	assert.Error(t, err)
+
+	_ = conn.Client.Database(testDb).Drop(nil)
+}
