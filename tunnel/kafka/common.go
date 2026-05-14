@@ -37,12 +37,27 @@ type Config struct {
 
 func NewConfig(rootCaFile string) (*Config, error) {
 	config := sarama.NewConfig()
-	config.Version = sarama.V0_10_0_0
+
+	kafkaVersion := conf.Options.TunnelKafkaVersion
+	if kafkaVersion == "" {
+		kafkaVersion = "0.10.0.0"
+		l.Logger.Warnf("tunnel.kafka.version not set, using legacy default %s. "+
+			"Consider setting it to match your Kafka cluster version for better metadata handling", kafkaVersion)
+	}
+	version, err := sarama.ParseKafkaVersion(kafkaVersion)
+	if err != nil {
+		return nil, fmt.Errorf("invalid tunnel.kafka.version[%s]: %v", kafkaVersion, err)
+	}
+	config.Version = version
+
 	config.MetricRegistry = metrics.NewRegistry()
+	config.Metadata.RefreshFrequency = 3 * time.Minute
 
 	config.Producer.Return.Errors = true
 	config.Producer.Return.Successes = true
 	config.Producer.Partitioner = sarama.NewManualPartitioner
+	config.Producer.Retry.Max = 10
+	config.Producer.Retry.Backoff = 500 * time.Millisecond
 	config.Producer.MaxMessageBytes = 16*utils.MB + 2*utils.MB // 2MB for the reserve gap
 
 	if conf.Options.KafkaProducerMaxMessage > 0 {

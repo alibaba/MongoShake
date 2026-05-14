@@ -39,6 +39,7 @@ type Configuration struct {
 	TunnelKafkaSaslAuth                    string   `config:"tunnel.kafka.sasl.auth"`                  // add v2.8.7
 	TunnelKafkaSaslMechanism               string   `config:"tunnel.kafka.sasl.mechanism"`             // add v2.8.7
 	TunnelKafkaCompression                 string   `config:"tunnel.kafka.compression"`                // add v2.8.7
+	TunnelKafkaVersion                     string   `config:"tunnel.kafka.version"`                    // add v2.8.9
 	KafkaProducerMaxMessage                int      `config:"tunnel.kafka.producer.max_message_bytes"` // add v2.8.7
 	TunnelJsonFormat                       string   `config:"tunnel.json.format"`
 	TunnelMongoSslRootCaFile               string   `config:"tunnel.mongo_ssl_root_ca_file"` // add v2.6.2
