@@ -122,6 +122,7 @@ func main() {
 
 func startup() {
 	initStartupHTTPApis()
+	utils.SetMongoShakeInfo(conf.Options.Id)
 
 	ReplCord := &coordinator.ReplicationCoordinator{
 		MongoD: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),

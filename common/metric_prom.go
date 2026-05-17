@@ -2,7 +2,9 @@ package utils
 
 import (
 	"net/http"
+	"runtime"
 	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -10,8 +12,9 @@ import (
 )
 
 var (
-	prometheusRegistry = prometheus.NewRegistry()
-	prometheusInitOnce sync.Once
+	prometheusRegistry  = prometheus.NewRegistry()
+	prometheusInitOnce  sync.Once
+	prometheusStartTime = time.Now()
 )
 
 var OplogFilterProm = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -37,6 +40,11 @@ var OplogApplyProm = prometheus.NewCounterVec(prometheus.CounterOpts{
 var OplogSuccessProm = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Name: "oplog_success_total",
 	Help: "Total number of successfully acknowledged oplogs.",
+}, []string{"name", "stage"})
+
+var OplogSuccessTpsProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "oplog_success_tps",
+	Help: "Current successful oplog throughput per second, matching the internal metric delta.",
 }, []string{"name", "stage"})
 
 var OplogFailProm = prometheus.NewCounterVec(prometheus.CounterOpts{
@@ -124,14 +132,44 @@ var PendingQueueUsedProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Help: "Current used size of the pending queue.",
 }, []string{"name", "stage", "queue_id"})
 
+var PendingQueueCapacityProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "pending_queue_capacity",
+	Help: "Capacity of the pending queue.",
+}, []string{"name", "stage", "queue_id"})
+
+var PendingQueueUsedRatioProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "pending_queue_used_ratio",
+	Help: "Current used ratio of the pending queue, from 0 to 1.",
+}, []string{"name", "stage", "queue_id"})
+
 var LogsQueueUsedProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "logs_queue_used",
 	Help: "Current used size of the logs queue.",
 }, []string{"name", "stage", "queue_id"})
 
+var LogsQueueCapacityProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "logs_queue_capacity",
+	Help: "Capacity of the logs queue.",
+}, []string{"name", "stage", "queue_id"})
+
+var LogsQueueUsedRatioProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "logs_queue_used_ratio",
+	Help: "Current used ratio of the logs queue, from 0 to 1.",
+}, []string{"name", "stage", "queue_id"})
+
 var WorkerJobsQueuedProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "worker_jobs_queued",
 	Help: "Current number of jobs queued in a worker.",
+}, []string{"name", "stage", "worker_id"})
+
+var WorkerJobsQueueCapacityProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "worker_jobs_queue_capacity",
+	Help: "Capacity of a worker jobs queue.",
+}, []string{"name", "stage", "worker_id"})
+
+var WorkerJobsQueueUsedRatioProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "worker_jobs_queue_used_ratio",
+	Help: "Current used ratio of a worker jobs queue, from 0 to 1.",
 }, []string{"name", "stage", "worker_id"})
 
 var WorkerUnackBufferUsedProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -142,6 +180,16 @@ var WorkerUnackBufferUsedProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 var PersisterBufferUsedProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "persister_buffer_used",
 	Help: "Current number of oplogs buffered inside the persister.",
+}, []string{"name", "stage"})
+
+var PersisterBufferCapacityProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "persister_buffer_capacity",
+	Help: "Capacity of the persister in-memory buffer.",
+}, []string{"name", "stage"})
+
+var PersisterBufferUsedRatioProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "persister_buffer_used_ratio",
+	Help: "Current used ratio of the persister in-memory buffer, from 0 to 1.",
 }, []string{"name", "stage"})
 
 var FullSyncCollectionsTotalProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -164,6 +212,56 @@ var FullSyncCollectionsWaitingProm = prometheus.NewGaugeVec(prometheus.GaugeOpts
 	Help: "Number of collections waiting to start during full sync.",
 }, []string{"name", "stage"})
 
+var FullSyncCollectionsProgressRatioProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "full_sync_collections_progress_ratio",
+	Help: "Overall full sync collection progress ratio, from 0 to 1.",
+}, []string{"name", "stage"})
+
+var FullSyncCollectionStatusProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "full_sync_collection_status",
+	Help: "Full sync collection status code: 0 wait start, 1 processing, 2 finish.",
+}, []string{"name", "stage", "db", "collection"})
+
+var FullSyncCollectionDocsTotalProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "full_sync_collection_docs_total",
+	Help: "Total number of documents discovered for a collection during full sync.",
+}, []string{"name", "stage", "db", "collection"})
+
+var FullSyncCollectionDocsFinishedProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "full_sync_collection_docs_finished",
+	Help: "Number of documents finished for a collection during full sync.",
+}, []string{"name", "stage", "db", "collection"})
+
+var FullSyncCollectionProgressRatioProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "full_sync_collection_progress_ratio",
+	Help: "Full sync collection document progress ratio, from 0 to 1.",
+}, []string{"name", "stage", "db", "collection"})
+
+var MongoShakeSyncStageProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "mongoshake_sync_stage",
+	Help: "Current MongoShake sync stage. 1 means active, 0 means inactive.",
+}, []string{"name", "stage"})
+
+var MongoShakeSyncStageStartTimeProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "mongoshake_sync_stage_start_time_seconds",
+	Help: "Unix timestamp when the current sync stage started.",
+}, []string{"name", "stage"})
+
+var MongoShakeSyncStateCodeProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "mongoshake_sync_state_code",
+	Help: "MongoShake sync state code: 0 init, 1 running, 2 done, 3 error, 4 stopped.",
+}, []string{"name", "stage"})
+
+var MongoShakeInfoProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "mongoshake_info",
+	Help: "MongoShake build and runtime information.",
+}, []string{"name", "version", "go_version"})
+
+var MongoShakeUptimeSecondsProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "mongoshake_uptime_seconds",
+	Help: "MongoShake process uptime in seconds observed by the Prometheus handler.",
+}, []string{"name"})
+
 var ExecutorOperationsProm = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Name: "executor_op_total",
 	Help: "Total number of direct executor operations grouped by operation type.",
@@ -173,11 +271,13 @@ func InitPrometheus() {
 	prometheusInitOnce.Do(func() {
 		prometheusRegistry.MustRegister(
 			collectors.NewGoCollector(),
+			collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 			OplogFilterProm,
 			OplogGetProm,
 			OplogConsumeProm,
 			OplogApplyProm,
 			OplogSuccessProm,
+			OplogSuccessTpsProm,
 			OplogFailProm,
 			OplogWriteFailProm,
 			CheckpointTimesProm,
@@ -195,20 +295,80 @@ func InitPrometheus() {
 			LSNAckLagSecondsProm,
 			LSNCheckpointLagSecondsProm,
 			PendingQueueUsedProm,
+			PendingQueueCapacityProm,
+			PendingQueueUsedRatioProm,
 			LogsQueueUsedProm,
+			LogsQueueCapacityProm,
+			LogsQueueUsedRatioProm,
 			WorkerJobsQueuedProm,
+			WorkerJobsQueueCapacityProm,
+			WorkerJobsQueueUsedRatioProm,
 			WorkerUnackBufferUsedProm,
 			PersisterBufferUsedProm,
+			PersisterBufferCapacityProm,
+			PersisterBufferUsedRatioProm,
 			FullSyncCollectionsTotalProm,
 			FullSyncCollectionsFinishedProm,
 			FullSyncCollectionsProcessingProm,
 			FullSyncCollectionsWaitingProm,
+			FullSyncCollectionsProgressRatioProm,
+			FullSyncCollectionStatusProm,
+			FullSyncCollectionDocsTotalProm,
+			FullSyncCollectionDocsFinishedProm,
+			FullSyncCollectionProgressRatioProm,
 			ExecutorOperationsProm,
+			MongoShakeSyncStageProm,
+			MongoShakeSyncStageStartTimeProm,
+			MongoShakeSyncStateCodeProm,
+			MongoShakeInfoProm,
+			MongoShakeUptimeSecondsProm,
 		)
 	})
 }
 
 func PrometheusHandler() http.Handler {
 	InitPrometheus()
-	return promhttp.HandlerFor(prometheusRegistry, promhttp.HandlerOpts{})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ObserveMongoShakeUptime("collector")
+		promhttp.HandlerFor(prometheusRegistry, promhttp.HandlerOpts{}).ServeHTTP(w, r)
+	})
+}
+
+const (
+	SyncStateInit uint64 = iota
+	SyncStateRunning
+	SyncStateDone
+	SyncStateError
+	SyncStateStopped
+)
+
+func SetMongoShakeSyncStage(name string, activeStage string) {
+	now := float64(time.Now().Unix())
+	for _, stage := range []string{TypeFull, TypeIncr} {
+		value := 0.0
+		if stage == activeStage {
+			value = 1
+			MongoShakeSyncStageStartTimeProm.WithLabelValues(name, stage).Set(now)
+		}
+		MongoShakeSyncStageProm.WithLabelValues(name, stage).Set(value)
+	}
+}
+
+func SetMongoShakeSyncState(name, stage string, state uint64) {
+	MongoShakeSyncStateCodeProm.WithLabelValues(name, stage).Set(float64(state))
+}
+
+func SetMongoShakeInfo(name string) {
+	MongoShakeInfoProm.WithLabelValues(name, BRANCH, runtime.Version()).Set(1)
+}
+
+func ObserveMongoShakeUptime(name string) {
+	MongoShakeUptimeSecondsProm.WithLabelValues(name).Set(time.Since(prometheusStartTime).Seconds())
+}
+
+func QueueUsedRatio(used, capacity int) float64 {
+	if capacity <= 0 {
+		return 0
+	}
+	return float64(used) / float64(capacity)
 }

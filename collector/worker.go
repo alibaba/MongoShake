@@ -295,11 +295,12 @@ func (worker *Worker) updateJobsQueuedMetric() {
 		return
 	}
 
-	utils.WorkerJobsQueuedProm.WithLabelValues(
-		worker.syncer.Replset,
-		utils.TypeIncr,
-		strconv.FormatUint(uint64(worker.id), 10),
-	).Set(float64(len(worker.queue)))
+	used := len(worker.queue)
+	capacity := cap(worker.queue)
+	labels := []string{worker.syncer.Replset, utils.TypeIncr, strconv.FormatUint(uint64(worker.id), 10)}
+	utils.WorkerJobsQueuedProm.WithLabelValues(labels...).Set(float64(used))
+	utils.WorkerJobsQueueCapacityProm.WithLabelValues(labels...).Set(float64(capacity))
+	utils.WorkerJobsQueueUsedRatioProm.WithLabelValues(labels...).Set(utils.QueueUsedRatio(used, capacity))
 }
 
 func (worker *Worker) updateUnackBufferMetric() {

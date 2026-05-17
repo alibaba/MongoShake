@@ -58,12 +58,22 @@ func getTimestampMap(sources []*utils.MongoSource, sslRootFile string) (map[stri
 	return ckptMap, nil
 }
 
-func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
+func (coordinator *ReplicationCoordinator) startDocumentReplication() (err error) {
+	utils.SetMongoShakeSyncStage(conf.Options.Id, utils.TypeFull)
+	utils.SetMongoShakeSyncState(conf.Options.Id, utils.TypeFull, utils.SyncStateRunning)
+	defer func() {
+		if r := recover(); r != nil {
+			utils.SetMongoShakeSyncState(conf.Options.Id, utils.TypeFull, utils.SyncStateError)
+			panic(r)
+		}
+		if err != nil {
+			utils.SetMongoShakeSyncState(conf.Options.Id, utils.TypeFull, utils.SyncStateError)
+		}
+	}()
 
 	fromIsSharding := coordinator.SourceIsSharding()
 
 	var shardingChunkMap sharding.ShardingChunkMap
-	var err error
 	// init orphan sharding chunk map if source is mongod(get data directly from mongod)
 	if fromIsSharding && coordinator.MongoS == nil {
 		l.Logger.Infof("source is mongod, need to fetching chunk map")
@@ -202,6 +212,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	// wait all db finished
 	wg.Wait()
 	if replError != nil {
+		utils.SetMongoShakeSyncState(conf.Options.Id, utils.TypeFull, utils.SyncStateError)
 		return replError
 	}
 
@@ -239,6 +250,7 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() error {
 	}
 
 	l.Logger.Infof("document syncer sync end")
+	utils.SetMongoShakeSyncState(conf.Options.Id, utils.TypeFull, utils.SyncStateDone)
 	return nil
 }
 

@@ -407,7 +407,9 @@ func (syncer *DBSyncer) Start() (syncError error) {
 
 	// create metric for each collection
 	for _, ns := range nsList {
-		syncer.metricNsMap[ns] = NewCollectionMetric()
+		metric := NewCollectionMetric()
+		syncer.metricNsMap[ns] = metric
+		syncer.updateSingleCollectionProgressMetric(ns, metric)
 	}
 	atomic.StoreInt64(&syncer.totalCollections, int64(len(nsList)))
 	atomic.StoreInt64(&syncer.waitingCollections, int64(len(nsList)))
@@ -479,8 +481,8 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 
 	// metric
 	collectionMetric := syncer.metricNsMap[ns]
-	syncer.markCollectionProcessing(collectionMetric)
 	collectionMetric.TotalCount = splitter.count
+	syncer.markCollectionProcessing(ns, collectionMetric)
 
 	// run in several pieces
 	var wg sync.WaitGroup
@@ -516,7 +518,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 	// fetch index
 
 	// set collection finish
-	syncer.markCollectionFinished(collectionMetric)
+	syncer.markCollectionFinished(ns, collectionMetric)
 
 	return nil
 }
@@ -533,7 +535,7 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 		if err != nil {
 			return fmt.Errorf("splitter reader[%v] get next document failed: %v", reader, err)
 		} else if doc == nil {
-			atomic.AddUint64(&collectionMetric.FinishCount, uint64(len(buffer)))
+			syncer.addCollectionFinishedDocs(reader.ns, collectionMetric, uint64(len(buffer)))
 			colExecutor.Sync(buffer)
 			syncer.replMetric.AddSuccess(uint64(len(buffer))) // only used to calculate the tps which is extract from "success"
 			break
@@ -542,7 +544,7 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 		syncer.replMetric.AddGet(1)
 
 		if bufferByteSize+len(doc) > MaxBufferByteSize || len(buffer) >= bufferSize {
-			atomic.AddUint64(&collectionMetric.FinishCount, uint64(len(buffer)))
+			syncer.addCollectionFinishedDocs(reader.ns, collectionMetric, uint64(len(buffer)))
 			colExecutor.Sync(buffer)
 			syncer.replMetric.AddSuccess(uint64(len(buffer))) // only used to calculate the tps which is extract from "success"
 			buffer = make([]*bson.Raw, 0, bufferSize)
@@ -617,7 +619,7 @@ func (syncer *DBSyncer) RestAPI() {
 	})
 }
 
-func (syncer *DBSyncer) markCollectionProcessing(collectionMetric *CollectionMetric) {
+func (syncer *DBSyncer) markCollectionProcessing(ns utils.NS, collectionMetric *CollectionMetric) {
 	if collectionMetric == nil {
 		return
 	}
@@ -628,9 +630,10 @@ func (syncer *DBSyncer) markCollectionProcessing(collectionMetric *CollectionMet
 	}
 	collectionMetric.CollectionStatus = StatusProcessing
 	syncer.updateCollectionProgressMetrics()
+	syncer.updateSingleCollectionProgressMetric(ns, collectionMetric)
 }
 
-func (syncer *DBSyncer) markCollectionFinished(collectionMetric *CollectionMetric) {
+func (syncer *DBSyncer) markCollectionFinished(ns utils.NS, collectionMetric *CollectionMetric) {
 	if collectionMetric == nil {
 		return
 	}
@@ -644,15 +647,47 @@ func (syncer *DBSyncer) markCollectionFinished(collectionMetric *CollectionMetri
 	atomic.AddInt64(&syncer.finishedCollections, 1)
 	collectionMetric.CollectionStatus = StatusFinish
 	syncer.updateCollectionProgressMetrics()
+	syncer.updateSingleCollectionProgressMetric(ns, collectionMetric)
 }
 
 func (syncer *DBSyncer) updateCollectionProgressMetrics() {
+	total := atomic.LoadInt64(&syncer.totalCollections)
+	finished := atomic.LoadInt64(&syncer.finishedCollections)
+	progressRatio := 1.0
+	if total > 0 {
+		progressRatio = float64(finished) / float64(total)
+	}
+
 	utils.FullSyncCollectionsTotalProm.WithLabelValues(syncer.fromReplset, utils.TypeFull).
-		Set(float64(atomic.LoadInt64(&syncer.totalCollections)))
+		Set(float64(total))
 	utils.FullSyncCollectionsFinishedProm.WithLabelValues(syncer.fromReplset, utils.TypeFull).
-		Set(float64(atomic.LoadInt64(&syncer.finishedCollections)))
+		Set(float64(finished))
 	utils.FullSyncCollectionsProcessingProm.WithLabelValues(syncer.fromReplset, utils.TypeFull).
 		Set(float64(atomic.LoadInt64(&syncer.processingCollections)))
 	utils.FullSyncCollectionsWaitingProm.WithLabelValues(syncer.fromReplset, utils.TypeFull).
 		Set(float64(atomic.LoadInt64(&syncer.waitingCollections)))
+	utils.FullSyncCollectionsProgressRatioProm.WithLabelValues(syncer.fromReplset, utils.TypeFull).
+		Set(progressRatio)
+}
+
+func (syncer *DBSyncer) addCollectionFinishedDocs(ns utils.NS, collectionMetric *CollectionMetric, n uint64) {
+	if collectionMetric == nil {
+		return
+	}
+	atomic.AddUint64(&collectionMetric.FinishCount, n)
+	syncer.updateSingleCollectionProgressMetric(ns, collectionMetric)
+}
+
+func (syncer *DBSyncer) updateSingleCollectionProgressMetric(ns utils.NS, collectionMetric *CollectionMetric) {
+	if collectionMetric == nil {
+		return
+	}
+	utils.FullSyncCollectionStatusProm.WithLabelValues(syncer.fromReplset, utils.TypeFull, ns.Database, ns.Collection).
+		Set(collectionMetric.StatusCode())
+	utils.FullSyncCollectionDocsTotalProm.WithLabelValues(syncer.fromReplset, utils.TypeFull, ns.Database, ns.Collection).
+		Set(float64(atomic.LoadUint64(&collectionMetric.TotalCount)))
+	utils.FullSyncCollectionDocsFinishedProm.WithLabelValues(syncer.fromReplset, utils.TypeFull, ns.Database, ns.Collection).
+		Set(float64(atomic.LoadUint64(&collectionMetric.FinishCount)))
+	utils.FullSyncCollectionProgressRatioProm.WithLabelValues(syncer.fromReplset, utils.TypeFull, ns.Database, ns.Collection).
+		Set(collectionMetric.ProgressRatio())
 }

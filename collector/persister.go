@@ -233,7 +233,11 @@ func (p *Persister) updateBufferUsedMetric() {
 		return
 	}
 
-	utils.PersisterBufferUsedProm.WithLabelValues(p.replset, utils.TypeIncr).Set(float64(len(p.Buffer)))
+	used := len(p.Buffer)
+	capacity := cap(p.Buffer)
+	utils.PersisterBufferUsedProm.WithLabelValues(p.replset, utils.TypeIncr).Set(float64(used))
+	utils.PersisterBufferCapacityProm.WithLabelValues(p.replset, utils.TypeIncr).Set(float64(capacity))
+	utils.PersisterBufferUsedRatioProm.WithLabelValues(p.replset, utils.TypeIncr).Set(utils.QueueUsedRatio(used, capacity))
 }
 
 func (p *Persister) retrieve() {

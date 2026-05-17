@@ -14,7 +14,18 @@ import (
 
 func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosition interface{},
 	fullSyncFinishPosition int64,
-	startTsMap map[string]int64) error {
+	startTsMap map[string]int64) (err error) {
+	utils.SetMongoShakeSyncStage(conf.Options.Id, utils.TypeIncr)
+	utils.SetMongoShakeSyncState(conf.Options.Id, utils.TypeIncr, utils.SyncStateRunning)
+	defer func() {
+		if r := recover(); r != nil {
+			utils.SetMongoShakeSyncState(conf.Options.Id, utils.TypeIncr, utils.SyncStateError)
+			panic(r)
+		}
+		if err != nil {
+			utils.SetMongoShakeSyncState(conf.Options.Id, utils.TypeIncr, utils.SyncStateError)
+		}
+	}()
 
 	// prepare all syncer. only one syncer while source is ReplicaSet or mongos
 	// otherwise one syncer connects to one shard
@@ -60,6 +71,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		syncer := coordinator.syncerGroup[i%len(coordinator.syncerGroup)]
 		w := collector.NewWorker(syncer, uint32(i))
 		if !w.Init() {
+			utils.SetMongoShakeSyncState(conf.Options.Id, utils.TypeIncr, utils.SyncStateError)
 			return errors.New("worker initialize error")
 		}
 		w.SetInitSyncFinishTs(fullSyncFinishPosition)
