@@ -113,12 +113,86 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 		return nil
 	}
 
-	// ignore duplicated again
 	if utils.DuplicateKey(err) {
+		if conf.Options.IncrSyncExecutorDeleteOnNonIdDupKey {
+			return cw.retryUpdateOnInsertIndividually(database, collection, metadata, oplogs, upsert)
+		}
 		l.Logger.Infof("Duplicated document found on doUpdateOnInsert [%s] [%s]", database, collection)
 		return nil
 	}
 	return err
+}
+
+func (cw *CommandWriter) retryUpdateOnInsertIndividually(database, collection string, metadata bson.E,
+	oplogs []*OplogRecord, upsert bool) error {
+	collectionHandle := cw.conn.Client.Database(database).Collection(collection)
+	for _, log := range oplogs {
+		id := oplog.GetKey(log.original.partialLog.Object, "")
+		if id == nil {
+			l.Logger.Warnf("retryUpdateOnInsertIndividually: _id look up failed. %v", log.original.partialLog)
+			continue
+		}
+		doc := log.original.partialLog.Object
+		idFilter := bson.M{"_id": id}
+
+		retryErr := cw.runSingleUpdateCmd(database, collection, metadata, idFilter, doc, upsert)
+		if retryErr == nil {
+			continue
+		}
+		if !utils.DuplicateKey(retryErr) {
+			l.Logger.Errorf("retryUpdateOnInsertIndividually: upsert _id[%v] failed: %v", id, retryErr)
+			return retryErr
+		}
+
+		indexName := parseDupKeyIndexName(retryErr)
+		if indexName == "_id_" {
+			l.Logger.Infof("Duplicated document found on doUpdateOnInsert [%s] [%s] _id[%v]",
+				database, collection, id)
+			continue
+		}
+
+		conflictFilter := resolveConflictFilter(retryErr, doc)
+		if conflictFilter == nil {
+			l.Logger.Errorf("retryUpdateOnInsertIndividually: cannot resolve conflict for index[%s] _id[%v]",
+				indexName, id)
+			return retryErr
+		}
+
+		l.Logger.Warnf("retryUpdateOnInsertIndividually: _id[%v] hit dup key on index[%s], "+
+			"deleting conflict doc with filter[%v] and retrying", id, indexName, conflictFilter)
+		if _, delErr := collectionHandle.DeleteOne(context.Background(), conflictFilter); delErr != nil {
+			l.Logger.Errorf("retryUpdateOnInsertIndividually: delete conflict failed: %v", delErr)
+			return delErr
+		}
+		if retryErr2 := cw.runSingleUpdateCmd(database, collection, metadata, idFilter, doc, upsert); retryErr2 != nil {
+			l.Logger.Errorf("retryUpdateOnInsertIndividually: retry upsert _id[%v] still failed: %v", id, retryErr2)
+			return retryErr2
+		}
+	}
+	return nil
+}
+
+func (cw *CommandWriter) runSingleUpdateCmd(database, collection string, metadata bson.E,
+	filter interface{}, doc bson.D, upsert bool) error {
+	updateCmd := bson.D{
+		{"update", collection},
+		{"updates", []bson.D{{
+			{"q", filter},
+			{"u", doc},
+			{"upsert", upsert},
+			{"multi", false},
+		}}},
+		{"ordered", ExecuteOrdered},
+	}
+	if conf.Options.IncrSyncBypassDocumentValidation {
+		updateCmd = append(updateCmd, bson.E{Key: "bypassDocumentValidation", Value: true})
+	} else {
+		updateCmd = append(updateCmd, bson.E{Key: "bypassDocumentValidation", Value: false})
+	}
+	if metadata.Key == "g" {
+		updateCmd = append(updateCmd, metadata)
+	}
+	return cw.conn.Client.Database(database).RunCommand(context.Background(), updateCmd).Err()
 }
 
 func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.E, oplogs []*OplogRecord,

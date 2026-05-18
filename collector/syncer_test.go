@@ -10,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
+	"github.com/alibaba/MongoShake/v2/collector/ckpt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
@@ -254,4 +255,115 @@ func TestRecordLastFetchStatsFallsBackToTimestamp(t *testing.T) {
 
 	assert.Equal(t, primitive.Timestamp{T: uint32(latestTS.Unix()), I: 9}, syncer.LastFetchTs, "should be equal")
 	assert.Equal(t, int64(9_000), atomic.LoadInt64(&syncer.replMetric.OplogGetDelay), "should be equal")
+}
+
+func TestCheckCheckpointUpdate(t *testing.T) {
+	utils.InitialLogger("", "", "info", true, 1)
+
+	origGetFunc := barrierCkptGetFunc
+	origFlushFunc := barrierCkptFlushFunc
+	origInterval := DDLCheckpointInterval
+	defer func() {
+		barrierCkptGetFunc = origGetFunc
+		barrierCkptFlushFunc = origFlushFunc
+		DDLCheckpointInterval = origInterval
+		utils.IncrSentinelOptions.Pause = false
+		utils.IncrSentinelOptions.Shutdown = false
+	}()
+
+	DDLCheckpointInterval = 1
+
+	var nr int
+
+	// case: barrier=false returns false immediately
+	{
+		fmt.Printf("TestCheckCheckpointUpdate case %d: barrier=false.\n", nr)
+		nr++
+
+		syncer := &OplogSyncer{Replset: "test-barrier-false"}
+		result := syncer.checkCheckpointUpdate(false, 100)
+		assert.Equal(t, false, result, "should be equal")
+	}
+
+	// case: checkpoint already >= newestTs, return true immediately
+	{
+		fmt.Printf("TestCheckCheckpointUpdate case %d: checkpoint already reached.\n", nr)
+		nr++
+
+		barrierCkptGetFunc = func(sync *OplogSyncer) (*ckpt.CheckpointContext, error) {
+			return &ckpt.CheckpointContext{Timestamp: 200}, nil
+		}
+		barrierCkptFlushFunc = func(sync *OplogSyncer) bool { return false }
+
+		syncer := &OplogSyncer{Replset: "test-already-reached"}
+		result := syncer.checkCheckpointUpdate(true, 100)
+		assert.Equal(t, true, result, "should be equal")
+	}
+
+	// case: checkpoint progresses over several iterations then reaches newestTs
+	{
+		fmt.Printf("TestCheckCheckpointUpdate case %d: gradual progress.\n", nr)
+		nr++
+
+		callCount := 0
+		barrierCkptGetFunc = func(sync *OplogSyncer) (*ckpt.CheckpointContext, error) {
+			callCount++
+			ts := int64(callCount * 10)
+			return &ckpt.CheckpointContext{Timestamp: ts}, nil
+		}
+		barrierCkptFlushFunc = func(sync *OplogSyncer) bool { return true }
+
+		syncer := &OplogSyncer{Replset: "test-gradual"}
+		result := syncer.checkCheckpointUpdate(true, 50)
+		assert.Equal(t, true, result, "should be equal")
+		assert.True(t, callCount >= 5, "should have polled at least 5 times")
+	}
+
+	// case: Pause interrupts barrier wait
+	{
+		fmt.Printf("TestCheckCheckpointUpdate case %d: Pause interrupts.\n", nr)
+		nr++
+
+		utils.IncrSentinelOptions.Pause = false
+		callCount := 0
+		barrierCkptGetFunc = func(sync *OplogSyncer) (*ckpt.CheckpointContext, error) {
+			callCount++
+			if callCount >= 3 {
+				utils.IncrSentinelOptions.Pause = true
+			}
+			return &ckpt.CheckpointContext{Timestamp: 0}, nil
+		}
+		barrierCkptFlushFunc = func(sync *OplogSyncer) bool { return false }
+
+		syncer := &OplogSyncer{Replset: "test-pause"}
+		result := syncer.checkCheckpointUpdate(true, 999)
+		assert.Equal(t, false, result, "should be equal")
+		assert.True(t, callCount >= 3, "should have polled at least 3 times before Pause")
+
+		utils.IncrSentinelOptions.Pause = false
+	}
+
+	// case: Shutdown interrupts barrier wait
+	{
+		fmt.Printf("TestCheckCheckpointUpdate case %d: Shutdown interrupts.\n", nr)
+		nr++
+
+		utils.IncrSentinelOptions.Shutdown = false
+		callCount := 0
+		barrierCkptGetFunc = func(sync *OplogSyncer) (*ckpt.CheckpointContext, error) {
+			callCount++
+			if callCount >= 2 {
+				utils.IncrSentinelOptions.Shutdown = true
+			}
+			return &ckpt.CheckpointContext{Timestamp: 0}, nil
+		}
+		barrierCkptFlushFunc = func(sync *OplogSyncer) bool { return false }
+
+		syncer := &OplogSyncer{Replset: "test-shutdown"}
+		result := syncer.checkCheckpointUpdate(true, 999)
+		assert.Equal(t, false, result, "should be equal")
+		assert.True(t, callCount >= 2, "should have polled at least 2 times before Shutdown")
+
+		utils.IncrSentinelOptions.Shutdown = false
+	}
 }

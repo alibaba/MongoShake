@@ -32,11 +32,24 @@ const (
 	PipelineQueueLen      = utils.VarSyncerPipelineQueueLen
 
 	SyncerFetchErrorRetryMs       = utils.VarSyncerFetchErrorRetryMs
-	DDLCheckpointInterval         = utils.VarSyncerDDLCheckpointIntervalMs
 	FilterCheckpointGap           = utils.VarSyncerFilterCheckpointGap
 	FilterCheckpointCheckInterval = utils.VarSyncerFilterCheckpointCheckInterval
 	CheckCheckpointUpdateTimes    = utils.VarSyncerCheckCheckpointUpdateTimes
 )
+
+var DDLCheckpointInterval int64 = utils.VarSyncerDDLCheckpointIntervalMs
+
+var barrierCkptGetFunc = func(sync *OplogSyncer) (*ckpt.CheckpointContext, error) {
+	checkpoint, _, err := sync.ckptManager.Get()
+	if err != nil {
+		return nil, err
+	}
+	return checkpoint, nil
+}
+
+var barrierCkptFlushFunc = func(sync *OplogSyncer) bool {
+	return sync.checkpoint(true, 0)
+}
 
 type OplogHandler interface {
 	// Handle is called on every oplog consumed
@@ -241,6 +254,7 @@ func (sync *OplogSyncer) startBatcher() {
 	var batcher = sync.batcher
 	filterCheckTs := time.Now()
 	filterFlag := false // marks whether previous log is filter
+	var pendingBarrierTs int64
 
 	nimo.GoRoutineInLoop(func() {
 		/*
@@ -249,6 +263,19 @@ func (sync *OplogSyncer) startBatcher() {
 		if !quorum.IsMaster() {
 			utils.YieldInMs(SyncerFetchErrorRetryMs)
 			return
+		}
+
+		// Re-confirm barrier checkpoint if previous wait was interrupted by Pause/Shutdown.
+		// Do not process new ops until the DDL execution is confirmed.
+		if pendingBarrierTs > 0 {
+			if sync.checkCheckpointUpdate(true, pendingBarrierTs) {
+				l.Logger.Infof("%s pending barrier checkpoint[%v] confirmed after resume",
+					sync, utils.ExtractTimestampForLog(pendingBarrierTs))
+				pendingBarrierTs = 0
+			} else {
+				utils.YieldInMs(DDLCheckpointInterval)
+				return
+			}
 		}
 
 		// As much as we can batch more from logs queue. batcher can merge
@@ -287,7 +314,12 @@ func (sync *OplogSyncer) startBatcher() {
 
 			// flush checkpoint value
 			sync.checkpoint(true, 0)
-			sync.checkCheckpointUpdate(true, newestTs)
+			if !sync.checkCheckpointUpdate(true, newestTs) {
+				l.Logger.Warnf("%s exit: barrier wait interrupted, checkpoint may not have reached %v. "+
+					"Not setting CanClose to avoid premature exit", sync, utils.ExtractTimestampForLog(newestTs))
+				pendingBarrierTs = newestTs
+				return
+			}
 			sync.CanClose = true
 			l.Logger.Infof("%s blocking and waiting exits, checkpoint: %v", sync, utils.ExtractTimestampForLog(newestTs))
 			select {} // block forever, wait outer routine exits
@@ -306,7 +338,10 @@ func (sync *OplogSyncer) startBatcher() {
 
 			// flush checkpoint value
 			sync.checkpoint(barrier, 0)
-			sync.checkCheckpointUpdate(barrier, newestTs)
+			if barrier && !sync.checkCheckpointUpdate(true, newestTs) {
+				pendingBarrierTs = newestTs
+				return
+			}
 		} else {
 			// if log is nil, check whether filterLog is empty
 			if filterLog == nil {
@@ -377,15 +412,18 @@ func (sync *OplogSyncer) startBatcher() {
 	})
 }
 
-// checkCheckpointUpdate wait for checkpoint reach newestTs which mean oplog is written to dest db when barrier is true,
-// max time is about 3 second (CheckCheckpointUpdateTimes * DDLCheckpointInterval)
 func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) bool {
-	// if barrier == true, we should check whether the checkpoint is updated to `newestTs`.
 	if barrier && newestTs > 0 {
 		l.Logger.Infof("%s checkCheckpointUpdate find barrier", sync)
 		var checkpointTs int64
-		for i := 0; i < CheckCheckpointUpdateTimes; i++ {
-			checkpoint, _, err := sync.ckptManager.Get()
+		for i := 0; ; i++ {
+			if utils.IncrSentinelOptions.Pause || utils.IncrSentinelOptions.Shutdown {
+				l.Logger.Warnf("%s barrier wait interrupted by sentinel (Pause=%v, Shutdown=%v)",
+					sync, utils.IncrSentinelOptions.Pause, utils.IncrSentinelOptions.Shutdown)
+				return false
+			}
+
+			checkpoint, err := barrierCkptGetFunc(sync)
 			if err != nil {
 				l.Logger.Errorf("%s[%v] get remote checkpoint failed: %v", sync, i, err)
 				utils.YieldInMs(DDLCheckpointInterval * 3)
@@ -394,8 +432,10 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) boo
 
 			checkpointTs = checkpoint.Timestamp
 
-			l.Logger.Infof("%s[%v] compare remote checkpoint[%v] to local newestTs[%v]", sync, i,
-				utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
+			if i%CheckCheckpointUpdateTimes == 0 {
+				l.Logger.Infof("%s[%v] compare remote checkpoint[%v] to local newestTs[%v]", sync, i,
+					utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
+			}
 			if checkpointTs >= newestTs {
 				l.Logger.Infof("%s[%v] barrier checkpoint already updated to newest[%v]",
 					sync, i, utils.ExtractTimestampForLog(newestTs))
@@ -403,20 +443,10 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) boo
 			}
 			utils.YieldInMs(DDLCheckpointInterval)
 
-			// re-flush
-			if sync.checkpoint(true, 0) {
-				l.Logger.Infof("[%v/%v] checkCheckpointUpdate checkpoint update succeed", i, CheckCheckpointUpdateTimes)
+			if barrierCkptFlushFunc(sync) {
+				l.Logger.Infof("[%v] checkCheckpointUpdate checkpoint update succeed", i)
 			}
 		}
-
-		/*
-		 * if code hits here, it means the checkpoint has not been updated(usually DDL).
-		 * it's ok because the checkpoint can still forward on the next time.
-		 * However, if MongoShake crashes here and restarts, there maybe a conflict when the
-		 * oplog is DDL that has been applied but checkpoint not updated.
-		 */
-		l.Logger.Warnf("check checkpoint[%v] update to ts[%v] failed, but don't worry",
-			utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
 	}
 	return false
 }

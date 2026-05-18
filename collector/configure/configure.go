@@ -39,6 +39,7 @@ type Configuration struct {
 	TunnelKafkaSaslAuth                    string   `config:"tunnel.kafka.sasl.auth"`                  // add v2.8.7
 	TunnelKafkaSaslMechanism               string   `config:"tunnel.kafka.sasl.mechanism"`             // add v2.8.7
 	TunnelKafkaCompression                 string   `config:"tunnel.kafka.compression"`                // add v2.8.7
+	TunnelKafkaVersion                     string   `config:"tunnel.kafka.version"`                    // add v2.8.9
 	KafkaProducerMaxMessage                int      `config:"tunnel.kafka.producer.max_message_bytes"` // add v2.8.7
 	TunnelJsonFormat                       string   `config:"tunnel.json.format"`
 	TunnelMongoSslRootCaFile               string   `config:"tunnel.mongo_ssl_root_ca_file"` // add v2.6.2
@@ -90,7 +91,8 @@ type Configuration struct {
 	IncrSyncFetcherBufferSizeThresholdInKB int      `config:"incr_sync.fetcher.buffer_size_threshold_in_kb"` // add v2.8.6
 	IncrSyncExecutorUpsert                 bool     `config:"incr_sync.executor.upsert"`
 	IncrSyncExecutorInsertOnDupUpdate      bool     `config:"incr_sync.executor.insert_on_dup_update"`
-	IncrSyncConflictWriteTo                string   `config:"incr_sync.conflict_write_to"` // remove "sdk" option since v2.4.21
+	IncrSyncExecutorDeleteOnNonIdDupKey    bool     `config:"incr_sync.executor.delete_on_non_id_dup_key"` // add v2.8.9
+	IncrSyncConflictWriteTo                string   `config:"incr_sync.conflict_write_to"`                 // remove "sdk" option since v2.4.21
 	IncrSyncExecutorMajorityEnable         bool     `config:"incr_sync.executor.majority_enable"`
 	IncrSyncBypassDocumentValidation       bool     `config:"incr_sync.executor.bypass_document_validation"` // add v2.8.7
 
