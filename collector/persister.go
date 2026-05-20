@@ -241,11 +241,14 @@ func (p *Persister) updateBufferUsedMetric() {
 }
 
 func (p *Persister) retrieve() {
-	for range time.NewTicker(3 * time.Second).C {
+	waitTicker := time.NewTicker(3 * time.Second)
+	defer waitTicker.Stop()
+Wait:
+	for range waitTicker.C {
 		stage := atomic.LoadInt32(&p.fetchStage)
 		switch stage {
 		case utils.FetchStageStoreDiskApply:
-			break
+			break Wait
 		case utils.FetchStageStoreUnknown:
 			// do nothing
 		case utils.FetchStageStoreDiskNoApply:
@@ -258,6 +261,7 @@ func (p *Persister) retrieve() {
 	l.Logger.Infof("persister retrieve for replset[%v] begin to read from disk queue with depth[%v]",
 		p.replset, p.DiskQueue.Depth())
 	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 Loop:
 	for {
 		select {
