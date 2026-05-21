@@ -240,15 +240,44 @@ func (p *Persister) updateBufferUsedMetric() {
 	utils.PersisterBufferUsedRatioProm.WithLabelValues(p.replset, utils.TypeIncr).Set(utils.QueueUsedRatio(used, capacity))
 }
 
+// retrieve is the persister goroutine that drains the on-disk queue back
+// into the in-memory pending queue once the full-sync stage flips to
+// "apply". It is started from Persister.Start() iff enableDiskPersist
+// (i.e. SyncMode=all AND FullSyncReaderOplogStoreDisk=true). fetchStage
+// is initialised to FetchStageStoreUnknown in NewPersister and driven by
+// loadCheckpoint() / StartDiskApply(). State machine observed here:
+//
+//	Unknown ──► DiskNoApply ──► DiskApply ──► (this goroutine reads disk queue) ──► MemoryApply
+//	   │             │              ▲
+//	   │             └──────────────┘
+//	   └────► MemoryApply (restart shortcut: ckpt already past OplogDiskQueueFinishTs;
+//	          DiskQueue stays nil — handle by returning early below)
+//
+// The 3-second polling cadence is deliberately slow: this goroutine is
+// idle for the entire document-replication phase (seconds to hours), so
+// reaction latency to a stage flip is not a hot-path concern.
 func (p *Persister) retrieve() {
 	waitTicker := time.NewTicker(3 * time.Second)
 	defer waitTicker.Stop()
+	waitRounds := 0
 Wait:
 	for range waitTicker.C {
+		waitRounds++
 		stage := atomic.LoadInt32(&p.fetchStage)
 		switch stage {
 		case utils.FetchStageStoreDiskApply:
+			l.Logger.Infof("persister retrieve for replset[%v] entered disk-apply stage after %d wait rounds",
+				p.replset, waitRounds)
 			break Wait
+		case utils.FetchStageStoreMemoryApply:
+			// loadCheckpoint() may set MemoryApply directly (without InitDiskQueue)
+			// when restart and checkpoint has already caught up to disk last ts.
+			// In that path DiskQueue is nil, so we must exit instead of falling
+			// through to the disk-read stage below.
+			l.Logger.Infof("persister retrieve for replset[%v] skip disk replay after %d wait rounds: "+
+				"fetchStage is MemoryApply (restart with checkpoint caught up to OplogDiskQueueFinishTs)",
+				p.replset, waitRounds)
+			return
 		case utils.FetchStageStoreUnknown:
 			// do nothing
 		case utils.FetchStageStoreDiskNoApply:
