@@ -64,7 +64,13 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.E, 
 			l.Logger.Infof("Duplicated document found. reinsert or update to [%s.%s]", database, collection)
 			return cw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.IncrSyncExecutorUpsert)
 		}
-		return nil
+		if skip, indexName := shouldSkipDupKeyOnInsert(database, collection, err); skip {
+			l.Logger.Warnf("skip duplicated insert oplogs, ns[%s.%s], index[%s], err[%v]",
+				database, collection, indexName, err)
+			return nil
+		}
+		l.Logger.Errorf("Duplicated document found on doInsert [%s.%s]: %v", database, collection, err)
+		return err
 	}
 	return err
 }
