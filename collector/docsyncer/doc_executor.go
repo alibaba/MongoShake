@@ -192,10 +192,17 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 		if conf.Options.FullSyncExecutorFilterOrphanDocument && exec.syncer.orphanFilter != nil {
 			var docData bson.D
 			if err := bson.Unmarshal(*doc, &docData); err != nil {
-				l.Logger.Errorf("doSync do bson unmarshal %v failed. %v", doc, err)
-			}
-			// judge whether is orphan document, pass if so
-			if exec.syncer.orphanFilter.Filter(docData, ns.Database+"."+ns.Collection) {
+				// previously fell through with an empty docData, which then caused
+				// OrphanFilter.Filter -> oplog.GetKey to return nil and Panicf the
+				// process. Skip the orphan check on unparseable docs instead so a
+				// single bad payload can't crash the syncer; the corrupt bytes
+				// will surface again at BulkWrite as a structured driver error.
+				l.Logger.Errorf("doSync skip orphan check, bson unmarshal failed: %v", err)
+				// intentional fall-through to BulkWrite (no continue):
+				// the malformed payload should reach the driver and surface
+				// there as a typed write error, not be silently dropped.
+			} else if exec.syncer.orphanFilter.Filter(docData, ns.Database+"."+ns.Collection) {
+				// judge whether is orphan document, pass if so
 				l.Logger.Infof("orphan document [%v] filter", doc)
 				continue
 			}

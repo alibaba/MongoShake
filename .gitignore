@@ -8,6 +8,7 @@
 *.sw[ap]
 *.yml
 !docs/monitor/*.yml
+!tests/integration/**/*.yml
 tags
 *.bak
 *.tar.gz

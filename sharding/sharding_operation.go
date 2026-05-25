@@ -183,14 +183,11 @@ func GetColShardType(conn *utils.MongoCommunityConn, namespace string) ([]string
 	}
 
 	for _, item := range colDoc {
-		fmt.Println(item)
 		// either be a single hashed field, or a list of ascending fields
 		switch v := item.Value.(type) {
 		case string:
 			shardType = HashedShard
-		case int:
-			shardType = RangedShard
-		case float64:
+		case int, int32, int64, float64:
 			shardType = RangedShard
 		default:
 			return nil, "", fmt.Errorf("GetColShardType with namespace[%v] doc[%v] meet unknown ShakeKey type[%v]",

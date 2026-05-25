@@ -1,0 +1,48 @@
+# Minimal sharded MongoDB cluster + single-node destination for MongoShake
+# integration testing of full_sync.executor.filter.orphan_document.
+#
+# Topology:
+#   configsvr (single-node replSet "cfg") :27019
+#   shard1   (single-node replSet "rs1")  :27018
+#   shard2   (single-node replSet "rs2")  :27028
+#   mongos                                :27017
+#   dest     (single-node replSet "dst")  :27117  ← MongoShake target
+#
+# Notes:
+# - Uses replSet=1 even for single-member shards because sharding requires it.
+# - All ports are bound to 127.0.0.1 to avoid clashing with the host network.
+# - Bring up:    docker compose -f docker-compose.yml up -d
+# - Tear down:   docker compose -f docker-compose.yml down -v
+
+services:
+  configsvr:
+    image: mongo:4.4
+    command: mongod --configsvr --replSet cfg --port 27019 --bind_ip_all
+    ports: ["127.0.0.1:27019:27019"]
+
+  # NOTE: --setParameter enableTestCommands=1 is required for the orphan
+  # injection step in inject_orphan.py to bypass sharded-collection
+  # write-version checks on shardsvr. Without it, a direct insert into a
+  # sharded namespace targets a shard whose chunk metadata says it owns
+  # nothing for that key range and gets rejected with StaleConfig /
+  # CannotImplicitlyCreateCollection. Test-mode only — do not use in prod.
+  shard1:
+    image: mongo:4.4
+    command: mongod --shardsvr --replSet rs1 --port 27018 --bind_ip_all --setParameter enableTestCommands=1
+    ports: ["127.0.0.1:27018:27018"]
+
+  shard2:
+    image: mongo:4.4
+    command: mongod --shardsvr --replSet rs2 --port 27028 --bind_ip_all --setParameter enableTestCommands=1
+    ports: ["127.0.0.1:27028:27028"]
+
+  mongos:
+    image: mongo:4.4
+    depends_on: [configsvr, shard1, shard2]
+    command: mongos --configdb cfg/configsvr:27019 --port 27017 --bind_ip_all
+    ports: ["127.0.0.1:27017:27017"]
+
+  dest:
+    image: mongo:4.4
+    command: mongod --replSet dst --port 27117 --bind_ip_all
+    ports: ["127.0.0.1:27117:27117"]
