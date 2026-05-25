@@ -94,6 +94,9 @@ func (bw *BulkWriter) handleBulkInsertDupKeySkip(database, collection string, op
 	if !errors.As(err, &bulkErr) {
 		return err
 	}
+	if bulkErr.WriteConcernError != nil {
+		return err
+	}
 	for _, writeErr := range bulkErr.WriteErrors {
 		if !writeErr.HasErrorCode(11000) {
 			return err
@@ -116,6 +119,7 @@ func (bw *BulkWriter) handleBulkInsertDupKeySkip(database, collection string, op
 
 func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord, upsert bool) error {
 	var models []mongo.WriteModel
+	var modelOplogs []*OplogRecord
 
 	for _, log := range oplogs {
 		newObject := log.original.partialLog.Object
@@ -124,6 +128,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 			models = append(models, mongo.NewUpdateOneModel().
 				SetFilter(log.original.partialLog.DocumentKey).
 				SetUpdate(bson.D{{"$set", newObject}}).SetUpsert(true))
+			modelOplogs = append(modelOplogs, log)
 		} else {
 			// if upsert {
 			//	l.Logger.Warnf("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
@@ -138,6 +143,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 					model.SetUpsert(true)
 				}
 				models = append(models, model)
+				modelOplogs = append(modelOplogs, log)
 			} else {
 				l.Logger.Warnf("Insert on duplicated update _id look up failed. %v", log)
 			}
@@ -164,10 +170,10 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 		if utils.DuplicateKey(err) {
 			// create single writer to write one by one
 			sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
-			if index < 0 || index >= len(oplogs) {
+			if index < 0 || index >= len(modelOplogs) {
 				return err
 			}
-			return sw.doUpdateOnInsert(database, collection, metadata, oplogs[index:], upsert)
+			return sw.doUpdateOnInsert(database, collection, metadata, modelOplogs[index:], upsert)
 		}
 
 		// error can be ignored

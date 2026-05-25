@@ -11,12 +11,6 @@ func shouldSkipDupKeyOnInsert(database, collection string, err error) (bool, str
 		return false, ""
 	}
 
-	ns := database + "." + collection
-	allowedIndexes, ok := conf.Options.IncrSyncExecutorDupKeySkipRulesMap[ns]
-	if !ok {
-		return false, ""
-	}
-
 	indexName := parseDupKeyIndexName(err)
 	if indexName == "" {
 		return false, ""
