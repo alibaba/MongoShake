@@ -114,11 +114,19 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 	}
 
 	if utils.DuplicateKey(err) {
-		if conf.Options.IncrSyncExecutorDeleteOnNonIdDupKey {
+		switch conf.Options.IncrSyncExecutorDupKeyStrategy {
+		case utils.VarIncrSyncExecutorDupKeyStrategyDeleteAndRetry:
 			return cw.retryUpdateOnInsertIndividually(database, collection, metadata, oplogs, upsert)
+		case utils.VarIncrSyncExecutorDupKeyStrategySkip:
+			if skip, indexName := shouldSkipDupKeyOnInsert(database, collection, err); skip {
+				RecordDuplicatedOplog(cw.conn, collection, oplogs)
+				l.Logger.Warnf("skip duplicated update_on_insert oplogs, ns[%s.%s], index[%s], err[%v]",
+					database, collection, indexName, err)
+				return nil
+			}
 		}
-		l.Logger.Infof("Duplicated document found on doUpdateOnInsert [%s] [%s]", database, collection)
-		return nil
+		l.Logger.Errorf("Duplicated document found on doUpdateOnInsert [%s] [%s]: %v", database, collection, err)
+		return err
 	}
 	return err
 }

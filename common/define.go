@@ -58,6 +58,11 @@ const (
 	VarIncrSyncConflictWriteToDb   = "db"
 	VarIncrSyncConflictWriteToSdk  = "sdk"
 
+	// incr_sync.executor.dup_key_strategy
+	VarIncrSyncExecutorDupKeyStrategyError          = "error"
+	VarIncrSyncExecutorDupKeyStrategyDeleteAndRetry = "delete_and_retry"
+	VarIncrSyncExecutorDupKeyStrategySkip           = "skip"
+
 	// checkpoint.storage.db
 	VarCheckpointStorageDbReplicaDefault  = "mongoshake"
 	VarCheckpointStorageDbShardingDefault = "admin"

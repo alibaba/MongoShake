@@ -119,7 +119,7 @@ func splitDotted(field string) []string {
 func deleteConflictAndRetry(collection *mongo.Collection, updateFilter interface{},
 	doc bson.D, dupErr error, opts *interface{}) (bool, error) {
 
-	if !conf.Options.IncrSyncExecutorDeleteOnNonIdDupKey {
+	if conf.Options.IncrSyncExecutorDupKeyStrategy != utils.VarIncrSyncExecutorDupKeyStrategyDeleteAndRetry {
 		return false, nil
 	}
 	if !utils.DuplicateKey(dupErr) {

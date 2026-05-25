@@ -91,10 +91,9 @@ type Configuration struct {
 	IncrSyncFetcherBufferSizeThresholdInKB  int      `config:"incr_sync.fetcher.buffer_size_threshold_in_kb"` // add v2.8.6
 	IncrSyncExecutorUpsert                  bool     `config:"incr_sync.executor.upsert"`
 	IncrSyncExecutorInsertOnDupUpdate       bool     `config:"incr_sync.executor.insert_on_dup_update"`
-	IncrSyncExecutorSkipDupKeyOnInsert      bool     `config:"incr_sync.executor.skip_dup_key_on_insert"`
-	IncrSyncExecutorSkipDupKeyOnInsertRules []string `config:"incr_sync.executor.skip_dup_key_on_insert.rules"`
-	IncrSyncExecutorDeleteOnNonIdDupKey     bool     `config:"incr_sync.executor.delete_on_non_id_dup_key"` // add v2.8.9
-	IncrSyncConflictWriteTo                 string   `config:"incr_sync.conflict_write_to"`                 // remove "sdk" option since v2.4.21
+	IncrSyncExecutorDupKeyStrategy          string   `config:"incr_sync.executor.dup_key_strategy"`   // add v2.8.9
+	IncrSyncExecutorDupKeySkipRules         []string `config:"incr_sync.executor.dup_key_skip_rules"` // add v2.8.9
+	IncrSyncConflictWriteTo                 string   `config:"incr_sync.conflict_write_to"`           // remove "sdk" option since v2.4.21
 	IncrSyncExecutorMajorityEnable          bool     `config:"incr_sync.executor.majority_enable"`
 	IncrSyncBypassDocumentValidation        bool     `config:"incr_sync.executor.bypass_document_validation"` // add v2.8.7
 
@@ -114,10 +113,10 @@ type Configuration struct {
 
 	/*---------------------------------------------------------*/
 	// generated variables
-	Version                                   string // version
-	SourceDBVersion                           string
-	TargetDBVersion                           string
-	IncrSyncExecutorSkipDupKeyOnInsertRuleMap map[string]map[string]struct{}
+	Version                            string // version
+	SourceDBVersion                    string
+	TargetDBVersion                    string
+	IncrSyncExecutorDupKeySkipRulesMap map[string]map[string]struct{}
 
 	/*---------------------------------------------------------*/
 	// deprecate variables

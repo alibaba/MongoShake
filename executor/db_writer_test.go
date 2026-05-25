@@ -2786,8 +2786,8 @@ func TestSingleWriterDeleteOnNonIdDupKey(t *testing.T) {
 		t.Skipf("skip integration test, cannot connect to MongoDB: %v", err)
 	}
 
-	conf.Options.IncrSyncExecutorDeleteOnNonIdDupKey = true
-	defer func() { conf.Options.IncrSyncExecutorDeleteOnNonIdDupKey = false }()
+	conf.Options.IncrSyncExecutorDupKeyStrategy = utils.VarIncrSyncExecutorDupKeyStrategyDeleteAndRetry
+	defer func() { conf.Options.IncrSyncExecutorDupKeyStrategy = utils.VarIncrSyncExecutorDupKeyStrategyError }()
 
 	_ = utils.InitialLogger("", "", "debug", true, 1)
 	writer := NewDbWriter(conn, bson.E{}, false, -1)
@@ -2831,7 +2831,7 @@ func TestSingleWriterDeleteOnNonIdDupKeyDisabled(t *testing.T) {
 		t.Skipf("skip integration test, cannot connect to MongoDB: %v", err)
 	}
 
-	conf.Options.IncrSyncExecutorDeleteOnNonIdDupKey = false
+	conf.Options.IncrSyncExecutorDupKeyStrategy = utils.VarIncrSyncExecutorDupKeyStrategyError
 	_ = utils.InitialLogger("", "", "debug", true, 1)
 	writer := NewDbWriter(conn, bson.E{}, false, -1)
 

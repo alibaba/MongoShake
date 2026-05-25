@@ -10,12 +10,13 @@ import (
 var duplicateKeyIndexRegexp = regexp.MustCompile(`index: ([^ ]+) dup key`)
 
 func shouldSkipDupKeyOnInsert(database, collection string, err error) (bool, string) {
-	if !conf.Options.IncrSyncExecutorSkipDupKeyOnInsert || !utils.DuplicateKey(err) {
+	if conf.Options.IncrSyncExecutorDupKeyStrategy != utils.VarIncrSyncExecutorDupKeyStrategySkip ||
+		!utils.DuplicateKey(err) {
 		return false, ""
 	}
 
 	ns := database + "." + collection
-	allowedIndexes, ok := conf.Options.IncrSyncExecutorSkipDupKeyOnInsertRuleMap[ns]
+	allowedIndexes, ok := conf.Options.IncrSyncExecutorDupKeySkipRulesMap[ns]
 	if !ok {
 		return false, ""
 	}
