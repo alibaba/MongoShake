@@ -21,9 +21,10 @@
 
 **核心思路：通过统一策略配置处理重复键冲突**
 
-新增配置项 `incr_sync.executor.dup_key_strategy`（默认 `error`），可选值：
+新增配置项 `incr_sync.executor.dup_key_strategy`（默认 `ignore`），可选值：
 
-- `error`：保持原有行为，阻塞报错。
+- `ignore`：保持历史行为，记录重复 oplog 后继续。
+- `error`：严格模式，阻塞报错。
 - `delete_and_retry`：源端为准，删除冲突文档并重试 upsert。
 - `skip`：目标端为准，按 `incr_sync.executor.dup_key_skip_rules` 白名单跳过并记录重复 oplog。
 
@@ -71,10 +72,11 @@ E11000 duplicate key error collection: db.coll index: a_1_b_1 dup key: { a: "x",
 
 ```ini
 # 当 insert_on_dup_update 的 upsert 仍因重复键冲突失败时的处理策略。
-# error            默认，保持原有行为，阻塞报错。
+# ignore           默认，保持历史行为：记录重复 oplog 后继续。
+# error            严格模式，阻塞报错。
 # delete_and_retry 源端为准，删除目标端冲突文档后重试；双端有流量时请勿开启。
 # skip             目标端为准，按白名单跳过 oplog 并记录重复日志。
-incr_sync.executor.dup_key_strategy = error
+incr_sync.executor.dup_key_strategy = ignore
 # 仅当 dup_key_strategy = skip 时生效。
 # 规则格式：db.collection:index1,index2;db.collection:*
 incr_sync.executor.dup_key_skip_rules =

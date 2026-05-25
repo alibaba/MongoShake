@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -66,16 +67,48 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 		}
 
 		if utils.DuplicateKey(err) {
-			RecordDuplicatedOplog(bw.conn, collection, oplogs)
 			// update on duplicated key occur
 			if dupUpdate {
+				RecordDuplicatedOplog(bw.conn, collection, oplogs)
 				l.Logger.Infof("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
 				return bw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.IncrSyncExecutorUpsert)
 			}
-			return nil
+			switch conf.Options.IncrSyncExecutorDupKeyStrategy {
+			case "", utils.VarIncrSyncExecutorDupKeyStrategyIgnore:
+				return handleDupKeyOnInsert(bw.conn, database, collection, oplogs, err, "bulk_writer::doInsert")
+			case utils.VarIncrSyncExecutorDupKeyStrategySkip:
+				return bw.handleBulkInsertDupKeySkip(database, collection, oplogs, err)
+			default:
+				return err
+			}
 		}
 		return err
 	}
+	return nil
+}
+
+func (bw *BulkWriter) handleBulkInsertDupKeySkip(database, collection string, oplogs []*OplogRecord, err error) error {
+	bulkErr, ok := err.(mongo.BulkWriteException)
+	if !ok {
+		return err
+	}
+	for _, writeErr := range bulkErr.WriteErrors {
+		if !writeErr.HasErrorCode(11000) {
+			return err
+		}
+		if writeErr.Index < 0 || writeErr.Index >= len(oplogs) {
+			return err
+		}
+		indexName := parseDupKeyIndexName(fmt.Errorf("%s", writeErr.Message))
+		if indexName != "_id_" && !shouldSkipDupKeyIndex(database, collection, indexName) {
+			return err
+		}
+	}
+	for _, writeErr := range bulkErr.WriteErrors {
+		RecordDuplicatedOplog(bw.conn, collection, []*OplogRecord{oplogs[writeErr.Index]})
+	}
+	l.Logger.Warnf("bulk_writer::doInsert duplicated oplogs skipped, ns[%s.%s], err[%v]",
+		database, collection, err)
 	return nil
 }
 
@@ -109,6 +142,10 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 		}
 
 		l.Logger.Debugf("bulk_writer: updateOnInsert %v", log.original.partialLog)
+	}
+
+	if len(models) == 0 {
+		return nil
 	}
 
 	opts := options.BulkWrite()

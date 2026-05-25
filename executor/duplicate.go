@@ -8,7 +8,13 @@ import (
 // RecordDuplicatedOplog
 // Write dup oplog in DB APPConflictDatabase
 func RecordDuplicatedOplog(conn *utils.MongoCommunityConn, coll string, records []*OplogRecord) {
+	if conn == nil {
+		return
+	}
 	for _, record := range records {
+		if record == nil || record.original == nil || record.original.partialLog == nil {
+			continue
+		}
 		log := record.original.partialLog
 		switch conf.Options.IncrSyncConflictWriteTo {
 		case DumpConflictToDB:

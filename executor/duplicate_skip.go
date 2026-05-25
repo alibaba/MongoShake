@@ -22,12 +22,22 @@ func shouldSkipDupKeyOnInsert(database, collection string, err error) (bool, str
 		return false, ""
 	}
 
-	if _, ok := allowedIndexes["*"]; ok {
-		return true, indexName
-	}
-	if _, ok := allowedIndexes[indexName]; ok {
-		return true, indexName
+	return shouldSkipDupKeyIndex(database, collection, indexName), indexName
+}
+
+func shouldSkipDupKeyIndex(database, collection, indexName string) bool {
+	if indexName == "" {
+		return false
 	}
 
-	return false, indexName
+	ns := database + "." + collection
+	allowedIndexes, ok := conf.Options.IncrSyncExecutorDupKeySkipRulesMap[ns]
+	if !ok {
+		return false
+	}
+	if _, ok := allowedIndexes["*"]; ok {
+		return true
+	}
+	_, ok = allowedIndexes[indexName]
+	return ok
 }

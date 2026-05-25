@@ -299,11 +299,12 @@ func checkDefaultValue() error {
 		return fmt.Errorf("incr_sync.conflict_write_to in {none, db, sdk}")
 	}
 	if conf.Options.IncrSyncExecutorDupKeyStrategy == "" {
-		conf.Options.IncrSyncExecutorDupKeyStrategy = utils.VarIncrSyncExecutorDupKeyStrategyError
-	} else if conf.Options.IncrSyncExecutorDupKeyStrategy != utils.VarIncrSyncExecutorDupKeyStrategyError &&
+		conf.Options.IncrSyncExecutorDupKeyStrategy = utils.VarIncrSyncExecutorDupKeyStrategyIgnore
+	} else if conf.Options.IncrSyncExecutorDupKeyStrategy != utils.VarIncrSyncExecutorDupKeyStrategyIgnore &&
+		conf.Options.IncrSyncExecutorDupKeyStrategy != utils.VarIncrSyncExecutorDupKeyStrategyError &&
 		conf.Options.IncrSyncExecutorDupKeyStrategy != utils.VarIncrSyncExecutorDupKeyStrategyDeleteAndRetry &&
 		conf.Options.IncrSyncExecutorDupKeyStrategy != utils.VarIncrSyncExecutorDupKeyStrategySkip {
-		return fmt.Errorf("incr_sync.executor.dup_key_strategy in {error, delete_and_retry, skip}")
+		return fmt.Errorf("incr_sync.executor.dup_key_strategy in {ignore, error, delete_and_retry, skip}")
 	}
 	if err := parseDupKeySkipRules(); err != nil {
 		return err
@@ -331,7 +332,7 @@ func parseDupKeySkipRules() error {
 			continue
 		}
 
-		parts := strings.Split(rule, ":")
+		parts := strings.SplitN(rule, ":", 2)
 		if len(parts) != 2 {
 			return fmt.Errorf("incr_sync.executor.dup_key_skip_rules should be ns:index1,index2; got [%s]", rule)
 		}

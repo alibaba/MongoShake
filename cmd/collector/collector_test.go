@@ -131,6 +131,61 @@ func TestSelectLeaderUseConfiguredElectionID(t *testing.T) {
 	assert.Equal(t, utils.VarCheckpointStorageDbReplicaDefault, call.db, "should be equal")
 }
 
+func TestDupKeyStrategyDefaultAndValidation(t *testing.T) {
+	origin := conf.Options
+	defer func() { conf.Options = origin }()
+
+	conf.Options = conf.Configuration{MongoUrls: []string{"mongodb://127.0.0.1:27017"}}
+	assert.NoError(t, checkDefaultValue(), "should be equal")
+	assert.Equal(t, utils.VarIncrSyncExecutorDupKeyStrategyIgnore,
+		conf.Options.IncrSyncExecutorDupKeyStrategy, "should be equal")
+
+	for _, strategy := range []string{
+		utils.VarIncrSyncExecutorDupKeyStrategyIgnore,
+		utils.VarIncrSyncExecutorDupKeyStrategyError,
+		utils.VarIncrSyncExecutorDupKeyStrategyDeleteAndRetry,
+		utils.VarIncrSyncExecutorDupKeyStrategySkip,
+	} {
+		conf.Options = conf.Configuration{
+			MongoUrls:                       []string{"mongodb://127.0.0.1:27017"},
+			IncrSyncExecutorDupKeyStrategy: strategy,
+		}
+		if strategy == utils.VarIncrSyncExecutorDupKeyStrategySkip {
+			conf.Options.IncrSyncExecutorDupKeySkipRules = []string{"db.coll:x_1"}
+		}
+		assert.NoError(t, checkDefaultValue(), "strategy %s should be valid", strategy)
+	}
+
+	conf.Options = conf.Configuration{
+		MongoUrls:                       []string{"mongodb://127.0.0.1:27017"},
+		IncrSyncExecutorDupKeyStrategy: "bad",
+	}
+	assert.Error(t, checkDefaultValue(), "should be equal")
+}
+
+func TestParseDupKeySkipRules(t *testing.T) {
+	origin := conf.Options
+	defer func() { conf.Options = origin }()
+
+	conf.Options = conf.Configuration{
+		IncrSyncExecutorDupKeyStrategy:  utils.VarIncrSyncExecutorDupKeyStrategySkip,
+		IncrSyncExecutorDupKeySkipRules: []string{"db.a:x_1,y_1", "db.b:*"},
+	}
+	assert.NoError(t, parseDupKeySkipRules(), "should be equal")
+	_, ok := conf.Options.IncrSyncExecutorDupKeySkipRulesMap["db.a"]["x_1"]
+	assert.True(t, ok, "should be equal")
+	_, ok = conf.Options.IncrSyncExecutorDupKeySkipRulesMap["db.a"]["y_1"]
+	assert.True(t, ok, "should be equal")
+	_, ok = conf.Options.IncrSyncExecutorDupKeySkipRulesMap["db.b"]["*"]
+	assert.True(t, ok, "should be equal")
+
+	conf.Options = conf.Configuration{IncrSyncExecutorDupKeyStrategy: utils.VarIncrSyncExecutorDupKeyStrategySkip}
+	assert.Error(t, parseDupKeySkipRules(), "skip strategy requires rules")
+
+	conf.Options = conf.Configuration{IncrSyncExecutorDupKeySkipRules: []string{"db.coll:"}}
+	assert.Error(t, parseDupKeySkipRules(), "empty index should be rejected")
+}
+
 func waitClosed(t *testing.T, ch <-chan struct{}, msg string) {
 	t.Helper()
 	select {

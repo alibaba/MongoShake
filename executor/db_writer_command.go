@@ -58,21 +58,60 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.E, 
 	}
 
 	if utils.DuplicateKey(err) {
-		RecordDuplicatedOplog(cw.conn, collection, oplogs)
 		// update on duplicated key occur
 		if dupUpdate {
+			RecordDuplicatedOplog(cw.conn, collection, oplogs)
 			l.Logger.Infof("Duplicated document found. reinsert or update to [%s.%s]", database, collection)
 			return cw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.IncrSyncExecutorUpsert)
 		}
-		if skip, indexName := shouldSkipDupKeyOnInsert(database, collection, err); skip {
-			l.Logger.Warnf("skip duplicated insert oplogs, ns[%s.%s], index[%s], err[%v]",
-				database, collection, indexName, err)
-			return nil
+		if conf.Options.IncrSyncExecutorDupKeyStrategy == utils.VarIncrSyncExecutorDupKeyStrategySkip {
+			return cw.retryInsertIndividually(database, collection, metadata, oplogs)
 		}
-		l.Logger.Errorf("Duplicated document found on doInsert [%s.%s]: %v", database, collection, err)
-		return err
+		return handleDupKeyOnInsert(cw.conn, database, collection, oplogs, err, "command_writer::doInsert")
 	}
 	return err
+}
+
+func (cw *CommandWriter) retryInsertIndividually(database, collection string, metadata bson.E,
+	oplogs []*OplogRecord) error {
+	for _, log := range oplogs {
+		retryErr := cw.runSingleInsertCmd(database, collection, metadata, log.original.partialLog.Object)
+		if retryErr == nil {
+			continue
+		}
+		if !utils.DuplicateKey(retryErr) {
+			return retryErr
+		}
+		indexName := parseDupKeyIndexName(retryErr)
+		if indexName == "_id_" {
+			RecordDuplicatedOplog(cw.conn, collection, []*OplogRecord{log})
+			l.Logger.Infof("Duplicated document found on doInsert [%s] [%s] _id, treated as already applied",
+				database, collection)
+			continue
+		}
+		if handleErr := handleDupKeyOnInsert(cw.conn, database, collection, []*OplogRecord{log}, retryErr,
+			"command_writer::retryInsertIndividually"); handleErr != nil {
+			return handleErr
+		}
+	}
+	return nil
+}
+
+func (cw *CommandWriter) runSingleInsertCmd(database, collection string, metadata bson.E, doc bson.D) error {
+	insertCmd := bson.D{
+		{"insert", collection},
+		{"documents", []bson.D{doc}},
+		{"ordered", ExecuteOrdered},
+	}
+	if conf.Options.IncrSyncBypassDocumentValidation {
+		insertCmd = append(insertCmd, bson.E{Key: "bypassDocumentValidation", Value: true})
+	} else {
+		insertCmd = append(insertCmd, bson.E{Key: "bypassDocumentValidation", Value: false})
+	}
+	if metadata.Key == "g" {
+		insertCmd = append(insertCmd, metadata)
+	}
+	return cw.conn.Client.Database(database).RunCommand(context.Background(), insertCmd).Err()
 }
 
 func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord,
@@ -92,6 +131,10 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 			l.Logger.Warnf("Insert on duplicated update _id look up failed. %v", log)
 		}
 		l.Logger.Debugf("command_writer:: updateOnInsert %v", log.original.partialLog)
+	}
+
+	if len(updates) == 0 {
+		return nil
 	}
 
 	var err error
@@ -121,15 +164,13 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 
 	if utils.DuplicateKey(err) {
 		switch conf.Options.IncrSyncExecutorDupKeyStrategy {
-		case utils.VarIncrSyncExecutorDupKeyStrategyDeleteAndRetry:
+		case "", utils.VarIncrSyncExecutorDupKeyStrategyIgnore:
+			RecordDuplicatedOplog(cw.conn, collection, oplogs)
+			l.Logger.Infof("Duplicated document found on doUpdateOnInsert [%s] [%s], ignored", database, collection)
+			return nil
+		case utils.VarIncrSyncExecutorDupKeyStrategyDeleteAndRetry,
+			utils.VarIncrSyncExecutorDupKeyStrategySkip:
 			return cw.retryUpdateOnInsertIndividually(database, collection, metadata, oplogs, upsert)
-		case utils.VarIncrSyncExecutorDupKeyStrategySkip:
-			if skip, indexName := shouldSkipDupKeyOnInsert(database, collection, err); skip {
-				RecordDuplicatedOplog(cw.conn, collection, oplogs)
-				l.Logger.Warnf("skip duplicated update_on_insert oplogs, ns[%s.%s], index[%s], err[%v]",
-					database, collection, indexName, err)
-				return nil
-			}
 		}
 		l.Logger.Errorf("Duplicated document found on doUpdateOnInsert [%s] [%s]: %v", database, collection, err)
 		return err
@@ -158,8 +199,20 @@ func (cw *CommandWriter) retryUpdateOnInsertIndividually(database, collection st
 			return retryErr
 		}
 
+		switch conf.Options.IncrSyncExecutorDupKeyStrategy {
+		case utils.VarIncrSyncExecutorDupKeyStrategySkip:
+			if handleErr := handleDupKeyOnInsert(cw.conn, database, collection, []*OplogRecord{log}, retryErr,
+				"command_writer::retryUpdateOnInsertIndividually"); handleErr != nil {
+				return handleErr
+			}
+			continue
+		case utils.VarIncrSyncExecutorDupKeyStrategyError:
+			return retryErr
+		}
+
 		indexName := parseDupKeyIndexName(retryErr)
 		if indexName == "_id_" {
+			RecordDuplicatedOplog(cw.conn, collection, []*OplogRecord{log})
 			l.Logger.Infof("Duplicated document found on doUpdateOnInsert [%s] [%s] _id[%v]",
 				database, collection, id)
 			continue
