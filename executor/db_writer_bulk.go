@@ -27,6 +27,7 @@ type BulkWriter struct {
 func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord, dupUpdate bool) error {
 
 	var models []mongo.WriteModel
+	var modelOplogs []*OplogRecord
 	for _, log := range oplogs {
 		if log.original.partialLog.Operation == "i" &&
 			strings.HasSuffix(log.original.partialLog.Namespace, utils.VarSystemViewsCollection) {
@@ -40,6 +41,7 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 			}
 		} else {
 			models = append(models, mongo.NewInsertOneModel().SetDocument(log.original.partialLog.Object))
+			modelOplogs = append(modelOplogs, log)
 			l.Logger.Debugf("bulk_writer: insert org_oplog:%v insert_doc:%v",
 				log.original.partialLog, log.original.partialLog.Object)
 		}
@@ -77,7 +79,7 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 			case "", utils.VarIncrSyncExecutorDupKeyStrategyIgnore:
 				return handleDupKeyOnInsert(bw.conn, database, collection, oplogs, err, "bulk_writer::doInsert")
 			case utils.VarIncrSyncExecutorDupKeyStrategySkip:
-				return bw.handleBulkInsertDupKeySkip(database, collection, oplogs, err)
+				return bw.handleBulkInsertDupKeySkip(database, collection, modelOplogs, err)
 			default:
 				return err
 			}
@@ -88,8 +90,8 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 }
 
 func (bw *BulkWriter) handleBulkInsertDupKeySkip(database, collection string, oplogs []*OplogRecord, err error) error {
-	bulkErr, ok := err.(mongo.BulkWriteException)
-	if !ok {
+	var bulkErr mongo.BulkWriteException
+	if !errors.As(err, &bulkErr) {
 		return err
 	}
 	for _, writeErr := range bulkErr.WriteErrors {

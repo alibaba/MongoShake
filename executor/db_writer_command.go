@@ -199,18 +199,24 @@ func (cw *CommandWriter) retryUpdateOnInsertIndividually(database, collection st
 			return retryErr
 		}
 
-		switch conf.Options.IncrSyncExecutorDupKeyStrategy {
-		case utils.VarIncrSyncExecutorDupKeyStrategySkip:
+		indexName := parseDupKeyIndexName(retryErr)
+		if conf.Options.IncrSyncExecutorDupKeyStrategy == utils.VarIncrSyncExecutorDupKeyStrategySkip {
+			if indexName == "_id_" {
+				RecordDuplicatedOplog(cw.conn, collection, []*OplogRecord{log})
+				l.Logger.Infof("Duplicated document found on doUpdateOnInsert [%s] [%s] _id[%v], treated as already applied",
+					database, collection, id)
+				continue
+			}
 			if handleErr := handleDupKeyOnInsert(cw.conn, database, collection, []*OplogRecord{log}, retryErr,
 				"command_writer::retryUpdateOnInsertIndividually"); handleErr != nil {
 				return handleErr
 			}
 			continue
-		case utils.VarIncrSyncExecutorDupKeyStrategyError:
+		}
+		if conf.Options.IncrSyncExecutorDupKeyStrategy == utils.VarIncrSyncExecutorDupKeyStrategyError {
 			return retryErr
 		}
 
-		indexName := parseDupKeyIndexName(retryErr)
 		if indexName == "_id_" {
 			RecordDuplicatedOplog(cw.conn, collection, []*OplogRecord{log})
 			l.Logger.Infof("Duplicated document found on doUpdateOnInsert [%s] [%s] _id[%v]",
