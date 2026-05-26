@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -26,6 +27,7 @@ type BulkWriter struct {
 func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord, dupUpdate bool) error {
 
 	var models []mongo.WriteModel
+	var modelOplogs []*OplogRecord
 	for _, log := range oplogs {
 		if log.original.partialLog.Operation == "i" &&
 			strings.HasSuffix(log.original.partialLog.Namespace, utils.VarSystemViewsCollection) {
@@ -39,6 +41,7 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 			}
 		} else {
 			models = append(models, mongo.NewInsertOneModel().SetDocument(log.original.partialLog.Object))
+			modelOplogs = append(modelOplogs, log)
 			l.Logger.Debugf("bulk_writer: insert org_oplog:%v insert_doc:%v",
 				log.original.partialLog, log.original.partialLog.Object)
 		}
@@ -66,21 +69,57 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 		}
 
 		if utils.DuplicateKey(err) {
-			RecordDuplicatedOplog(bw.conn, collection, oplogs)
 			// update on duplicated key occur
 			if dupUpdate {
+				RecordDuplicatedOplog(bw.conn, collection, oplogs)
 				l.Logger.Infof("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
 				return bw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.IncrSyncExecutorUpsert)
 			}
-			return nil
+			switch conf.Options.IncrSyncExecutorDupKeyStrategy {
+			case "", utils.VarIncrSyncExecutorDupKeyStrategyIgnore:
+				return handleDupKeyOnInsert(bw.conn, database, collection, oplogs, err, "bulk_writer::doInsert")
+			case utils.VarIncrSyncExecutorDupKeyStrategySkip:
+				return bw.handleBulkInsertDupKeySkip(database, collection, modelOplogs, err)
+			default:
+				return err
+			}
 		}
 		return err
 	}
 	return nil
 }
 
+func (bw *BulkWriter) handleBulkInsertDupKeySkip(database, collection string, oplogs []*OplogRecord, err error) error {
+	var bulkErr mongo.BulkWriteException
+	if !errors.As(err, &bulkErr) {
+		return err
+	}
+	if bulkErr.WriteConcernError != nil {
+		return err
+	}
+	for _, writeErr := range bulkErr.WriteErrors {
+		if !writeErr.HasErrorCode(11000) {
+			return err
+		}
+		if writeErr.Index < 0 || writeErr.Index >= len(oplogs) {
+			return err
+		}
+		indexName := parseDupKeyIndexName(fmt.Errorf("%s", writeErr.Message))
+		if indexName != "_id_" && !shouldSkipDupKeyIndex(database, collection, indexName) {
+			return err
+		}
+	}
+	for _, writeErr := range bulkErr.WriteErrors {
+		RecordDuplicatedOplog(bw.conn, collection, []*OplogRecord{oplogs[writeErr.Index]})
+	}
+	l.Logger.Warnf("bulk_writer::doInsert duplicated oplogs skipped, ns[%s.%s], err[%v]",
+		database, collection, err)
+	return nil
+}
+
 func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord, upsert bool) error {
 	var models []mongo.WriteModel
+	var modelOplogs []*OplogRecord
 
 	for _, log := range oplogs {
 		newObject := log.original.partialLog.Object
@@ -89,6 +128,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 			models = append(models, mongo.NewUpdateOneModel().
 				SetFilter(log.original.partialLog.DocumentKey).
 				SetUpdate(bson.D{{"$set", newObject}}).SetUpsert(true))
+			modelOplogs = append(modelOplogs, log)
 		} else {
 			// if upsert {
 			//	l.Logger.Warnf("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
@@ -103,12 +143,17 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 					model.SetUpsert(true)
 				}
 				models = append(models, model)
+				modelOplogs = append(modelOplogs, log)
 			} else {
 				l.Logger.Warnf("Insert on duplicated update _id look up failed. %v", log)
 			}
 		}
 
 		l.Logger.Debugf("bulk_writer: updateOnInsert %v", log.original.partialLog)
+	}
+
+	if len(models) == 0 {
+		return nil
 	}
 
 	opts := options.BulkWrite()
@@ -125,7 +170,10 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 		if utils.DuplicateKey(err) {
 			// create single writer to write one by one
 			sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
-			return sw.doUpdateOnInsert(database, collection, metadata, oplogs[index:], upsert)
+			if index < 0 || index >= len(modelOplogs) {
+				return err
+			}
+			return sw.doUpdateOnInsert(database, collection, metadata, modelOplogs[index:], upsert)
 		}
 
 		// error can be ignored

@@ -19,9 +19,18 @@
 
 ## 修复方案
 
-**核心思路：opt-in 删除冲突文档 + 重试 upsert**
+**核心思路：通过统一策略配置处理重复键冲突**
 
-新增配置项 `incr_sync.executor.delete_on_non_id_dup_key`（默认 false），开启后：
+新增配置项 `incr_sync.executor.dup_key_strategy`（默认 `ignore`），可选值：
+
+- `ignore`：保持历史行为，记录重复 oplog 后继续。
+- `error`：严格模式，阻塞报错。
+- `delete_and_retry`：源端为准，删除冲突文档并重试 upsert。
+- `skip`：目标端为准，按 `incr_sync.executor.dup_key_skip_rules` 白名单跳过并记录重复 oplog。
+
+`skip` 策略需要配置白名单规则，格式为 `db.collection:index1,index2;db.collection:*`，用于限定可跳过的 namespace 和 index，避免扩大影响范围。
+
+当配置为 `delete_and_retry` 时：
 
 1. **解析 E11000 错误的 `dup key: { ... }` 部分**，提取冲突字段名（如 `account`、`a, b`）
 2. **判断**：如果是 `_id_` 索引，走已有逻辑；如果是非 `_id` 唯一索引，进入新逻辑
@@ -52,7 +61,7 @@ E11000 duplicate key error collection: db.coll index: a_1_b_1 dup key: { a: "x",
 
 | 文件 | 改动 |
 |------|------|
-| `collector/configure/configure.go` | 新增 `IncrSyncExecutorDeleteOnNonIdDupKey` 配置字段 |
+| `collector/configure/configure.go` | 新增 `IncrSyncExecutorDupKeyStrategy` 配置字段 |
 | `conf/collector.conf` | 新增配置项及说明 |
 | `executor/dup_key_resolver.go` | 新增：`parseDupKeyIndexName()`、`parseDupKeyFields()`、`resolveConflictFilter()`、`deleteConflictAndRetry()` |
 | `executor/db_writer_single.go` | 修改 `doUpdateOnInsert()` 的 upsert 分支，配置开启时调用 resolver |
@@ -62,9 +71,15 @@ E11000 duplicate key error collection: db.coll index: a_1_b_1 dup key: { a: "x",
 ## 配置说明
 
 ```ini
-# 当 insert_on_dup_update 的 upsert 仍因非 _id 唯一索引冲突而失败时，
-# 删除冲突文档并重试。仅在「以源端为准」的单向同步场景下启用。
-incr_sync.executor.delete_on_non_id_dup_key = false
+# 当 insert_on_dup_update 的 upsert 仍因重复键冲突失败时的处理策略。
+# ignore           默认，保持历史行为：记录重复 oplog 后继续。
+# error            严格模式，阻塞报错。
+# delete_and_retry 源端为准，删除目标端冲突文档后重试；双端有流量时请勿开启。
+# skip             目标端为准，按白名单跳过 oplog 并记录重复日志。
+incr_sync.executor.dup_key_strategy = ignore
+# 仅当 dup_key_strategy = skip 时生效。
+# 规则格式：db.collection:index1,index2;db.collection:*
+incr_sync.executor.dup_key_skip_rules =
 ```
 
 ## 验证

@@ -2779,6 +2779,73 @@ func TestResolveConflictFilter(t *testing.T) {
 	assert.Equal(t, bson.D{{"address.city", "shanghai"}}, filter)
 }
 
+func TestShouldSkipDupKeyOnInsert(t *testing.T) {
+	origin := conf.Options
+	defer func() { conf.Options = origin }()
+
+	err := fmt.Errorf(`E11000 duplicate key error collection: db.coll index: x_1 dup key: { x: 1 }`)
+	conf.Options = conf.Configuration{
+		IncrSyncExecutorDupKeyStrategy: utils.VarIncrSyncExecutorDupKeyStrategySkip,
+		IncrSyncExecutorDupKeySkipRulesMap: map[string]map[string]struct{}{
+			"db.coll": {"x_1": {}},
+		},
+	}
+
+	skip, indexName := shouldSkipDupKeyOnInsert("db", "coll", err)
+	assert.True(t, skip, "should be equal")
+	assert.Equal(t, "x_1", indexName, "should be equal")
+
+	skip, _ = shouldSkipDupKeyOnInsert("db", "other", err)
+	assert.False(t, skip, "should be equal")
+
+	conf.Options.IncrSyncExecutorDupKeySkipRulesMap = map[string]map[string]struct{}{
+		"db.coll": {"y_1": {}},
+	}
+	skip, indexName = shouldSkipDupKeyOnInsert("db", "coll", err)
+	assert.False(t, skip, "should be equal")
+	assert.Equal(t, "x_1", indexName, "should be equal")
+
+	conf.Options.IncrSyncExecutorDupKeySkipRulesMap = map[string]map[string]struct{}{
+		"db.coll": {"*": {}},
+	}
+	skip, indexName = shouldSkipDupKeyOnInsert("db", "coll", err)
+	assert.True(t, skip, "should be equal")
+	assert.Equal(t, "x_1", indexName, "should be equal")
+	assert.True(t, shouldSkipDupKeyIndex("db", "coll", "x_1"), "should be equal")
+	assert.False(t, shouldSkipDupKeyIndex("db", "other", "x_1"), "should be equal")
+
+	idErr := fmt.Errorf(`E11000 duplicate key error collection: db.coll index: _id_ dup key: { _id: 1 }`)
+	skip, indexName = shouldSkipDupKeyOnInsert("db", "coll", idErr)
+	assert.False(t, skip, "_id duplicate is handled by writer-level already-applied logic")
+	assert.Equal(t, "_id_", indexName, "should be equal")
+}
+
+func TestHandleDupKeyOnInsertStrategy(t *testing.T) {
+	origin := conf.Options
+	defer func() { conf.Options = origin }()
+
+	err := fmt.Errorf(`E11000 duplicate key error collection: db.coll index: x_1 dup key: { x: 1 }`)
+
+	conf.Options = conf.Configuration{IncrSyncExecutorDupKeyStrategy: utils.VarIncrSyncExecutorDupKeyStrategyIgnore}
+	assert.NoError(t, handleDupKeyOnInsert(nil, "db", "coll", nil, err, "test"), "should be equal")
+
+	conf.Options = conf.Configuration{IncrSyncExecutorDupKeyStrategy: utils.VarIncrSyncExecutorDupKeyStrategyError}
+	assert.Error(t, handleDupKeyOnInsert(nil, "db", "coll", nil, err, "test"), "should be equal")
+
+	conf.Options = conf.Configuration{
+		IncrSyncExecutorDupKeyStrategy: utils.VarIncrSyncExecutorDupKeyStrategySkip,
+		IncrSyncExecutorDupKeySkipRulesMap: map[string]map[string]struct{}{
+			"db.coll": {"x_1": {}},
+		},
+	}
+	assert.NoError(t, handleDupKeyOnInsert(nil, "db", "coll", nil, err, "test"), "should be equal")
+
+	conf.Options.IncrSyncExecutorDupKeySkipRulesMap = map[string]map[string]struct{}{
+		"db.coll": {"y_1": {}},
+	}
+	assert.Error(t, handleDupKeyOnInsert(nil, "db", "coll", nil, err, "test"), "should be equal")
+}
+
 func TestSingleWriterDeleteOnNonIdDupKey(t *testing.T) {
 	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
@@ -2786,8 +2853,8 @@ func TestSingleWriterDeleteOnNonIdDupKey(t *testing.T) {
 		t.Skipf("skip integration test, cannot connect to MongoDB: %v", err)
 	}
 
-	conf.Options.IncrSyncExecutorDeleteOnNonIdDupKey = true
-	defer func() { conf.Options.IncrSyncExecutorDeleteOnNonIdDupKey = false }()
+	conf.Options.IncrSyncExecutorDupKeyStrategy = utils.VarIncrSyncExecutorDupKeyStrategyDeleteAndRetry
+	defer func() { conf.Options.IncrSyncExecutorDupKeyStrategy = utils.VarIncrSyncExecutorDupKeyStrategyError }()
 
 	_ = utils.InitialLogger("", "", "debug", true, 1)
 	writer := NewDbWriter(conn, bson.E{}, false, -1)
@@ -2831,7 +2898,7 @@ func TestSingleWriterDeleteOnNonIdDupKeyDisabled(t *testing.T) {
 		t.Skipf("skip integration test, cannot connect to MongoDB: %v", err)
 	}
 
-	conf.Options.IncrSyncExecutorDeleteOnNonIdDupKey = false
+	conf.Options.IncrSyncExecutorDupKeyStrategy = utils.VarIncrSyncExecutorDupKeyStrategyError
 	_ = utils.InitialLogger("", "", "debug", true, 1)
 	writer := NewDbWriter(conn, bson.E{}, false, -1)
 

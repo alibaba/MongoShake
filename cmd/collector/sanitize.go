@@ -298,6 +298,17 @@ func checkDefaultValue() error {
 		conf.Options.IncrSyncConflictWriteTo != utils.VarIncrSyncConflictWriteToSdk {
 		return fmt.Errorf("incr_sync.conflict_write_to in {none, db, sdk}")
 	}
+	if conf.Options.IncrSyncExecutorDupKeyStrategy == "" {
+		conf.Options.IncrSyncExecutorDupKeyStrategy = utils.VarIncrSyncExecutorDupKeyStrategyIgnore
+	} else if conf.Options.IncrSyncExecutorDupKeyStrategy != utils.VarIncrSyncExecutorDupKeyStrategyIgnore &&
+		conf.Options.IncrSyncExecutorDupKeyStrategy != utils.VarIncrSyncExecutorDupKeyStrategyError &&
+		conf.Options.IncrSyncExecutorDupKeyStrategy != utils.VarIncrSyncExecutorDupKeyStrategyDeleteAndRetry &&
+		conf.Options.IncrSyncExecutorDupKeyStrategy != utils.VarIncrSyncExecutorDupKeyStrategySkip {
+		return fmt.Errorf("incr_sync.executor.dup_key_strategy in {ignore, error, delete_and_retry, skip}")
+	}
+	if err := parseDupKeySkipRules(); err != nil {
+		return err
+	}
 	if conf.Options.IncrSyncReaderBufferTime <= 0 {
 		conf.Options.IncrSyncReaderBufferTime = 1
 	}
@@ -310,6 +321,49 @@ func checkDefaultValue() error {
 	filter.NsShouldBeIgnore[utils.AppDatabase+"."] = true
 	filter.NsShouldBeIgnore[utils.APPConflictDatabase+"."] = true
 
+	return nil
+}
+
+func parseDupKeySkipRules() error {
+	ruleMap := make(map[string]map[string]struct{})
+	for _, rule := range conf.Options.IncrSyncExecutorDupKeySkipRules {
+		rule = strings.TrimSpace(rule)
+		if rule == "" {
+			continue
+		}
+
+		parts := strings.SplitN(rule, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("incr_sync.executor.dup_key_skip_rules should be ns:index1,index2; got [%s]", rule)
+		}
+
+		ns := strings.TrimSpace(parts[0])
+		if ns == "" || !strings.Contains(ns, ".") {
+			return fmt.Errorf("incr_sync.executor.dup_key_skip_rules namespace should be db.collection; got [%s]", rule)
+		}
+
+		indexes := strings.Split(parts[1], ",")
+		if len(indexes) == 0 {
+			return fmt.Errorf("incr_sync.executor.dup_key_skip_rules index list is empty for [%s]", ns)
+		}
+
+		if _, ok := ruleMap[ns]; !ok {
+			ruleMap[ns] = make(map[string]struct{})
+		}
+		for _, index := range indexes {
+			index = strings.TrimSpace(index)
+			if index == "" {
+				return fmt.Errorf("incr_sync.executor.dup_key_skip_rules contains empty index for [%s]", ns)
+			}
+			ruleMap[ns][index] = struct{}{}
+		}
+	}
+
+	if conf.Options.IncrSyncExecutorDupKeyStrategy == utils.VarIncrSyncExecutorDupKeyStrategySkip && len(ruleMap) == 0 {
+		return fmt.Errorf("incr_sync.executor.dup_key_skip_rules must be set when incr_sync.executor.dup_key_strategy is skip")
+	}
+
+	conf.Options.IncrSyncExecutorDupKeySkipRulesMap = ruleMap
 	return nil
 }
 

@@ -69,7 +69,19 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.E, o
 		if _, err := collectionHandle.InsertOne(context.Background(), log.original.partialLog.Object, opts); err != nil {
 
 			if utils.DuplicateKey(err) {
-				upserts = append(upserts, log)
+				if dupUpdate {
+					upserts = append(upserts, log)
+					continue
+				}
+				if conf.Options.IncrSyncExecutorDupKeyStrategy == utils.VarIncrSyncExecutorDupKeyStrategySkip &&
+					parseDupKeyIndexName(err) == "_id_" {
+					RecordDuplicatedOplog(sw.conn, collection, []*OplogRecord{log})
+					continue
+				}
+				if handleErr := handleDupKeyOnInsert(sw.conn, database, collection, []*OplogRecord{log}, err,
+					"single_writer::doInsert"); handleErr != nil {
+					return handleErr
+				}
 				continue
 			} else {
 				l.Logger.Errorf("insert data[%v] failed[%v]", log.original.partialLog.Object, err)
@@ -82,13 +94,8 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.E, o
 
 	if len(upserts) != 0 {
 		RecordDuplicatedOplog(sw.conn, collection, upserts)
-
-		// update on duplicated key occur
-		if dupUpdate {
-			l.Logger.Infof("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
-			return sw.doUpdateOnInsert(database, collection, metadata, upserts, conf.Options.IncrSyncExecutorUpsert)
-		}
-		return nil
+		l.Logger.Infof("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
+		return sw.doUpdateOnInsert(database, collection, metadata, upserts, conf.Options.IncrSyncExecutorUpsert)
 	}
 	return nil
 }
@@ -137,6 +144,11 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 					if utils.TimeStampToInt64(oplogs[update.index].original.partialLog.Timestamp) <= sw.fullFinishTs {
 						continue
 					}
+					if conf.Options.IncrSyncExecutorDupKeyStrategy == "" ||
+						conf.Options.IncrSyncExecutorDupKeyStrategy == utils.VarIncrSyncExecutorDupKeyStrategyIgnore {
+						RecordDuplicatedOplog(sw.conn, collection, []*OplogRecord{oplogs[update.index]})
+						continue
+					}
 
 					resolved, delErr := deleteConflictAndRetry(collectionHandle, update.id, update.data, err, nil)
 					if delErr != nil {
@@ -158,6 +170,17 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 						}
 						continue
 					}
+				}
+				if conf.Options.IncrSyncExecutorDupKeyStrategy == utils.VarIncrSyncExecutorDupKeyStrategySkip &&
+					parseDupKeyIndexName(err) == "_id_" {
+					RecordDuplicatedOplog(sw.conn, collection, []*OplogRecord{oplogs[update.index]})
+					continue
+				}
+				if skip, indexName := shouldSkipDupKeyOnInsert(database, collection, err); skip {
+					RecordDuplicatedOplog(sw.conn, collection, []*OplogRecord{oplogs[update.index]})
+					l.Logger.Warnf("skip duplicated insert after update_on_insert failed, ns[%s.%s], index[%s], id[%v], ts[%v], err[%v]",
+						database, collection, indexName, update.id, oplogs[update.index].original.partialLog.Timestamp, err)
+					continue
 				}
 
 				l.Logger.Errorf("upsert _id[%v] with data[%v] failed[%v]", update.id, update.data, err)
