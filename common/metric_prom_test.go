@@ -64,13 +64,13 @@ func TestPrometheusHandlerExposesZeroValueMetricsForFreshIncrMetric(t *testing.T
 func TestPrometheusHandlerExposesRuntimeCollectors(t *testing.T) {
 	request := httptest.NewRequest("GET", "/metrics", nil)
 	recorder := httptest.NewRecorder()
-	PrometheusHandler().ServeHTTP(recorder, request)
+	PrometheusHandlerWithName("rs-runtime").ServeHTTP(recorder, request)
 
 	body := recorder.Body.String()
 	assert.Equal(t, 200, recorder.Code, "should be equal")
 	assert.Contains(t, body, `go_info`, "should be equal")
 	assert.Contains(t, body, `go_goroutines`, "should be equal")
-	assert.Contains(t, body, `mongoshake_uptime_seconds{name="collector"}`, "should be equal")
+	assert.Contains(t, body, `mongoshake_uptime_seconds{name="rs-runtime"}`, "should be equal")
 }
 
 func TestPrometheusHandlerExposesSyncStageAndInfoMetrics(t *testing.T) {

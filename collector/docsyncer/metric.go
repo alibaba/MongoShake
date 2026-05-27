@@ -5,30 +5,39 @@ import (
 	"sync/atomic"
 )
 
-type Status string
+type Status int32
 
 const (
-	StatusWaitStart  Status = "wait start"
-	StatusProcessing Status = "in processing"
-	StatusFinish     Status = "finish"
+	StatusWaitStart Status = iota
+	StatusProcessing
+	StatusFinish
 )
 
 type CollectionMetric struct {
-	CollectionStatus Status
+	CollectionStatus int32
 	TotalCount       uint64
 	FinishCount      uint64
 }
 
 func NewCollectionMetric() *CollectionMetric {
 	return &CollectionMetric{
-		CollectionStatus: StatusWaitStart,
+		CollectionStatus: int32(StatusWaitStart),
 	}
+}
+
+func (cm *CollectionMetric) Status() Status {
+	return Status(atomic.LoadInt32(&cm.CollectionStatus))
+}
+
+func (cm *CollectionMetric) SetStatus(status Status) {
+	atomic.StoreInt32(&cm.CollectionStatus, int32(status))
 }
 
 func (cm *CollectionMetric) String() string {
 	totalCount := atomic.LoadUint64(&cm.TotalCount)
 	finishCount := atomic.LoadUint64(&cm.FinishCount)
-	if cm.CollectionStatus == StatusWaitStart {
+	status := cm.Status()
+	if status == StatusWaitStart {
 		return fmt.Sprintf("-")
 	}
 
@@ -41,7 +50,7 @@ func (cm *CollectionMetric) String() string {
 }
 
 func (cm *CollectionMetric) StatusCode() float64 {
-	switch cm.CollectionStatus {
+	switch cm.Status() {
 	case StatusProcessing:
 		return 1
 	case StatusFinish:
@@ -54,10 +63,11 @@ func (cm *CollectionMetric) StatusCode() float64 {
 func (cm *CollectionMetric) ProgressRatio() float64 {
 	totalCount := atomic.LoadUint64(&cm.TotalCount)
 	finishCount := atomic.LoadUint64(&cm.FinishCount)
-	if cm.CollectionStatus == StatusWaitStart {
+	status := cm.Status()
+	if status == StatusWaitStart {
 		return 0
 	}
-	if cm.CollectionStatus == StatusFinish || totalCount == 0 {
+	if status == StatusFinish || totalCount == 0 {
 		return 1
 	}
 	return float64(finishCount) / float64(totalCount)

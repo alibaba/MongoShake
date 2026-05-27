@@ -22,7 +22,7 @@ func TestPrometheusHandlerExposesFullSyncProgressMetrics(t *testing.T) {
 	secondNS := utils.NS{Database: "db1", Collection: "orders"}
 	first := NewCollectionMetric()
 	second := NewCollectionMetric()
-	first.TotalCount = 100
+	atomic.StoreUint64(&first.TotalCount, 100)
 	syncer.updateSingleCollectionProgressMetric(firstNS, first)
 	syncer.updateSingleCollectionProgressMetric(secondNS, second)
 	syncer.markCollectionProcessing(firstNS, first)

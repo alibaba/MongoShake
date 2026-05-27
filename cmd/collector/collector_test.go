@@ -30,6 +30,7 @@ func TestInitStartupHTTPApisStartPrometheusBeforeLeaderElection(t *testing.T) {
 	}()
 
 	conf.Options = conf.Configuration{
+		Id:                     "rs-startup",
 		FullSyncHTTPListenPort: 9101,
 		IncrSyncHTTPListenPort: 9100,
 		PromHTTPListenPort:     9102,
@@ -40,7 +41,9 @@ func TestInitStartupHTTPApisStartPrometheusBeforeLeaderElection(t *testing.T) {
 	releaseLeader := make(chan struct{})
 	done := make(chan struct{})
 
-	prometheusInitHttpApiFunc = func(int) {
+	prometheusInitHttpApiFunc = func(port int, name string) {
+		assert.Equal(t, 9102, port, "should be equal")
+		assert.Equal(t, "rs-startup", name, "should be equal")
 		order <- "prometheus-init"
 	}
 	startPrometheusHttpApiFunc = func() {

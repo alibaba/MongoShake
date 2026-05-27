@@ -327,9 +327,13 @@ func InitPrometheus() {
 }
 
 func PrometheusHandler() http.Handler {
+	return PrometheusHandlerWithName("collector")
+}
+
+func PrometheusHandlerWithName(name string) http.Handler {
 	InitPrometheus()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ObserveMongoShakeUptime("collector")
+		ObserveMongoShakeUptime(name)
 		promhttp.HandlerFor(prometheusRegistry, promhttp.HandlerOpts{}).ServeHTTP(w, r)
 	})
 }

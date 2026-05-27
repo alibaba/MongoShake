@@ -27,9 +27,13 @@ type PrometheusProvider struct {
 }
 
 func PrometheusInitHttpApi(port int) {
+	PrometheusInitHttpApiWithName(port, "collector")
+}
+
+func PrometheusInitHttpApiWithName(port int, name string) {
 	PrometheusHttpApi = &PrometheusProvider{
 		port:    port,
-		handler: PrometheusHandler(),
+		handler: PrometheusHandlerWithName(name),
 	}
 }
 

@@ -481,7 +481,7 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 
 	// metric
 	collectionMetric := syncer.metricNsMap[ns]
-	collectionMetric.TotalCount = splitter.count
+	atomic.StoreUint64(&collectionMetric.TotalCount, splitter.count)
 	syncer.markCollectionProcessing(ns, collectionMetric)
 
 	// run in several pieces
@@ -599,7 +599,7 @@ func (syncer *DBSyncer) RestAPI() {
 		ret.TotalCollection = len(syncer.metricNsMap)
 		for ns, collectionMetric := range syncer.metricNsMap {
 			ret.CollectionMetric[ns.Str()] = collectionMetric.String()
-			switch collectionMetric.CollectionStatus {
+			switch collectionMetric.Status() {
 			case StatusWaitStart:
 				ret.WaitCollection += 1
 			case StatusProcessing:
@@ -624,11 +624,11 @@ func (syncer *DBSyncer) markCollectionProcessing(ns utils.NS, collectionMetric *
 		return
 	}
 
-	if collectionMetric.CollectionStatus == StatusWaitStart {
+	if collectionMetric.Status() == StatusWaitStart {
 		atomic.AddInt64(&syncer.waitingCollections, -1)
 		atomic.AddInt64(&syncer.processingCollections, 1)
 	}
-	collectionMetric.CollectionStatus = StatusProcessing
+	collectionMetric.SetStatus(StatusProcessing)
 	syncer.updateCollectionProgressMetrics()
 	syncer.updateSingleCollectionProgressMetric(ns, collectionMetric)
 }
@@ -638,14 +638,14 @@ func (syncer *DBSyncer) markCollectionFinished(ns utils.NS, collectionMetric *Co
 		return
 	}
 
-	switch collectionMetric.CollectionStatus {
+	switch collectionMetric.Status() {
 	case StatusWaitStart:
 		atomic.AddInt64(&syncer.waitingCollections, -1)
 	case StatusProcessing:
 		atomic.AddInt64(&syncer.processingCollections, -1)
 	}
 	atomic.AddInt64(&syncer.finishedCollections, 1)
-	collectionMetric.CollectionStatus = StatusFinish
+	collectionMetric.SetStatus(StatusFinish)
 	syncer.updateCollectionProgressMetrics()
 	syncer.updateSingleCollectionProgressMetric(ns, collectionMetric)
 }
