@@ -104,6 +104,9 @@ func (metric *ReplicationMetric) init() {
 
 func (metric *ReplicationMetric) Close() {
 	metric.isClosed = true
+	if metric.STAGE == TypeIncr {
+		SetMongoShakeSyncState(metric.NAME, metric.STAGE, SyncStateStopped)
+	}
 }
 
 func (metric *ReplicationMetric) String() string {
@@ -137,6 +140,7 @@ func (metric *ReplicationMetric) startup() {
 			lsnCkpt := atomic.LoadInt64(&metric.LSNCheckpoint)
 			restrans := atomic.LoadUint64(&metric.Retransmission)
 			tps := atomic.LoadUint64(&metric.OplogSuccess.Delta)
+			OplogSuccessTpsProm.WithLabelValues(metric.NAME, metric.STAGE).Set(float64(tps))
 			success := atomic.LoadUint64(&metric.OplogSuccess.Value)
 
 			verbose := "[name=%s, stage=%s, get=%d"
@@ -192,16 +196,13 @@ func (metric *ReplicationMetric) getTunnelTraffic() string {
 }
 
 func (metric *ReplicationMetric) initPrometheusSeries() {
-	if metric.STAGE != TypeIncr {
-		return
-	}
-
 	counterLabels := []string{metric.NAME, metric.STAGE}
 	OplogFilterProm.WithLabelValues(counterLabels...).Add(0)
 	OplogGetProm.WithLabelValues(counterLabels...).Add(0)
 	OplogConsumeProm.WithLabelValues(counterLabels...).Add(0)
 	OplogApplyProm.WithLabelValues(counterLabels...).Add(0)
 	OplogSuccessProm.WithLabelValues(counterLabels...).Add(0)
+	OplogSuccessTpsProm.WithLabelValues(counterLabels...).Set(0)
 	OplogFailProm.WithLabelValues(counterLabels...).Add(0)
 	CheckpointTimesProm.WithLabelValues(counterLabels...).Add(0)
 	RetransmissionProm.WithLabelValues(counterLabels...).Add(0)
@@ -218,6 +219,7 @@ func (metric *ReplicationMetric) initPrometheusSeries() {
 	ReplStatusCodeProm.WithLabelValues(gaugeLabels...).Set(0)
 	LSNAckLagSecondsProm.WithLabelValues(gaugeLabels...).Set(0)
 	LSNCheckpointLagSecondsProm.WithLabelValues(gaugeLabels...).Set(0)
+	MongoShakeSyncStateCodeProm.WithLabelValues(metric.NAME, metric.STAGE).Set(float64(SyncStateInit))
 }
 
 func (metric *ReplicationMetric) Get() uint64 {

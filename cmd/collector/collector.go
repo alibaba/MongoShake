@@ -26,7 +26,7 @@ type Exit struct{ Code int }
 var (
 	fullSyncInitHttpApiFunc    = utils.FullSyncInitHttpApi
 	incrSyncInitHttpApiFunc    = utils.IncrSyncInitHttpApi
-	prometheusInitHttpApiFunc  = utils.PrometheusInitHttpApi
+	prometheusInitHttpApiFunc  = utils.PrometheusInitHttpApiWithName
 	startPrometheusHttpApiFunc = startPrometheusHttpApi
 	registerConfHttpApiFunc    = registerConfHttpApi
 	selectLeaderFunc           = selectLeader
@@ -122,6 +122,7 @@ func main() {
 
 func startup() {
 	initStartupHTTPApis()
+	utils.SetMongoShakeInfo(conf.Options.Id)
 
 	ReplCord := &coordinator.ReplicationCoordinator{
 		MongoD: make([]*utils.MongoSource, len(conf.Options.MongoUrls)),
@@ -173,7 +174,7 @@ func startup() {
 }
 
 func initStartupHTTPApis() {
-	prometheusInitHttpApiFunc(conf.Options.PromHTTPListenPort)
+	prometheusInitHttpApiFunc(conf.Options.PromHTTPListenPort, conf.Options.Id)
 	startPrometheusHttpApiFunc()
 
 	// leader election blocks standby nodes before full/incr runtime APIs are exposed.

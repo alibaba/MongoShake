@@ -590,11 +590,12 @@ func (sync *OplogSyncer) updatePendingQueueMetric(index int) {
 		return
 	}
 
-	utils.PendingQueueUsedProm.WithLabelValues(
-		sync.Replset,
-		utils.TypeIncr,
-		strconv.Itoa(index),
-	).Set(float64(len(sync.PendingQueue[index])))
+	used := len(sync.PendingQueue[index])
+	capacity := cap(sync.PendingQueue[index])
+	labels := []string{sync.Replset, utils.TypeIncr, strconv.Itoa(index)}
+	utils.PendingQueueUsedProm.WithLabelValues(labels...).Set(float64(used))
+	utils.PendingQueueCapacityProm.WithLabelValues(labels...).Set(float64(capacity))
+	utils.PendingQueueUsedRatioProm.WithLabelValues(labels...).Set(utils.QueueUsedRatio(used, capacity))
 }
 
 func (sync *OplogSyncer) updateLogsQueueMetric(index int) {
@@ -602,11 +603,12 @@ func (sync *OplogSyncer) updateLogsQueueMetric(index int) {
 		return
 	}
 
-	utils.LogsQueueUsedProm.WithLabelValues(
-		sync.Replset,
-		utils.TypeIncr,
-		strconv.Itoa(index),
-	).Set(float64(len(sync.logsQueue[index])))
+	used := len(sync.logsQueue[index])
+	capacity := cap(sync.logsQueue[index])
+	labels := []string{sync.Replset, utils.TypeIncr, strconv.Itoa(index)}
+	utils.LogsQueueUsedProm.WithLabelValues(labels...).Set(float64(used))
+	utils.LogsQueueCapacityProm.WithLabelValues(labels...).Set(float64(capacity))
+	utils.LogsQueueUsedRatioProm.WithLabelValues(labels...).Set(utils.QueueUsedRatio(used, capacity))
 }
 
 func (sync *OplogSyncer) recordLastFetchStats(logs []*oplog.GenericOplog, now time.Time) {

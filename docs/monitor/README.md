@@ -455,3 +455,107 @@ curl -g 'http://127.0.0.1:9090/api/v1/query?query=up{job="mongoshake"}'
 4. 启动 Grafana，创建 Prometheus datasource
 5. 导入 `docs/monitor/mongoshake-dashboard.json`
 6. 在 dashboard 顶部选择 `Instance`，检查复制状态和 delay 面板是否出数
+
+## 10. 增强指标与常用 PromQL
+
+### 10.1 当前同步阶段
+
+`mongoshake_sync_stage{name,stage}` 用于直接判断当前任务处于全量还是增量阶段：
+
+```promql
+# 当前正在全量同步
+mongoshake_sync_stage{stage="full"} == 1
+
+# 当前正在增量同步
+mongoshake_sync_stage{stage="incr"} == 1
+```
+
+`mongoshake_sync_stage_start_time_seconds{name,stage}` 表示阶段开始时间，可计算阶段持续时间：
+
+```promql
+# 当前全量阶段持续秒数
+time() - mongoshake_sync_stage_start_time_seconds{stage="full"}
+```
+
+`mongoshake_sync_state_code{name,stage}` 表示阶段生命周期状态：
+
+| code | 状态 |
+| --- | --- |
+| 0 | init |
+| 1 | running |
+| 2 | done |
+| 3 | error |
+| 4 | stopped |
+
+### 10.2 全量同步表级进度
+
+以下指标可用于确认具体库表的全量同步进度：
+
+| 指标 | 说明 |
+| --- | --- |
+| `full_sync_collection_status{name,stage,db,collection}` | 表状态：0 等待、1 同步中、2 完成 |
+| `full_sync_collection_docs_total{name,stage,db,collection}` | 表总文档数 |
+| `full_sync_collection_docs_finished{name,stage,db,collection}` | 已完成文档数 |
+| `full_sync_collection_progress_ratio{name,stage,db,collection}` | 表同步进度，范围 0~1 |
+
+常用查询：
+
+```promql
+# 正在同步的表
+full_sync_collection_status{stage="full"} == 1
+
+# 每张表同步百分比
+full_sync_collection_progress_ratio{stage="full"} * 100
+
+# 某个库下每张表同步百分比
+full_sync_collection_progress_ratio{stage="full",db="db1"} * 100
+
+# 未完成的表
+full_sync_collection_progress_ratio{stage="full"} < 1
+```
+
+整体集合进度可用：
+
+```promql
+full_sync_collections_progress_ratio{stage="full"} * 100
+```
+
+### 10.3 队列利用率
+
+新增 capacity 和 ratio 指标，便于观察堆积：
+
+```promql
+pending_queue_used_ratio{stage="incr"}
+logs_queue_used_ratio{stage="incr"}
+worker_jobs_queue_used_ratio{stage="incr"}
+persister_buffer_used_ratio{stage="incr"}
+```
+
+示例告警条件：
+
+```promql
+pending_queue_used_ratio{stage="incr"} > 0.8
+```
+
+### 10.4 TPS 与运行信息
+
+`oplog_success_tps{name,stage}` 暴露内部每秒成功量，和日志中的 `tps` 语义一致。也可以继续使用 counter 计算平滑速率：
+
+```promql
+rate(oplog_success_total[1m])
+```
+
+运行信息：
+
+```promql
+mongoshake_info
+mongoshake_uptime_seconds
+```
+
+进程级指标由 Prometheus process collector 暴露，常见指标包括：
+
+```promql
+process_resident_memory_bytes
+process_virtual_memory_bytes
+process_start_time_seconds
+```
