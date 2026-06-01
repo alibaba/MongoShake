@@ -19,10 +19,12 @@ import (
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
 
-const (
+var (
 	testUrl                  = unit_test_common.TestUrl
 	testMongoShardingAddress = unit_test_common.TestUrlSharding
+)
 
+const (
 	uuidMark = "ui"
 )
 

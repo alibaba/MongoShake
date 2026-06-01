@@ -32,3 +32,6 @@ common/123.pid
 
 #Claude
 .claude/
+
+# Local-only test env vars (see docs/refactor-test-config-env-vars.md)
+.env.test
