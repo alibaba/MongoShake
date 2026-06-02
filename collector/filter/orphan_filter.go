@@ -64,7 +64,11 @@ NextChunk:
 			if key == nil {
 				l.Logger.Panicf("OrphanFilter find no shard key[%v] in doc %v", keyName, docD)
 			}
-			if shardCol.ShardType == sharding.HashedShard {
+			// Compound shard keys can mix hashed and ranged columns
+			// (e.g. {a: 1, b: "hashed"}); hash only the columns the
+			// server hashes, otherwise the ranged column would be
+			// compared against a hashed bound and silently mis-classify.
+			if shardCol.ShardTypes[keyInd] == sharding.HashedShard {
 				key = ComputeHash(key)
 			}
 			if chunkLt(key, chunkRage.Mins[keyInd]) {
@@ -78,9 +82,9 @@ NextChunk:
 		for keyInd, keyName := range shardCol.Keys {
 			key := oplog.GetKey(docD, keyName)
 			if key == nil {
-				l.Logger.Panicf("OrphanFilter find no shard ke[%v] in doc %v", keyName, docD)
+				l.Logger.Panicf("OrphanFilter find no shard key[%v] in doc %v", keyName, docD)
 			}
-			if shardCol.ShardType == sharding.HashedShard {
+			if shardCol.ShardTypes[keyInd] == sharding.HashedShard {
 				key = ComputeHash(key)
 			}
 			if chunkGt(key, chunkRage.Maxs[keyInd]) {

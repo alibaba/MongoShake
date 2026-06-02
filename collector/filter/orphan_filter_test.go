@@ -36,7 +36,7 @@ func TestOrphanFilter_NilChunkMap(t *testing.T) {
 func TestOrphanFilter_NamespaceMissing(t *testing.T) {
 	f := NewOrphanFilter("rs0", sharding.DBChunkMap{
 		"other.coll": &sharding.ShardCollection{
-			Keys: []string{"x"}, ShardType: sharding.RangedShard,
+			Keys: []string{"x"}, ShardTypes: []string{sharding.RangedShard},
 			Chunks: []*sharding.ChunkRange{{Mins: []interface{}{0}, Maxs: []interface{}{10}}},
 		},
 	})
@@ -46,7 +46,7 @@ func TestOrphanFilter_NamespaceMissing(t *testing.T) {
 // range, single shard key: in/out/min/max boundary semantics.
 func TestOrphanFilter_RangeSingleKey(t *testing.T) {
 	cm := mkRange(t, &sharding.ShardCollection{
-		Keys: []string{"x"}, ShardType: sharding.RangedShard,
+		Keys: []string{"x"}, ShardTypes: []string{sharding.RangedShard},
 		Chunks: []*sharding.ChunkRange{
 			{Mins: []interface{}{1}, Maxs: []interface{}{10}},
 			{Mins: []interface{}{50}, Maxs: []interface{}{100}},
@@ -81,7 +81,7 @@ func TestOrphanFilter_RangeSingleKey(t *testing.T) {
 // issue #978: "分片键为两个字段的联合分片").
 func TestOrphanFilter_RangeCompoundKey(t *testing.T) {
 	cm := mkRange(t, &sharding.ShardCollection{
-		Keys: []string{"a", "b"}, ShardType: sharding.RangedShard,
+		Keys: []string{"a", "b"}, ShardTypes: []string{sharding.RangedShard, sharding.RangedShard},
 		Chunks: []*sharding.ChunkRange{
 			// chunk: [{a:1, b:100}, {a:5, b:200})
 			{Mins: []interface{}{1, 100}, Maxs: []interface{}{5, 200}},
@@ -140,7 +140,7 @@ func TestOrphanFilter_HashedAllTypes(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			cm := mkRange(t, &sharding.ShardCollection{
-				Keys: []string{"k"}, ShardType: sharding.HashedShard,
+				Keys: []string{"k"}, ShardTypes: []string{sharding.HashedShard},
 				Chunks: keyAll,
 			})
 			f := NewOrphanFilter("rs0", cm)
@@ -159,7 +159,7 @@ func TestOrphanFilter_HashedTightChunk(t *testing.T) {
 	hashed := ComputeHash(oid)
 
 	in := mkRange(t, &sharding.ShardCollection{
-		Keys: []string{"_id"}, ShardType: sharding.HashedShard,
+		Keys: []string{"_id"}, ShardTypes: []string{sharding.HashedShard},
 		Chunks: []*sharding.ChunkRange{
 			{Mins: []interface{}{hashed - 1}, Maxs: []interface{}{hashed + 1}},
 		},
@@ -168,7 +168,7 @@ func TestOrphanFilter_HashedTightChunk(t *testing.T) {
 		"hashed key inside ±1 chunk should not be orphan")
 
 	out := mkRange(t, &sharding.ShardCollection{
-		Keys: []string{"_id"}, ShardType: sharding.HashedShard,
+		Keys: []string{"_id"}, ShardTypes: []string{sharding.HashedShard},
 		Chunks: []*sharding.ChunkRange{
 			{Mins: []interface{}{hashed + 100}, Maxs: []interface{}{hashed + 200}},
 		},
@@ -181,7 +181,7 @@ func TestOrphanFilter_HashedTightChunk(t *testing.T) {
 // (verifies the "iterate-all-then-fall-through" path).
 func TestOrphanFilter_HashedNoChunks(t *testing.T) {
 	cm := mkRange(t, &sharding.ShardCollection{
-		Keys: []string{"k"}, ShardType: sharding.HashedShard,
+		Keys: []string{"k"}, ShardTypes: []string{sharding.HashedShard},
 		Chunks: nil,
 	})
 	f := NewOrphanFilter("rs0", cm)
@@ -197,7 +197,7 @@ func TestOrphanFilter_HashedInt64Precision(t *testing.T) {
 	// 2^62 + 1 and 2^62 - 1 are distinct int64 but collide in float64.
 	const target = int64(1)<<62 + 1
 	cm := mkRange(t, &sharding.ShardCollection{
-		Keys: []string{"k"}, ShardType: sharding.HashedShard,
+		Keys: []string{"k"}, ShardTypes: []string{sharding.HashedShard},
 		Chunks: []*sharding.ChunkRange{
 			{Mins: []interface{}{target}, Maxs: []interface{}{target + 1}},
 		},
@@ -278,12 +278,63 @@ func TestGetBsonType_PrimitiveMinMaxKey(t *testing.T) {
 	assert.Equal(t, BsonMaxKey, typ)
 }
 
+// Compound hashed shard key {a: 1, b: "hashed"}: only `b` should be hashed
+// before comparing to chunk bounds. Pre-fix Filter would hash every column
+// whenever ShardType==HashedShard, so a=5 would become ComputeHash(5) and
+// fall outside the [3, 7) ranged bound — silently flagging the doc as
+// orphan. This test pins the per-column behaviour added in ShardTypes.
+func TestOrphanFilter_CompoundHashed_RangedFirst(t *testing.T) {
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys:       []string{"a", "b"},
+		ShardTypes: []string{sharding.RangedShard, sharding.HashedShard},
+		Chunks: []*sharding.ChunkRange{
+			// a in [3, 7), b covers the full hash space so b is irrelevant
+			// to the in/out decision — this isolates `a` is compared as-is.
+			{
+				Mins: []interface{}{3, int64(math.MinInt64)},
+				Maxs: []interface{}{7, int64(math.MaxInt64)},
+			},
+		},
+	})
+	f := NewOrphanFilter("rs0", cm)
+
+	// a=5 in [3, 7); ComputeHash(5) is almost certainly not in [3, 7),
+	// so this assertion fails the moment Filter starts hashing column 0.
+	assert.False(t, f.Filter(bson.D{{"a", 5}, {"b", "anything"}}, testNs),
+		"a in ranged bounds; only column 1 should be hashed")
+	assert.True(t, f.Filter(bson.D{{"a", 8}, {"b", "anything"}}, testNs),
+		"a outside ranged bounds — orphan")
+}
+
+// Compound hashed shard key {a: "hashed", b: 1}: column 0 must be hashed,
+// column 1 compared as-is. Pre-fix Filter inferred ShardType from the last
+// key (ranged here) and therefore skipped hashing entirely; this test pins
+// the inverse direction so the ShardTypes wiring stays correct both ways.
+func TestOrphanFilter_CompoundHashed_HashedFirst(t *testing.T) {
+	aVal := "hashed-key"
+	hashA := ComputeHash(aVal)
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys:       []string{"a", "b"},
+		ShardTypes: []string{sharding.HashedShard, sharding.RangedShard},
+		Chunks: []*sharding.ChunkRange{
+			// Pin a to hashA so the min-loop reaches b; b in [3, 7).
+			{Mins: []interface{}{hashA, 3}, Maxs: []interface{}{hashA, 7}},
+		},
+	})
+	f := NewOrphanFilter("rs0", cm)
+
+	assert.False(t, f.Filter(bson.D{{"a", aVal}, {"b", 5}}, testNs),
+		"a must be hashed to hashA, b must be compared as-is in [3, 7)")
+	assert.True(t, f.Filter(bson.D{{"a", aVal}, {"b", 10}}, testNs),
+		"b outside ranged bounds — orphan")
+}
+
 // End-to-end test: range shard with real BSON MinKey/MaxKey boundaries (as
 // decoded from config.chunks) must correctly classify docs as non-orphan.
 func TestOrphanFilter_RangeWithBsonMinMaxKey(t *testing.T) {
 	// First/last chunks in a real sharded collection use MinKey/MaxKey.
 	cm := mkRange(t, &sharding.ShardCollection{
-		Keys: []string{"x"}, ShardType: sharding.RangedShard,
+		Keys: []string{"x"}, ShardTypes: []string{sharding.RangedShard},
 		Chunks: []*sharding.ChunkRange{
 			{Mins: []interface{}{primitive.MinKey{}}, Maxs: []interface{}{50}},
 			{Mins: []interface{}{50}, Maxs: []interface{}{primitive.MaxKey{}}},

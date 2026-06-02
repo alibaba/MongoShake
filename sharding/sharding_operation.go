@@ -59,9 +59,14 @@ type ChunkRange struct {
 
 type ShardCollection struct {
 	Chunks []*ChunkRange
-	// shard key may have multiple columns, for example {a:1, b:1, c:1}
-	Keys      []string
-	ShardType string
+	// Shard key columns and the corresponding per-column shard type.
+	// ShardTypes[i] is the type of Keys[i] and is either HashedShard or
+	// RangedShard. Compound hashed keys (MongoDB 4.4+) such as
+	// {a: 1, b: "hashed"} are represented with a mix of values; consumers
+	// must check ShardTypes[i] per key instead of treating the collection
+	// as uniformly hashed or ranged.
+	Keys       []string
+	ShardTypes []string
 }
 
 // {replset: {namespace: []ChunkRange} }
@@ -122,8 +127,8 @@ func GetChunkMapByUrl(csUrl string) (ShardingChunkMap, error) {
 			continue
 		}
 
-		// get all keys and shard type(range or hashed)
-		keys, shardType, err := GetColShardType(conn, chunkDoc.Ns)
+		// get all keys and per-key shard type(range or hashed)
+		keys, shardTypes, err := GetColShardType(conn, chunkDoc.Ns)
 		if err != nil {
 			return nil, err
 		}
@@ -131,7 +136,7 @@ func GetChunkMapByUrl(csUrl string) (ShardingChunkMap, error) {
 		// the namespace is sharded, chunk map of each shard need to initialize
 		for _, dbChunkMap := range chunkMap {
 			if _, ok := dbChunkMap[chunkDoc.Ns]; !ok {
-				dbChunkMap[chunkDoc.Ns] = &ShardCollection{Keys: keys, ShardType: shardType}
+				dbChunkMap[chunkDoc.Ns] = &ShardCollection{Keys: keys, ShardTypes: shardTypes}
 			}
 		}
 
@@ -167,35 +172,56 @@ func GetChunkMapByUrl(csUrl string) (ShardingChunkMap, error) {
 	return chunkMap, nil
 }
 
-// input given namespace, return all keys and shard type(range or hashed)
-func GetColShardType(conn *utils.MongoCommunityConn, namespace string) ([]string, string, error) {
+// GetColShardType returns the shard key columns and the per-column shard
+// type for the given namespace. The second return value has the same length
+// as the first; each entry is either HashedShard or RangedShard.
+//
+// Compound shard keys can mix the two — e.g. {a: 1, b: "hashed"} (MongoDB
+// 4.4+ compound hashed). Callers must consult the per-column type when
+// deciding whether to ComputeHash; treating the whole collection as a
+// single type silently mis-classifies documents at the shard boundary.
+func GetColShardType(conn *utils.MongoCommunityConn, namespace string) ([]string, []string, error) {
 	var colDoc bson.D
 	if err := conn.Client.Database(ConfigDB).Collection(CollectionCol).FindOne(context.Background(),
 		bson.M{"_id": namespace}).Decode(&colDoc); err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 
-	var keys []string
-	var shardType string
-	var ok bool
-	if colDoc, ok = oplog.GetKey(colDoc, "key").(bson.D); !ok {
-		return nil, "", fmt.Errorf("GetColShardType with namespace[%v] has no key item in doc %v", namespace, colDoc)
+	keyDoc, ok := oplog.GetKey(colDoc, "key").(bson.D)
+	if !ok {
+		return nil, nil, fmt.Errorf("GetColShardType with namespace[%v] has no key item in doc %v", namespace, colDoc)
 	}
+	keys, shardTypes, err := parseShardKey(keyDoc)
+	if err != nil {
+		return nil, nil, fmt.Errorf("GetColShardType with namespace[%v]: %w", namespace, err)
+	}
+	return keys, shardTypes, nil
+}
 
-	for _, item := range colDoc {
-		// either be a single hashed field, or a list of ascending fields
+// parseShardKey turns a config.collections "key" subdocument into the per-
+// column (name, type) pair. It is the pure data path of GetColShardType and
+// is split out so we can unit-test compound hashed shard keys without a
+// mongos. Each item's value is either a string ("hashed") or a numeric
+// direction (1 / -1, including int32/int64/float64 as decoded by the BSON
+// driver). The two slices returned are 1:1 with keyDoc and are intentionally
+// not coalesced — callers like OrphanFilter.Filter rely on the per-column
+// type rather than a collection-wide flag.
+func parseShardKey(keyDoc bson.D) ([]string, []string, error) {
+	keys := make([]string, 0, len(keyDoc))
+	shardTypes := make([]string, 0, len(keyDoc))
+	for _, item := range keyDoc {
 		switch v := item.Value.(type) {
 		case string:
-			shardType = HashedShard
+			shardTypes = append(shardTypes, HashedShard)
 		case int, int32, int64, float64:
-			shardType = RangedShard
+			shardTypes = append(shardTypes, RangedShard)
 		default:
-			return nil, "", fmt.Errorf("GetColShardType with namespace[%v] doc[%v] meet unknown ShakeKey type[%v]",
-				namespace, colDoc, reflect.TypeOf(v))
+			return nil, nil, fmt.Errorf("shard key field[%v] has unsupported value type[%v]",
+				item.Key, reflect.TypeOf(v))
 		}
 		keys = append(keys, item.Key)
 	}
-	return keys, shardType, nil
+	return keys, shardTypes, nil
 }
 
 type ShardCollectionSpec struct {

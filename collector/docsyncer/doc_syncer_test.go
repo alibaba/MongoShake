@@ -192,8 +192,8 @@ func TestDbSync(t *testing.T) {
 						},
 					},
 				},
-				Keys:      []string{"x"},
-				ShardType: sharding.RangedShard,
+				Keys:       []string{"x"},
+				ShardTypes: []string{sharding.RangedShard},
 			},
 		})
 		dbSyncer := &DBSyncer{

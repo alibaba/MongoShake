@@ -15,7 +15,7 @@ Cases:
     A. mongo_urls only + filter.orphan_document=true
        → dest should have exactly 2 docs (orphan filtered)
     B. mongo_urls + mongo_s_url + filter.orphan_document=true (issue #978 repro)
-       → dest should have <2 docs OR fail with dup-key (orphan NOT filtered),
+       → dest should have exactly 2 docs (mongos routes past orphan) with rc=0,
          AND the collector log must contain the new WARN message
     C. mongo_urls only + filter.orphan_document=false
        → dest should fail with dup-key (baseline)
@@ -105,14 +105,21 @@ def main(binary: str) -> int:
         failures += 1
 
     # Case B: mongod-direct + mongos + filter on → WARN expected, filter
-    # silently disabled (current pre-fix would silently fail; with this fix
-    # we additionally expect the WARN line in the log).
+    # silently disabled. With mongo_s_url configured, full sync reads via
+    # mongos which never exposes orphan docs (they're invisible to the
+    # router). So the sync succeeds normally with 2 docs — same as Case A
+    # in terms of dest state, but the mechanism is different: mongos routing
+    # hides the orphan rather than the filter removing it.
+    # Assert:
+    #   1) the new WARN line is present (proves the fix logged the heads-up)
+    #   2) rc=0 and dest_count=2 (mongos-routed sync sees only owned docs)
     print("\nCase B: mongos + orphan_document=true (#978 repro)")
     reset_dest()
     conf = os.path.join(workdir, "B.conf")
     log_dir = os.path.join(workdir, "B_log"); os.makedirs(log_dir, exist_ok=True)
     write_conf(conf, log_dir, with_mongos=True, orphan_filter=True)
     rc, out = run_collector(binary, conf)
+    cnt = dest_count()
     log_blob = ""
     log_path = os.path.join(log_dir, "collector.log")
     if os.path.exists(log_path):
@@ -121,6 +128,13 @@ def main(binary: str) -> int:
     has_warn = "orphan filter will NOT take effect" in log_blob
     case("WARN present in log", has_warn, "looking for 'orphan filter will NOT take effect'")
     if not has_warn:
+        failures += 1
+    # mongos routes reads to the owning shard only, so orphan is invisible
+    # and sync completes cleanly with all 2 legitimate docs.
+    behaved_as_mongos_routed = (rc == 0 and cnt == 2)
+    case("mongos-routed sync succeeds normally", behaved_as_mongos_routed,
+         f"rc={rc} dest_count={cnt} (expect rc=0, dest=2)")
+    if not behaved_as_mongos_routed:
         failures += 1
 
     # Case C: filter off → baseline failure mode.

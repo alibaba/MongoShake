@@ -6,7 +6,7 @@ covering the three configurations from issue #978:
 | Case | Source config | `orphan_document` | Expected dest |
 |---|---|---|---|
 | A | `mongo_urls` only (mongod direct) | `true` | 2 docs (orphan filtered) |
-| B | `mongo_urls` + `mongo_s_url` (the #978 user's config) | `true` | `<2` docs **and** WARN line in log |
+| B | `mongo_urls` + `mongo_s_url` (the #978 user's config) | `true` | 2 docs (mongos routes past orphan), rc=0, **and** WARN line in log |
 | C | `mongo_urls` only | `false` | baseline failure (dup-key panic) |
 
 ## What this catches
