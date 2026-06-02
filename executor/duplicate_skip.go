@@ -16,6 +16,16 @@ func shouldSkipDupKeyOnInsert(database, collection string, err error) (bool, str
 		return false, ""
 	}
 
+	// _id duplicates carry distinct semantics: an oplog being re-applied
+	// after a checkpoint replay produces an _id E11000, and the writer
+	// layer's already-applied detection is the right place to handle it
+	// (it can compare the existing doc to the incoming one). Skipping
+	// _id_ here — even under a "*" wildcard rule — would mask real data
+	// divergence, so always defer _id back to the writer.
+	if indexName == "_id_" {
+		return false, indexName
+	}
+
 	return shouldSkipDupKeyIndex(database, collection, indexName), indexName
 }
 
