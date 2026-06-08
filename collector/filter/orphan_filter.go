@@ -283,6 +283,12 @@ func chunkGt(x, y interface{}) bool {
 		return false
 	case BsonTypeString:
 		return rx.(string) > ry.(string)
+	case BsonTypeOid:
+		return rx.(string) > ry.(string)
+	case BsonTypeBool, BsonTypeDate:
+		return rx.(int64) > ry.(int64)
+	case BsonTypeTstamp:
+		return rx.(uint64) > ry.(uint64)
 	default:
 		l.Logger.Panicf("chunkGt meet unknown type %v", xType)
 	}
@@ -305,6 +311,12 @@ func chunkEqual(x, y interface{}) bool {
 		return true
 	case BsonTypeString:
 		return rx.(string) == ry.(string)
+	case BsonTypeOid:
+		return rx.(string) == ry.(string)
+	case BsonTypeBool, BsonTypeDate:
+		return rx.(int64) == ry.(int64)
+	case BsonTypeTstamp:
+		return rx.(uint64) == ry.(uint64)
 	default:
 		l.Logger.Panicf("chunkEqual meet unknown type %v", xType)
 	}
@@ -327,6 +339,12 @@ func chunkLt(x, y interface{}) bool {
 		return false
 	case BsonTypeString:
 		return rx.(string) < ry.(string)
+	case BsonTypeOid:
+		return rx.(string) < ry.(string)
+	case BsonTypeBool, BsonTypeDate:
+		return rx.(int64) < ry.(int64)
+	case BsonTypeTstamp:
+		return rx.(uint64) < ry.(uint64)
 	default:
 		l.Logger.Panicf("chunkLt meet unknown type %v", xType)
 	}
@@ -361,6 +379,18 @@ func getBsonType(x interface{}) (int, interface{}) {
 		return BsonTypeString, rx
 	case primitive.ObjectID:
 		return BsonTypeOid, rx.Hex()
+	case bool:
+		if rx {
+			return BsonTypeBool, int64(1)
+		}
+		return BsonTypeBool, int64(0)
+	case primitive.DateTime:
+		return BsonTypeDate, int64(rx)
+	case primitive.Timestamp:
+		// Encode T (seconds) in high 32 bits and I (increment) in low 32 bits.
+		// Must stay uint64 — int64 would overflow to negative when T >= 2^31,
+		// reversing the sort order for timestamps after 2038-01-19.
+		return BsonTypeTstamp, uint64(rx.T)<<32 | uint64(rx.I)
 	default:
 		l.Logger.Panicf("getBsonType meet unknown type %T", x)
 	}

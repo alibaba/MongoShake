@@ -329,6 +329,106 @@ func TestOrphanFilter_CompoundHashed_HashedFirst(t *testing.T) {
 		"b outside ranged bounds — orphan")
 }
 
+// Ranged shard key = ObjectID (the most common non-hash shard key in
+// production: shard on _id). Chunk bounds are real ObjectIDs from
+// config.chunks; chunkLt/Gt/Equal must compare via BsonTypeOid (hex string)
+// without panicking.
+func TestOrphanFilter_RangeObjectID(t *testing.T) {
+	// Construct 3 ObjectIDs with known ordering (lexicographic on bytes).
+	oid1 := primitive.ObjectID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
+	oid2 := primitive.ObjectID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05}
+	oid3 := primitive.ObjectID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a}
+
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys: []string{"_id"}, ShardTypes: []string{sharding.RangedShard},
+		Chunks: []*sharding.ChunkRange{
+			{Mins: []interface{}{oid1}, Maxs: []interface{}{oid3}},
+		},
+	})
+	f := NewOrphanFilter("rs0", cm)
+
+	oidBefore := primitive.ObjectID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+	oidAfter := primitive.ObjectID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f}
+
+	cases := []struct {
+		name   string
+		id     primitive.ObjectID
+		orphan bool
+	}{
+		{"before chunk min", oidBefore, true},
+		{"at chunk min (inclusive)", oid1, false},
+		{"in chunk", oid2, false},
+		{"at chunk max (exclusive)", oid3, true},
+		{"after chunk max", oidAfter, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.orphan, f.Filter(bson.D{{"_id", c.id}}, testNs))
+		})
+	}
+}
+
+// Ranged shard key = DateTime: verify chunkLt/Gt/Equal handle BsonTypeDate.
+func TestOrphanFilter_RangeDateTime(t *testing.T) {
+	min := primitive.DateTime(1000000)
+	max := primitive.DateTime(2000000)
+
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys: []string{"ts"}, ShardTypes: []string{sharding.RangedShard},
+		Chunks: []*sharding.ChunkRange{
+			{Mins: []interface{}{min}, Maxs: []interface{}{max}},
+		},
+	})
+	f := NewOrphanFilter("rs0", cm)
+
+	assert.True(t, f.Filter(bson.D{{"ts", primitive.DateTime(500000)}}, testNs), "before min")
+	assert.False(t, f.Filter(bson.D{{"ts", primitive.DateTime(1500000)}}, testNs), "in range")
+	assert.True(t, f.Filter(bson.D{{"ts", primitive.DateTime(2000000)}}, testNs), "at max (exclusive)")
+}
+
+// Ranged shard key = Timestamp: verify chunkLt/Gt/Equal handle BsonTypeTstamp.
+func TestOrphanFilter_RangeTimestamp(t *testing.T) {
+	min := primitive.Timestamp{T: 100, I: 0}
+	max := primitive.Timestamp{T: 200, I: 0}
+
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys: []string{"ts"}, ShardTypes: []string{sharding.RangedShard},
+		Chunks: []*sharding.ChunkRange{
+			{Mins: []interface{}{min}, Maxs: []interface{}{max}},
+		},
+	})
+	f := NewOrphanFilter("rs0", cm)
+
+	assert.True(t, f.Filter(bson.D{{"ts", primitive.Timestamp{T: 50, I: 0}}}, testNs), "before min")
+	assert.False(t, f.Filter(bson.D{{"ts", primitive.Timestamp{T: 150, I: 0}}}, testNs), "in range")
+	assert.True(t, f.Filter(bson.D{{"ts", primitive.Timestamp{T: 200, I: 0}}}, testNs), "at max (exclusive)")
+	// T equal, I decides order
+	assert.False(t, f.Filter(bson.D{{"ts", primitive.Timestamp{T: 100, I: 5}}}, testNs), "T==min.T, I>min.I → in range")
+}
+
+// Timestamp chunk spanning T = 0x7fffffff → 0x80000000: the packed uint64
+// must not overflow into negative int64, otherwise the ordering reverses
+// and docs after 2038-01-19 are misclassified.
+func TestOrphanFilter_RangeTimestamp_Uint64Overflow(t *testing.T) {
+	min := primitive.Timestamp{T: 0x7fffffff, I: 0}
+	max := primitive.Timestamp{T: 0x80000001, I: 0}
+
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys: []string{"ts"}, ShardTypes: []string{sharding.RangedShard},
+		Chunks: []*sharding.ChunkRange{
+			{Mins: []interface{}{min}, Maxs: []interface{}{max}},
+		},
+	})
+	f := NewOrphanFilter("rs0", cm)
+
+	assert.False(t, f.Filter(bson.D{{"ts", primitive.Timestamp{T: 0x80000000, I: 0}}}, testNs),
+		"T=0x80000000 is between 0x7fffffff and 0x80000001 — must be in range, not orphan")
+	assert.True(t, f.Filter(bson.D{{"ts", primitive.Timestamp{T: 0x7ffffffe, I: 0}}}, testNs),
+		"below min — orphan")
+	assert.True(t, f.Filter(bson.D{{"ts", primitive.Timestamp{T: 0x80000001, I: 0}}}, testNs),
+		"at max (exclusive) — orphan")
+}
+
 // End-to-end test: range shard with real BSON MinKey/MaxKey boundaries (as
 // decoded from config.chunks) must correctly classify docs as non-orphan.
 func TestOrphanFilter_RangeWithBsonMinMaxKey(t *testing.T) {
