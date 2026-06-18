@@ -19,10 +19,13 @@ import (
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
 
-const (
+var (
 	testMongoAddress = unit_test_common.TestUrl
-	testDb           = "test_db"
-	testCollection   = "test_coll"
+)
+
+const (
+	testDb         = "test_db"
+	testCollection = "test_coll"
 )
 
 var (
@@ -189,8 +192,8 @@ func TestDbSync(t *testing.T) {
 						},
 					},
 				},
-				Keys:      []string{"x"},
-				ShardType: sharding.RangedShard,
+				Keys:       []string{"x"},
+				ShardTypes: []string{sharding.RangedShard},
 			},
 		})
 		dbSyncer := &DBSyncer{

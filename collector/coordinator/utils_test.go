@@ -17,11 +17,14 @@ import (
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
 
-const (
+var (
 	testUrl           = unit_test_common.TestUrl
 	testUrlServerless = unit_test_common.TestUrlServerlessTenant
-	testDb            = "test_db3"
-	testCollection    = "test_ut"
+)
+
+const (
+	testDb         = "test_db3"
+	testCollection = "test_ut"
 )
 
 func TestSelectSyncMode(t *testing.T) {
