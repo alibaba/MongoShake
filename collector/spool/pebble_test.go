@@ -1,10 +1,12 @@
 package spool
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/pebble/v2"
 	"github.com/stretchr/testify/assert"
@@ -50,11 +52,9 @@ func TestPebbleSpoolAcceptNoopWithoutNamespace(t *testing.T) {
 	ps := openTestSpool(t, t.TempDir(), "rs-spool-noop")
 	defer ps.Delete()
 
-	data, err := bson.Marshal(&oplog.PartialLog{
-		ParsedLog: oplog.ParsedLog{
-			Timestamp: utils.TimeToTimestamp(11),
-			Operation: "n",
-		},
+	data, err := bson.Marshal(&oplog.ParsedLog{
+		Timestamp: utils.TimeToTimestamp(11),
+		Operation: "n",
 	})
 	require.NoError(t, err)
 
@@ -67,6 +67,14 @@ func TestPebbleSpoolAcceptNoopWithoutNamespace(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, data, rows[0], "should be equal")
+}
+
+func TestParseOplogTimestampRejectsMissingTimestamp(t *testing.T) {
+	data, err := bson.Marshal(bson.D{{Key: "op", Value: "n"}})
+	require.NoError(t, err)
+
+	_, err = parseOplogTimestamp(data)
+	require.ErrorContains(t, err, "timestamp field \"ts\" not found")
 }
 
 func TestPebbleSpoolReopen(t *testing.T) {
@@ -130,6 +138,48 @@ func TestPebbleSpoolRejectPutAfterMaxBytes(t *testing.T) {
 	assert.Equal(t, uint64(1), stats.WriteSeq, "should be equal")
 	assert.Equal(t, uint64(1), stats.Depth, "should be equal")
 	assert.Greater(t, stats.Bytes, uint64(0), "should be equal")
+}
+
+func TestDirectorySizeIgnoresDisappearingEntries(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "spool")
+	walk := func(path string, fn fs.WalkDirFunc) error {
+		require.Equal(t, root, path)
+		require.NoError(t, fn(root, fakeDirEntry{name: "spool", dir: true}, nil))
+		require.NoError(t, fn(filepath.Join(root, "removed-before-callback.sst"), nil, &os.PathError{
+			Op:   "lstat",
+			Path: filepath.Join(root, "removed-before-callback.sst"),
+			Err:  os.ErrNotExist,
+		}))
+		require.NoError(t, fn(filepath.Join(root, "removed-before-info.sst"), fakeDirEntry{
+			name:    "removed-before-info.sst",
+			infoErr: os.ErrNotExist,
+		}, nil))
+		require.NoError(t, fn(filepath.Join(root, "live.sst"), fakeDirEntry{
+			name: "live.sst",
+			size: 42,
+		}, nil))
+		return nil
+	}
+
+	size, err := directorySizeWithWalk(root, walk)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(42), size, "should be equal")
+}
+
+func TestDirectorySizeReturnsRootMissing(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing")
+	walk := func(path string, fn fs.WalkDirFunc) error {
+		require.Equal(t, root, path)
+		return fn(root, nil, &os.PathError{
+			Op:   "lstat",
+			Path: root,
+			Err:  os.ErrNotExist,
+		})
+	}
+
+	_, err := directorySizeWithWalk(root, walk)
+	require.Error(t, err)
+	assert.True(t, os.IsNotExist(err), "should be equal")
 }
 
 func TestPebbleSpoolDelete(t *testing.T) {
@@ -281,13 +331,11 @@ func makeTestOplogs(t *testing.T, timestamps ...int64) [][]byte {
 
 	out := make([][]byte, 0, len(timestamps))
 	for _, ts := range timestamps {
-		data, err := bson.Marshal(&oplog.PartialLog{
-			ParsedLog: oplog.ParsedLog{
-				Timestamp: utils.TimeToTimestamp(ts),
-				Operation: "i",
-				Namespace: "a.b",
-				Object:    bson.D{{Key: "_id", Value: ts}},
-			},
+		data, err := bson.Marshal(&oplog.ParsedLog{
+			Timestamp: utils.TimeToTimestamp(ts),
+			Operation: "i",
+			Namespace: "a.b",
+			Object:    bson.D{{Key: "_id", Value: ts}},
 		})
 		require.NoError(t, err)
 		out = append(out, data)
@@ -298,17 +346,77 @@ func makeTestOplogs(t *testing.T, timestamps ...int64) [][]byte {
 func makeLargeTestOplog(t *testing.T, ts int64, payloadSize int) []byte {
 	t.Helper()
 
-	data, err := bson.Marshal(&oplog.PartialLog{
-		ParsedLog: oplog.ParsedLog{
-			Timestamp: utils.TimeToTimestamp(ts),
-			Operation: "i",
-			Namespace: "a.b",
-			Object: bson.D{
-				{Key: "_id", Value: ts},
-				{Key: "payload", Value: strings.Repeat("x", payloadSize)},
-			},
+	data, err := bson.Marshal(&oplog.ParsedLog{
+		Timestamp: utils.TimeToTimestamp(ts),
+		Operation: "i",
+		Namespace: "a.b",
+		Object: bson.D{
+			{Key: "_id", Value: ts},
+			{Key: "payload", Value: strings.Repeat("x", payloadSize)},
 		},
 	})
 	require.NoError(t, err)
 	return data
+}
+
+type fakeDirEntry struct {
+	name    string
+	dir     bool
+	size    int64
+	infoErr error
+}
+
+func (e fakeDirEntry) Name() string {
+	return e.name
+}
+
+func (e fakeDirEntry) IsDir() bool {
+	return e.dir
+}
+
+func (e fakeDirEntry) Type() fs.FileMode {
+	if e.dir {
+		return fs.ModeDir
+	}
+	return 0
+}
+
+func (e fakeDirEntry) Info() (fs.FileInfo, error) {
+	if e.infoErr != nil {
+		return nil, e.infoErr
+	}
+	return fakeFileInfo{name: e.name, dir: e.dir, size: e.size}, nil
+}
+
+type fakeFileInfo struct {
+	name string
+	dir  bool
+	size int64
+}
+
+func (i fakeFileInfo) Name() string {
+	return i.name
+}
+
+func (i fakeFileInfo) Size() int64 {
+	return i.size
+}
+
+func (i fakeFileInfo) Mode() fs.FileMode {
+	if i.dir {
+		return fs.ModeDir
+	}
+	return 0
+}
+
+func (i fakeFileInfo) ModTime() time.Time {
+	return time.Time{}
+}
+
+func (i fakeFileInfo) IsDir() bool {
+	return i.dir
+}
+
+func (i fakeFileInfo) Sys() interface{} {
+	return nil
 }

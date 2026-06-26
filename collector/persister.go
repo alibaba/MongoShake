@@ -128,15 +128,11 @@ func (p *Persister) GetQueryTsFromDiskQueue() primitive.Timestamp {
 	}
 
 	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
-		log := new(oplog.PartialLog)
-		if err := bson.Unmarshal(logData, log); err != nil {
-			l.Logger.Panicf("unmarshal oplog[%v] failed[%v]", logData, err)
+		ts, err := oplog.ExtractRawTimestamp(logData, "ts")
+		if err != nil {
+			l.Logger.Panicf("parse raw oplog timestamp failed[%v]", err)
 		}
-
-		if log.Timestamp.T == 0 && log.Timestamp.I == 0 {
-			l.Logger.Panicf("unmarshal data to oplog failed: timestamp is empty: %v", log)
-		}
-		return log.Timestamp
+		return ts
 	} else {
 		// change_stream
 		log := new(oplog.Event)

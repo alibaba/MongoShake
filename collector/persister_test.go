@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
@@ -31,18 +32,48 @@ func mockOplogsBinary() []byte {
 func mockOplogsBinaryWithTs(t *testing.T, ts int64) []byte {
 	t.Helper()
 
-	log := oplog.PartialLog{
-		ParsedLog: oplog.ParsedLog{
-			Timestamp: utils.TimeToTimestamp(ts),
-			Operation: "i",
-			Namespace: "a.b",
-			Object:    bson.D{{Key: "_id", Value: ts}},
-		},
+	log := oplog.ParsedLog{
+		Timestamp: utils.TimeToTimestamp(ts),
+		Operation: "i",
+		Namespace: "a.b",
+		Object:    bson.D{{Key: "_id", Value: ts}},
 	}
 
 	ret, err := bson.Marshal(&log)
 	require.NoError(t, err)
 	return ret
+}
+
+func mockRawOplogBinaryWithTs(t *testing.T, ts primitive.Timestamp) []byte {
+	t.Helper()
+
+	ret, err := bson.Marshal(bson.D{
+		{Key: "ts", Value: ts},
+		{Key: "op", Value: "n"},
+		{Key: "ns", Value: ""},
+		{Key: "o", Value: bson.D{}},
+	})
+	require.NoError(t, err)
+	return ret
+}
+
+func TestPersisterGetQueryTsFromDiskQueueReadsRawOplogTimestamp(t *testing.T) {
+	oldFetchMethod := conf.Options.IncrSyncMongoFetchMethod
+	conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodOplog
+	defer func() {
+		conf.Options.IncrSyncMongoFetchMethod = oldFetchMethod
+	}()
+
+	want := primitive.Timestamp{T: 1234, I: 56}
+	persister := &Persister{
+		replset: "rs-raw-ts",
+		DiskQueue: &fakeOplogSpool{
+			name: "fake-raw-ts-spool",
+			data: [][]byte{mockRawOplogBinaryWithTs(t, want)},
+		},
+	}
+
+	assert.Equal(t, want, persister.GetQueryTsFromDiskQueue(), "should be equal")
 }
 
 func TestInject(t *testing.T) {

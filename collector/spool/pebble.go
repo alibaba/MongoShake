@@ -5,12 +5,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/cockroachdb/pebble/v2"
-	"go.mongodb.org/mongo-driver/bson"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
@@ -500,14 +500,11 @@ func observeError(name, stage, op string) {
 }
 
 func parseOplogTimestamp(data []byte) (int64, error) {
-	log := new(oplog.PartialLog)
-	if err := bson.Unmarshal(data, log); err != nil {
-		return 0, fmt.Errorf("unmarshal oplog for spool failed: %w", err)
+	ts, err := oplog.ExtractRawTimestamp(data, "ts")
+	if err != nil {
+		return 0, fmt.Errorf("oplog spool data: %w", err)
 	}
-	if log.Timestamp.T == 0 && log.Timestamp.I == 0 {
-		return 0, fmt.Errorf("unmarshal data to oplog for spool failed: timestamp is empty")
-	}
-	return utils.TimeStampToInt64(log.Timestamp), nil
+	return utils.TimeStampToInt64(ts), nil
 }
 
 func dataKey(seq uint64) []byte {
@@ -541,16 +538,27 @@ func estimateWriteBytes(dataBytes uint64) uint64 {
 }
 
 func directorySize(path string) (uint64, error) {
+	return directorySizeWithWalk(path, filepath.WalkDir)
+}
+
+func directorySizeWithWalk(path string, walk func(string, fs.WalkDirFunc) error) (uint64, error) {
 	var total uint64
-	err := filepath.WalkDir(path, func(_ string, entry os.DirEntry, err error) error {
+	root := filepath.Clean(path)
+	err := walk(path, func(walkPath string, entry fs.DirEntry, err error) error {
 		if err != nil {
+			if filepath.Clean(walkPath) != root && errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
 			return err
 		}
-		if entry.IsDir() {
+		if entry == nil || entry.IsDir() {
 			return nil
 		}
 		info, err := entry.Info()
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
 			return err
 		}
 		total += uint64(info.Size())
