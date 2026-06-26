@@ -27,7 +27,12 @@ type GenericOplog struct {
 type ParsedLog struct {
 	Timestamp     primitive.Timestamp `bson:"ts" json:"ts"`
 	Term          *int64              `bson:"t" json:"t"`
-	Hash          *int64              `bson:"h" json:"h"`
+	// Hash maps to the oplog 'h' field.
+	// omitempty is required: MongoDB 7.0+ (SERVER-69062) rejects applyOps input
+	// containing 'h' with IDLUnknownField; MongoDB 9.0+ (SERVER-128506) reuses
+	// 'h' as docHash with a different semantic, so the field must be absent
+	// rather than serialized as null when not present in the source oplog.
+	Hash          *int64              `bson:"h,omitempty" json:"h,omitempty"`
 	Version       int                 `bson:"v" json:"v"`
 	Operation     string              `bson:"op" json:"op"`
 	Gid           string              `bson:"g,omitempty" json:"g,omitempty"`
