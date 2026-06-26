@@ -390,7 +390,8 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 			if newObject, oplogErr = log.original.partialLog.UpdateValue(); oplogErr != nil {
 				// Column-store diffs in time-series buckets need the original applyOps.
 				if strings.HasPrefix(collection, utils.VarSystemBucketsPrefix) {
-					l.Logger.Infof("bulk_writer fall back to applyOps for time-series bucket update on %s.%s: %v", database, collection, oplogErr)
+					// oplogErr embeds the raw column-store binary diff, so it is left out of the log.
+					l.Logger.Infof("bulk_writer fall back to applyOps for time-series bucket update on %s.%s", database, collection)
 					if applyErr := replayUpdateViaApplyOps(bw.conn.Client, log.original.partialLog); applyErr != nil {
 						return applyErr
 					}

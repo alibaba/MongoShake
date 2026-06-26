@@ -276,7 +276,8 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.E, 
 		newObject, transErr := log.original.partialLog.UpdateValue()
 		if transErr != nil {
 			if strings.HasPrefix(collection, utils.VarSystemBucketsPrefix) {
-				l.Logger.Infof("command_writer fall back to applyOps for time-series bucket update on %s.%s: %v", database, collection, transErr)
+				// transErr embeds the raw column-store binary diff, so it is left out of the log.
+				l.Logger.Infof("command_writer fall back to applyOps for time-series bucket update on %s.%s", database, collection)
 				if applyErr := replayUpdateViaApplyOps(cw.conn.Client, log.original.partialLog); applyErr != nil {
 					return applyErr
 				}
