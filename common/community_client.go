@@ -124,8 +124,8 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 	case VarMongoConnectModeSecondaryPreferred:
 		readPreference = readpref.SecondaryPreferred()
 	case VarMongoConnectModeStandalone:
-		// TODO, no standalone, choose nearest
-		fallthrough
+		clientOps.SetDirect(true)
+		readPreference = readpref.Nearest()
 	case VarMongoConnectModeNearset:
 		readPreference = readpref.Nearest()
 	default:

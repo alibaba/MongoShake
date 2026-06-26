@@ -1,0 +1,461 @@
+package filter
+
+import (
+	"math"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"github.com/alibaba/MongoShake/v2/sharding"
+)
+
+const testNs = "db.coll"
+
+// keyAll covers the entire hash space; lets hashed-shard tests assert that
+// ComputeHash is wired up without depending on the chunkLt/chunkGt int64
+// precision issue (see TestOrphanFilter_HashedPrecisionBug below).
+var keyAll = []*sharding.ChunkRange{{
+	Mins: []interface{}{int64(math.MinInt64)},
+	Maxs: []interface{}{int64(math.MaxInt64)},
+}}
+
+func mkRange(t *testing.T, sc *sharding.ShardCollection) sharding.DBChunkMap {
+	t.Helper()
+	return sharding.DBChunkMap{testNs: sc}
+}
+
+// chunkMap is nil: no chunk info loaded, do not filter.
+func TestOrphanFilter_NilChunkMap(t *testing.T) {
+	f := NewOrphanFilter("rs0", nil)
+	assert.False(t, f.Filter(bson.D{{"x", 1}}, testNs))
+}
+
+// namespace not present in chunk map: collection isn't sharded, do not filter.
+func TestOrphanFilter_NamespaceMissing(t *testing.T) {
+	f := NewOrphanFilter("rs0", sharding.DBChunkMap{
+		"other.coll": &sharding.ShardCollection{
+			Keys: []string{"x"}, ShardTypes: []string{sharding.RangedShard},
+			Chunks: []*sharding.ChunkRange{{Mins: []interface{}{0}, Maxs: []interface{}{10}}},
+		},
+	})
+	assert.False(t, f.Filter(bson.D{{"x", 1}}, testNs))
+}
+
+// range, single shard key: in/out/min/max boundary semantics.
+func TestOrphanFilter_RangeSingleKey(t *testing.T) {
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys: []string{"x"}, ShardTypes: []string{sharding.RangedShard},
+		Chunks: []*sharding.ChunkRange{
+			{Mins: []interface{}{1}, Maxs: []interface{}{10}},
+			{Mins: []interface{}{50}, Maxs: []interface{}{100}},
+		},
+	})
+	f := NewOrphanFilter("rs0", cm)
+
+	cases := []struct {
+		name   string
+		key    int
+		orphan bool
+	}{
+		{"in first chunk", 5, false},
+		{"in second chunk", 75, false},
+		{"between chunks", 30, true},
+		{"before all", 0, true},
+		{"after all", 200, true},
+		{"equal first min (inclusive)", 1, false},
+		{"equal first max (exclusive)", 10, true},
+		{"equal second min (inclusive)", 50, false},
+		{"equal second max (exclusive)", 100, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.orphan, f.Filter(bson.D{{"x", c.key}}, testNs))
+		})
+	}
+}
+
+// range, compound shard key {a, b}: covers boundary cases that are most easy
+// to get wrong in lexicographic comparison (this is exactly the layout from
+// issue #978: "分片键为两个字段的联合分片").
+func TestOrphanFilter_RangeCompoundKey(t *testing.T) {
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys: []string{"a", "b"}, ShardTypes: []string{sharding.RangedShard, sharding.RangedShard},
+		Chunks: []*sharding.ChunkRange{
+			// chunk: [{a:1, b:100}, {a:5, b:200})
+			{Mins: []interface{}{1, 100}, Maxs: []interface{}{5, 200}},
+		},
+	})
+	f := NewOrphanFilter("rs0", cm)
+
+	cases := []struct {
+		name   string
+		a, b   int
+		orphan bool
+	}{
+		{"a<min_a", 0, 150, true},
+		{"a==min_a, b<min_b", 1, 50, true},
+		{"a==min_a, b==min_b (lower bound inclusive)", 1, 100, false},
+		{"a==min_a, b in range", 1, 150, false},
+		{"a in range, b anywhere", 3, 1, false},
+		{"a in range, b at upper sentinel", 3, 99999, false},
+		{"a==max_a, b<max_b", 5, 199, false},
+		{"a==max_a, b==max_b (upper bound exclusive)", 5, 200, true},
+		{"a==max_a, b>max_b", 5, 201, true},
+		{"a>max_a", 6, 0, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.orphan, f.Filter(bson.D{{"a", c.a}, {"b", c.b}}, testNs))
+		})
+	}
+}
+
+// hashed shard: cover every key type supported by ComputeHash end-to-end
+// (ComputeHash branch + Filter wiring). [MinInt64, MaxInt64] chunk so any
+// hash lands inside — checks plumbing, not boundary math (the boundary
+// math is exercised by TestOrphanFilter_HashedTightChunk below).
+func TestOrphanFilter_HashedAllTypes(t *testing.T) {
+	cases := []struct {
+		name string
+		val  interface{}
+	}{
+		{"ObjectID", primitive.NewObjectID()},
+		{"string", "hello-orphan"},
+		{"int64", int64(1234567890)},
+		{"int", 42},
+		{"int32", int32(42)},
+		{"float64", 3.14},
+		{"bool/true", true},
+		{"bool/false", false},
+		{"DateTime", primitive.DateTime(1715000000000)},
+		{"Timestamp", primitive.Timestamp{T: 1715000000, I: 7}},
+		// nil shard-key values are exercised separately in
+		// TestComputeHash_NullKey because OrphanFilter.Filter itself
+		// can't distinguish "missing field" from "field with value
+		// null" (oplog.GetKey returns nil for both); pushing nil
+		// through Filter would panic in a way unrelated to this bug.
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cm := mkRange(t, &sharding.ShardCollection{
+				Keys: []string{"k"}, ShardTypes: []string{sharding.HashedShard},
+				Chunks: keyAll,
+			})
+			f := NewOrphanFilter("rs0", cm)
+			assert.False(t, f.Filter(bson.D{{"k", c.val}}, testNs),
+				"hashed key in [MinInt64, MaxInt64] chunk should never be orphan")
+		})
+	}
+}
+
+// hashed shard with a tight chunk around the computed hash: exercises the
+// int64-precise comparison path in chunkLt/chunkGt that used to silently
+// collapse via float64 (was TestOrphanFilter_HashedPrecisionBug, now
+// fixed by introducing BsonTypeInt64).
+func TestOrphanFilter_HashedTightChunk(t *testing.T) {
+	oid := primitive.NewObjectID()
+	hashed := ComputeHash(oid)
+
+	in := mkRange(t, &sharding.ShardCollection{
+		Keys: []string{"_id"}, ShardTypes: []string{sharding.HashedShard},
+		Chunks: []*sharding.ChunkRange{
+			{Mins: []interface{}{hashed - 1}, Maxs: []interface{}{hashed + 1}},
+		},
+	})
+	assert.False(t, NewOrphanFilter("rs0", in).Filter(bson.D{{"_id", oid}}, testNs),
+		"hashed key inside ±1 chunk should not be orphan")
+
+	out := mkRange(t, &sharding.ShardCollection{
+		Keys: []string{"_id"}, ShardTypes: []string{sharding.HashedShard},
+		Chunks: []*sharding.ChunkRange{
+			{Mins: []interface{}{hashed + 100}, Maxs: []interface{}{hashed + 200}},
+		},
+	})
+	assert.True(t, NewOrphanFilter("rs0", out).Filter(bson.D{{"_id", oid}}, testNs),
+		"hashed key below chunk min should be orphan")
+}
+
+// hashed shard, no chunks held by this replset: every doc is orphan
+// (verifies the "iterate-all-then-fall-through" path).
+func TestOrphanFilter_HashedNoChunks(t *testing.T) {
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys: []string{"k"}, ShardTypes: []string{sharding.HashedShard},
+		Chunks: nil,
+	})
+	f := NewOrphanFilter("rs0", cm)
+	assert.True(t, f.Filter(bson.D{{"k", primitive.NewObjectID()}}, testNs))
+}
+
+// Regression guard: hashed-shard chunk bounds at the extremes of int64
+// must compare exactly, not via float64 (which would collapse pairs of
+// adjacent int64s above 2^53 to the same float). Picks a hash value far
+// outside float64's contiguous-integer range so the assertion fails if
+// the precision fix regresses.
+func TestOrphanFilter_HashedInt64Precision(t *testing.T) {
+	// 2^62 + 1 and 2^62 - 1 are distinct int64 but collide in float64.
+	const target = int64(1)<<62 + 1
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys: []string{"k"}, ShardTypes: []string{sharding.HashedShard},
+		Chunks: []*sharding.ChunkRange{
+			{Mins: []interface{}{target}, Maxs: []interface{}{target + 1}},
+		},
+	})
+	// A key whose computed hash is target-1 should be orphan (below min);
+	// we can't make ComputeHash produce target on demand, so instead test
+	// the chunkLt/chunkGt primitives directly to anchor the contract.
+	assert.True(t, chunkLt(target-1, target), "target-1 must be strictly < target")
+	assert.True(t, chunkGt(target+1, target), "target+1 must be strictly > target")
+	assert.False(t, chunkEqual(target-1, target), "target-1 must not equal target")
+	assert.False(t, chunkEqual(target+1, target), "target+1 must not equal target")
+
+	// And the Filter wiring with a tight chunk around int64-precise bounds
+	// is exercised in TestOrphanFilter_HashedTightChunk above; keep this
+	// reference here so the next reader knows where to look.
+	_ = cm
+}
+
+// BSON null is hashed with no value bytes (only the canonical type tag).
+// Tested at the ComputeHash level because OrphanFilter.Filter conflates
+// "field missing" with "field is null" via oplog.GetKey.
+func TestComputeHash_NullKey(t *testing.T) {
+	// Should not panic, and should be deterministic / distinct from other
+	// hashes (we just check it doesn't panic and returns a stable value).
+	a := ComputeHash(nil)
+	b := ComputeHash(nil)
+	assert.Equal(t, a, b, "ComputeHash(nil) must be deterministic")
+	assert.NotEqual(t, a, ComputeHash(int64(0)),
+		"hash of null must differ from hash of int64(0)")
+}
+
+// ComputeHash supports the BSON value types most commonly used as
+// hashed-shard keys. Decimal128 / BinData / Symbol are intentionally not
+// supported (see comment in ComputeHash). This test pins the panic so any
+// future broadening of type support has to update the assertion and
+// double-check the byte layout against MongoDB hasher.cpp.
+func TestOrphanFilter_HashedUnsupportedTypePanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected ComputeHash to panic on unsupported type, got no panic")
+		}
+	}()
+	ComputeHash(primitive.Decimal128{}) // not in the switch, must panic
+}
+
+// getBsonType must recognise primitive.MinKey / primitive.MaxKey as they come
+// out of bson.Unmarshal when reading config.chunks boundaries from MongoDB.
+// The int64 sentinel path (math.MinInt64/MaxInt64) is kept for backwards compat
+// with test code that constructs chunk ranges by hand.
+func TestGetBsonType_PrimitiveMinMaxKey(t *testing.T) {
+	// Simulate what bson.Unmarshal produces for a chunk boundary containing MinKey/MaxKey.
+	type chunkBound struct {
+		X interface{} `bson:"x"`
+	}
+	// Encode MinKey, then decode — the round-tripped value is primitive.MinKey{}.
+	minDoc, err := bson.Marshal(bson.D{{"x", primitive.MinKey{}}})
+	assert.NoError(t, err)
+	maxDoc, err := bson.Marshal(bson.D{{"x", primitive.MaxKey{}}})
+	assert.NoError(t, err)
+
+	var minResult, maxResult chunkBound
+	assert.NoError(t, bson.Unmarshal(minDoc, &minResult))
+	assert.NoError(t, bson.Unmarshal(maxDoc, &maxResult))
+
+	// getBsonType must return BsonMinKey / BsonMaxKey
+	typ, val := getBsonType(minResult.X)
+	assert.Equal(t, BsonMinKey, typ)
+	assert.Nil(t, val)
+
+	typ, val = getBsonType(maxResult.X)
+	assert.Equal(t, BsonMaxKey, typ)
+	assert.Nil(t, val)
+
+	// Also verify the int64 sentinel still works (backward compat)
+	typ, _ = getBsonType(int64(math.MinInt64))
+	assert.Equal(t, BsonMinKey, typ)
+	typ, _ = getBsonType(int64(math.MaxInt64))
+	assert.Equal(t, BsonMaxKey, typ)
+}
+
+// Compound hashed shard key {a: 1, b: "hashed"}: only `b` should be hashed
+// before comparing to chunk bounds. Pre-fix Filter would hash every column
+// whenever ShardType==HashedShard, so a=5 would become ComputeHash(5) and
+// fall outside the [3, 7) ranged bound — silently flagging the doc as
+// orphan. This test pins the per-column behaviour added in ShardTypes.
+func TestOrphanFilter_CompoundHashed_RangedFirst(t *testing.T) {
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys:       []string{"a", "b"},
+		ShardTypes: []string{sharding.RangedShard, sharding.HashedShard},
+		Chunks: []*sharding.ChunkRange{
+			// a in [3, 7), b covers the full hash space so b is irrelevant
+			// to the in/out decision — this isolates `a` is compared as-is.
+			{
+				Mins: []interface{}{3, int64(math.MinInt64)},
+				Maxs: []interface{}{7, int64(math.MaxInt64)},
+			},
+		},
+	})
+	f := NewOrphanFilter("rs0", cm)
+
+	// a=5 in [3, 7); ComputeHash(5) is almost certainly not in [3, 7),
+	// so this assertion fails the moment Filter starts hashing column 0.
+	assert.False(t, f.Filter(bson.D{{"a", 5}, {"b", "anything"}}, testNs),
+		"a in ranged bounds; only column 1 should be hashed")
+	assert.True(t, f.Filter(bson.D{{"a", 8}, {"b", "anything"}}, testNs),
+		"a outside ranged bounds — orphan")
+}
+
+// Compound hashed shard key {a: "hashed", b: 1}: column 0 must be hashed,
+// column 1 compared as-is. Pre-fix Filter inferred ShardType from the last
+// key (ranged here) and therefore skipped hashing entirely; this test pins
+// the inverse direction so the ShardTypes wiring stays correct both ways.
+func TestOrphanFilter_CompoundHashed_HashedFirst(t *testing.T) {
+	aVal := "hashed-key"
+	hashA := ComputeHash(aVal)
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys:       []string{"a", "b"},
+		ShardTypes: []string{sharding.HashedShard, sharding.RangedShard},
+		Chunks: []*sharding.ChunkRange{
+			// Pin a to hashA so the min-loop reaches b; b in [3, 7).
+			{Mins: []interface{}{hashA, 3}, Maxs: []interface{}{hashA, 7}},
+		},
+	})
+	f := NewOrphanFilter("rs0", cm)
+
+	assert.False(t, f.Filter(bson.D{{"a", aVal}, {"b", 5}}, testNs),
+		"a must be hashed to hashA, b must be compared as-is in [3, 7)")
+	assert.True(t, f.Filter(bson.D{{"a", aVal}, {"b", 10}}, testNs),
+		"b outside ranged bounds — orphan")
+}
+
+// Ranged shard key = ObjectID (the most common non-hash shard key in
+// production: shard on _id). Chunk bounds are real ObjectIDs from
+// config.chunks; chunkLt/Gt/Equal must compare via BsonTypeOid (hex string)
+// without panicking.
+func TestOrphanFilter_RangeObjectID(t *testing.T) {
+	// Construct 3 ObjectIDs with known ordering (lexicographic on bytes).
+	oid1 := primitive.ObjectID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
+	oid2 := primitive.ObjectID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05}
+	oid3 := primitive.ObjectID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a}
+
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys: []string{"_id"}, ShardTypes: []string{sharding.RangedShard},
+		Chunks: []*sharding.ChunkRange{
+			{Mins: []interface{}{oid1}, Maxs: []interface{}{oid3}},
+		},
+	})
+	f := NewOrphanFilter("rs0", cm)
+
+	oidBefore := primitive.ObjectID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
+	oidAfter := primitive.ObjectID{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f}
+
+	cases := []struct {
+		name   string
+		id     primitive.ObjectID
+		orphan bool
+	}{
+		{"before chunk min", oidBefore, true},
+		{"at chunk min (inclusive)", oid1, false},
+		{"in chunk", oid2, false},
+		{"at chunk max (exclusive)", oid3, true},
+		{"after chunk max", oidAfter, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.orphan, f.Filter(bson.D{{"_id", c.id}}, testNs))
+		})
+	}
+}
+
+// Ranged shard key = DateTime: verify chunkLt/Gt/Equal handle BsonTypeDate.
+func TestOrphanFilter_RangeDateTime(t *testing.T) {
+	min := primitive.DateTime(1000000)
+	max := primitive.DateTime(2000000)
+
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys: []string{"ts"}, ShardTypes: []string{sharding.RangedShard},
+		Chunks: []*sharding.ChunkRange{
+			{Mins: []interface{}{min}, Maxs: []interface{}{max}},
+		},
+	})
+	f := NewOrphanFilter("rs0", cm)
+
+	assert.True(t, f.Filter(bson.D{{"ts", primitive.DateTime(500000)}}, testNs), "before min")
+	assert.False(t, f.Filter(bson.D{{"ts", primitive.DateTime(1500000)}}, testNs), "in range")
+	assert.True(t, f.Filter(bson.D{{"ts", primitive.DateTime(2000000)}}, testNs), "at max (exclusive)")
+}
+
+// Ranged shard key = Timestamp: verify chunkLt/Gt/Equal handle BsonTypeTstamp.
+func TestOrphanFilter_RangeTimestamp(t *testing.T) {
+	min := primitive.Timestamp{T: 100, I: 0}
+	max := primitive.Timestamp{T: 200, I: 0}
+
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys: []string{"ts"}, ShardTypes: []string{sharding.RangedShard},
+		Chunks: []*sharding.ChunkRange{
+			{Mins: []interface{}{min}, Maxs: []interface{}{max}},
+		},
+	})
+	f := NewOrphanFilter("rs0", cm)
+
+	assert.True(t, f.Filter(bson.D{{"ts", primitive.Timestamp{T: 50, I: 0}}}, testNs), "before min")
+	assert.False(t, f.Filter(bson.D{{"ts", primitive.Timestamp{T: 150, I: 0}}}, testNs), "in range")
+	assert.True(t, f.Filter(bson.D{{"ts", primitive.Timestamp{T: 200, I: 0}}}, testNs), "at max (exclusive)")
+	// T equal, I decides order
+	assert.False(t, f.Filter(bson.D{{"ts", primitive.Timestamp{T: 100, I: 5}}}, testNs), "T==min.T, I>min.I → in range")
+}
+
+// Timestamp chunk spanning T = 0x7fffffff → 0x80000000: the packed uint64
+// must not overflow into negative int64, otherwise the ordering reverses
+// and docs after 2038-01-19 are misclassified.
+func TestOrphanFilter_RangeTimestamp_Uint64Overflow(t *testing.T) {
+	min := primitive.Timestamp{T: 0x7fffffff, I: 0}
+	max := primitive.Timestamp{T: 0x80000001, I: 0}
+
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys: []string{"ts"}, ShardTypes: []string{sharding.RangedShard},
+		Chunks: []*sharding.ChunkRange{
+			{Mins: []interface{}{min}, Maxs: []interface{}{max}},
+		},
+	})
+	f := NewOrphanFilter("rs0", cm)
+
+	assert.False(t, f.Filter(bson.D{{"ts", primitive.Timestamp{T: 0x80000000, I: 0}}}, testNs),
+		"T=0x80000000 is between 0x7fffffff and 0x80000001 — must be in range, not orphan")
+	assert.True(t, f.Filter(bson.D{{"ts", primitive.Timestamp{T: 0x7ffffffe, I: 0}}}, testNs),
+		"below min — orphan")
+	assert.True(t, f.Filter(bson.D{{"ts", primitive.Timestamp{T: 0x80000001, I: 0}}}, testNs),
+		"at max (exclusive) — orphan")
+}
+
+// End-to-end test: range shard with real BSON MinKey/MaxKey boundaries (as
+// decoded from config.chunks) must correctly classify docs as non-orphan.
+func TestOrphanFilter_RangeWithBsonMinMaxKey(t *testing.T) {
+	// First/last chunks in a real sharded collection use MinKey/MaxKey.
+	cm := mkRange(t, &sharding.ShardCollection{
+		Keys: []string{"x"}, ShardTypes: []string{sharding.RangedShard},
+		Chunks: []*sharding.ChunkRange{
+			{Mins: []interface{}{primitive.MinKey{}}, Maxs: []interface{}{50}},
+			{Mins: []interface{}{50}, Maxs: []interface{}{primitive.MaxKey{}}},
+		},
+	})
+	f := NewOrphanFilter("rs0", cm)
+
+	// Everything should be non-orphan since chunks cover [MinKey, MaxKey)
+	cases := []struct {
+		name   string
+		val    interface{}
+		orphan bool
+	}{
+		{"below zero", -100, false},
+		{"zero", 0, false},
+		{"at split", 50, false},
+		{"above split", 99, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.orphan, f.Filter(bson.D{{"x", c.val}}, testNs))
+		})
+	}
+}
