@@ -1,0 +1,422 @@
+package spool
+
+import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/cockroachdb/pebble/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/bson"
+
+	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/oplog"
+)
+
+func TestPebbleSpoolPutReadAdvance(t *testing.T) {
+	ps := openTestSpool(t, t.TempDir(), "rs-spool-basic")
+	defer ps.Delete()
+
+	data := makeTestOplogs(t, 1, 2, 3)
+	for _, item := range data {
+		require.NoError(t, ps.Put(item))
+	}
+
+	stats := ps.Stats()
+	assert.Equal(t, uint64(1), stats.ReadSeq, "should be equal")
+	assert.Equal(t, uint64(3), stats.WriteSeq, "should be equal")
+	assert.Equal(t, uint64(3), stats.Depth, "should be equal")
+
+	batch, err := ps.ReadBatch(2)
+	require.NoError(t, err)
+	require.Len(t, batch, 2)
+	assert.Equal(t, data[0], batch[0], "should be equal")
+	assert.Equal(t, data[1], batch[1], "should be equal")
+
+	require.NoError(t, ps.Advance(2))
+	depth, err := ps.Depth()
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), depth, "should be equal")
+
+	batch, err = ps.ReadBatch(10)
+	require.NoError(t, err)
+	require.Len(t, batch, 1)
+	assert.Equal(t, data[2], batch[0], "should be equal")
+}
+
+func TestPebbleSpoolAcceptNoopWithoutNamespace(t *testing.T) {
+	ps := openTestSpool(t, t.TempDir(), "rs-spool-noop")
+	defer ps.Delete()
+
+	data, err := bson.Marshal(&oplog.ParsedLog{
+		Timestamp: utils.TimeToTimestamp(11),
+		Operation: "n",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, ps.Put(data))
+	last, err := ps.LastWriteData()
+	require.NoError(t, err)
+	assert.Equal(t, data, last, "should be equal")
+
+	rows, err := ps.ReadAll()
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, data, rows[0], "should be equal")
+}
+
+func TestParseOplogTimestampRejectsMissingTimestamp(t *testing.T) {
+	data, err := bson.Marshal(bson.D{{Key: "op", Value: "n"}})
+	require.NoError(t, err)
+
+	_, err = parseOplogTimestamp(data)
+	require.ErrorContains(t, err, "timestamp field \"ts\" not found")
+}
+
+func TestPebbleSpoolReopen(t *testing.T) {
+	logDir := t.TempDir()
+	name := "rs-spool-reopen"
+	ps := openTestSpool(t, logDir, name)
+
+	data := makeTestOplogs(t, 11, 12, 13)
+	for _, item := range data {
+		require.NoError(t, ps.Put(item))
+	}
+	require.NoError(t, ps.Advance(2))
+	require.NoError(t, ps.Close())
+
+	reopened, err := Open(OpenOptions{
+		Name:            name,
+		LogDir:          logDir,
+		CreateIfMissing: false,
+		MetricName:      name,
+		MetricStage:     utils.TypeIncr,
+	})
+	require.NoError(t, err)
+	defer reopened.Delete()
+
+	stats := reopened.Stats()
+	assert.Equal(t, uint64(3), stats.ReadSeq, "should be equal")
+	assert.Equal(t, uint64(3), stats.WriteSeq, "should be equal")
+	assert.Equal(t, uint64(1), stats.Depth, "should be equal")
+
+	last, err := reopened.LastWriteData()
+	require.NoError(t, err)
+	assert.Equal(t, data[2], last, "should be equal")
+
+	remaining, err := reopened.ReadAll()
+	require.NoError(t, err)
+	require.Len(t, remaining, 1)
+	assert.Equal(t, data[2], remaining[0], "should be equal")
+}
+
+func TestPebbleSpoolRejectPutAfterMaxBytes(t *testing.T) {
+	logDir := t.TempDir()
+	name := "rs-spool-max"
+	ps, err := Open(OpenOptions{
+		Name:            name,
+		LogDir:          logDir,
+		CreateIfMissing: true,
+		MetricName:      name,
+		MetricStage:     utils.TypeIncr,
+		MaxBytesMB:      1,
+	})
+	require.NoError(t, err)
+	defer ps.Delete()
+
+	require.NoError(t, ps.Put(makeTestOplogs(t, 1)[0]))
+
+	err = ps.Put(makeLargeTestOplog(t, 2, int(utils.MB)))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeds max size", "should be equal")
+
+	stats := ps.Stats()
+	assert.Equal(t, uint64(1), stats.WriteSeq, "should be equal")
+	assert.Equal(t, uint64(1), stats.Depth, "should be equal")
+	assert.Greater(t, stats.Bytes, uint64(0), "should be equal")
+}
+
+func TestDirectorySizeIgnoresDisappearingEntries(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "spool")
+	walk := func(path string, fn fs.WalkDirFunc) error {
+		require.Equal(t, root, path)
+		require.NoError(t, fn(root, fakeDirEntry{name: "spool", dir: true}, nil))
+		require.NoError(t, fn(filepath.Join(root, "removed-before-callback.sst"), nil, &os.PathError{
+			Op:   "lstat",
+			Path: filepath.Join(root, "removed-before-callback.sst"),
+			Err:  os.ErrNotExist,
+		}))
+		require.NoError(t, fn(filepath.Join(root, "removed-before-info.sst"), fakeDirEntry{
+			name:    "removed-before-info.sst",
+			infoErr: os.ErrNotExist,
+		}, nil))
+		require.NoError(t, fn(filepath.Join(root, "live.sst"), fakeDirEntry{
+			name: "live.sst",
+			size: 42,
+		}, nil))
+		return nil
+	}
+
+	size, err := directorySizeWithWalk(root, walk)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(42), size, "should be equal")
+}
+
+func TestDirectorySizeReturnsRootMissing(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "missing")
+	walk := func(path string, fn fs.WalkDirFunc) error {
+		require.Equal(t, root, path)
+		return fn(root, nil, &os.PathError{
+			Op:   "lstat",
+			Path: root,
+			Err:  os.ErrNotExist,
+		})
+	}
+
+	_, err := directorySizeWithWalk(root, walk)
+	require.Error(t, err)
+	assert.True(t, os.IsNotExist(err), "should be equal")
+}
+
+func TestPebbleSpoolDelete(t *testing.T) {
+	logDir := t.TempDir()
+	name := "rs-spool-delete"
+	ps := openTestSpool(t, logDir, name)
+	require.NoError(t, ps.Put(makeTestOplogs(t, 1)[0]))
+
+	path := Path(logDir, name)
+	require.NoError(t, ps.Delete())
+	_, err := os.Stat(path)
+	assert.True(t, os.IsNotExist(err), "should be equal")
+}
+
+func TestPebbleSpoolOpenLockErrorIsNotLegacy(t *testing.T) {
+	logDir := t.TempDir()
+	name := "rs-spool-lock"
+	ps := openTestSpool(t, logDir, name)
+	defer ps.Delete()
+
+	_, err := Open(OpenOptions{
+		Name:            name,
+		LogDir:          logDir,
+		CreateIfMissing: false,
+		MetricName:      name,
+		MetricStage:     utils.TypeIncr,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "open pebble oplog spool", "should be equal")
+	assert.NotContains(t, err.Error(), "Legacy go-diskqueue", "should be equal")
+}
+
+func TestPebbleSpoolRejectNonPebbleDir(t *testing.T) {
+	logDir := t.TempDir()
+	name := "rs-spool-legacy"
+	path := Path(logDir, name)
+	require.NoError(t, os.MkdirAll(path, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(path, "diskqueue.dat"), []byte("legacy"), 0o644))
+
+	_, err := Open(OpenOptions{
+		Name:            name,
+		LogDir:          logDir,
+		CreateIfMissing: false,
+		MetricName:      name,
+		MetricStage:     utils.TypeIncr,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a Pebble spool", "should be equal")
+	assert.Contains(t, err.Error(), "Legacy go-diskqueue files are not supported", "should be equal")
+}
+
+func TestPebbleSpoolRejectLegacyFilesInLogDir(t *testing.T) {
+	logDir := t.TempDir()
+	name := "diskqueue-rs-legacy"
+	require.NoError(t, os.WriteFile(filepath.Join(logDir, name+".dat"), []byte("legacy"), 0o644))
+
+	_, err := Open(OpenOptions{
+		Name:            name,
+		LogDir:          logDir,
+		CreateIfMissing: false,
+		MetricName:      name,
+		MetricStage:     utils.TypeIncr,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a Pebble spool", "should be equal")
+	assert.Contains(t, err.Error(), "Legacy go-diskqueue files are not supported", "should be equal")
+}
+
+func TestPebbleSpoolSchemaMismatch(t *testing.T) {
+	logDir := t.TempDir()
+	name := "rs-spool-schema"
+	ps := openTestSpool(t, logDir, name)
+	require.NoError(t, ps.Close())
+
+	db, err := pebble.Open(Path(logDir, name), &pebble.Options{ErrorIfNotExists: true})
+	require.NoError(t, err)
+	require.NoError(t, db.Set(metaVersionKey, encodeUint32(999), pebble.NoSync))
+	require.NoError(t, db.Close())
+
+	_, err = Open(OpenOptions{
+		Name:            name,
+		LogDir:          logDir,
+		CreateIfMissing: false,
+		MetricName:      name,
+		MetricStage:     utils.TypeIncr,
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "schema version mismatch", "should be equal")
+}
+
+func TestPebbleSpoolMissingDataKey(t *testing.T) {
+	logDir := t.TempDir()
+	name := "rs-spool-missing"
+	ps := openTestSpool(t, logDir, name)
+	data := makeTestOplogs(t, 1, 2, 3)
+	for _, item := range data {
+		require.NoError(t, ps.Put(item))
+	}
+	require.NoError(t, ps.Close())
+
+	db, err := pebble.Open(Path(logDir, name), &pebble.Options{ErrorIfNotExists: true})
+	require.NoError(t, err)
+	require.NoError(t, db.Delete(dataKey(2), pebble.NoSync))
+	require.NoError(t, db.Close())
+
+	reopened, err := Open(OpenOptions{
+		Name:            name,
+		LogDir:          logDir,
+		CreateIfMissing: false,
+		MetricName:      name,
+		MetricStage:     utils.TypeIncr,
+	})
+	require.NoError(t, err)
+	defer reopened.Delete()
+
+	_, err = reopened.ReadBatch(10)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing data key for seq 2", "should be equal")
+}
+
+func TestPebbleSpoolMetricsNoPanic(t *testing.T) {
+	ps := openTestSpool(t, t.TempDir(), "rs-spool-metrics")
+	defer ps.Delete()
+
+	require.NoError(t, ps.Put(makeTestOplogs(t, 1)[0]))
+	rows, err := ps.ReadBatch(1)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NoError(t, ps.Advance(1))
+	require.NoError(t, ps.Delete())
+}
+
+func openTestSpool(t *testing.T, logDir, name string) *PebbleSpool {
+	t.Helper()
+
+	ps, err := Open(OpenOptions{
+		Name:            name,
+		LogDir:          logDir,
+		CreateIfMissing: true,
+		MetricName:      name,
+		MetricStage:     utils.TypeIncr,
+	})
+	require.NoError(t, err)
+	return ps
+}
+
+func makeTestOplogs(t *testing.T, timestamps ...int64) [][]byte {
+	t.Helper()
+
+	out := make([][]byte, 0, len(timestamps))
+	for _, ts := range timestamps {
+		data, err := bson.Marshal(&oplog.ParsedLog{
+			Timestamp: utils.TimeToTimestamp(ts),
+			Operation: "i",
+			Namespace: "a.b",
+			Object:    bson.D{{Key: "_id", Value: ts}},
+		})
+		require.NoError(t, err)
+		out = append(out, data)
+	}
+	return out
+}
+
+func makeLargeTestOplog(t *testing.T, ts int64, payloadSize int) []byte {
+	t.Helper()
+
+	data, err := bson.Marshal(&oplog.ParsedLog{
+		Timestamp: utils.TimeToTimestamp(ts),
+		Operation: "i",
+		Namespace: "a.b",
+		Object: bson.D{
+			{Key: "_id", Value: ts},
+			{Key: "payload", Value: strings.Repeat("x", payloadSize)},
+		},
+	})
+	require.NoError(t, err)
+	return data
+}
+
+type fakeDirEntry struct {
+	name    string
+	dir     bool
+	size    int64
+	infoErr error
+}
+
+func (e fakeDirEntry) Name() string {
+	return e.name
+}
+
+func (e fakeDirEntry) IsDir() bool {
+	return e.dir
+}
+
+func (e fakeDirEntry) Type() fs.FileMode {
+	if e.dir {
+		return fs.ModeDir
+	}
+	return 0
+}
+
+func (e fakeDirEntry) Info() (fs.FileInfo, error) {
+	if e.infoErr != nil {
+		return nil, e.infoErr
+	}
+	return fakeFileInfo{name: e.name, dir: e.dir, size: e.size}, nil
+}
+
+type fakeFileInfo struct {
+	name string
+	dir  bool
+	size int64
+}
+
+func (i fakeFileInfo) Name() string {
+	return i.name
+}
+
+func (i fakeFileInfo) Size() int64 {
+	return i.size
+}
+
+func (i fakeFileInfo) Mode() fs.FileMode {
+	if i.dir {
+		return fs.ModeDir
+	}
+	return 0
+}
+
+func (i fakeFileInfo) ModTime() time.Time {
+	return time.Time{}
+}
+
+func (i fakeFileInfo) IsDir() bool {
+	return i.dir
+}
+
+func (i fakeFileInfo) Sys() interface{} {
+	return nil
+}

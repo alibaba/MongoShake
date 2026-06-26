@@ -55,6 +55,41 @@ func TestCheckDefaultValueKeepDisabledHTTPPorts(t *testing.T) {
 	assert.Equal(t, 0, conf.Options.PromHTTPListenPort, "should be equal")
 }
 
+func TestCheckDefaultValueRejectChangeStreamDiskSpool(t *testing.T) {
+	origin := conf.Options
+	defer func() {
+		conf.Options = origin
+	}()
+
+	conf.Options = conf.Configuration{
+		MongoUrls:                           []string{"mongodb://source-a"},
+		SyncMode:                            utils.VarSyncModeAll,
+		FullSyncReaderOplogStoreDisk:        true,
+		IncrSyncMongoFetchMethod:            utils.VarIncrSyncMongoFetchMethodChangeStream,
+		FullSyncReaderOplogStoreDiskMaxSize: 1,
+	}
+
+	err := checkDefaultValue()
+	assert.EqualError(t, err, "full_sync.reader.oplog_store_disk currently supports incr_sync.mongo_fetch_method=oplog only")
+}
+
+func TestCheckDefaultValueAllowsChangeStreamDiskSpoolOutsideAllMode(t *testing.T) {
+	origin := conf.Options
+	defer func() {
+		conf.Options = origin
+	}()
+
+	conf.Options = conf.Configuration{
+		MongoUrls:                    []string{"mongodb://source-a"},
+		SyncMode:                     utils.VarSyncModeIncr,
+		FullSyncReaderOplogStoreDisk: true,
+		IncrSyncMongoFetchMethod:     utils.VarIncrSyncMongoFetchMethodChangeStream,
+	}
+
+	err := checkDefaultValue()
+	assert.NoError(t, err, "should be equal")
+}
+
 func TestCheckDefaultValueRequireMasterQuorumElectionID(t *testing.T) {
 	origin := conf.Options
 	defer func() {

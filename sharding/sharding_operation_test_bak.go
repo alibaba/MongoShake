@@ -20,7 +20,7 @@ func TestSharding(t *testing.T) {
 	mp, err := GetChunkMapByUrl(testCsAddress)
 	assert.Equal(t, nil, err, "should be equal")
 	for key, val := range mp["test-replica-set"] {
-		fmt.Printf("%v -> key[%v] type[%v] chunks[%v]\n", key, val.Keys, val.ShardType, val.Chunks)
+		fmt.Printf("%v -> key[%v] type[%v] chunks[%v]\n", key, val.Keys, val.ShardTypes, val.Chunks)
 		if val.Chunks != nil {
 			for _, chunk := range val.Chunks {
 				fmt.Printf("  [%v, %v]\n", chunk.Mins, chunk.Maxs)

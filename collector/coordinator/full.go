@@ -84,6 +84,18 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() (err error
 		}
 	} else {
 		l.Logger.Infof("source is replica or mongos, no need to fetching chunk map")
+		// surface a clear warning when full_sync.executor.filter.orphan_document=true is
+		// configured but cannot take effect: in mongos mode the orphan filter has no
+		// way to attribute a fetched doc to a specific shard, so silently dropping the
+		// option (the previous behavior) gives users the impression it was applied.
+		if fromIsSharding && coordinator.MongoS != nil &&
+			conf.Options.FullSyncExecutorFilterOrphanDocument {
+			l.Logger.Warnf("full_sync.executor.filter.orphan_document=true is set but " +
+				"source is mongos (mongo_s_url configured); the orphan filter will NOT take " +
+				"effect because docs read via mongos are not tagged with their origin shard. " +
+				"To enable orphan filtering, drop mongo_s_url and use mongo_urls (mongod direct) " +
+				"plus mongo_cs_url, or run cleanupOrphaned on the source cluster before full sync.")
+		}
 	}
 
 	filterList := filter.NewDocFilterList()

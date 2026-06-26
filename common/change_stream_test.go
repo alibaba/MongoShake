@@ -9,7 +9,7 @@ import (
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
 
-const (
+var (
 	testMongoAddressCs = unit_test_common.TestUrlConfigServer
 )
 

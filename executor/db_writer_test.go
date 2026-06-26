@@ -21,11 +21,14 @@ import (
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
 
-const (
+var (
 	testMongoAddress         = unit_test_common.TestUrl
 	testMongoShardingAddress = unit_test_common.TestUrlSharding
-	testDb                   = "writer_test"
-	testCollection           = "a"
+)
+
+const (
+	testDb         = "writer_test"
+	testCollection = "a"
 )
 
 func mockDeleteOplogRecord(oId interface{}) *OplogRecord {
@@ -2779,11 +2782,23 @@ func TestResolveConflictFilter(t *testing.T) {
 	assert.Equal(t, bson.D{{"address.city", "shanghai"}}, filter)
 }
 
+// dupKeyErrLike returns a real mongo.WriteException with code 11000 and the
+// given E11000 message — the same error shape that mongo driver returns from
+// a real failing insert. Tests that exercise handleDupKeyOnInsert /
+// shouldSkipDupKeyOnInsert must use this rather than fmt.Errorf, since
+// utils.DuplicateKey -> mongo.IsDuplicateKeyError checks the ServerError
+// interface (HasErrorCode 11000), not the error string.
+func dupKeyErrLike(msg string) error {
+	return mongo.WriteException{
+		WriteErrors: mongo.WriteErrors{{Code: 11000, Message: msg}},
+	}
+}
+
 func TestShouldSkipDupKeyOnInsert(t *testing.T) {
 	origin := conf.Options
 	defer func() { conf.Options = origin }()
 
-	err := fmt.Errorf(`E11000 duplicate key error collection: db.coll index: x_1 dup key: { x: 1 }`)
+	err := dupKeyErrLike(`E11000 duplicate key error collection: db.coll index: x_1 dup key: { x: 1 }`)
 	conf.Options = conf.Configuration{
 		IncrSyncExecutorDupKeyStrategy: utils.VarIncrSyncExecutorDupKeyStrategySkip,
 		IncrSyncExecutorDupKeySkipRulesMap: map[string]map[string]struct{}{
@@ -2814,7 +2829,7 @@ func TestShouldSkipDupKeyOnInsert(t *testing.T) {
 	assert.True(t, shouldSkipDupKeyIndex("db", "coll", "x_1"), "should be equal")
 	assert.False(t, shouldSkipDupKeyIndex("db", "other", "x_1"), "should be equal")
 
-	idErr := fmt.Errorf(`E11000 duplicate key error collection: db.coll index: _id_ dup key: { _id: 1 }`)
+	idErr := dupKeyErrLike(`E11000 duplicate key error collection: db.coll index: _id_ dup key: { _id: 1 }`)
 	skip, indexName = shouldSkipDupKeyOnInsert("db", "coll", idErr)
 	assert.False(t, skip, "_id duplicate is handled by writer-level already-applied logic")
 	assert.Equal(t, "_id_", indexName, "should be equal")
@@ -2824,7 +2839,7 @@ func TestHandleDupKeyOnInsertStrategy(t *testing.T) {
 	origin := conf.Options
 	defer func() { conf.Options = origin }()
 
-	err := fmt.Errorf(`E11000 duplicate key error collection: db.coll index: x_1 dup key: { x: 1 }`)
+	err := dupKeyErrLike(`E11000 duplicate key error collection: db.coll index: x_1 dup key: { x: 1 }`)
 
 	conf.Options = conf.Configuration{IncrSyncExecutorDupKeyStrategy: utils.VarIncrSyncExecutorDupKeyStrategyIgnore}
 	assert.NoError(t, handleDupKeyOnInsert(nil, "db", "coll", nil, err, "test"), "should be equal")
@@ -2844,6 +2859,17 @@ func TestHandleDupKeyOnInsertStrategy(t *testing.T) {
 		"db.coll": {"y_1": {}},
 	}
 	assert.Error(t, handleDupKeyOnInsert(nil, "db", "coll", nil, err, "test"), "should be equal")
+
+	// Non-dup-key errors must always be returned untouched, regardless of
+	// strategy — the routing in handleDupKeyOnInsert depends on
+	// IsDuplicateKeyError, so a server-side error of a different code must
+	// not be swallowed.
+	conf.Options = conf.Configuration{IncrSyncExecutorDupKeyStrategy: utils.VarIncrSyncExecutorDupKeyStrategyIgnore}
+	otherErr := mongo.WriteException{
+		WriteErrors: mongo.WriteErrors{{Code: 121, Message: "DocumentValidationFailure"}},
+	}
+	assert.Error(t, handleDupKeyOnInsert(nil, "db", "coll", nil, otherErr, "test"),
+		"non-dup-key errors must propagate even under Ignore")
 }
 
 func TestSingleWriterDeleteOnNonIdDupKey(t *testing.T) {

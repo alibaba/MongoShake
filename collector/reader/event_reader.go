@@ -5,8 +5,6 @@ import (
 	"sync"
 	"time"
 
-	diskQueue "github.com/vinllen/go-diskqueue"
-
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
@@ -28,9 +26,6 @@ type EventReader struct {
 
 	// stage of fetch and store oplog
 	fetchStage int32
-	// disk queue used to store oplog temporarily
-	diskQueue     *diskQueue.DiskQueue
-	disQueueMutex sync.Mutex // disk queue mutex
 
 	// start at operation time
 	startAtOperationTime interface{}

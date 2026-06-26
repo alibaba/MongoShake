@@ -19,10 +19,12 @@ import (
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
 
-const (
+var (
 	testUrl                  = unit_test_common.TestUrl
 	testMongoShardingAddress = unit_test_common.TestUrlSharding
+)
 
+const (
 	uuidMark = "ui"
 )
 
@@ -377,7 +379,13 @@ func runOplog(data *PartialLog) error {
 		_, err := client.Database(ns[0]).Collection(ns[1]).DeleteOne(context.Background(), data.Object)
 		return err
 	case "u":
-		_, err := client.Database(ns[0]).Collection(ns[1]).UpdateOne(context.Background(), data.Query, data.Object)
+		coll := client.Database(ns[0]).Collection(ns[1])
+		// mirror the executor: $-less object is a full-document replace
+		if FindFiledPrefix(data.Object, "$") {
+			_, err := coll.UpdateOne(context.Background(), data.Query, data.Object)
+			return err
+		}
+		_, err := coll.ReplaceOne(context.Background(), data.Query, data.Object)
 		return err
 	case "c":
 		operation, found := ExtraCommandName(data.Object)
@@ -548,6 +556,53 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		assert.Equal(t, 2, len(all), "should be equal")
 		assert.Equal(t, "1", all["1"]["a"], "should be equal")
 		assert.Equal(t, "20", all["2"]["a"], "should be equal")
+	}
+
+	// test replace removes fields absent from FullDocument
+	{
+		fmt.Printf("TestConvertEvent2Oplog case %d.\n", nr)
+		nr++
+
+		var err error
+		client, err = newMongoClient(testUrl)
+		assert.Equal(t, nil, err, "should be equal")
+
+		err = client.Database("testDb").Drop(context.Background())
+		assert.Equal(t, nil, err, "should be equal")
+
+		eventInsert := Event{
+			OperationType: "insert",
+			FullDocument: bson.D{
+				bson.E{Key: "_id", Value: "3"},
+				bson.E{Key: "a", Value: "1"},
+				bson.E{Key: "extra", Value: "keepme"},
+			},
+			Ns: bson.M{"db": "testDb", "coll": "testColl"},
+		}
+		out, err := bson.Marshal(eventInsert)
+		assert.Equal(t, nil, err, "should be equal")
+		err = runByte(out)
+		assert.Equal(t, nil, err, "should be equal")
+
+		eventReplace := Event{
+			OperationType: "replace",
+			DocumentKey:   bson.D{{"_id", "3"}},
+			FullDocument: bson.D{
+				bson.E{Key: "_id", Value: "3"},
+				bson.E{Key: "a", Value: "2"},
+			},
+			Ns: bson.M{"db": "testDb", "coll": "testColl"},
+		}
+		out, err = bson.Marshal(eventReplace)
+		assert.Equal(t, nil, err, "should be equal")
+		err = runByte(out)
+		assert.Equal(t, nil, err, "should be equal")
+
+		all := getAllDoc("testDb", "testColl")
+		assert.Equal(t, 1, len(all), "should be equal")
+		assert.Equal(t, "2", all["3"]["a"], "should be equal")
+		_, hasExtra := all["3"]["extra"]
+		assert.Equal(t, false, hasExtra, "replace must remove fields absent from FullDocument")
 	}
 
 	// test insert & update & delete

@@ -72,7 +72,10 @@ func TestMongoConn(t *testing.T) {
 		fmt.Printf("TestMongoConn case %d.\n", nr)
 		nr++
 
-		conn, err := NewMongoCommunityConn(testUrlSsl, VarMongoConnectModePrimary, true, "", "", "/Users/zhongli/workspace/ApsaraDB-CA-Chain.pem")
+		if testUrlSsl == "" || unit_test_common.TestCaPem == "" {
+			t.Skip("set MONGOSHAKE_TEST_URL_SSL and MONGOSHAKE_TEST_CA_PEM to run this case")
+		}
+		conn, err := NewMongoCommunityConn(testUrlSsl, VarMongoConnectModePrimary, true, "", "", unit_test_common.TestCaPem)
 		assert.Equal(t, err, nil, "should be equal")
 		assert.Equal(t, conn != nil, true, "should be equal")
 	}

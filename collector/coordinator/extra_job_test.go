@@ -14,7 +14,7 @@ import (
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
 
-const (
+var (
 	testMongoAddress = unit_test_common.TestUrl
 )
 

@@ -192,6 +192,36 @@ var PersisterBufferUsedRatioProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Help: "Current used ratio of the persister in-memory buffer, from 0 to 1.",
 }, []string{"name", "stage"})
 
+var SpoolDepthProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "spool_depth",
+	Help: "Current number of oplogs waiting in the local spool.",
+}, []string{"name", "stage"})
+
+var SpoolWriteSeqProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "spool_write_seq",
+	Help: "Current maximum write sequence in the local spool.",
+}, []string{"name", "stage"})
+
+var SpoolReadSeqProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "spool_read_seq",
+	Help: "Current next read sequence in the local spool.",
+}, []string{"name", "stage"})
+
+var SpoolWriteTotalProm = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Name: "spool_write_total",
+	Help: "Total number of oplogs written into the local spool.",
+}, []string{"name", "stage"})
+
+var SpoolReadTotalProm = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Name: "spool_read_total",
+	Help: "Total number of oplogs read from the local spool.",
+}, []string{"name", "stage"})
+
+var SpoolErrorsTotalProm = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Name: "spool_errors_total",
+	Help: "Total number of local spool operation errors.",
+}, []string{"name", "stage", "op"})
+
 var FullSyncCollectionsTotalProm = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "full_sync_collections_total",
 	Help: "Total number of collections discovered for full sync.",
@@ -307,6 +337,12 @@ func InitPrometheus() {
 			PersisterBufferUsedProm,
 			PersisterBufferCapacityProm,
 			PersisterBufferUsedRatioProm,
+			SpoolDepthProm,
+			SpoolWriteSeqProm,
+			SpoolReadSeqProm,
+			SpoolWriteTotalProm,
+			SpoolReadTotalProm,
+			SpoolErrorsTotalProm,
 			FullSyncCollectionsTotalProm,
 			FullSyncCollectionsFinishedProm,
 			FullSyncCollectionsProcessingProm,

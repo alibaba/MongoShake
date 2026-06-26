@@ -51,25 +51,39 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 	// if no checkpoint exists
 	if !exists {
 		sync.persister.SetFetchStage(utils.FetchStageStoreDiskNoApply)
-		dqName := fmt.Sprintf("diskqueue-%v-%v", sync.Replset, ts.Format("20060102-150405"))
-		sync.persister.InitDiskQueue(dqName)
+		dqName := fmt.Sprintf("oplog-spool-%v-%v", sync.Replset, ts.Format("20060102-150405"))
+		if err := sync.persister.InitDiskQueue(dqName, true); err != nil {
+			return fmt.Errorf("init pebble oplog spool[%v] failed[%v]", dqName, err)
+		}
 		sync.ckptManager.SetOplogDiskQueueName(dqName)
 		sync.ckptManager.SetOplogDiskFinishTs(ckpt.InitCheckpoint) // set as init
 		return nil
 	}
 
-	// check if checkpoint real ts >= checkpoint disk last ts
-	if checkpoint.OplogDiskQueueFinishTs > 0 && checkpoint.Timestamp >= checkpoint.OplogDiskQueueFinishTs {
+	// check if checkpoint real ts >= checkpoint disk last ts.
+	// InitCheckpoint is also the initial unfinished marker, so it only means
+	// completed when the queue name has already been cleared.
+	diskQueueFinished := (checkpoint.OplogDiskQueue == "" &&
+		checkpoint.OplogDiskQueueFinishTs <= ckpt.InitCheckpoint) ||
+		(checkpoint.OplogDiskQueueFinishTs > ckpt.InitCheckpoint &&
+			checkpoint.Timestamp >= checkpoint.OplogDiskQueueFinishTs)
+	if diskQueueFinished {
 		// no need to init disk queue again
 		sync.persister.SetFetchStage(utils.FetchStageStoreMemoryApply)
 		return nil
 	}
 
-	// TODO, there is a bug if MongoShake restarts
+	if checkpoint.OplogDiskQueue == "" {
+		return fmt.Errorf("checkpoint[%v] has unfinished disk spool finish ts[%v] but empty queue name",
+			sync.Replset, utils.ExtractTimestampForLog(checkpoint.OplogDiskQueueFinishTs))
+	}
 
 	// need to init
 	sync.persister.SetFetchStage(utils.FetchStageStoreDiskNoApply)
-	sync.persister.InitDiskQueue(checkpoint.OplogDiskQueue)
+	if err := sync.persister.InitDiskQueue(checkpoint.OplogDiskQueue, false); err != nil {
+		return fmt.Errorf("open existing pebble oplog spool[%v] for checkpoint[%v] failed[%v]",
+			checkpoint.OplogDiskQueue, sync.Replset, err)
+	}
 	return nil
 }
 
@@ -113,10 +127,31 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs int64) bool {
 
 	lowestInt64 := lowest
 	// if all oplogs from disk has been replayed successfully, store the newest oplog timestamp
+	diskQueueFinishMetadataOnly := false
 	if conf.Options.FullSyncReaderOplogStoreDisk && sync.persister.diskQueueLastTs > 0 {
-		if lowestInt64 >= sync.persister.diskQueueLastTs {
-			sync.ckptManager.SetOplogDiskFinishTs(sync.persister.diskQueueLastTs)
+		if sync.persister.diskQueueLastTs == ckpt.InitCheckpoint {
+			finishTs := inMemoryTs
+			if finishTs <= ckpt.InitCheckpoint {
+				finishTs = ckpt.InitCheckpoint
+			}
+			sync.ckptManager.SetOplogDiskFinishTs(finishTs)
+			sync.ckptManager.SetOplogDiskQueueName("")
 			sync.persister.diskQueueLastTs = -2 // mark -1 so next time won't call
+			diskQueueFinishMetadataOnly = true
+		} else if lowestInt64 >= sync.persister.diskQueueLastTs {
+			sync.ckptManager.SetOplogDiskFinishTs(sync.persister.diskQueueLastTs)
+			sync.ckptManager.SetOplogDiskQueueName("")
+			sync.persister.diskQueueLastTs = -2 // mark -1 so next time won't call
+		}
+	}
+
+	if diskQueueFinishMetadataOnly && inMemoryTs > 0 && (lowestInt64 <= inMemoryTs || err != nil) {
+		if err = sync.ckptManager.Update(inMemoryTs); err == nil {
+			l.Logger.Infof("CheckpointOperation write success. updated disk spool metadata at %v",
+				utils.ExtractTimestampForLog(inMemoryTs))
+			sync.replMetric.AddCheckpoint(1)
+			sync.replMetric.SetLSNCheckpoint(inMemoryTs)
+			return true
 		}
 	}
 
