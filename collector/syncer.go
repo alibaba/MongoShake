@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -547,6 +548,10 @@ func (sync *OplogSyncer) deserializer(index int) {
 		for _, rawLog := range batchRawLogs {
 			log, err := parser(rawLog)
 			if err != nil {
+				if errors.Is(err, oplog.ErrEmptyChangeStreamUpdate) {
+					l.Logger.Warnf("%s deserializer skip empty change stream update: %v", sync, err)
+					continue
+				}
 				l.Logger.Panicf("%s deserializer parse data failed[%v]", sync, err)
 			}
 			sourceTime := extractSourceTime(rawLog, log)

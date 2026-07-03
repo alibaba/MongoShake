@@ -2,6 +2,7 @@ package oplog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -1291,4 +1292,422 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		assert.Equal(t, nil, err, "should be equal")
 		assert.Equal(t, bson.D{bson.E{Key: "_id", Value: int32(1)}, bson.E{Key: "a", Value: int32(1)}}, document.ShardKey, "should be equal")
 	}
+}
+
+// TestConvertEvent2Oplog_TruncatedArrays verifies that updateDescription.truncatedArrays
+// is converted to $push + $each: [] + $slice — a regular update operator compatible
+// with all MongoDB versions, preventing an empty update object from being replayed
+// as a replacement.
+func TestConvertEvent2Oplog_TruncatedArrays(t *testing.T) {
+	// Case 1: only truncatedArrays, empty updatedFields and removedFields.
+	// This is the exact scenario reported in the issue — without the fix the
+	// generated oplog.Object is empty and the executor treats it as replacement.
+	t.Run("truncatedArrays_only", func(t *testing.T) {
+		event := Event{
+			OperationType: "update",
+			DocumentKey:   bson.D{{"_id", "1"}},
+			UpdateDescription: bson.M{
+				"updatedFields": bson.M{},
+				"removedFields": primitive.A{},
+				"truncatedArrays": primitive.A{
+					bson.M{"field": "arr", "newSize": int32(1)},
+				},
+			},
+			Ns: bson.M{"db": "db", "coll": "coll"},
+		}
+		raw, err := bson.Marshal(event)
+		assert.NoError(t, err)
+
+		oplog, err := ConvertEvent2Oplog(raw, false)
+		assert.NoError(t, err)
+
+		// Must have a $-prefixed operator so the executor takes the update path.
+		assert.True(t, FindFiledPrefix(oplog.Object, "$"),
+			"oplog.Object must have $ operator to avoid replacement path, got: %v", oplog.Object)
+
+		// Verify $push contains $each: [] and $slice for "arr".
+		pushVal := GetKey(oplog.Object, "$push")
+		assert.NotNil(t, pushVal, "expected $push in oplog.Object, got: %v", oplog.Object)
+		pushDoc, ok := pushVal.(bson.D)
+		assert.True(t, ok, "$push should be bson.D, got %T", pushVal)
+
+		arrVal := GetKey(pushDoc, "arr")
+		assert.NotNil(t, arrVal, "expected 'arr' field in $push")
+		arrExpr, ok := arrVal.(bson.D)
+		assert.True(t, ok, "arr expression should be bson.D, got %T", arrVal)
+
+		eachVal := GetKey(arrExpr, "$each")
+		assert.NotNil(t, eachVal, "expected $each in arr expression")
+		eachArr, ok := eachVal.(primitive.A)
+		assert.True(t, ok, "$each should be primitive.A, got %T", eachVal)
+		assert.Equal(t, 0, len(eachArr), "$each should be empty")
+
+		sliceVal := GetKey(arrExpr, "$slice")
+		assert.Equal(t, int32(1), sliceVal, "expected $slice: 1")
+
+		// No $set should be present (updatedFields is empty).
+		assert.Nil(t, GetKey(oplog.Object, "$set"), "no $set expected when updatedFields is empty")
+	})
+
+	// Case 2: truncatedArrays together with updatedFields — should produce
+	// separate $set and $push operators.
+	t.Run("truncatedArrays_with_updatedFields", func(t *testing.T) {
+		event := Event{
+			OperationType: "update",
+			DocumentKey:   bson.D{{"_id", "1"}},
+			UpdateDescription: bson.M{
+				"updatedFields": bson.M{"keep": "new_value"},
+				"removedFields": primitive.A{},
+				"truncatedArrays": primitive.A{
+					bson.M{"field": "arr", "newSize": int32(2)},
+				},
+			},
+			Ns: bson.M{"db": "db", "coll": "coll"},
+		}
+		raw, err := bson.Marshal(event)
+		assert.NoError(t, err)
+
+		oplog, err := ConvertEvent2Oplog(raw, false)
+		assert.NoError(t, err)
+		assert.True(t, FindFiledPrefix(oplog.Object, "$"))
+
+		// $set from updatedFields
+		setVal := GetKey(oplog.Object, "$set")
+		assert.NotNil(t, setVal)
+		setDoc, ok := setVal.(bson.M)
+		assert.True(t, ok, "expected bson.M for $set, got %T", setVal)
+		assert.Equal(t, "new_value", setDoc["keep"])
+
+		// $push from truncatedArrays
+		pushVal := GetKey(oplog.Object, "$push")
+		assert.NotNil(t, pushVal)
+	})
+
+	// Case 3: truncatedArrays together with removedFields — should produce
+	// both $push (for truncation) and $unset (for removed fields).
+	t.Run("truncatedArrays_with_removedFields", func(t *testing.T) {
+		event := Event{
+			OperationType: "update",
+			DocumentKey:   bson.D{{"_id", "1"}},
+			UpdateDescription: bson.M{
+				"updatedFields": bson.M{},
+				"removedFields": primitive.A{"gone"},
+				"truncatedArrays": primitive.A{
+					bson.M{"field": "arr", "newSize": int32(0)},
+				},
+			},
+			Ns: bson.M{"db": "db", "coll": "coll"},
+		}
+		raw, err := bson.Marshal(event)
+		assert.NoError(t, err)
+
+		oplog, err := ConvertEvent2Oplog(raw, false)
+		assert.NoError(t, err)
+		assert.True(t, FindFiledPrefix(oplog.Object, "$"))
+		assert.NotNil(t, GetKey(oplog.Object, "$push"))
+		assert.NotNil(t, GetKey(oplog.Object, "$unset"))
+	})
+
+	// Case 4: no truncatedArrays — existing $set/$unset semantics are preserved,
+	// and no $push is generated.
+	t.Run("no_truncatedArrays", func(t *testing.T) {
+		event := Event{
+			OperationType: "update",
+			DocumentKey:   bson.D{{"_id", "1"}},
+			UpdateDescription: bson.M{
+				"updatedFields": bson.M{"x": int32(1)},
+				"removedFields": primitive.A{},
+			},
+			Ns: bson.M{"db": "db", "coll": "coll"},
+		}
+		raw, err := bson.Marshal(event)
+		assert.NoError(t, err)
+
+		oplog, err := ConvertEvent2Oplog(raw, false)
+		assert.NoError(t, err)
+		assert.True(t, FindFiledPrefix(oplog.Object, "$"))
+
+		setVal := GetKey(oplog.Object, "$set")
+		assert.NotNil(t, setVal)
+		setDoc, ok := setVal.(bson.M)
+		assert.True(t, ok, "expected bson.M for $set, got %T", setVal)
+		assert.Equal(t, int32(1), setDoc["x"])
+
+		assert.Nil(t, GetKey(oplog.Object, "$push"), "no $push expected without truncatedArrays")
+	})
+
+	// Case 5 (L2): nested dotted path in truncatedArrays field name.
+	t.Run("truncatedArrays_nested_dotted_path", func(t *testing.T) {
+		event := Event{
+			OperationType: "update",
+			DocumentKey:   bson.D{{"_id", "1"}},
+			UpdateDescription: bson.M{
+				"updatedFields": bson.M{},
+				"removedFields": primitive.A{},
+				"truncatedArrays": primitive.A{
+					bson.M{"field": "nested.arr.items", "newSize": int32(3)},
+				},
+			},
+			Ns: bson.M{"db": "db", "coll": "coll"},
+		}
+		raw, err := bson.Marshal(event)
+		assert.NoError(t, err)
+
+		oplog, err := ConvertEvent2Oplog(raw, false)
+		assert.NoError(t, err)
+
+		pushVal := GetKey(oplog.Object, "$push")
+		assert.NotNil(t, pushVal, "expected $push in oplog.Object")
+		pushDoc, ok := pushVal.(bson.D)
+		assert.True(t, ok)
+
+		nestedVal := GetKey(pushDoc, "nested.arr.items")
+		assert.NotNil(t, nestedVal, "expected dotted path 'nested.arr.items' in $push")
+		nestedExpr, ok := nestedVal.(bson.D)
+		assert.True(t, ok)
+		assert.Equal(t, int32(3), GetKey(nestedExpr, "$slice"))
+	})
+
+	// Case 6 (L3): multiple truncatedArrays entries — two arrays truncated in one event.
+	t.Run("truncatedArrays_multiple_entries", func(t *testing.T) {
+		event := Event{
+			OperationType: "update",
+			DocumentKey:   bson.D{{"_id", "1"}},
+			UpdateDescription: bson.M{
+				"updatedFields": bson.M{},
+				"removedFields": primitive.A{},
+				"truncatedArrays": primitive.A{
+					bson.M{"field": "arr1", "newSize": int32(1)},
+					bson.M{"field": "arr2", "newSize": int64(5)},
+				},
+			},
+			Ns: bson.M{"db": "db", "coll": "coll"},
+		}
+		raw, err := bson.Marshal(event)
+		assert.NoError(t, err)
+
+		oplog, err := ConvertEvent2Oplog(raw, false)
+		assert.NoError(t, err)
+
+		pushVal := GetKey(oplog.Object, "$push")
+		assert.NotNil(t, pushVal, "expected $push in oplog.Object")
+		pushDoc, ok := pushVal.(bson.D)
+		assert.True(t, ok)
+
+		arr1 := GetKey(pushDoc, "arr1")
+		assert.NotNil(t, arr1, "expected arr1 in $push")
+		arr1Expr, ok := arr1.(bson.D)
+		assert.True(t, ok)
+		assert.Equal(t, int32(1), GetKey(arr1Expr, "$slice"))
+
+		arr2 := GetKey(pushDoc, "arr2")
+		assert.NotNil(t, arr2, "expected arr2 in $push")
+		arr2Expr, ok := arr2.(bson.D)
+		assert.True(t, ok)
+		assert.Equal(t, int64(5), GetKey(arr2Expr, "$slice"))
+	})
+
+	// Case 7: all three fields empty — should return sentinel error to prevent
+	// empty oplog.Object from being treated as replacement.
+	t.Run("all_fields_empty", func(t *testing.T) {
+		event := Event{
+			OperationType: "update",
+			DocumentKey:   bson.D{{"_id", "1"}},
+			UpdateDescription: bson.M{
+				"updatedFields":   bson.M{},
+				"removedFields":   primitive.A{},
+				"truncatedArrays": primitive.A{},
+			},
+			Ns: bson.M{"db": "db", "coll": "coll"},
+		}
+		raw, err := bson.Marshal(event)
+		assert.NoError(t, err)
+
+		_, err = ConvertEvent2Oplog(raw, false)
+		assert.Error(t, err, "expected error for empty update object")
+		assert.True(t, errors.Is(err, ErrEmptyChangeStreamUpdate),
+			"expected ErrEmptyChangeStreamUpdate, got: %v", err)
+	})
+
+	// Case 8: the same array is both modified and truncated by one event. Verified
+	// against MongoDB 7.0.37: a 200-element array updated with
+	// [{$set:{arr:{$concatArrays:[["X"],{$slice:["$arr",1,99]}]}}}] produces the
+	// $v:2 delta {"sarr":{"a":true,"l":100,"u0":"X"}}, which the server surfaces
+	// as updatedFields {"arr.0":"X"} plus truncatedArrays {field:"arr",newSize:100}.
+	// Emitting both $set and $push makes MongoDB fail the write with "Updating the
+	// path 'arr' would create a conflict at 'arr'", which the executor retries
+	// forever — so the truncation must be dropped instead.
+	t.Run("truncatedArrays_conflicts_with_updatedFields_element", func(t *testing.T) {
+		event := Event{
+			OperationType: "update",
+			DocumentKey:   bson.D{{"_id", "1"}},
+			UpdateDescription: bson.M{
+				"updatedFields":   bson.M{"arr.0": "X"},
+				"removedFields":   primitive.A{},
+				"truncatedArrays": primitive.A{bson.M{"field": "arr", "newSize": int32(100)}},
+			},
+			Ns: bson.M{"db": "db", "coll": "coll"},
+		}
+		raw, err := bson.Marshal(event)
+		assert.NoError(t, err)
+
+		oplog, err := ConvertEvent2Oplog(raw, false)
+		assert.NoError(t, err, "a conflicting truncation must degrade, not fail the event")
+
+		assert.Nil(t, GetKey(oplog.Object, "$push"),
+			"$push on 'arr' would conflict with $set on 'arr.0', got: %v", oplog.Object)
+		assert.NotNil(t, GetKey(oplog.Object, "$set"), "the $set part must survive")
+	})
+
+	// Case 9: updatedFields replaces the whole array that truncatedArrays names.
+	t.Run("truncatedArrays_conflicts_with_whole_field_update", func(t *testing.T) {
+		event := Event{
+			OperationType: "update",
+			DocumentKey:   bson.D{{"_id", "1"}},
+			UpdateDescription: bson.M{
+				"updatedFields":   bson.M{"arr": primitive.A{"a"}},
+				"removedFields":   primitive.A{},
+				"truncatedArrays": primitive.A{bson.M{"field": "arr", "newSize": int32(1)}},
+			},
+			Ns: bson.M{"db": "db", "coll": "coll"},
+		}
+		raw, err := bson.Marshal(event)
+		assert.NoError(t, err)
+
+		oplog, err := ConvertEvent2Oplog(raw, false)
+		assert.NoError(t, err)
+		assert.Nil(t, GetKey(oplog.Object, "$push"))
+		assert.NotNil(t, GetKey(oplog.Object, "$set"))
+	})
+
+	// Case 10: updatedFields addresses a value nested below the truncated array.
+	t.Run("truncatedArrays_conflicts_with_nested_path", func(t *testing.T) {
+		event := Event{
+			OperationType: "update",
+			DocumentKey:   bson.D{{"_id", "1"}},
+			UpdateDescription: bson.M{
+				"updatedFields":   bson.M{"arr.0.x": int32(1)},
+				"removedFields":   primitive.A{},
+				"truncatedArrays": primitive.A{bson.M{"field": "arr", "newSize": int32(2)}},
+			},
+			Ns: bson.M{"db": "db", "coll": "coll"},
+		}
+		raw, err := bson.Marshal(event)
+		assert.NoError(t, err)
+
+		oplog, err := ConvertEvent2Oplog(raw, false)
+		assert.NoError(t, err)
+		assert.Nil(t, GetKey(oplog.Object, "$push"))
+	})
+
+	// Case 11: overlap is decided per path component, not by raw string prefix —
+	// "arrayish" and "arr" are unrelated fields and must both be replayed.
+	t.Run("truncatedArrays_no_conflict_on_shared_substring", func(t *testing.T) {
+		event := Event{
+			OperationType: "update",
+			DocumentKey:   bson.D{{"_id", "1"}},
+			UpdateDescription: bson.M{
+				"updatedFields":   bson.M{"arrayish": int32(1)},
+				"removedFields":   primitive.A{},
+				"truncatedArrays": primitive.A{bson.M{"field": "arr", "newSize": int32(2)}},
+			},
+			Ns: bson.M{"db": "db", "coll": "coll"},
+		}
+		raw, err := bson.Marshal(event)
+		assert.NoError(t, err)
+
+		oplog, err := ConvertEvent2Oplog(raw, false)
+		assert.NoError(t, err)
+		assert.NotNil(t, GetKey(oplog.Object, "$set"))
+		assert.NotNil(t, GetKey(oplog.Object, "$push"),
+			"'arr' does not overlap 'arrayish', the truncation must be kept: %v", oplog.Object)
+	})
+
+	// Case 12: only the conflicting entry is dropped; a sibling truncation in the
+	// same event still has to be replayed.
+	t.Run("truncatedArrays_partial_conflict_keeps_sibling", func(t *testing.T) {
+		event := Event{
+			OperationType: "update",
+			DocumentKey:   bson.D{{"_id", "1"}},
+			UpdateDescription: bson.M{
+				"updatedFields": bson.M{"arr.0": "X"},
+				"removedFields": primitive.A{},
+				"truncatedArrays": primitive.A{
+					bson.M{"field": "arr", "newSize": int32(2)},
+					bson.M{"field": "other", "newSize": int32(3)},
+				},
+			},
+			Ns: bson.M{"db": "db", "coll": "coll"},
+		}
+		raw, err := bson.Marshal(event)
+		assert.NoError(t, err)
+
+		oplog, err := ConvertEvent2Oplog(raw, false)
+		assert.NoError(t, err)
+
+		pushVal := GetKey(oplog.Object, "$push")
+		assert.NotNil(t, pushVal)
+		pushDoc, ok := pushVal.(bson.D)
+		assert.True(t, ok)
+		assert.Nil(t, GetKey(pushDoc, "arr"), "conflicting entry must be dropped")
+		assert.NotNil(t, GetKey(pushDoc, "other"), "sibling entry must survive")
+	})
+
+	// Case 13: an entry MongoShake cannot interpret must fail the event loudly
+	// rather than be skipped. These are plain errors on purpose — only a genuinely
+	// empty updateDescription may return ErrEmptyChangeStreamUpdate, which the
+	// syncer drops with a warning.
+	t.Run("truncatedArrays_unrepresentable_entries_fail_loudly", func(t *testing.T) {
+		cases := []struct {
+			name  string
+			entry interface{}
+		}{
+			{"missing_newSize", bson.M{"field": "arr"}},
+			{"non_numeric_newSize", bson.M{"field": "arr", "newSize": "2"}},
+			{"negative_newSize", bson.M{"field": "arr", "newSize": int32(-1)}},
+			{"missing_field", bson.M{"newSize": int32(2)}},
+			{"entry_not_a_document", "arr"},
+		}
+		for _, c := range cases {
+			t.Run(c.name, func(t *testing.T) {
+				event := Event{
+					OperationType: "update",
+					DocumentKey:   bson.D{{"_id", "1"}},
+					UpdateDescription: bson.M{
+						"updatedFields":   bson.M{},
+						"removedFields":   primitive.A{},
+						"truncatedArrays": primitive.A{c.entry},
+					},
+					Ns: bson.M{"db": "db", "coll": "coll"},
+				}
+				raw, err := bson.Marshal(event)
+				assert.NoError(t, err)
+
+				_, err = ConvertEvent2Oplog(raw, false)
+				assert.Error(t, err, "an unrepresentable truncation must not be dropped silently")
+				assert.False(t, errors.Is(err, ErrEmptyChangeStreamUpdate),
+					"must not be skippable as an empty update, got: %v", err)
+			})
+		}
+	})
+
+	// Case 14: truncatedArrays of a non-array type is equally unrepresentable.
+	t.Run("truncatedArrays_wrong_outer_type", func(t *testing.T) {
+		event := Event{
+			OperationType: "update",
+			DocumentKey:   bson.D{{"_id", "1"}},
+			UpdateDescription: bson.M{
+				"updatedFields":   bson.M{},
+				"removedFields":   primitive.A{},
+				"truncatedArrays": "arr",
+			},
+			Ns: bson.M{"db": "db", "coll": "coll"},
+		}
+		raw, err := bson.Marshal(event)
+		assert.NoError(t, err)
+
+		_, err = ConvertEvent2Oplog(raw, false)
+		assert.Error(t, err)
+		assert.False(t, errors.Is(err, ErrEmptyChangeStreamUpdate))
+	})
 }
