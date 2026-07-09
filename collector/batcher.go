@@ -1,6 +1,8 @@
 package collector
 
 import (
+	"strings"
+	"sync/atomic"
 	"time"
 
 	nimo "github.com/gugemichael/nimo4go"
@@ -10,6 +12,7 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/executor"
 	"github.com/alibaba/MongoShake/v2/oplog"
 	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
@@ -36,6 +39,50 @@ var (
 		18, 116, 0, 255, 255, 255, 255, 255, 255, 255, 255, 0,
 	}
 )
+
+// DDLExecutor directly executes DDL on target MongoDB, bypassing the worker pipeline.
+// Only created for direct tunnel. For other tunnels, DDL still goes through worker[0].
+type DDLExecutor struct {
+	conn         *utils.MongoCommunityConn
+	fullFinishTs int64
+}
+
+// NewDDLExecutor creates a DDLExecutor with a direct connection to the target MongoDB.
+func NewDDLExecutor(mongoUrl string, fullFinishTs int64) *DDLExecutor {
+	conn, err := utils.NewMongoCommunityConn(
+		mongoUrl,
+		utils.VarMongoConnectModePrimary,
+		true,
+		utils.ReadWriteConcernDefault,
+		utils.ReadWriteConcernDefault,
+		conf.Options.TunnelMongoSslRootCaFile,
+	)
+	if err != nil {
+		l.Logger.Crashf("create DDL executor connection failed: %v", err)
+	}
+	return &DDLExecutor{conn: conn, fullFinishTs: fullFinishTs}
+}
+
+// Execute runs a DDL command directly on the target MongoDB.
+func (e *DDLExecutor) Execute(log *oplog.PartialLog) error {
+	namespace := log.Namespace
+	dc := strings.SplitN(namespace, ".", 2)
+	database := dc[0]
+	operation, _ := oplog.ExtraCommandName(log.Object)
+	l.Logger.Info("DDLExecutor: directly executing DDL [%s] on db[%s], ts=%v",
+		operation, database, log.Timestamp)
+
+	err := executor.RunCommand(database, operation, log, e.conn.Client)
+	if err != nil {
+		if executor.IgnoreError(err, "c", utils.TimeStampToInt64(log.Timestamp) <= e.fullFinishTs) {
+			l.Logger.Debug("DDLExecutor: ignore DDL error [%v]", err)
+			return nil
+		}
+		return err
+	}
+	l.Logger.Info("DDLExecutor: DDL [%s] executed successfully", operation)
+	return nil
+}
 
 func getTargetDelay() int64 {
 	if utils.IncrSentinelOptions.TargetDelay < 0 {
@@ -85,6 +132,10 @@ type Batcher struct {
 	// transaction buffer
 	txnBuffer *oplog.TxnBuffer
 
+	// ddlExecutor directly executes DDL on target MongoDB, bypassing the worker pipeline.
+	// Only created for direct tunnel. For other tunnels, DDL still goes through worker[0].
+	ddlExecutor *DDLExecutor
+
 	// for ut only
 	utBatchesDelay struct {
 		flag        bool                  // ut enable?
@@ -95,6 +146,13 @@ type Batcher struct {
 
 func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
 	handler OplogHandler, workerGroup []*Worker) *Batcher {
+	// Only create DDL executor for direct tunnel (where DDL ordering matters)
+	var ddlExecutor *DDLExecutor
+	if conf.Options.Tunnel == utils.VarTunnelDirect && len(conf.Options.TunnelAddress) > 0 {
+		ddlExecutor = NewDDLExecutor(conf.Options.TunnelAddress[0],
+			utils.TimeStampToInt64(syncer.fullSyncFinishPosition))
+	}
+
 	return &Batcher{
 		syncer:          syncer,
 		filterList:      filterList,
@@ -103,6 +161,7 @@ func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
 		lastOplog:       fakeOplog,
 		lastFilterOplog: fakeOplog.Parsed,
 		txnBuffer:       oplog.NewBuffer(),
+		ddlExecutor:     ddlExecutor,
 	}
 }
 
@@ -276,14 +335,14 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
  * i d i c u i
  *      | |
  */
-func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barrier bool, allEmpty bool, exit bool) {
+func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barrier bool, allEmpty bool, exit bool, ddlOplogs []*oplog.GenericOplog) {
 	// picked raw oplogs and batching in sequence
 	batcher.batchGroup = make([][]*oplog.GenericOplog, len(batcher.workerGroup))
 	if batcher.barrierOplogs == nil {
 		batcher.barrierOplogs = make([]*oplog.GenericOplog, 0)
 	}
 
-	// Have barrier Oplogs to performed
+	// Have barrier Oplogs to performed (transaction with command)
 	if len(batcher.barrierOplogs) > 0 {
 		for _, v := range batcher.barrierOplogs {
 			if batcher.filter(v.Parsed) {
@@ -300,14 +359,14 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		}
 		batcher.barrierOplogs = nil
 
-		return batcher.batchGroup, true, batcher.setLastOplog(), false
+		return batcher.batchGroup, true, batcher.setLastOplog(), false, nil
 	}
 
 	// try to get batch
 	mergeBatch, exit := batcher.getBatchWithDelay()
 
 	if mergeBatch == nil {
-		return batcher.batchGroup, false, batcher.setLastOplog(), exit
+		return batcher.batchGroup, false, batcher.setLastOplog(), exit, nil
 	}
 
 	for i, genericLog := range mergeBatch {
@@ -334,7 +393,7 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 
 				allEmpty := batcher.setLastOplog()
 				nimo.AssertTrue(allEmpty == true, "batcher.batchGroup don't be empty")
-				return batcher.batchGroup, true, allEmpty, false
+				return batcher.batchGroup, true, allEmpty, false, nil
 			} else {
 				for _, ele := range deliveredOps {
 					batcher.addIntoBatchGroup(ele, false)
@@ -370,11 +429,12 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		if ddlFilter.Filter(genericLog.Parsed) {
 
 			if conf.Options.FilterDDLEnable {
-				batcher.barrierOplogs = append(batcher.barrierOplogs, genericLog)
+				// DDL is returned via ddlOplogs for direct execution by startBatcher
+				ddlOplogs = append(ddlOplogs, genericLog)
 
 				batcher.remainLogs = mergeBatch[i+1:]
 
-				return batcher.batchGroup, true, batcher.setLastOplog(), false
+				return batcher.batchGroup, true, batcher.setLastOplog(), false, ddlOplogs
 			} else {
 				// filter
 				batcher.syncer.replMetric.AddFilter(1)
@@ -388,7 +448,7 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		batcher.addIntoBatchGroup(genericLog, false)
 	}
 
-	return batcher.batchGroup, false, batcher.setLastOplog(), exit
+	return batcher.batchGroup, false, batcher.setLastOplog(), exit, nil
 }
 
 func (batcher *Batcher) setLastOplog() bool {
@@ -520,4 +580,68 @@ func (batcher *Batcher) moveToNextQueue() {
 
 func (batcher *Batcher) currentQueue() uint64 {
 	return batcher.nextQueue
+}
+
+// waitForAllWorkersIdle waits until all workers have empty queues and all dispatched
+// oplogs have been acknowledged (ack == unack). This ensures all DML operations are
+// completed before DDL execution.
+func (batcher *Batcher) waitForAllWorkersIdle() bool {
+	l.Logger.Info("%s waiting for all workers to be idle (barrier)", batcher.syncer)
+
+	for i := 0; ; i++ {
+		if utils.IncrSentinelOptions.Pause || utils.IncrSentinelOptions.Shutdown {
+			l.Logger.Warn("%s barrier wait interrupted by sentinel (Pause=%v, Shutdown=%v)",
+				batcher.syncer, utils.IncrSentinelOptions.Pause, utils.IncrSentinelOptions.Shutdown)
+			return false
+		}
+
+		allIdle := true
+		for _, worker := range batcher.workerGroup {
+			queueLen := len(worker.queue)
+			ack := atomic.LoadInt64(&worker.ack)
+			unack := atomic.LoadInt64(&worker.unack)
+			if queueLen > 0 || (unack != ack) {
+				allIdle = false
+				break
+			}
+		}
+
+		if allIdle {
+			l.Logger.Info("%s all workers are idle, barrier satisfied", batcher.syncer)
+			return true
+		}
+
+		if i%CheckCheckpointUpdateTimes == 0 {
+			l.Logger.Info("%s[%d] waiting for workers to be idle", batcher.syncer, i)
+		}
+
+		utils.YieldInMs(DDLCheckpointInterval)
+	}
+}
+
+// executeDDLDirectly executes DDL operations directly on the target MongoDB,
+// bypassing the worker pipeline. For direct tunnel, DDL is executed by DDLExecutor.
+// For non-direct tunnel, DDL falls back to being dispatched to worker[0].
+func (batcher *Batcher) executeDDLDirectly(ddlOplogs []*oplog.GenericOplog) error {
+	if batcher.ddlExecutor == nil {
+		// Non-direct tunnel: fall back to dispatching DDL to worker[0]
+		for _, v := range ddlOplogs {
+			batcher.addIntoBatchGroup(v, true)
+		}
+		return nil
+	}
+
+	// Direct tunnel: execute DDL directly, bypassing worker pipeline
+	for _, ddlLog := range ddlOplogs {
+		if batcher.filter(ddlLog.Parsed) {
+			batcher.lastFilterOplog = ddlLog.Parsed
+			continue
+		}
+		if err := batcher.ddlExecutor.Execute(ddlLog.Parsed); err != nil {
+			return err
+		}
+		batcher.syncer.replMetric.AddApply(1)
+		batcher.syncer.replMetric.AddSuccess(1)
+	}
+	return nil
 }
