@@ -53,6 +53,7 @@ func TestCheckDefaultValueKeepDisabledHTTPPorts(t *testing.T) {
 	assert.Equal(t, -1, conf.Options.FullSyncHTTPListenPort, "should be equal")
 	assert.Equal(t, 0, conf.Options.IncrSyncHTTPListenPort, "should be equal")
 	assert.Equal(t, 0, conf.Options.PromHTTPListenPort, "should be equal")
+	assert.Equal(t, int64(256000), conf.Options.FullSyncReaderOplogStoreDiskMaxSize, "should be equal")
 }
 
 func TestCheckDefaultValueRejectChangeStreamDiskSpool(t *testing.T) {

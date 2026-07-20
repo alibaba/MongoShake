@@ -605,7 +605,7 @@ func checkConflict() error {
 			conf.Options.IncrSyncWorkerOplogCompressor = utils.VarIncrSyncWorkerOplogCompressorNone
 		}
 	}
-	// disable oplog disk persist when sync mode isn't 'full'
+	// Disable oplog disk persistence unless full and incremental sync run together.
 	if conf.Options.FullSyncReaderOplogStoreDisk {
 		if conf.Options.SyncMode != utils.VarSyncModeAll {
 			conf.Options.FullSyncReaderOplogStoreDisk = false

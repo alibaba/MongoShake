@@ -1,14 +1,13 @@
 package spool
 
 import (
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/cockroachdb/pebble/v2"
+	"github.com/cockroachdb/pebble"
+	"github.com/cockroachdb/pebble/vfs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
@@ -48,6 +47,52 @@ func TestPebbleSpoolPutReadAdvance(t *testing.T) {
 	assert.Equal(t, data[2], batch[0], "should be equal")
 }
 
+func TestPebbleSpoolPutBatchPersistsAfterCrash(t *testing.T) {
+	memFS := vfs.NewStrictMem()
+	logDir := "/logs"
+	name := "rs-spool-crash"
+	require.NoError(t, memFS.MkdirAll(logDir, 0o755))
+	root, err := memFS.OpenDir("/")
+	require.NoError(t, err)
+	require.NoError(t, root.Sync())
+	require.NoError(t, root.Close())
+
+	ps, err := Open(OpenOptions{
+		Name:            name,
+		LogDir:          logDir,
+		CreateIfMissing: true,
+		MetricName:      name,
+		MetricStage:     utils.TypeIncr,
+		FS:              memFS,
+	})
+	require.NoError(t, err)
+
+	data := makeTestOplogs(t, 1, 2, 3)
+	require.NoError(t, ps.PutBatch(data))
+
+	memFS.SetIgnoreSyncs(true)
+	require.NoError(t, ps.db.Close())
+	ps.db = nil
+	ps.closed = true
+	memFS.ResetToSyncedState()
+	memFS.SetIgnoreSyncs(false)
+
+	reopened, err := Open(OpenOptions{
+		Name:            name,
+		LogDir:          logDir,
+		CreateIfMissing: false,
+		MetricName:      name,
+		MetricStage:     utils.TypeIncr,
+		FS:              memFS,
+	})
+	require.NoError(t, err)
+	defer reopened.Delete()
+
+	rows, err := reopened.ReadAll()
+	require.NoError(t, err)
+	assert.Equal(t, data, rows, "should be equal")
+}
+
 func TestPebbleSpoolAcceptNoopWithoutNamespace(t *testing.T) {
 	ps := openTestSpool(t, t.TempDir(), "rs-spool-noop")
 	defer ps.Delete()
@@ -59,9 +104,9 @@ func TestPebbleSpoolAcceptNoopWithoutNamespace(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, ps.Put(data))
-	last, err := ps.LastWriteData()
+	last, err := ps.LastWriteTimestamp()
 	require.NoError(t, err)
-	assert.Equal(t, data, last, "should be equal")
+	assert.Equal(t, utils.TimeStampToInt64(utils.TimeToTimestamp(11)), last, "should be equal")
 
 	rows, err := ps.ReadAll()
 	require.NoError(t, err)
@@ -100,18 +145,17 @@ func TestPebbleSpoolReopen(t *testing.T) {
 	defer reopened.Delete()
 
 	stats := reopened.Stats()
-	assert.Equal(t, uint64(3), stats.ReadSeq, "should be equal")
+	assert.Equal(t, uint64(1), stats.ReadSeq, "should be equal")
 	assert.Equal(t, uint64(3), stats.WriteSeq, "should be equal")
-	assert.Equal(t, uint64(1), stats.Depth, "should be equal")
+	assert.Equal(t, uint64(3), stats.Depth, "should be equal")
 
-	last, err := reopened.LastWriteData()
+	last, err := reopened.LastWriteTimestamp()
 	require.NoError(t, err)
-	assert.Equal(t, data[2], last, "should be equal")
+	assert.Equal(t, utils.TimeStampToInt64(utils.TimeToTimestamp(13)), last, "should be equal")
 
 	remaining, err := reopened.ReadAll()
 	require.NoError(t, err)
-	require.Len(t, remaining, 1)
-	assert.Equal(t, data[2], remaining[0], "should be equal")
+	assert.Equal(t, data, remaining, "should be equal")
 }
 
 func TestPebbleSpoolRejectPutAfterMaxBytes(t *testing.T) {
@@ -140,46 +184,24 @@ func TestPebbleSpoolRejectPutAfterMaxBytes(t *testing.T) {
 	assert.Greater(t, stats.Bytes, uint64(0), "should be equal")
 }
 
-func TestDirectorySizeIgnoresDisappearingEntries(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "spool")
-	walk := func(path string, fn fs.WalkDirFunc) error {
-		require.Equal(t, root, path)
-		require.NoError(t, fn(root, fakeDirEntry{name: "spool", dir: true}, nil))
-		require.NoError(t, fn(filepath.Join(root, "removed-before-callback.sst"), nil, &os.PathError{
-			Op:   "lstat",
-			Path: filepath.Join(root, "removed-before-callback.sst"),
-			Err:  os.ErrNotExist,
-		}))
-		require.NoError(t, fn(filepath.Join(root, "removed-before-info.sst"), fakeDirEntry{
-			name:    "removed-before-info.sst",
-			infoErr: os.ErrNotExist,
-		}, nil))
-		require.NoError(t, fn(filepath.Join(root, "live.sst"), fakeDirEntry{
-			name: "live.sst",
-			size: 42,
-		}, nil))
-		return nil
-	}
-
-	size, err := directorySizeWithWalk(root, walk)
+func TestPebbleSpoolStatsUsesPebbleDiskUsage(t *testing.T) {
+	memFS := vfs.NewMem()
+	name := "rs-spool-size"
+	ps, err := Open(OpenOptions{
+		Name:            name,
+		LogDir:          "/logs",
+		CreateIfMissing: true,
+		MetricName:      name,
+		MetricStage:     utils.TypeIncr,
+		FS:              memFS,
+	})
 	require.NoError(t, err)
-	assert.Equal(t, uint64(42), size, "should be equal")
-}
+	defer ps.Delete()
 
-func TestDirectorySizeReturnsRootMissing(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "missing")
-	walk := func(path string, fn fs.WalkDirFunc) error {
-		require.Equal(t, root, path)
-		return fn(root, nil, &os.PathError{
-			Op:   "lstat",
-			Path: root,
-			Err:  os.ErrNotExist,
-		})
-	}
-
-	_, err := directorySizeWithWalk(root, walk)
-	require.Error(t, err)
-	assert.True(t, os.IsNotExist(err), "should be equal")
+	require.NoError(t, ps.Put(makeTestOplogs(t, 1)[0]))
+	expected := ps.db.Metrics().DiskSpaceUsage()
+	assert.Greater(t, expected, uint64(0), "should be greater")
+	assert.Equal(t, expected, ps.Stats().Bytes, "should be equal")
 }
 
 func TestPebbleSpoolDelete(t *testing.T) {
@@ -192,6 +214,20 @@ func TestPebbleSpoolDelete(t *testing.T) {
 	require.NoError(t, ps.Delete())
 	_, err := os.Stat(path)
 	assert.True(t, os.IsNotExist(err), "should be equal")
+}
+
+func TestDeletePathRejectsUnsafeName(t *testing.T) {
+	logDir := t.TempDir()
+	marker := filepath.Join(logDir, "keep", "marker")
+	require.NoError(t, os.MkdirAll(filepath.Dir(marker), 0o755))
+	require.NoError(t, os.WriteFile(marker, []byte("keep"), 0o644))
+
+	for _, name := range []string{"", ".", "..", "../keep", `..\keep`, "nested/spool"} {
+		err := DeletePath(logDir, name)
+		require.Error(t, err, name)
+	}
+	_, err := os.Stat(marker)
+	require.NoError(t, err)
 }
 
 func TestPebbleSpoolOpenLockErrorIsNotLegacy(t *testing.T) {
@@ -248,7 +284,7 @@ func TestPebbleSpoolRejectLegacyFilesInLogDir(t *testing.T) {
 	assert.Contains(t, err.Error(), "Legacy go-diskqueue files are not supported", "should be equal")
 }
 
-func TestPebbleSpoolSchemaMismatch(t *testing.T) {
+func TestPebbleSpoolRejectsSchemaV1(t *testing.T) {
 	logDir := t.TempDir()
 	name := "rs-spool-schema"
 	ps := openTestSpool(t, logDir, name)
@@ -256,7 +292,7 @@ func TestPebbleSpoolSchemaMismatch(t *testing.T) {
 
 	db, err := pebble.Open(Path(logDir, name), &pebble.Options{ErrorIfNotExists: true})
 	require.NoError(t, err)
-	require.NoError(t, db.Set(metaVersionKey, encodeUint32(999), pebble.NoSync))
+	require.NoError(t, db.Set(metaVersionKey, encodeUint32(1), pebble.Sync))
 	require.NoError(t, db.Close())
 
 	_, err = Open(OpenOptions{
@@ -268,6 +304,7 @@ func TestPebbleSpoolSchemaMismatch(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "schema version mismatch", "should be equal")
+	assert.Contains(t, err.Error(), "got 1 want 2", "should be equal")
 }
 
 func TestPebbleSpoolMissingDataKey(t *testing.T) {
@@ -357,66 +394,4 @@ func makeLargeTestOplog(t *testing.T, ts int64, payloadSize int) []byte {
 	})
 	require.NoError(t, err)
 	return data
-}
-
-type fakeDirEntry struct {
-	name    string
-	dir     bool
-	size    int64
-	infoErr error
-}
-
-func (e fakeDirEntry) Name() string {
-	return e.name
-}
-
-func (e fakeDirEntry) IsDir() bool {
-	return e.dir
-}
-
-func (e fakeDirEntry) Type() fs.FileMode {
-	if e.dir {
-		return fs.ModeDir
-	}
-	return 0
-}
-
-func (e fakeDirEntry) Info() (fs.FileInfo, error) {
-	if e.infoErr != nil {
-		return nil, e.infoErr
-	}
-	return fakeFileInfo{name: e.name, dir: e.dir, size: e.size}, nil
-}
-
-type fakeFileInfo struct {
-	name string
-	dir  bool
-	size int64
-}
-
-func (i fakeFileInfo) Name() string {
-	return i.name
-}
-
-func (i fakeFileInfo) Size() int64 {
-	return i.size
-}
-
-func (i fakeFileInfo) Mode() fs.FileMode {
-	if i.dir {
-		return fs.ModeDir
-	}
-	return 0
-}
-
-func (i fakeFileInfo) ModTime() time.Time {
-	return time.Time{}
-}
-
-func (i fakeFileInfo) IsDir() bool {
-	return i.dir
-}
-
-func (i fakeFileInfo) Sys() interface{} {
-	return nil
 }

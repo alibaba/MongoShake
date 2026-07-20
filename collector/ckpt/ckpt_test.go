@@ -1,7 +1,10 @@
 package ckpt
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,6 +14,81 @@ import (
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/unit_test_common"
 )
+
+func TestHttpApiCheckpointInsertRejectsNonOKStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	operation := &HttpApiCheckpoint{URL: server.URL}
+	err := operation.Insert(&CheckpointContext{Name: "rs-http", Timestamp: 100})
+	assert.Error(t, err)
+}
+
+func TestCheckpointManagerUpdateFailureDoesNotMutateInMemory(t *testing.T) {
+	insertErr := errors.New("insert failed")
+	manager := &CheckpointManager{
+		ctx: &CheckpointContext{
+			Name:                   "rs-atomic",
+			Timestamp:              100,
+			Version:                1,
+			FetchMethod:            "oplog",
+			OplogDiskQueue:         "spool-old",
+			OplogDiskQueueFinishTs: InitCheckpoint,
+		},
+		delegate: &stubCheckpointOperation{insertErr: insertErr},
+	}
+	manager.SetFetchMethod("change_stream")
+	manager.SetOplogDiskQueueName("spool-new")
+	manager.SetOplogDiskFinishTs(200)
+
+	err := manager.Update(300)
+	assert.ErrorIs(t, err, insertErr)
+	assert.Equal(t, int64(100), manager.ctx.Timestamp, "should be equal")
+	assert.Equal(t, 1, manager.ctx.Version, "should be equal")
+	assert.Equal(t, "oplog", manager.ctx.FetchMethod, "should be equal")
+	assert.Equal(t, "spool-old", manager.ctx.OplogDiskQueue, "should be equal")
+	assert.Equal(t, InitCheckpoint, manager.ctx.OplogDiskQueueFinishTs, "should be equal")
+}
+
+func TestCheckpointManagerUpdatePreservesFieldsThatWereNotStaged(t *testing.T) {
+	manager := &CheckpointManager{
+		ctx: &CheckpointContext{
+			Name:                   "rs-preserve",
+			Timestamp:              100,
+			Version:                1,
+			FetchMethod:            "oplog",
+			OplogDiskQueue:         "spool-old",
+			OplogDiskQueueFinishTs: InitCheckpoint,
+		},
+		delegate: &stubCheckpointOperation{},
+	}
+	manager.SetOplogDiskQueueName("spool-new")
+
+	err := manager.Update(200)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(200), manager.ctx.Timestamp, "should be equal")
+	assert.Equal(t, "oplog", manager.ctx.FetchMethod, "should be equal")
+	assert.Equal(t, "spool-new", manager.ctx.OplogDiskQueue, "should be equal")
+	assert.Equal(t, InitCheckpoint, manager.ctx.OplogDiskQueueFinishTs, "should be equal")
+}
+
+type stubCheckpointOperation struct {
+	insertErr error
+}
+
+func (s *stubCheckpointOperation) Get() (*CheckpointContext, bool) {
+	return nil, false
+}
+
+func (s *stubCheckpointOperation) Insert(*CheckpointContext) error {
+	return s.insertErr
+}
+
+func (s *stubCheckpointOperation) String() string {
+	return "stub"
+}
 
 var (
 	testUrl = unit_test_common.TestUrl

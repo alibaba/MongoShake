@@ -16,7 +16,6 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/spool"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	"github.com/alibaba/MongoShake/v2/oplog"
 	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
@@ -40,6 +39,8 @@ type Persister struct {
 
 	// enable disk persist
 	enableDiskPersist bool
+	diskBuffer        [][]byte
+	diskBufferSize    uint64
 
 	// stage of fetch and store oplog
 	fetchStage int32
@@ -62,6 +63,7 @@ func NewPersister(replset string, sync *OplogSyncer) *Persister {
 		nextQueuePosition: 0,
 		enableDiskPersist: conf.Options.SyncMode == utils.VarSyncModeAll &&
 			conf.Options.FullSyncReaderOplogStoreDisk,
+		diskBuffer:      make([][]byte, 0, conf.Options.IncrSyncFetcherBufferCapacity),
 		fetchStage:      utils.FetchStageStoreUnknown,
 		diskQueueLastTs: -1, // initial set 1
 	}
@@ -108,8 +110,12 @@ func (p *Persister) InitDiskQueue(dqName string, createIfMissing bool) error {
 		return err
 	}
 	p.DiskQueue = opened
-	l.Logger.Infof("persister replset[%v] open pebble oplog spool name[%v] path[%v] create[%v]",
-		p.replset, dqName, opened.Stats().Path, createIfMissing)
+	stats := opened.Stats()
+	maxBytes := uint64(conf.Options.FullSyncReaderOplogStoreDiskMaxSize) * utils.MB
+	l.Logger.Infof("persister replset[%v] open pebble oplog spool name[%v] path[%v] create[%v] "+
+		"max_size[%v MiB] max_bytes[%v] limit_scope[total Pebble spool disk usage observed before each batch write]",
+		p.replset, dqName, stats.Path, createIfMissing,
+		conf.Options.FullSyncReaderOplogStoreDiskMaxSize, maxBytes)
 	return nil
 }
 
@@ -118,34 +124,15 @@ func (p *Persister) GetQueryTsFromDiskQueue() primitive.Timestamp {
 		l.Logger.Panicf("persister replset[%v] get query timestamp from nil disk queue", p.replset)
 	}
 
-	logData, err := p.DiskQueue.LastWriteData()
+	lastTs, err := p.DiskQueue.LastWriteTimestamp()
 	if err != nil {
-		l.Logger.Panicf("persister replset[%v] get last write data from disk queue failed[%v]",
+		l.Logger.Panicf("persister replset[%v] get last write timestamp from disk queue failed[%v]",
 			p.replset, err)
 	}
-	if len(logData) == 0 {
+	if lastTs == 0 {
 		return primitive.Timestamp{}
 	}
-
-	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodOplog {
-		ts, err := oplog.ExtractRawTimestamp(logData, "ts")
-		if err != nil {
-			l.Logger.Panicf("parse raw oplog timestamp failed[%v]", err)
-		}
-		return ts
-	} else {
-		// change_stream
-		log := new(oplog.Event)
-		if err := bson.Unmarshal(logData, log); err != nil {
-			l.Logger.Panicf("unmarshal oplog[%v] failed[%v]", logData, err)
-		}
-
-		// assert
-		if log.OperationType == "" {
-			l.Logger.Panicf("unmarshal data to change stream event failed: %v", log)
-		}
-		return log.ClusterTime
-	}
+	return utils.Int64ToTimestamp(lastTs)
 }
 
 // Inject inject data
@@ -174,24 +161,22 @@ func (p *Persister) Inject(input []byte) {
 		if fetchStage == utils.FetchStageStoreMemoryApply {
 			p.PushToPendingQueue(input)
 		} else if p.DiskQueue != nil {
-			if input == nil {
-				// no need to store
-				return
-			}
-
-			// store local
 			p.diskQueueMutex.Lock()
 			defer p.diskQueueMutex.Unlock()
 			if p.DiskQueue != nil { // double check
-				// should send to diskQueue
-				if err := p.DiskQueue.Put(input); err != nil {
-					l.Logger.Panicf("persister inject replset[%v] put oplog to disk queue failed[%v]",
-						p.replset, err)
+				if input != nil {
+					p.bufferDiskInput(input)
 				}
-				atomic.AddUint64(&p.diskWriteCount, 1)
-			} else {
-				// should send to pending queue
+				if p.shouldFlushDiskBuffer(input == nil) {
+					if err := p.flushDiskBufferLocked(); err != nil {
+						l.Logger.Panicf("persister inject replset[%v] put oplog batch to disk queue failed[%v]",
+							p.replset, err)
+					}
+				}
+			} else if input != nil {
 				p.PushToPendingQueue(input)
+			} else {
+				p.PushToPendingQueue(nil)
 			}
 		} else {
 			l.Logger.Panicf("persister inject replset[%v] has no diskQueue with fetch stage[%v]",
@@ -200,6 +185,36 @@ func (p *Persister) Inject(input []byte) {
 	} else {
 		p.PushToPendingQueue(input)
 	}
+}
+
+func (p *Persister) bufferDiskInput(input []byte) {
+	p.diskBuffer = append(p.diskBuffer, input)
+	p.diskBufferSize += uint64(len(input))
+}
+
+func (p *Persister) shouldFlushDiskBuffer(flush bool) bool {
+	if conf.Options.IncrSyncFetcherBufferCapacity > 0 &&
+		len(p.diskBuffer) >= conf.Options.IncrSyncFetcherBufferCapacity {
+		return true
+	}
+	if conf.Options.IncrSyncFetcherBufferSizeThresholdInKB > 0 &&
+		p.diskBufferSize >= uint64(conf.Options.IncrSyncFetcherBufferSizeThresholdInKB*1024) {
+		return true
+	}
+	return flush && len(p.diskBuffer) != 0
+}
+
+func (p *Persister) flushDiskBufferLocked() error {
+	if len(p.diskBuffer) == 0 {
+		return nil
+	}
+	if err := p.DiskQueue.PutBatch(p.diskBuffer); err != nil {
+		return err
+	}
+	atomic.AddUint64(&p.diskWriteCount, uint64(len(p.diskBuffer)))
+	p.diskBuffer = make([][]byte, 0, conf.Options.IncrSyncFetcherBufferCapacity)
+	p.diskBufferSize = 0
+	return nil
 }
 
 func (p *Persister) bufferInput(input []byte) {
@@ -356,6 +371,9 @@ Wait:
 	// wait to finish retrieve and continue fetch to store to memory
 	p.diskQueueMutex.Lock()
 	defer p.diskQueueMutex.Unlock() // lock till the end
+	if err := p.flushDiskBufferLocked(); err != nil {
+		l.Logger.Panicf("persister replset[%v] retrieve flush final pebble spool batch failed[%v]", p.replset, err)
+	}
 	readData, err := p.DiskQueue.ReadAll()
 	if err != nil {
 		l.Logger.Panicf("persister replset[%v] retrieve drain pebble spool failed[%v]", p.replset, err)
@@ -392,14 +410,8 @@ Wait:
 			p.replset, depth)
 	}
 	p.SetFetchStage(utils.FetchStageStoreMemoryApply)
-
-	if err := p.DiskQueue.Delete(); err != nil {
-		l.Logger.Criticalf("persister retrieve for replset[%v] delete pebble spool error. %v", p.replset, err)
-	} else {
-		l.Logger.Infof("persister retrieve for replset[%v] delete pebble spool success", p.replset)
-	}
-	p.DiskQueue = nil
-	l.Logger.Infof("persister retriever for replset[%v] exits", p.replset)
+	l.Logger.Infof("persister retriever for replset[%v] exits and retains pebble spool until checkpoint cleanup",
+		p.replset)
 }
 
 func (p *Persister) spoolStats() spool.Stats {
