@@ -5,29 +5,28 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
-	"github.com/cockroachdb/pebble/v2"
+	"github.com/cockroachdb/pebble"
+	"github.com/cockroachdb/pebble/vfs"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
 )
 
 const (
-	schemaVersion            uint32 = 1
+	schemaVersion            uint32 = 2
 	pebbleWriteOverheadBytes        = 64 * 1024
 )
 
 var (
-	metaVersionKey       = []byte("m/version")
-	metaWriteSeqKey      = []byte("m/write_seq")
-	metaReadSeqKey       = []byte("m/read_seq")
-	metaLastWriteTsKey   = []byte("m/last_write_ts")
-	metaLastWriteDataKey = []byte("m/last_write_data")
-	dataUpperBound       = []byte{'e'}
+	metaVersionKey     = []byte("m/version")
+	metaWriteSeqKey    = []byte("m/write_seq")
+	metaLastWriteTsKey = []byte("m/last_write_ts")
+	dataUpperBound     = []byte{'e'}
 )
 
 type PebbleSpool struct {
@@ -39,17 +38,18 @@ type PebbleSpool struct {
 	metric   string
 	stage    string
 	maxBytes uint64
+	fs       vfs.FS
 
-	readSeq       uint64
-	writeSeq      uint64
-	lastWriteData []byte
-	closed        bool
-	deleted       bool
+	readSeq     uint64
+	writeSeq    uint64
+	lastWriteTs int64
+	closed      bool
+	deleted     bool
 }
 
 func Open(opts OpenOptions) (*PebbleSpool, error) {
-	if opts.Name == "" {
-		return nil, errors.New("oplog spool name is empty")
+	if err := validateName(opts.Name); err != nil {
+		return nil, err
 	}
 	if opts.LogDir == "" {
 		return nil, errors.New("oplog spool log directory is empty")
@@ -60,24 +60,34 @@ func Open(opts OpenOptions) (*PebbleSpool, error) {
 	if opts.MetricName == "" {
 		opts.MetricName = opts.Name
 	}
+	if opts.FS == nil {
+		opts.FS = vfs.Default
+	}
 	var maxBytes uint64
 	if opts.MaxBytesMB > 0 {
+		if uint64(opts.MaxBytesMB) > ^uint64(0)/utils.MB {
+			return nil, fmt.Errorf("oplog spool max size %d MiB overflows bytes", opts.MaxBytesMB)
+		}
 		maxBytes = uint64(opts.MaxBytesMB) * utils.MB
 	}
 
-	path := Path(opts.LogDir, opts.Name)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	path := opts.FS.PathJoin(opts.LogDir, "spool", opts.Name)
+	if err := opts.FS.MkdirAll(opts.FS.PathDir(path), 0o755); err != nil {
+		observeError(opts.MetricName, opts.MetricStage, "open")
+		return nil, err
+	}
+	if err := syncDirectory(opts.FS, opts.LogDir); err != nil {
 		observeError(opts.MetricName, opts.MetricStage, "open")
 		return nil, err
 	}
 	if !opts.CreateIfMissing {
-		if _, err := os.Stat(path); os.IsNotExist(err) && hasLegacyDiskQueueFiles(opts.LogDir, opts.Name) {
+		if _, err := opts.FS.Stat(path); os.IsNotExist(err) && hasLegacyDiskQueueFiles(opts.FS, opts.LogDir, opts.Name) {
 			observeError(opts.MetricName, opts.MetricStage, "open")
 			return nil, legacyOpenError(opts.Name, path, pebble.ErrDBDoesNotExist)
 		}
 	}
 
-	dbOpts := &pebble.Options{}
+	dbOpts := &pebble.Options{FS: opts.FS}
 	if opts.CreateIfMissing {
 		dbOpts.ErrorIfExists = true
 	} else {
@@ -87,7 +97,7 @@ func Open(opts OpenOptions) (*PebbleSpool, error) {
 	db, err := pebble.Open(path, dbOpts)
 	if err != nil {
 		observeError(opts.MetricName, opts.MetricStage, "open")
-		return nil, formatOpenError(opts.Name, path, err)
+		return nil, formatOpenError(opts.FS, opts.Name, path, err)
 	}
 
 	ps := &PebbleSpool{
@@ -97,11 +107,19 @@ func Open(opts OpenOptions) (*PebbleSpool, error) {
 		metric:   opts.MetricName,
 		stage:    opts.MetricStage,
 		maxBytes: maxBytes,
+		fs:       opts.FS,
 	}
 
 	if opts.CreateIfMissing {
 		if err := ps.init(); err != nil {
 			_ = db.Close()
+			_ = opts.FS.RemoveAll(path)
+			observeError(opts.MetricName, opts.MetricStage, "init")
+			return nil, err
+		}
+		if err := syncDirectory(opts.FS, opts.FS.PathDir(path)); err != nil {
+			_ = db.Close()
+			_ = opts.FS.RemoveAll(path)
 			observeError(opts.MetricName, opts.MetricStage, "init")
 			return nil, err
 		}
@@ -119,6 +137,20 @@ func Path(logDir, name string) string {
 	return filepath.Join(logDir, "spool", name)
 }
 
+func DeletePath(logDir, name string) error {
+	if err := validateName(name); err != nil {
+		return err
+	}
+	return os.RemoveAll(Path(logDir, name))
+}
+
+func validateName(name string) error {
+	if name == "" || name == "." || name == ".." || filepath.Base(name) != name || strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("invalid oplog spool name %q", name)
+	}
+	return nil
+}
+
 func (ps *PebbleSpool) init() error {
 	batch := ps.db.NewBatch()
 	defer batch.Close()
@@ -129,16 +161,13 @@ func (ps *PebbleSpool) init() error {
 	if err := batch.Set(metaWriteSeqKey, encodeUint64(0), pebble.NoSync); err != nil {
 		return err
 	}
-	if err := batch.Set(metaReadSeqKey, encodeUint64(1), pebble.NoSync); err != nil {
-		return err
-	}
-	if err := batch.Commit(pebble.NoSync); err != nil {
+	if err := batch.Commit(pebble.Sync); err != nil {
 		return err
 	}
 
 	ps.readSeq = 1
 	ps.writeSeq = 0
-	ps.lastWriteData = nil
+	ps.lastWriteTs = 0
 	return nil
 }
 
@@ -156,38 +185,47 @@ func (ps *PebbleSpool) load() error {
 	if err != nil {
 		return fmt.Errorf("oplog spool %q path %q is missing write_seq: %w", ps.name, ps.path, err)
 	}
-	readSeq, err := ps.getUint64(metaReadSeqKey)
-	if err != nil {
-		return fmt.Errorf("oplog spool %q path %q is missing read_seq: %w", ps.name, ps.path, err)
-	}
-	if readSeq < 1 || readSeq > writeSeq+1 {
-		return fmt.Errorf("oplog spool %q path %q has invalid seq state: read_seq=%d write_seq=%d",
-			ps.name, ps.path, readSeq, writeSeq)
-	}
-	lastWriteData, err := ps.getBytes(metaLastWriteDataKey)
-	if err != nil && !errors.Is(err, pebble.ErrNotFound) {
-		return err
-	}
-	if writeSeq >= readSeq && len(lastWriteData) == 0 {
-		return fmt.Errorf("oplog spool %q path %q has depth %d but missing last_write_data",
-			ps.name, ps.path, writeSeq-readSeq+1)
+	var lastWriteTs int64
+	if writeSeq > 0 {
+		lastWriteTs, err = ps.getInt64(metaLastWriteTsKey)
+		if err != nil {
+			return fmt.Errorf("oplog spool %q path %q has data but missing last_write_ts: %w", ps.name, ps.path, err)
+		}
 	}
 
-	ps.readSeq = readSeq
+	ps.readSeq = 1
 	ps.writeSeq = writeSeq
-	ps.lastWriteData = lastWriteData
+	ps.lastWriteTs = lastWriteTs
 	return nil
 }
 
 func (ps *PebbleSpool) Put(data []byte) error {
+	return ps.PutBatch([][]byte{data})
+}
+
+func (ps *PebbleSpool) PutBatch(data [][]byte) error {
 	if len(data) == 0 {
-		observeError(ps.metric, ps.stage, "put")
-		return errors.New("oplog spool rejects empty data")
+		return nil
 	}
-	ts, err := parseOplogTimestamp(data)
-	if err != nil {
-		observeError(ps.metric, ps.stage, "put")
-		return err
+
+	timestamps := make([]int64, len(data))
+	var incomingBytes uint64
+	for i, item := range data {
+		if len(item) == 0 {
+			observeError(ps.metric, ps.stage, "put")
+			return errors.New("oplog spool rejects empty data")
+		}
+		ts, err := parseOplogTimestamp(item)
+		if err != nil {
+			observeError(ps.metric, ps.stage, "put")
+			return err
+		}
+		timestamps[i] = ts
+		if uint64(len(item)) > ^uint64(0)-incomingBytes {
+			incomingBytes = ^uint64(0)
+		} else {
+			incomingBytes += uint64(len(item))
+		}
 	}
 
 	ps.mu.Lock()
@@ -196,39 +234,42 @@ func (ps *PebbleSpool) Put(data []byte) error {
 		observeError(ps.metric, ps.stage, "put")
 		return err
 	}
-	if err := ps.ensureUnderMaxBytesLocked(uint64(len(data))); err != nil {
+	if err := ps.ensureUnderMaxBytesLocked(incomingBytes); err != nil {
 		observeError(ps.metric, ps.stage, "put")
 		return err
 	}
 
-	nextSeq := ps.writeSeq + 1
 	batch := ps.db.NewBatch()
 	defer batch.Close()
 
-	if err := batch.Set(dataKey(nextSeq), data, pebble.NoSync); err != nil {
+	if uint64(len(data)) > ^uint64(0)-ps.writeSeq {
 		observeError(ps.metric, ps.stage, "put")
-		return err
+		return fmt.Errorf("oplog spool %q path %q write sequence overflow", ps.name, ps.path)
+	}
+	nextSeq := ps.writeSeq
+	for _, item := range data {
+		nextSeq++
+		if err := batch.Set(dataKey(nextSeq), item, pebble.NoSync); err != nil {
+			observeError(ps.metric, ps.stage, "put")
+			return err
+		}
 	}
 	if err := batch.Set(metaWriteSeqKey, encodeUint64(nextSeq), pebble.NoSync); err != nil {
 		observeError(ps.metric, ps.stage, "put")
 		return err
 	}
-	if err := batch.Set(metaLastWriteTsKey, encodeInt64(ts), pebble.NoSync); err != nil {
+	if err := batch.Set(metaLastWriteTsKey, encodeInt64(timestamps[len(timestamps)-1]), pebble.NoSync); err != nil {
 		observeError(ps.metric, ps.stage, "put")
 		return err
 	}
-	if err := batch.Set(metaLastWriteDataKey, data, pebble.NoSync); err != nil {
-		observeError(ps.metric, ps.stage, "put")
-		return err
-	}
-	if err := batch.Commit(pebble.NoSync); err != nil {
+	if err := batch.Commit(pebble.Sync); err != nil {
 		observeError(ps.metric, ps.stage, "put")
 		return err
 	}
 
 	ps.writeSeq = nextSeq
-	ps.lastWriteData = append(ps.lastWriteData[:0], data...)
-	utils.SpoolWriteTotalProm.WithLabelValues(ps.metric, ps.stage).Inc()
+	ps.lastWriteTs = timestamps[len(timestamps)-1]
+	utils.SpoolWriteTotalProm.WithLabelValues(ps.metric, ps.stage).Add(float64(len(data)))
 	ps.observeSeq()
 	return nil
 }
@@ -331,30 +372,19 @@ func (ps *PebbleSpool) Advance(n int) error {
 		return fmt.Errorf("oplog spool %q path %q advance beyond write_seq: read_seq=%d n=%d write_seq=%d",
 			ps.name, ps.path, ps.readSeq, n, ps.writeSeq)
 	}
-	batch := ps.db.NewBatch()
-	defer batch.Close()
-	if err := batch.Set(metaReadSeqKey, encodeUint64(nextReadSeq), pebble.NoSync); err != nil {
-		observeError(ps.metric, ps.stage, "advance")
-		return err
-	}
-	if err := batch.Commit(pebble.NoSync); err != nil {
-		observeError(ps.metric, ps.stage, "advance")
-		return err
-	}
-
 	ps.readSeq = nextReadSeq
 	ps.observeSeq()
 	return nil
 }
 
-func (ps *PebbleSpool) LastWriteData() ([]byte, error) {
+func (ps *PebbleSpool) LastWriteTimestamp() (int64, error) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	if err := ps.ensureOpenLocked(); err != nil {
 		observeError(ps.metric, ps.stage, "last_write")
-		return nil, err
+		return 0, err
 	}
-	return append([]byte(nil), ps.lastWriteData...), nil
+	return ps.lastWriteTs, nil
 }
 
 func (ps *PebbleSpool) Depth() (uint64, error) {
@@ -376,7 +406,7 @@ func (ps *PebbleSpool) Stats() Stats {
 		ReadSeq:  ps.readSeq,
 		WriteSeq: ps.writeSeq,
 		Depth:    ps.depthLocked(),
-		Bytes:    directorySizeNoError(ps.path),
+		Bytes:    ps.diskUsageLocked(),
 	}
 }
 
@@ -405,7 +435,7 @@ func (ps *PebbleSpool) Delete() error {
 		observeError(ps.metric, ps.stage, "delete")
 		return err
 	}
-	if err := os.RemoveAll(ps.path); err != nil {
+	if err := ps.fs.RemoveAll(ps.path); err != nil {
 		observeError(ps.metric, ps.stage, "delete")
 		return err
 	}
@@ -414,7 +444,7 @@ func (ps *PebbleSpool) Delete() error {
 	ps.deleted = true
 	ps.readSeq = 1
 	ps.writeSeq = 0
-	ps.lastWriteData = nil
+	ps.lastWriteTs = 0
 	ps.mu.Unlock()
 	utils.SpoolDepthProm.WithLabelValues(ps.metric, ps.stage).Set(0)
 	utils.SpoolReadSeqProm.WithLabelValues(ps.metric, ps.stage).Set(0)
@@ -444,6 +474,14 @@ func (ps *PebbleSpool) getUint64(key []byte) (uint64, error) {
 	return binary.BigEndian.Uint64(data), nil
 }
 
+func (ps *PebbleSpool) getInt64(key []byte) (int64, error) {
+	data, err := ps.getUint64(key)
+	if err != nil {
+		return 0, err
+	}
+	return int64(data), nil
+}
+
 func (ps *PebbleSpool) getBytes(key []byte) ([]byte, error) {
 	data, closer, err := ps.db.Get(key)
 	if err != nil {
@@ -467,16 +505,20 @@ func (ps *PebbleSpool) ensureUnderMaxBytesLocked(incomingDataBytes uint64) error
 	if ps.maxBytes == 0 {
 		return nil
 	}
-	current, err := directorySize(ps.path)
-	if err != nil {
-		return fmt.Errorf("oplog spool %q path %q calculate directory size failed: %w", ps.name, ps.path, err)
-	}
+	current := ps.diskUsageLocked()
 	incoming := estimateWriteBytes(incomingDataBytes)
 	if current >= ps.maxBytes || incoming > ps.maxBytes-current {
 		return fmt.Errorf("oplog spool %q path %q exceeds max size: current=%d incoming=%d max=%d",
 			ps.name, ps.path, current, incoming, ps.maxBytes)
 	}
 	return nil
+}
+
+func (ps *PebbleSpool) diskUsageLocked() uint64 {
+	if ps.db == nil {
+		return 0
+	}
+	return ps.db.Metrics().DiskSpaceUsage()
 }
 
 func (ps *PebbleSpool) depthLocked() uint64 {
@@ -531,53 +573,15 @@ func encodeInt64(v int64) []byte {
 }
 
 func estimateWriteBytes(dataBytes uint64) uint64 {
-	if dataBytes > (^uint64(0)-pebbleWriteOverheadBytes)/2 {
+	if dataBytes > ^uint64(0)-pebbleWriteOverheadBytes {
 		return ^uint64(0)
 	}
-	return dataBytes*2 + pebbleWriteOverheadBytes
+	return dataBytes + pebbleWriteOverheadBytes
 }
 
-func directorySize(path string) (uint64, error) {
-	return directorySizeWithWalk(path, filepath.WalkDir)
-}
-
-func directorySizeWithWalk(path string, walk func(string, fs.WalkDirFunc) error) (uint64, error) {
-	var total uint64
-	root := filepath.Clean(path)
-	err := walk(path, func(walkPath string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			if filepath.Clean(walkPath) != root && errors.Is(err, os.ErrNotExist) {
-				return nil
-			}
-			return err
-		}
-		if entry == nil || entry.IsDir() {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return nil
-			}
-			return err
-		}
-		total += uint64(info.Size())
-		return nil
-	})
-	return total, err
-}
-
-func directorySizeNoError(path string) uint64 {
-	total, err := directorySize(path)
-	if err != nil {
-		return 0
-	}
-	return total
-}
-
-func formatOpenError(name, path string, err error) error {
+func formatOpenError(fs vfs.FS, name, path string, err error) error {
 	if errors.Is(err, pebble.ErrDBDoesNotExist) {
-		if entries, readErr := os.ReadDir(path); readErr == nil && len(entries) > 0 {
+		if entries, readErr := fs.List(path); readErr == nil && len(entries) > 0 {
 			return legacyOpenError(name, path, err)
 		}
 		return fmt.Errorf("oplog spool %q path %q does not exist: %w", name, path, err)
@@ -585,9 +589,29 @@ func formatOpenError(name, path string, err error) error {
 	return fmt.Errorf("open pebble oplog spool %q path %q failed: %w", name, path, err)
 }
 
-func hasLegacyDiskQueueFiles(logDir, name string) bool {
-	matches, err := filepath.Glob(filepath.Join(logDir, name+"*"))
-	return err == nil && len(matches) > 0
+func hasLegacyDiskQueueFiles(fs vfs.FS, logDir, name string) bool {
+	entries, err := fs.List(logDir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func syncDirectory(fs vfs.FS, path string) error {
+	dir, err := fs.OpenDir(path)
+	if err != nil {
+		return err
+	}
+	if err := dir.Sync(); err != nil {
+		_ = dir.Close()
+		return err
+	}
+	return dir.Close()
 }
 
 func legacyOpenError(name, path string, err error) error {

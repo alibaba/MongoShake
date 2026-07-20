@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -221,7 +222,7 @@ func TestCheckpointSetsOplogDiskFinishTsAfterWorkerCatchesUp(t *testing.T) {
 		conf.Options.CheckpointInterval = oldCheckpointInterval
 	}()
 
-	var posted ckpt.CheckpointContext
+	var posted []ckpt.CheckpointContext
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -233,7 +234,9 @@ func TestCheckpointSetsOplogDiskFinishTsAfterWorkerCatchesUp(t *testing.T) {
 				OplogDiskQueueFinishTs: ckpt.InitCheckpoint,
 			})
 		case http.MethodPost:
-			_ = json.NewDecoder(r.Body).Decode(&posted)
+			var value ckpt.CheckpointContext
+			_ = json.NewDecoder(r.Body).Decode(&value)
+			posted = append(posted, value)
 			w.WriteHeader(http.StatusOK)
 		default:
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -252,10 +255,12 @@ func TestCheckpointSetsOplogDiskFinishTsAfterWorkerCatchesUp(t *testing.T) {
 
 	metric := utils.NewMetric("rs-checkpoint-spool", utils.TypeIncr, 0)
 	defer metric.Close()
+	fakeSpool := &fakeOplogSpool{name: "oplog-spool-rs-checkpoint"}
 	syncer := &OplogSyncer{
 		ckptManager: manager,
 		persister: &Persister{
 			diskQueueLastTs: 200,
+			DiskQueue:       fakeSpool,
 		},
 		replMetric: metric,
 		ckptTime:   time.Now().Add(-time.Hour),
@@ -264,9 +269,83 @@ func TestCheckpointSetsOplogDiskFinishTsAfterWorkerCatchesUp(t *testing.T) {
 
 	updated := syncer.checkpoint(true, 200)
 	assert.Equal(t, true, updated, "should be equal")
-	assert.Equal(t, int64(200), posted.Timestamp, "should be equal")
-	assert.Equal(t, int64(200), posted.OplogDiskQueueFinishTs, "should be equal")
-	assert.Equal(t, "", posted.OplogDiskQueue, "should be equal")
+	require.Len(t, posted, 2)
+	assert.Equal(t, int64(200), posted[0].Timestamp, "should be equal")
+	assert.Equal(t, int64(200), posted[0].OplogDiskQueueFinishTs, "should be equal")
+	assert.Equal(t, "oplog-spool-rs-checkpoint", posted[0].OplogDiskQueue, "should be equal")
+	assert.Equal(t, int64(200), posted[1].OplogDiskQueueFinishTs, "should be equal")
+	assert.Equal(t, "", posted[1].OplogDiskQueue, "should be equal")
+	assert.True(t, fakeSpool.deleted, "should be equal")
+	assert.Nil(t, syncer.persister.DiskQueue, "should be equal")
+	assert.Equal(t, int64(-2), syncer.persister.diskQueueLastTs, "should be equal")
+}
+
+func TestCheckpointRetriesClearingQueueNameAfterPhaseBFailure(t *testing.T) {
+	origin := conf.Options
+	defer func() {
+		conf.Options = origin
+	}()
+
+	var posted []ckpt.CheckpointContext
+	postCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(&ckpt.CheckpointContext{
+				Name:                   "rs-phase-b-retry",
+				Timestamp:              100,
+				Version:                utils.FcvCheckpoint.CurrentVersion,
+				OplogDiskQueue:         "oplog-spool-rs-phase-b-retry",
+				OplogDiskQueueFinishTs: ckpt.InitCheckpoint,
+			})
+		case http.MethodPost:
+			var value ckpt.CheckpointContext
+			_ = json.NewDecoder(r.Body).Decode(&value)
+			posted = append(posted, value)
+			postCount++
+			if postCount == 2 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	conf.Options.CheckpointStorage = utils.VarCheckpointStorageApi
+	conf.Options.CheckpointStorageCollection = server.URL
+	conf.Options.FullSyncReaderOplogStoreDisk = true
+	conf.Options.CheckpointInterval = 0
+
+	manager := ckpt.NewCheckpointManager("rs-phase-b-retry", 100)
+	_, _, err := manager.Get()
+	require.NoError(t, err)
+
+	fakeSpool := &fakeOplogSpool{name: "oplog-spool-rs-phase-b-retry"}
+	syncer := &OplogSyncer{
+		ckptManager: manager,
+		persister: &Persister{
+			diskQueueLastTs: 200,
+			DiskQueue:       fakeSpool,
+		},
+		batcher:   &Batcher{workerGroup: []*Worker{}},
+		ckptTime:  time.Now().Add(-time.Hour),
+		startTime: time.Now().Add(-time.Hour),
+	}
+
+	assert.False(t, syncer.checkpoint(true, 200), "should be equal")
+	require.Len(t, posted, 2)
+	assert.Equal(t, "oplog-spool-rs-phase-b-retry", manager.GetInMemory().OplogDiskQueue, "should be equal")
+	assert.Equal(t, int64(200), manager.GetInMemory().OplogDiskQueueFinishTs, "should be equal")
+	assert.True(t, fakeSpool.deleted, "should be equal")
+	assert.Nil(t, syncer.persister.DiskQueue, "should be equal")
+	assert.Equal(t, int64(200), syncer.persister.diskQueueLastTs, "should be equal")
+
+	assert.True(t, syncer.checkpoint(true, 0), "should be equal")
+	require.Len(t, posted, 3)
+	assert.Empty(t, posted[2].OplogDiskQueue, "should be empty")
 	assert.Equal(t, int64(-2), syncer.persister.diskQueueLastTs, "should be equal")
 }
 
@@ -318,9 +397,11 @@ func TestLoadCheckpointReopensUnfinishedInitCheckpointSpool(t *testing.T) {
 	conf.Options.FullSyncReaderOplogStoreDiskMaxSize = 256000
 
 	manager := ckpt.NewCheckpointManager(replset, 200)
+	reader := &checkpointTestReader{}
 	syncer := &OplogSyncer{
 		Replset:     replset,
 		ckptManager: manager,
+		reader:      reader,
 	}
 	syncer.persister = &Persister{
 		replset:         replset,
@@ -335,7 +416,158 @@ func TestLoadCheckpointReopensUnfinishedInitCheckpointSpool(t *testing.T) {
 	require.NotNil(t, syncer.persister.DiskQueue, "should be equal")
 	stats := syncer.persister.DiskQueue.Stats()
 	assert.Equal(t, uint64(1), stats.Depth, "should be equal")
+	assert.Equal(t, utils.TimeStampToInt64(utils.TimeToTimestamp(201)), reader.updatedTs, "should be equal")
 	require.NoError(t, syncer.persister.DiskQueue.Delete())
+}
+
+func TestLoadCheckpointPersistsNewSpoolMetadataBeforeFetch(t *testing.T) {
+	origin := conf.Options
+	defer func() {
+		conf.Options = origin
+	}()
+
+	var posted []ckpt.CheckpointContext
+	replset := "rs-new-spool-metadata"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(&ckpt.CheckpointContext{})
+		case http.MethodPost:
+			var value ckpt.CheckpointContext
+			_ = json.NewDecoder(r.Body).Decode(&value)
+			posted = append(posted, value)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	conf.Options.CheckpointStorage = utils.VarCheckpointStorageApi
+	conf.Options.CheckpointStorageCollection = server.URL
+	conf.Options.FullSyncReaderOplogStoreDisk = true
+	conf.Options.LogDirectory = t.TempDir()
+	conf.Options.SyncMode = utils.VarSyncModeAll
+	conf.Options.IncrSyncFetcherBufferCapacity = 10
+	conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodOplog
+	conf.Options.FullSyncReaderOplogStoreDiskMaxSize = 256000
+
+	manager := ckpt.NewCheckpointManager(replset, 100)
+	syncer := &OplogSyncer{
+		Replset:     replset,
+		ckptManager: manager,
+		reader:      &checkpointTestReader{},
+	}
+	syncer.persister = NewPersister(replset, syncer)
+
+	err := syncer.loadCheckpoint()
+	require.NoError(t, err)
+	require.Len(t, posted, 1)
+	assert.Equal(t, int64(100), posted[0].Timestamp, "should be equal")
+	assert.Equal(t, ckpt.InitCheckpoint, posted[0].OplogDiskQueueFinishTs, "should be equal")
+	assert.NotEmpty(t, posted[0].OplogDiskQueue, "should not be empty")
+	assert.Equal(t, utils.VarIncrSyncMongoFetchMethodOplog, posted[0].FetchMethod, "should be equal")
+	require.NotNil(t, syncer.persister.DiskQueue, "should not be nil")
+	assert.Equal(t, posted[0].OplogDiskQueue, syncer.persister.DiskQueue.Stats().Name, "should be equal")
+	require.NoError(t, syncer.persister.DiskQueue.Delete())
+}
+
+func TestLoadCheckpointCompletesPendingSpoolCleanup(t *testing.T) {
+	origin := conf.Options
+	defer func() {
+		conf.Options = origin
+	}()
+
+	logDir := t.TempDir()
+	replset := "rs-pending-spool-cleanup"
+	queueName := "oplog-spool-rs-pending-spool-cleanup"
+	created, err := spool.Open(spool.OpenOptions{
+		Name:            queueName,
+		LogDir:          logDir,
+		CreateIfMissing: true,
+		MetricName:      replset,
+		MetricStage:     utils.TypeIncr,
+	})
+	require.NoError(t, err)
+	require.NoError(t, created.Put(mockOplogsBinaryWithTs(t, 200)))
+	require.NoError(t, created.Close())
+
+	var posted []ckpt.CheckpointContext
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(&ckpt.CheckpointContext{
+				Name:                   replset,
+				Timestamp:              300,
+				Version:                utils.FcvCheckpoint.CurrentVersion,
+				OplogDiskQueue:         queueName,
+				OplogDiskQueueFinishTs: 200,
+				FetchMethod:            utils.VarIncrSyncMongoFetchMethodOplog,
+			})
+		case http.MethodPost:
+			var value ckpt.CheckpointContext
+			_ = json.NewDecoder(r.Body).Decode(&value)
+			posted = append(posted, value)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer server.Close()
+
+	conf.Options.CheckpointStorage = utils.VarCheckpointStorageApi
+	conf.Options.CheckpointStorageCollection = server.URL
+	conf.Options.FullSyncReaderOplogStoreDisk = true
+	conf.Options.LogDirectory = logDir
+	conf.Options.SyncMode = utils.VarSyncModeAll
+	conf.Options.IncrSyncFetcherBufferCapacity = 10
+	conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodOplog
+
+	manager := ckpt.NewCheckpointManager(replset, 100)
+	syncer := &OplogSyncer{
+		Replset:     replset,
+		ckptManager: manager,
+		reader:      &checkpointTestReader{},
+	}
+	syncer.persister = NewPersister(replset, syncer)
+
+	err = syncer.loadCheckpoint()
+	require.NoError(t, err)
+	require.Len(t, posted, 1)
+	assert.Empty(t, posted[0].OplogDiskQueue, "should be empty")
+	assert.Equal(t, int64(200), posted[0].OplogDiskQueueFinishTs, "should be equal")
+	assert.Equal(t, utils.VarIncrSyncMongoFetchMethodOplog, posted[0].FetchMethod, "should be equal")
+	assert.Equal(t, utils.FetchStageStoreMemoryApply, syncer.persister.GetFetchStage(), "should be equal")
+	_, statErr := os.Stat(spool.Path(logDir, queueName))
+	assert.True(t, os.IsNotExist(statErr), "should be equal")
+}
+
+type checkpointTestReader struct {
+	updatedTs int64
+}
+
+func (r *checkpointTestReader) Name() string {
+	return "checkpoint-test-reader"
+}
+
+func (r *checkpointTestReader) StartFetcher() {}
+
+func (r *checkpointTestReader) SetQueryTimestampOnEmpty(interface{}) {}
+
+func (r *checkpointTestReader) UpdateQueryTimestamp(ts int64) {
+	r.updatedTs = ts
+}
+
+func (r *checkpointTestReader) Next() ([]byte, error) {
+	return nil, nil
+}
+
+func (r *checkpointTestReader) EnsureNetwork() error {
+	return nil
+}
+
+func (r *checkpointTestReader) FetchNewestTimestamp() (interface{}, error) {
+	return nil, nil
 }
 
 func TestLoadCheckpointTreatsEmptyZeroDiskSpoolAsCompleted(t *testing.T) {
@@ -429,10 +661,12 @@ func TestCheckpointPersistsEmptyDiskSpoolCompletion(t *testing.T) {
 
 	metric := utils.NewMetric(replset, utils.TypeIncr, 0)
 	defer metric.Close()
+	fakeSpool := &fakeOplogSpool{name: queueName}
 	syncer := &OplogSyncer{
 		ckptManager: manager,
 		persister: &Persister{
 			diskQueueLastTs: ckpt.InitCheckpoint,
+			DiskQueue:       fakeSpool,
 		},
 		replMetric: metric,
 		batcher: &Batcher{
@@ -447,5 +681,7 @@ func TestCheckpointPersistsEmptyDiskSpoolCompletion(t *testing.T) {
 	assert.Equal(t, int64(100), posted.Timestamp, "should be equal")
 	assert.Equal(t, int64(100), posted.OplogDiskQueueFinishTs, "should be equal")
 	assert.Equal(t, "", posted.OplogDiskQueue, "should be equal")
+	assert.True(t, fakeSpool.deleted, "should be equal")
+	assert.Nil(t, syncer.persister.DiskQueue, "should be equal")
 	assert.Equal(t, int64(-2), syncer.persister.diskQueueLastTs, "should be equal")
 }

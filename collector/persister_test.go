@@ -57,7 +57,7 @@ func mockRawOplogBinaryWithTs(t *testing.T, ts primitive.Timestamp) []byte {
 	return ret
 }
 
-func TestPersisterGetQueryTsFromDiskQueueReadsRawOplogTimestamp(t *testing.T) {
+func TestPersisterGetQueryTsFromDiskQueueReadsStoredTimestamp(t *testing.T) {
 	oldFetchMethod := conf.Options.IncrSyncMongoFetchMethod
 	conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodOplog
 	defer func() {
@@ -74,6 +74,41 @@ func TestPersisterGetQueryTsFromDiskQueueReadsRawOplogTimestamp(t *testing.T) {
 	}
 
 	assert.Equal(t, want, persister.GetQueryTsFromDiskQueue(), "should be equal")
+}
+
+func TestPersisterInjectWritesDiskBatches(t *testing.T) {
+	oldCapacity := conf.Options.IncrSyncFetcherBufferCapacity
+	oldThreshold := conf.Options.IncrSyncFetcherBufferSizeThresholdInKB
+	conf.Options.IncrSyncFetcherBufferCapacity = 3
+	conf.Options.IncrSyncFetcherBufferSizeThresholdInKB = 0
+	defer func() {
+		conf.Options.IncrSyncFetcherBufferCapacity = oldCapacity
+		conf.Options.IncrSyncFetcherBufferSizeThresholdInKB = oldThreshold
+	}()
+
+	fakeSpool := &fakeOplogSpool{name: "fake-batch-spool"}
+	persister := &Persister{
+		replset:           "rs-batch",
+		enableDiskPersist: true,
+		fetchStage:        utils.FetchStageStoreDiskNoApply,
+		DiskQueue:         fakeSpool,
+	}
+
+	persister.Inject(mockOplogsBinaryWithTs(t, 1))
+	persister.Inject(mockOplogsBinaryWithTs(t, 2))
+	assert.Empty(t, fakeSpool.data, "should be empty")
+	assert.Equal(t, 0, fakeSpool.putBatchCalls, "should be equal")
+
+	persister.Inject(mockOplogsBinaryWithTs(t, 3))
+	assert.Len(t, fakeSpool.data, 3)
+	assert.Equal(t, 1, fakeSpool.putBatchCalls, "should be equal")
+	assert.Equal(t, uint64(3), persister.diskWriteCount, "should be equal")
+
+	persister.Inject(mockOplogsBinaryWithTs(t, 4))
+	persister.Inject(nil)
+	assert.Len(t, fakeSpool.data, 4)
+	assert.Equal(t, 2, fakeSpool.putBatchCalls, "should be equal")
+	assert.Equal(t, uint64(4), persister.diskWriteCount, "should be equal")
 }
 
 func TestInject(t *testing.T) {
@@ -210,8 +245,8 @@ func TestPersisterRetrieveDiskApplyE2E(t *testing.T) {
 	assert.Equal(t, utils.FetchStageStoreMemoryApply, persister.GetFetchStage(), "should be equal")
 	assert.Equal(t, uint64(2), persister.diskReadCount, "should be equal")
 	assert.Equal(t, utils.TimeStampToInt64(utils.TimeToTimestamp(102)), persister.diskQueueLastTs, "should be equal")
-	assert.True(t, fakeSpool.deleted, "should be equal")
-	assert.Nil(t, persister.DiskQueue, "should be equal")
+	assert.False(t, fakeSpool.deleted, "should be equal")
+	assert.Same(t, fakeSpool, persister.DiskQueue, "should be equal")
 }
 
 func TestPersisterRetrieveEmptyDiskApplyMarksFinishSentinel(t *testing.T) {
@@ -260,19 +295,25 @@ func TestPersisterRetrieveEmptyDiskApplyMarksFinishSentinel(t *testing.T) {
 	assert.Equal(t, utils.FetchStageStoreMemoryApply, persister.GetFetchStage(), "should be equal")
 	assert.Equal(t, uint64(0), persister.diskReadCount, "should be equal")
 	assert.Equal(t, ckpt.InitCheckpoint, persister.diskQueueLastTs, "should be equal")
-	assert.True(t, fakeSpool.deleted, "should be equal")
-	assert.Nil(t, persister.DiskQueue, "should be equal")
+	assert.False(t, fakeSpool.deleted, "should be equal")
+	assert.Same(t, fakeSpool, persister.DiskQueue, "should be equal")
 }
 
 type fakeOplogSpool struct {
-	name    string
-	data    [][]byte
-	readSeq uint64
-	deleted bool
+	name          string
+	data          [][]byte
+	readSeq       uint64
+	putBatchCalls int
+	deleted       bool
 }
 
 func (s *fakeOplogSpool) Put(data []byte) error {
-	s.data = append(s.data, data)
+	return s.PutBatch([][]byte{data})
+}
+
+func (s *fakeOplogSpool) PutBatch(data [][]byte) error {
+	s.putBatchCalls++
+	s.data = append(s.data, cloneBytesSlice(data)...)
 	return nil
 }
 
@@ -304,11 +345,15 @@ func (s *fakeOplogSpool) ReadAll() ([][]byte, error) {
 	return cloneBytesSlice(s.data[start:]), nil
 }
 
-func (s *fakeOplogSpool) LastWriteData() ([]byte, error) {
+func (s *fakeOplogSpool) LastWriteTimestamp() (int64, error) {
 	if len(s.data) == 0 {
-		return nil, nil
+		return 0, nil
 	}
-	return append([]byte(nil), s.data[len(s.data)-1]...), nil
+	ts, err := oplog.ExtractRawTimestamp(s.data[len(s.data)-1], "ts")
+	if err != nil {
+		return 0, err
+	}
+	return utils.TimeStampToInt64(ts), nil
 }
 
 func (s *fakeOplogSpool) Depth() (uint64, error) {
