@@ -3,6 +3,7 @@ package docsyncer
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -276,6 +277,59 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 			opts := options.BulkWrite().SetOrdered(false)
 			_, err := exec.conn.Client.Database(ns.Database).Collection(ns.Collection).BulkWrite(nil, updateModels, opts)
 			if err != nil {
+				// Check if the update failed due to immutable shard key field.
+				// On sharded collections, $set on an immutable shard key field is
+				// rejected. Fall back to delete + insert for those documents.
+				// This fallback is only enabled when
+				// full_sync.executor.immutable_shard_key_fallback = true because
+				// delete+insert is not atomic — if the target has concurrent writes
+				// on the same _id, data loss can occur between the delete and insert.
+				if conf.Options.FullSyncExecutorImmutableShardKeyFallback && isImmutableShardKeyError(err) {
+					l.Logger.Warnf("updateForInsert hit immutable shard key error on ns[%v], falling back to delete+insert: %v", ns, err)
+
+					// Collect _id filters and docs from the original duplicate-key
+					// errors so we can delete the old docs and re-insert with new
+					// shard key values.
+					var deleteModels []mongo.WriteModel
+					var reInsertModels []mongo.WriteModel
+					for _, wError := range bulkErr.WriteErrors {
+						if !utils.DuplicateKey(wError) {
+							continue
+						}
+						dupDocument := *docs[wError.Index]
+						var updateFilter bson.D
+						var docData bson.D
+						if err := bson.Unmarshal(dupDocument, &docData); err == nil {
+							for _, bsonE := range docData {
+								if bsonE.Key == "_id" {
+									updateFilter = bson.D{bsonE}
+								}
+							}
+						}
+						if len(updateFilter) > 0 {
+							deleteModels = append(deleteModels, mongo.NewDeleteOneModel().SetFilter(updateFilter))
+							reInsertModels = append(reInsertModels, mongo.NewInsertOneModel().SetDocument(dupDocument))
+						}
+					}
+
+					if len(deleteModels) > 0 {
+						// Phase 1: Delete old documents by _id
+						delOpts := options.BulkWrite().SetOrdered(false)
+						_, delErr := exec.conn.Client.Database(ns.Database).Collection(ns.Collection).BulkWrite(nil, deleteModels, delOpts)
+						if delErr != nil {
+							return fmt.Errorf("delete+insert fallback: delete failed on ns[%v]: %v", ns, delErr)
+						}
+
+						// Phase 2: Re-insert with new shard key values
+						insOpts := options.BulkWrite().SetOrdered(false)
+						_, insErr := exec.conn.Client.Database(ns.Database).Collection(ns.Collection).BulkWrite(nil, reInsertModels, insOpts)
+						if insErr != nil {
+							return fmt.Errorf("delete+insert fallback: re-insert failed on ns[%v]: %v", ns, insErr)
+						}
+						l.Logger.Infof("delete+insert fallback succeeded for %d docs on ns[%v]", len(deleteModels), ns)
+						return nil
+					}
+				}
 				return fmt.Errorf("bulk run updateForInsert failed[%v]", err)
 			}
 			l.Logger.Debugf("updateForInsert succeed, updateModels.len:%d updateModules[0]:%v",
@@ -286,4 +340,32 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 	}
 
 	return nil
+}
+
+// isImmutableShardKeyError checks whether a write error is caused by
+// modifying an immutable shard key field on a sharded collection.
+// MongoDB error code 66 (ImmutableField), or message substring match
+// for nested "caused by" chains through mongos.
+func isImmutableShardKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if bulkErr, ok := err.(mongo.BulkWriteException); ok {
+		for _, we := range bulkErr.WriteErrors {
+			if we.Code == 66 { // ImmutableField
+				return true
+			}
+		}
+	}
+	immutablePatterns := []string{
+		"immutable field",
+		"was found to have been altered",
+	}
+	for _, p := range immutablePatterns {
+		if strings.Contains(msg, p) {
+			return true
+		}
+	}
+	return false
 }

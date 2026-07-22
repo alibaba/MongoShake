@@ -73,7 +73,8 @@ type Configuration struct {
 	FullSyncExecutorInsertOnDupUpdate    bool   `config:"full_sync.executor.insert_on_dup_update"`
 	FullSyncExecutorFilterOrphanDocument bool   `config:"full_sync.executor.filter.orphan_document"`
 	FullSyncExecutorMajorityEnable       bool   `config:"full_sync.executor.majority_enable"`
-	FullSyncDoNotShardDest               bool   `config:"full_sync.do_not_shard_destination"` // add v2.8.6
+	FullSyncDoNotShardDest               bool   `config:"full_sync.do_not_shard_destination"`  // add v2.8.6
+	FullSyncExecutorImmutableShardKeyFallback bool `config:"full_sync.executor.immutable_shard_key_fallback"` // add v2.8.9
 
 	// 3. incr sync
 	IncrSyncMongoFetchMethod                string   `config:"incr_sync.mongo_fetch_method"`
@@ -92,7 +93,8 @@ type Configuration struct {
 	IncrSyncExecutorUpsert                  bool     `config:"incr_sync.executor.upsert"`
 	IncrSyncExecutorInsertOnDupUpdate       bool     `config:"incr_sync.executor.insert_on_dup_update"`
 	IncrSyncExecutorDupKeyStrategy          string   `config:"incr_sync.executor.dup_key_strategy"`   // add v2.8.9
-	IncrSyncExecutorDupKeySkipRules         []string `config:"incr_sync.executor.dup_key_skip_rules"` // add v2.8.9
+	IncrSyncExecutorDupKeySkipRules              []string `config:"incr_sync.executor.dup_key_skip_rules"` // add v2.8.9
+	IncrSyncExecutorImmutableShardKeyFallback    bool     `config:"incr_sync.executor.immutable_shard_key_fallback"` // add v2.8.9
 	IncrSyncConflictWriteTo                 string   `config:"incr_sync.conflict_write_to"`           // remove "sdk" option since v2.4.21
 	IncrSyncExecutorMajorityEnable          bool     `config:"incr_sync.executor.majority_enable"`
 	IncrSyncBypassDocumentValidation        bool     `config:"incr_sync.executor.bypass_document_validation"` // add v2.8.7
