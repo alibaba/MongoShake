@@ -155,9 +155,12 @@ func (exec *DocExecutor) String() string {
 }
 
 func (exec *DocExecutor) start() {
-	if !conf.Options.FullSyncExecutorDebug {
-		defer exec.conn.Close()
-	}
+	// NOTE: do NOT close exec.conn here — all DocExecutors within a
+	// CollectionExecutor share the same connection.  Closing it from one
+	// goroutine would tear down the connection for all others, causing
+	// "use of closed network connection" panics.
+	// CollectionExecutor.Wait() is responsible for closing the shared
+	// connection after all workers have finished.
 
 	for {
 		docs, ok := <-exec.colExecutor.docBatch
