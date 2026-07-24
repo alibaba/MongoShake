@@ -18,6 +18,8 @@ import (
 )
 
 const (
+	// Version 1 was used by an earlier revision of this PR. Version 2 removes
+	// durable read_seq and always replays from sequence 1 after reopen.
 	schemaVersion            uint32 = 2
 	pebbleWriteOverheadBytes        = 64 * 1024
 )
