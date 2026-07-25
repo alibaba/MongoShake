@@ -65,9 +65,12 @@ type OplogReader struct {
 // NewOplogReader creates reader with mongodb url
 func NewOplogReader(src string, replset string) *OplogReader {
 	return &OplogReader{
-		src:       src,
-		replset:   replset,
-		query:     bson.M{},
+		src:     src,
+		replset: replset,
+		query: bson.M{
+			"fromMigrate": bson.M{"$ne": true},
+			"ns":          bson.M{"$not": primitive.Regex{Pattern: "^config\\.", Options: "i"}},
+		},
 		oplogChan: make(chan *retOplog, 10*conf.Options.IncrSyncReaderFetchBatchSize), // ten times of batchSize
 		firstRead: true,
 	}

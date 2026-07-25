@@ -128,9 +128,14 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 	}
 
 	if moveChunkFilter.Filter(log) {
-		l.Logger.Criticalf("shake exit, must close balancer in sharding + oplog")
-		l.Logger.Panicf("move chunk oplog found, must close balancer in sharding + oplog [%v]", log)
-		return false
+		// fromMigrate deletes are source-internal chunk migration cleanup.
+		// The source and target are independent clusters — the target
+		// should not replicate the source's internal chunk movements.
+		// Full sync wrote each document to the correct location via mongos;
+		// skipping this cleanup delete is safe and avoids accidental data loss.
+		l.Logger.Infof("skip fromMigrate oplog, source chunk migration does not affect target. oplog[%v]", log)
+		batcher.syncer.replMetric.AddFilter(1)
+		return true
 	}
 
 	// DDL is disabled when timestamp <= fullSyncFinishPosition
