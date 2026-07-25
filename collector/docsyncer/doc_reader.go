@@ -470,7 +470,11 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 		return fmt.Errorf("run find failed: %v", err)
 	}
 
-	l.Logger.Infof("reader[%s] generates new cursor with resume query[%v]", reader.String(), resumeQuery)
+	if reader.lastReadID == nil {
+		l.Logger.Infof("reader[%s] generates new cursor with query[%v]", reader.String(), resumeQuery)
+	} else {
+		l.Logger.Infof("reader[%s] rebuild cursor from lastReadID, resume query[%v]", reader.String(), resumeQuery)
+	}
 
 	return nil
 }
