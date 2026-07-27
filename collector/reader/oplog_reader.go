@@ -200,8 +200,15 @@ func (or *OplogReader) fetcher() {
 
 		// successfully read data, reset capped error counter
 		or.cappedErrorCount = 0
-		or.oplogChan <- &retOplog{or.oplogsCursor.Current, nil}
+		or.oplogChan <- &retOplog{cloneOplogRaw(or.oplogsCursor.Current), nil}
 	}
+}
+
+func cloneOplogRaw(raw bson.Raw) bson.Raw {
+	if raw == nil {
+		return nil
+	}
+	return append(bson.Raw(nil), raw...)
 }
 
 // EnsureNetwork establish the mongodb connection at first

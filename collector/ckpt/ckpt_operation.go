@@ -185,6 +185,11 @@ func (ckpt *HttpApiCheckpoint) Get() (*CheckpointContext, bool) {
 		l.Logger.Warnf("%s Http api ckpt request failed, %v", ckpt.Name, err)
 		return nil, false
 	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		l.Logger.Warnf("%s Http api ckpt request returned status %s", ckpt.Name, resp.Status)
+		return nil, false
+	}
 
 	if stream, err = ioutil.ReadAll(resp.Body); err != nil {
 		return nil, false
@@ -206,7 +211,14 @@ func (ckpt *HttpApiCheckpoint) Get() (*CheckpointContext, bool) {
 
 func (ckpt *HttpApiCheckpoint) Insert(insert *CheckpointContext) error {
 	body, _ := json.Marshal(insert)
-	if resp, err := http.Post(ckpt.URL, "application/json", bytes.NewReader(body)); err != nil || resp.StatusCode != http.StatusOK {
+	resp, err := http.Post(ckpt.URL, "application/json", bytes.NewReader(body))
+	if err != nil {
+		l.Logger.Warnf("%s Context api manager write request failed, %v", ckpt.Name, err)
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		err = fmt.Errorf("checkpoint api returned status %s", resp.Status)
 		l.Logger.Warnf("%s Context api manager write request failed, %v", ckpt.Name, err)
 		return err
 	}

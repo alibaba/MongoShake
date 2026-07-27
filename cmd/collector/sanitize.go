@@ -218,6 +218,11 @@ func checkDefaultValue() error {
 		conf.Options.IncrSyncMongoFetchMethod != utils.VarIncrSyncMongoFetchMethodChangeStream {
 		return fmt.Errorf("incr_sync.mongo_fetch_method should in {oplog, change_stream}")
 	}
+	if conf.Options.SyncMode == utils.VarSyncModeAll &&
+		conf.Options.FullSyncReaderOplogStoreDisk &&
+		conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
+		return fmt.Errorf("full_sync.reader.oplog_store_disk currently supports incr_sync.mongo_fetch_method=oplog only")
+	}
 	if conf.Options.IncrSyncShardKey == "" {
 		conf.Options.IncrSyncShardKey = utils.VarIncrSyncShardKeyCollection
 	} else if conf.Options.IncrSyncShardKey != utils.VarIncrSyncShardKeyAuto &&
@@ -600,7 +605,7 @@ func checkConflict() error {
 			conf.Options.IncrSyncWorkerOplogCompressor = utils.VarIncrSyncWorkerOplogCompressorNone
 		}
 	}
-	// disable oplog disk persist when sync mode isn't 'full'
+	// Disable oplog disk persistence unless full and incremental sync run together.
 	if conf.Options.FullSyncReaderOplogStoreDisk {
 		if conf.Options.SyncMode != utils.VarSyncModeAll {
 			conf.Options.FullSyncReaderOplogStoreDisk = false

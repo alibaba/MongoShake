@@ -92,6 +92,28 @@ func TestPrometheusHandlerExposesSyncStageAndInfoMetrics(t *testing.T) {
 	assert.Contains(t, body, `name="rs-stage"`, "should be equal")
 }
 
+func TestPrometheusHandlerExposesSpoolMetrics(t *testing.T) {
+	SpoolDepthProm.WithLabelValues("rs-spool-prom", TypeIncr).Set(3)
+	SpoolReadSeqProm.WithLabelValues("rs-spool-prom", TypeIncr).Set(2)
+	SpoolWriteSeqProm.WithLabelValues("rs-spool-prom", TypeIncr).Set(4)
+	SpoolWriteTotalProm.WithLabelValues("rs-spool-prom", TypeIncr).Add(4)
+	SpoolReadTotalProm.WithLabelValues("rs-spool-prom", TypeIncr).Add(1)
+	SpoolErrorsTotalProm.WithLabelValues("rs-spool-prom", TypeIncr, "put").Add(0)
+
+	request := httptest.NewRequest("GET", "/metrics", nil)
+	recorder := httptest.NewRecorder()
+	PrometheusHandler().ServeHTTP(recorder, request)
+
+	body := recorder.Body.String()
+	assert.Equal(t, 200, recorder.Code, "should be equal")
+	assert.Contains(t, body, `spool_depth{name="rs-spool-prom",stage="incr"} 3`, "should be equal")
+	assert.Contains(t, body, `spool_read_seq{name="rs-spool-prom",stage="incr"} 2`, "should be equal")
+	assert.Contains(t, body, `spool_write_seq{name="rs-spool-prom",stage="incr"} 4`, "should be equal")
+	assert.Contains(t, body, `spool_write_total{name="rs-spool-prom",stage="incr"} 4`, "should be equal")
+	assert.Contains(t, body, `spool_read_total{name="rs-spool-prom",stage="incr"} 1`, "should be equal")
+	assert.Contains(t, body, `spool_errors_total{name="rs-spool-prom",op="put",stage="incr"} 0`, "should be equal")
+}
+
 func TestQueueUsedRatio(t *testing.T) {
 	assert.Equal(t, 0.0, QueueUsedRatio(1, 0), "should be equal")
 	assert.Equal(t, 0.25, QueueUsedRatio(1, 4), "should be equal")

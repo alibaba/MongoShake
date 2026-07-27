@@ -19,6 +19,9 @@ type CheckpointManager struct {
 	ctx        *CheckpointContext
 	ctxRecLock sync.Mutex
 	ctxRec     *CheckpointContext // only used to store temporary value that will be lazy load
+	finishSet  bool
+	queueSet   bool
+	fetchSet   bool
 	delegate   CheckpointOperation
 }
 
@@ -87,56 +90,64 @@ func (manager *CheckpointManager) Update(ts int64) error {
 		return errors.New("current ckpt context is empty")
 	}
 
-	manager.ctx.Timestamp = ts
-	manager.ctx.Version = utils.FcvCheckpoint.CurrentVersion
+	candidate := *manager.ctx
+	candidate.Timestamp = ts
+	candidate.Version = utils.FcvCheckpoint.CurrentVersion
 
 	// update OplogDiskQueueFinishTs if set
+	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
 	if manager.ctxRec != nil {
-		if manager.ctx.OplogDiskQueueFinishTs != manager.ctxRec.OplogDiskQueueFinishTs {
-			manager.ctx.OplogDiskQueueFinishTs = manager.ctxRec.OplogDiskQueueFinishTs
+		if manager.finishSet {
+			candidate.OplogDiskQueueFinishTs = manager.ctxRec.OplogDiskQueueFinishTs
 		}
-		if manager.ctx.OplogDiskQueue != manager.ctxRec.OplogDiskQueue {
-			manager.ctx.OplogDiskQueue = manager.ctxRec.OplogDiskQueue
+		if manager.queueSet {
+			candidate.OplogDiskQueue = manager.ctxRec.OplogDiskQueue
 		}
-		if manager.ctx.FetchMethod != manager.ctxRec.FetchMethod {
-			manager.ctx.FetchMethod = manager.ctxRec.FetchMethod
+		if manager.fetchSet {
+			candidate.FetchMethod = manager.ctxRec.FetchMethod
 		}
 	}
 
-	return manager.delegate.Insert(manager.ctx)
+	if err := manager.delegate.Insert(&candidate); err != nil {
+		return err
+	}
+	manager.ctx = &candidate
+	manager.ctxRec = nil
+	manager.finishSet = false
+	manager.queueSet = false
+	manager.fetchSet = false
+	return nil
 }
 
 // SetOplogDiskFinishTs
 // OplogDiskQueueFinishTs and OplogDiskQueue won't take effect immediately, will be inserted in the next Update call.
 func (manager *CheckpointManager) SetOplogDiskFinishTs(ts int64) {
+	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
 	if manager.ctxRec == nil {
-		manager.ctxRecLock.Lock()
-		if manager.ctxRec == nil { // double check
-			manager.ctxRec = new(CheckpointContext)
-		}
-		manager.ctxRecLock.Unlock()
+		manager.ctxRec = new(CheckpointContext)
 	}
 	manager.ctxRec.OplogDiskQueueFinishTs = ts
+	manager.finishSet = true
 }
 
 func (manager *CheckpointManager) SetOplogDiskQueueName(name string) {
+	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
 	if manager.ctxRec == nil {
-		manager.ctxRecLock.Lock()
-		if manager.ctxRec == nil { // double check
-			manager.ctxRec = new(CheckpointContext)
-		}
-		manager.ctxRecLock.Unlock()
+		manager.ctxRec = new(CheckpointContext)
 	}
 	manager.ctxRec.OplogDiskQueue = name
+	manager.queueSet = true
 }
 
 func (manager *CheckpointManager) SetFetchMethod(method string) {
+	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
 	if manager.ctxRec == nil {
-		manager.ctxRecLock.Lock()
-		if manager.ctxRec == nil { // double check
-			manager.ctxRec = new(CheckpointContext)
-		}
-		manager.ctxRecLock.Unlock()
+		manager.ctxRec = new(CheckpointContext)
 	}
 	manager.ctxRec.FetchMethod = method
+	manager.fetchSet = true
 }
