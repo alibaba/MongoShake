@@ -7,7 +7,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io/ioutil"
-	"net/url"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -85,8 +85,11 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 	}
 	l.Logger.Debugf("encodedURL:[%v]", encodedURL)
 
+	isSrvURI := strings.HasPrefix(url, "mongodb+srv://")
 	clientOps := options.Client().ApplyURI(encodedURL)
-	//clientOps := options.Client().ApplyURI(url)
+	if !isSrvURI {
+		clientOps.SetDirect(true)
+	}
 
 	// tls tlsInsecure + tlsCaFile
 	if sslRootFile != "" {
@@ -146,12 +149,9 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 	ctx := context.Background()
 
 	// connect
-	client, err := mongo.NewClient(clientOps)
+	client, err := mongo.Connect(ctx, clientOps)
 	if err != nil {
 		return nil, fmt.Errorf("new client failed: %v", err)
-	}
-	if err := client.Connect(ctx); err != nil {
-		return nil, fmt.Errorf("connect to %s failed: %v", BlockMongoUrlPassword(url, "***"), err)
 	}
 
 	// ping
@@ -287,7 +287,7 @@ func EncodeMongoURI(uri string) (string, error) {
 		return "", fmt.Errorf("invalid URI scheme")
 	}
 	scheme := parts[0]
-	if scheme != "mongodb" {
+	if scheme != "mongodb" && scheme != "mongodb+srv" {
 		return "", fmt.Errorf("unsupported scheme: %s", scheme)
 	}
 	rest := parts[1][2:] // remove "//"
@@ -315,19 +315,25 @@ func EncodeMongoURI(uri string) (string, error) {
 	// split hosts and path
 	hostPathParts := strings.SplitN(afterUserInfo, "/", 2)
 	host := hostPathParts[0]
-	var path string
+
+	var path, rawQuery string
 	if len(hostPathParts) > 1 {
-		path = "/" + hostPathParts[1]
-	} else {
-		path = ""
+		pathAndQuery := hostPathParts[1]
+		// split path and query
+		pathQueryParts := strings.SplitN(pathAndQuery, "?", 2)
+		path = "/" + pathQueryParts[0]
+		if len(pathQueryParts) > 1 {
+			rawQuery = pathQueryParts[1]
+		}
 	}
 
 	// generate URL
-	u := &url.URL{
-		Scheme: scheme,
-		User:   url.UserPassword(username, password),
-		Host:   host,
-		Path:   path,
+	u := &neturl.URL{
+		Scheme:   scheme,
+		User:     neturl.UserPassword(username, password),
+		Host:     host,
+		Path:     path,
+		RawQuery: rawQuery,
 	}
 
 	return u.String(), nil
