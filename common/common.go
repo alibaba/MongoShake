@@ -146,6 +146,56 @@ func DuplicateKey(err error) bool {
 	return mongo.IsDuplicateKeyError(err)
 }
 
+// IsImmutableShardKeyError checks whether a write error is caused by
+// modifying an immutable shard key field on a sharded collection.
+//
+// Detected patterns:
+//   - WriteError code 66:  ImmutableField (MongoDB 4.0–4.4)
+//   - WriteError code 31025: ShardKeyUpdateForbidden (MongoDB 5.0+:
+//     "Shard key update is not allowed without specifying the full shard key")
+//   - CommandError code 66 or 31025 (mongos wraps as command error)
+//   - Message substring match for mongos "caused by" chains
+//
+// Distinct from the "Document shard key value updates that cause the doc
+// to move shards must be sent with write batch of size 1" error, which is
+// checked with executor.shardKeyUpdateErr (moveChunk batch-size constraint).
+func IsImmutableShardKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+
+	// Check BulkWriteException write-error codes
+	if bulkErr, ok := err.(mongo.BulkWriteException); ok {
+		for _, we := range bulkErr.WriteErrors {
+			if we.Code == 66 || we.Code == 31025 {
+				return true
+			}
+		}
+	}
+
+	// Check mongos CommandError code
+	if cmdErr, ok := err.(mongo.CommandError); ok {
+		if cmdErr.Code == 66 || cmdErr.Code == 31025 {
+			return true
+		}
+	}
+
+	// Message substring match for mongos "caused by" chains
+	patterns := []string{
+		"immutable field",
+		"was found to have been altered",
+		"Shard key update is not allowed",
+		"without specifying the full shard key",
+	}
+	for _, p := range patterns {
+		if strings.Contains(msg, p) {
+			return true
+		}
+	}
+	return false
+}
+
 // HaveIdIndexKey return true if index key is just '_id'
 func HaveIdIndexKey(obj bson.D) bool {
 	for _, ele := range obj {

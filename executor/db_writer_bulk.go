@@ -187,6 +187,84 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 			return nil
 		}
 
+		// immutable shard key fallback: if update fails because the
+		// existing document has a different shard key value, delete
+		// the old document and re-insert with the new value.
+		// This fallback is only enabled when
+		// incr_sync.executor.immutable_shard_key_fallback = true because
+		// delete+insert is not atomic — if the target has concurrent writes
+		// on the same _id, data loss can occur between the delete and insert.
+		if conf.Options.IncrSyncExecutorImmutableShardKeyFallback && utils.IsImmutableShardKeyError(err) {
+			l.Logger.Warnf("doUpdateOnInsert hit immutable shard key error on ns[%v.%v], falling back to delete+insert: %v", database, collection, err)
+
+			// Maps _id values already seen in this fallback to avoid
+			// re-insert collision when multiple oplogs share the same _id.
+			seenIDs := make(map[interface{}]bool)
+			var deleteModels []mongo.WriteModel
+			var reInsertModels []mongo.WriteModel
+			if bulkErr, ok := err.(mongo.BulkWriteException); ok {
+				for _, wError := range bulkErr.WriteErrors {
+					if wError.Index < 0 || wError.Index >= len(modelOplogs) {
+						continue
+					}
+					doc := modelOplogs[wError.Index].original.partialLog.Object
+					var id interface{}
+					for _, e := range doc {
+						if e.Key == "_id" {
+							id = e.Value
+							break
+						}
+					}
+					if id != nil && !seenIDs[id] {
+						seenIDs[id] = true
+						deleteModels = append(deleteModels, mongo.NewDeleteOneModel().SetFilter(bson.D{{"_id", id}}))
+						reInsertModels = append(reInsertModels, mongo.NewInsertOneModel().SetDocument(doc))
+					}
+				}
+			} else {
+				// bulk error type not available (e.g. wrapped by mongos),
+				// fall back to single-document delete+insert for safety.
+				// Dedup by _id to avoid re-insert collision.
+				for _, log := range modelOplogs {
+					doc := log.original.partialLog.Object
+					var id interface{}
+					for _, e := range doc {
+						if e.Key == "_id" {
+							id = e.Value
+							break
+						}
+					}
+					if id != nil && !seenIDs[id] {
+						seenIDs[id] = true
+						deleteModels = append(deleteModels, mongo.NewDeleteOneModel().SetFilter(bson.D{{"_id", id}}))
+						reInsertModels = append(reInsertModels, mongo.NewInsertOneModel().SetDocument(doc))
+					}
+				}
+			}
+			if len(deleteModels) > 0 {
+				delOpts := options.BulkWrite().SetOrdered(false)
+				_, delErr := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, deleteModels, delOpts)
+				if delErr != nil {
+					return fmt.Errorf("delete+insert fallback: delete failed on ns[%v.%v]: %v", database, collection, delErr)
+				}
+				insOpts := options.BulkWrite().SetOrdered(false)
+				_, insErr := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, reInsertModels, insOpts)
+				if insErr != nil {
+					return fmt.Errorf("delete+insert fallback: re-insert failed on ns[%v.%v]: %v", database, collection, insErr)
+				}
+				l.Logger.Infof("delete+insert fallback succeeded for %d docs on ns[%v.%v]", len(deleteModels), database, collection)
+			}
+
+			// The bulk is ordered (no SetOrdered(false)), so the server
+			// stopped at the first error. ops after index were never
+			// executed — re-run them via single writer.
+			if index >= 0 && index+1 < len(modelOplogs) {
+				sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
+				return sw.doUpdateOnInsert(database, collection, metadata, modelOplogs[index+1:], upsert)
+			}
+			return nil
+		}
+
 		l.Logger.Errorf("doUpdateOnInsert run upsert/update[%v] failed[%v]", upsert, err)
 		return err
 	}
@@ -486,3 +564,4 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.E, oplogs []*Oplo
 	}
 	return nil
 }
+
