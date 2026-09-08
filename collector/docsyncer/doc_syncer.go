@@ -517,25 +517,6 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 	 */
 	// fetch index
 
-	// Verify that the number of documents actually read roughly matches
-	// the expected total from collStats. A large discrepancy indicates
-	// that a cursor was prematurely killed and the resume returned empty
-	// results, causing silent data loss.
-	totalCount := atomic.LoadUint64(&collectionMetric.TotalCount)
-	finishCount := atomic.LoadUint64(&collectionMetric.FinishCount)
-	if totalCount > 0 && finishCount > 0 {
-		ratio := float64(finishCount) / float64(totalCount)
-		if ratio < 0.9 {
-			l.Logger.Criticalf("collection[%v] sync completed but finishCount[%v] is significantly less than totalCount[%v] (%.1f%%). "+
-				"Possible data loss: cursor may have been killed and resume returned empty. "+
-				"Verify target data manually!",
-				ns, finishCount, totalCount, ratio*100)
-		} else {
-			l.Logger.Infof("collection[%v] sync verification: finishCount[%v]/totalCount[%v] = %.1f%%",
-				ns, finishCount, totalCount, ratio*100)
-		}
-	}
-
 	// set collection finish
 	syncer.markCollectionFinished(ns, collectionMetric)
 

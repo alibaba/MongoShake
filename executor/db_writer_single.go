@@ -183,6 +183,24 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 					continue
 				}
 
+				// immutable shard key fallback: delete old document and
+				// re-insert with new shard key value.
+				if conf.Options.IncrSyncExecutorImmutableShardKeyFallback && utils.IsImmutableShardKeyError(err) {
+					l.Logger.Warnf("single_writer doUpdateOnInsert hit immutable shard key on ns[%v.%v], _id[%v], trying delete+insert: %v",
+						database, collection, update.id, err)
+					if _, delErr := collectionHandle.DeleteOne(context.Background(), update.id); delErr != nil {
+						return fmt.Errorf("single_writer delete+insert fallback: delete _id[%v] failed on ns[%v.%v]: %v",
+							update.id, database, collection, delErr)
+					}
+					if _, insErr := collectionHandle.InsertOne(context.Background(), update.data); insErr != nil {
+						return fmt.Errorf("single_writer delete+insert fallback: re-insert _id[%v] failed on ns[%v.%v]: %v",
+							update.id, database, collection, insErr)
+					}
+					l.Logger.Infof("single_writer delete+insert fallback succeeded for _id[%v] on ns[%v.%v]",
+						update.id, database, collection)
+					continue
+				}
+
 				l.Logger.Errorf("upsert _id[%v] with data[%v] failed[%v]", update.id, update.data, err)
 				return err
 			}
@@ -194,7 +212,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 			}
 		}
 	} else {
-		for i, update := range updates {
+		for _, update := range updates {
 			opts := options.Update().SetUpsert(false)
 			if conf.Options.IncrSyncBypassDocumentValidation {
 				opts = opts.SetBypassDocumentValidation(true)
@@ -207,7 +225,28 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 
 				// error can be ignored
 				if IgnoreError(err, "u",
-					utils.TimeStampToInt64(oplogs[i].original.partialLog.Timestamp) <= sw.fullFinishTs) {
+					utils.TimeStampToInt64(oplogs[update.index].original.partialLog.Timestamp) <= sw.fullFinishTs) {
+					continue
+				}
+
+				// immutable shard key fallback: if the update on {_id}
+				// fails because of an immutable shard key field, delete
+				// the old document and re-insert with the new value.
+				if conf.Options.IncrSyncExecutorImmutableShardKeyFallback && utils.IsImmutableShardKeyError(err) {
+					l.Logger.Warnf("single_writer doUpdateOnInsert hit immutable shard key on ns[%v.%v], _id[%v], trying delete+insert: %v",
+						database, collection, update.id, err)
+					// Delete old document
+					if _, delErr := collectionHandle.DeleteOne(context.Background(), update.id); delErr != nil {
+						return fmt.Errorf("single_writer delete+insert fallback: delete _id[%v] failed on ns[%v.%v]: %v",
+							update.id, database, collection, delErr)
+					}
+					// Re-insert with new shard key values
+					if _, insErr := collectionHandle.InsertOne(context.Background(), update.data); insErr != nil {
+						return fmt.Errorf("single_writer delete+insert fallback: re-insert _id[%v] failed on ns[%v.%v]: %v",
+							update.id, database, collection, insErr)
+					}
+					l.Logger.Infof("single_writer delete+insert fallback succeeded for _id[%v] on ns[%v.%v]",
+						update.id, database, collection)
 					continue
 				}
 

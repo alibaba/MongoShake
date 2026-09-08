@@ -194,8 +194,12 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 		// incr_sync.executor.immutable_shard_key_fallback = true because
 		// delete+insert is not atomic — if the target has concurrent writes
 		// on the same _id, data loss can occur between the delete and insert.
-		if conf.Options.IncrSyncExecutorImmutableShardKeyFallback && isImmutableShardKeyErrorInc(err) {
+		if conf.Options.IncrSyncExecutorImmutableShardKeyFallback && utils.IsImmutableShardKeyError(err) {
 			l.Logger.Warnf("doUpdateOnInsert hit immutable shard key error on ns[%v.%v], falling back to delete+insert: %v", database, collection, err)
+
+			// Maps _id values already seen in this fallback to avoid
+			// re-insert collision when multiple oplogs share the same _id.
+			seenIDs := make(map[interface{}]bool)
 			var deleteModels []mongo.WriteModel
 			var reInsertModels []mongo.WriteModel
 			if bulkErr, ok := err.(mongo.BulkWriteException); ok {
@@ -211,14 +215,16 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 							break
 						}
 					}
-					if id != nil {
+					if id != nil && !seenIDs[id] {
+						seenIDs[id] = true
 						deleteModels = append(deleteModels, mongo.NewDeleteOneModel().SetFilter(bson.D{{"_id", id}}))
 						reInsertModels = append(reInsertModels, mongo.NewInsertOneModel().SetDocument(doc))
 					}
 				}
 			} else {
 				// bulk error type not available (e.g. wrapped by mongos),
-				// fall back to single-document delete+insert for safety
+				// fall back to single-document delete+insert for safety.
+				// Dedup by _id to avoid re-insert collision.
 				for _, log := range modelOplogs {
 					doc := log.original.partialLog.Object
 					var id interface{}
@@ -228,7 +234,8 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 							break
 						}
 					}
-					if id != nil {
+					if id != nil && !seenIDs[id] {
+						seenIDs[id] = true
 						deleteModels = append(deleteModels, mongo.NewDeleteOneModel().SetFilter(bson.D{{"_id", id}}))
 						reInsertModels = append(reInsertModels, mongo.NewInsertOneModel().SetDocument(doc))
 					}
@@ -246,8 +253,16 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 					return fmt.Errorf("delete+insert fallback: re-insert failed on ns[%v.%v]: %v", database, collection, insErr)
 				}
 				l.Logger.Infof("delete+insert fallback succeeded for %d docs on ns[%v.%v]", len(deleteModels), database, collection)
-				return nil
 			}
+
+			// The bulk is ordered (no SetOrdered(false)), so the server
+			// stopped at the first error. ops after index were never
+			// executed — re-run them via single writer.
+			if index >= 0 && index+1 < len(modelOplogs) {
+				sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
+				return sw.doUpdateOnInsert(database, collection, metadata, modelOplogs[index+1:], upsert)
+			}
+			return nil
 		}
 
 		l.Logger.Errorf("doUpdateOnInsert run upsert/update[%v] failed[%v]", upsert, err)
@@ -550,30 +565,3 @@ func (bw *BulkWriter) doCommand(database string, metadata bson.E, oplogs []*Oplo
 	return nil
 }
 
-// isImmutableShardKeyErrorInc checks whether a write error is caused by
-// modifying an immutable shard key field on a sharded collection.
-// MongoDB error code 66 (ImmutableField), or message substring match
-// for nested "caused by" chains through mongos.
-func isImmutableShardKeyErrorInc(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	if bulkErr, ok := err.(mongo.BulkWriteException); ok {
-		for _, we := range bulkErr.WriteErrors {
-			if we.Code == 66 { // ImmutableField
-				return true
-			}
-		}
-	}
-	immutablePatterns := []string{
-		"immutable field",
-		"was found to have been altered",
-	}
-	for _, p := range immutablePatterns {
-		if strings.Contains(msg, p) {
-			return true
-		}
-	}
-	return false
-}
