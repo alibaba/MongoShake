@@ -83,8 +83,10 @@ func (filter *OpTypeFilter) Filter(log *oplog.PartialLog) bool {
 	}
 
 	oplog.SetFiled(log.Object, "applyOps", remainOps)
-	l.Logger.Infof("OpTypeFilter filtered %d inner applyOps ops, drop oplog?[%v], after reorganize: %v",
-		filteredCount, len(remainOps) == 0, log.Object)
+	l.Logger.Infof("OpTypeFilter filtered %d inner applyOps ops, drop oplog?[%v]",
+		filteredCount, len(remainOps) == 0)
+	// full payload can be huge (whole transaction documents); debug only.
+	l.Logger.Debugf("OpTypeFilter applyOps after reorganize: %v", log.Object)
 	return len(remainOps) == 0
 }
 
@@ -362,14 +364,22 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 						l.Logger.Infof("filter vectored insert ops with ns:%v in o.applyOps oplog", innerNs)
 						return true
 					}
-					l.Logger.Infof("filter inner op with ns:%v in txn:%v", innerNs, log.Object)
+					l.Logger.Infof("filter inner op with ns:%v in applyOps txn", innerNs)
 					continue
 				} else {
 					remainOps = append(remainOps, ele)
 				}
 			}
 			oplog.SetFiled(log.Object, "applyOps", remainOps)
-			l.Logger.Infof("NamespaceFilter applyOps filter?[%v], after reorganize: %v", len(remainOps) == 0, log.Object)
+			if len(remainOps) == 0 {
+				// the whole transaction got filtered out — a notable drop event.
+				l.Logger.Infof("NamespaceFilter applyOps filtered entire txn, drop oplog")
+			} else {
+				// partial/kept inner ops is the steady-state path; keep it quiet.
+				l.Logger.Debugf("NamespaceFilter applyOps remainOps[%d] inner ops", len(remainOps))
+			}
+			// full payload can be huge (whole transaction documents); debug only.
+			l.Logger.Debugf("NamespaceFilter applyOps after reorganize: %v", log.Object)
 			return len(remainOps) == 0
 		default:
 			// such as: dropDatabase

@@ -236,6 +236,11 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 		if !ok {
 			l.Logger.Warnf("insert docs with length[%v] into ns[%v] of dest mongo failed[type:%T err:%v] res[%v]",
 				len(models), ns, err, err, res)
+		} else if utils.AllWriteErrorsDupKey(bulkErr) && conf.Options.FullSyncExecutorInsertOnDupUpdate {
+			// every write error is a duplicate key and each duplicate will be
+			// converted to an update below: a per-batch multi-hundred-line
+			// warning adds no signal, log an aggregated summary instead.
+			utils.GlobalDupKeyLog.ReportHandled(ns.Database+"."+ns.Collection, len(models), err)
 		} else {
 			l.Logger.Warnf("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
 				len(models), ns, bulkErr, res)

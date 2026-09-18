@@ -97,7 +97,9 @@ func (or *OplogReader) SetQueryTimestampOnEmpty(ts interface{}) {
 
 func (or *OplogReader) UpdateQueryTimestamp(ts int64) {
 	or.query[QueryTs] = bson.M{QueryOpGT: utils.Int64ToTimestamp(ts)}
-	l.Logger.Infof("update or.query to %v", or.query)
+	// per-batch query anchor advance: noisy in steady state, keep at debug;
+	// the initial anchor is reported once via SetQueryTimestampOnEmpty.
+	l.Logger.Debugf("update or.query to %v", or.query)
 }
 
 func (or *OplogReader) getQueryTimestamp() int64 {
