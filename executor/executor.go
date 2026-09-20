@@ -310,6 +310,7 @@ func prepareLogTransform(log *oplog.PartialLog, transformRef bool) error {
 }
 
 func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.NamespaceTransform, transformRef bool) (*oplog.PartialLog, error) {
+	// Intentionally repeat the idempotent batch pre-pass for recursive applyOps sub-logs.
 	if err := prepareLogTransform(partialLog, transformRef); err != nil {
 		return nil, err
 	}
