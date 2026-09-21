@@ -34,14 +34,22 @@ var opsMap = map[string]*CommandOperation{
 	"refineCollectionShardKey": {concernSyncData: false, runOnAdmin: true, needFilter: false},
 }
 
-func ExtraCommandName(o bson.D) (string, bool) {
-	// command name must be at the first position
-	if len(o) > 0 {
-		if _, exist := opsMap[o[0].Key]; exist {
-			return o[0].Key, true
+func ExtraCommandName(object interface{}) (string, bool) {
+	// Command name must be at the first position; inspect raw BSON without decoding.
+	var name string
+	switch o := object.(type) {
+	case bson.D:
+		if len(o) > 0 {
+			name = o[0].Key
+		}
+	case bson.Raw:
+		if element, err := o.IndexErr(0); err == nil {
+			name = element.Key()
 		}
 	}
-
+	if _, exists := opsMap[name]; exists {
+		return name, true
+	}
 	return "", false
 }
 

@@ -209,7 +209,7 @@ type DDLFilter struct {
 
 func (filter *DDLFilter) Filter(log *oplog.PartialLog) bool {
 	operation, _ := oplog.ExtraCommandName(log.Object)
-	return log.Operation == "c" && operation != "applyOps" || strings.HasSuffix(log.Namespace, "system.indexes")
+	return log.Operation == "c" && operation != "applyOps" || oplog.IsLegacyIndexNamespace(log.Namespace)
 }
 
 type MigrateFilter struct {
@@ -273,16 +273,23 @@ func NewNamespaceFilter(white, black []string) *NamespaceFilter {
 func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 	var result bool
 
-	l.Logger.Debugf("NamespaceFilter check oplog:%v", log.Object)
+	l.Logger.Debugf("NamespaceFilter check oplog:%v", log.ObjectValue())
 
 	db := strings.SplitN(log.Namespace, ".", 2)[0]
 	if log.Operation != "c" {
 		// DML
 		// {"op" : "i", "ns" : "my.system.indexes", "o" : { "v" : 2, "key" : { "date" : 1 }, "name" : "date_1", "ns" : "my.tbl", "expireAfterSeconds" : 3600 }
-		if strings.HasSuffix(log.Namespace, "system.indexes") {
+		if oplog.IsLegacyIndexNamespace(log.Namespace) {
 			// DDL: change log.Namespace to ns of object, in order to do filter with real namespace
 			ns := log.Namespace
-			log.Namespace = oplog.GetKey(log.Object, "ns").(string)
+			indexNS, ok := log.ObjectKey("ns").(string)
+			if !ok || indexNS == "" {
+				// Keep malformed records on the execution path, which reports the error
+				// without acknowledging or silently filtering them.
+				l.Logger.Errorf("legacy index oplog has invalid ns: %v", log.ObjectValue())
+				return false
+			}
+			log.Namespace = indexNS
 			result = filter.filter(log)
 			log.Namespace = ns
 		} else {

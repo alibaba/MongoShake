@@ -68,7 +68,7 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 		// just use the first log. they have the same metadata
 		// zhongli: ???
 		metadata := buildMetadata(group.oplogRecords[0].original.partialLog)
-		hasIndex := strings.Contains(group.ns, "system.indexes")
+		hasIndex := oplog.IsLegacyIndexNamespace(group.ns)
 		// l.Logger.Debugf("fullFinishTs: %v", utils.ExtractTimestampForLog(exec.batchExecutor.FullFinishTs))
 		dbWriter := NewDbWriter(exec.conn, metadata, exec.bulkInsert && !hasIndex, exec.batchExecutor.FullFinishTs)
 		var err error

@@ -235,7 +235,11 @@ func (exec *Executor) start() {
 func (exec *Executor) doSync(logs []*OplogRecord) error {
 	count := len(logs)
 
-	transLogs := transformLogs(logs, exec.batchExecutor.NsTrans, conf.Options.IncrSyncDBRef)
+	transLogs, err := transformLogs(logs, exec.batchExecutor.NsTrans, conf.Options.IncrSyncDBRef)
+	if err != nil {
+		l.Logger.Errorf("transform oplog batch failed: %v", err)
+		return err
+	}
 
 	// eventual consistency
 	// only sort CURD now for effective bulk insert
@@ -264,25 +268,56 @@ func (exec *Executor) doSync(logs []*OplogRecord) error {
 // if no need to transform namespace, return original logs
 // for no command log, transform namespace in DBRef by conf.Options.TransformDBRef
 // for command log, need transform namespace/collection in object of oplog
-func transformLogs(logs []*OplogRecord, nsTrans *transform.NamespaceTransform, transformRef bool) []*OplogRecord {
+func transformLogs(logs []*OplogRecord, nsTrans *transform.NamespaceTransform, transformRef bool) ([]*OplogRecord, error) {
+	// Validate/materialize the whole batch before changing namespaces. A failed
+	// decode must not leave earlier records transformed again on each retry.
+	for _, log := range logs {
+		if err := prepareLogTransform(log.original.partialLog, transformRef && nsTrans != nil); err != nil {
+			return nil, err
+		}
+	}
 	if nsTrans == nil {
-		return logs
+		return logs, nil
 	}
 	for _, log := range logs {
 		partialLog := log.original.partialLog
-		transPartialLog := transformPartialLog(partialLog, nsTrans, transformRef)
+		transPartialLog, err := transformPartialLog(partialLog, nsTrans, transformRef)
+		if err != nil {
+			return nil, err
+		}
 		if transPartialLog != nil {
 			log.original.partialLog = transPartialLog
 		}
 	}
-	return logs
+	return logs, nil
 }
 
-func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.NamespaceTransform, transformRef bool) *oplog.PartialLog {
+func prepareLogTransform(log *oplog.PartialLog, transformRef bool) error {
+	if log.Operation == "c" {
+		return nil // Command/transaction payloads are already decoded.
+	}
+	if oplog.IsLegacyIndexNamespace(log.Namespace) {
+		if ns, ok := log.ObjectKey("ns").(string); !ok || ns == "" {
+			return fmt.Errorf("legacy index oplog ns=%s ts=%v has invalid o.ns", log.Namespace, log.Timestamp)
+		}
+	}
+	if transformRef {
+		if err := log.MaterializeObject(); err != nil {
+			return fmt.Errorf("materialize DBRef oplog ns=%s ts=%v: %w", log.Namespace, log.Timestamp, err)
+		}
+	}
+	return nil
+}
+
+func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.NamespaceTransform, transformRef bool) (*oplog.PartialLog, error) {
+	// Intentionally repeat the idempotent batch pre-pass for recursive applyOps sub-logs.
+	if err := prepareLogTransform(partialLog, transformRef); err != nil {
+		return nil, err
+	}
 	db := strings.SplitN(partialLog.Namespace, ".", 2)[0]
 	if partialLog.Operation != "c" {
 		// {"op" : "i", "ns" : "my.system.indexes", "o" : { "v" : 2, "key" : { "date" : 1 }, "name" : "date_1", "ns" : "my.tbl", "expireAfterSeconds" : 3600 }
-		if strings.HasSuffix(partialLog.Namespace, "system.indexes") {
+		if oplog.IsLegacyIndexNamespace(partialLog.Namespace) {
 			value := oplog.GetKey(partialLog.Object, "ns")
 			oplog.SetFiled(partialLog.Object, "ns", nsTrans.Transform(value.(string)))
 		}
@@ -294,7 +329,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 		operation, found := oplog.ExtraCommandName(partialLog.Object)
 		if !found {
 			l.Logger.Warnf("extraCommandName meets type[%s] which is not implemented, ignore!", operation)
-			return nil
+			return nil, nil
 		}
 		switch operation {
 		case "create":
@@ -329,7 +364,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			col, ok := oplog.GetKey(partialLog.Object, operation).(string)
 			if !ok {
 				l.Logger.Warnf("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
-				return nil
+				return nil, nil
 			}
 			fullNs := fmt.Sprintf("%s.%s", db, col)
 			partialLog.Namespace = transformTimeseriesNs(fullNs, nsTrans)
@@ -339,12 +374,12 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			fromNs, ok := oplog.GetKey(partialLog.Object, operation).(string)
 			if !ok {
 				l.Logger.Warnf("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
-				return nil
+				return nil, nil
 			}
 			toNs, ok := oplog.GetKey(partialLog.Object, "to").(string)
 			if !ok {
 				l.Logger.Warnf("extraCommandName meets illegal %v oplog %v, ignore!", operation, partialLog.Object)
-				return nil
+				return nil, nil
 			}
 			// NOTE: Time series collections do not support renameCollection/reIndex command,
 			// so we do not use transformTimeseriesNs() here.
@@ -357,7 +392,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			ops, err := oplog.NormalizeApplyOps(partialLog.Object)
 			if err != nil {
 				l.Logger.Warnf("transformPartialLog meets unsupported applyOps type[%v], ignore! oplog=%v", err, partialLog.Object)
-				return nil
+				return nil, nil
 			}
 
 			// except field 'o'
@@ -368,10 +403,13 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 				// m, keys := oplog.ConvertBsonD2M(ele)
 				m, keys := oplog.ConvertBsonD2MExcept(ele, except)
 				subLog := oplog.NewPartialLog(m)
-				transSubLog := transformPartialLog(subLog, nsTrans, transformRef)
+				transSubLog, err := transformPartialLog(subLog, nsTrans, transformRef)
+				if err != nil {
+					return nil, err
+				}
 				if transSubLog == nil {
 					l.Logger.Warnf("transformPartialLog sub log %v return nil, ignore!", subLog)
-					return nil
+					return nil, nil
 				}
 				ops[i] = transSubLog.Dump(keys, false)
 			}
@@ -381,7 +419,7 @@ func transformPartialLog(partialLog *oplog.PartialLog, nsTrans *transform.Namesp
 			partialLog.Namespace = transformTimeseriesNs(partialLog.Namespace, nsTrans)
 		}
 	}
-	return partialLog
+	return partialLog, nil
 }
 
 // transformTimeseriesNs transforms a namespace that may belong to a time-series collection.

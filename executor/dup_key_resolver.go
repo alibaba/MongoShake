@@ -9,6 +9,7 @@ import (
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/oplog"
 	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
@@ -51,7 +52,7 @@ func parseDupKeyFields(err error) []string {
 // resolveConflictFilter parses field names from the E11000 dup key error, then extracts
 // corresponding values from the source document to build a conflict filter.
 // Returns nil if fields cannot be parsed or values cannot be extracted.
-func resolveConflictFilter(dupErr error, doc bson.D) bson.D {
+func resolveConflictFilter(dupErr error, doc interface{}) bson.D {
 	fields := parseDupKeyFields(dupErr)
 	if len(fields) == 0 {
 		return nil
@@ -69,30 +70,10 @@ func resolveConflictFilter(dupErr error, doc bson.D) bson.D {
 	return filter
 }
 
-// getFieldValue extracts a field value from a bson.D document, supporting dotted paths.
+// getFieldValue reads a field from decoded or raw BSON, supporting dotted paths.
 // Returns the value and whether the field was found (distinguishes nil value from missing field).
-func getFieldValue(doc bson.D, field string) (interface{}, bool) {
-	parts := splitDotted(field)
-	var current interface{} = doc
-	for _, part := range parts {
-		switch d := current.(type) {
-		case bson.D:
-			found := false
-			for _, elem := range d {
-				if elem.Key == part {
-					current = elem.Value
-					found = true
-					break
-				}
-			}
-			if !found {
-				return nil, false
-			}
-		default:
-			return nil, false
-		}
-	}
-	return current, true
+func getFieldValue(doc interface{}, field string) (interface{}, bool) {
+	return oplog.LookupDocument(doc, splitDotted(field)...)
 }
 
 func splitDotted(field string) []string {
@@ -117,7 +98,7 @@ func splitDotted(field string) []string {
 // 3. Deleting the conflicting document
 // Returns (resolved, error). resolved=true means the conflict was handled (caller should retry upsert).
 func deleteConflictAndRetry(collection *mongo.Collection, updateFilter interface{},
-	doc bson.D, dupErr error, opts *interface{}) (bool, error) {
+	doc interface{}, dupErr error, opts *interface{}) (bool, error) {
 
 	if conf.Options.IncrSyncExecutorDupKeyStrategy != utils.VarIncrSyncExecutorDupKeyStrategyDeleteAndRetry {
 		return false, nil

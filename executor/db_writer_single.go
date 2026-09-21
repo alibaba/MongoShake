@@ -66,7 +66,7 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.E, o
 		if conf.Options.IncrSyncBypassDocumentValidation {
 			opts = opts.SetBypassDocumentValidation(true)
 		}
-		if _, err := collectionHandle.InsertOne(context.Background(), log.original.partialLog.Object, opts); err != nil {
+		if _, err := collectionHandle.InsertOne(context.Background(), log.original.partialLog.ObjectValue(), opts); err != nil {
 
 			if utils.DuplicateKey(err) {
 				if dupUpdate {
@@ -84,7 +84,7 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.E, o
 				}
 				continue
 			} else {
-				l.Logger.Errorf("insert data[%v] failed[%v]", log.original.partialLog.Object, err)
+				l.Logger.Errorf("insert data[%v] failed[%v]", log.original.partialLog.ObjectValue(), err)
 				return err
 			}
 		}
@@ -103,12 +103,12 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.E, o
 func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord, upsert bool) error {
 	type pair struct {
 		id    interface{}
-		data  bson.D
+		data  interface{}
 		index int
 	}
 	var updates []*pair
 	for i, log := range oplogs {
-		newObject := log.original.partialLog.Object
+		newObject := log.original.partialLog.ObjectValue()
 		if upsert && len(log.original.partialLog.DocumentKey) > 0 {
 			updates = append(updates, &pair{id: log.original.partialLog.DocumentKey, data: newObject, index: i})
 		} else {
@@ -116,7 +116,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 			//	l.Logger.Warnf("doUpdateOnInsert runs upsert but lack documentKey: %v", log.original.partialLog)
 			// }
 			// insert must have _id
-			if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
+			if id := log.original.partialLog.ObjectKey(""); id != nil {
 				updates = append(updates, &pair{id: bson.D{{"_id", id}}, data: newObject, index: i})
 			} else {
 				return fmt.Errorf("insert on duplicated update _id look up failed. %v", log.original.partialLog)
@@ -321,31 +321,19 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 
 		updateCmd := "update"
 		l.Logger.Debugf("single_writer: org_doc %v", log.original.partialLog)
-		if oplog.FindFiledPrefix(log.original.partialLog.Object, "$") {
+		if log.original.partialLog.ObjectHasPrefix("$") {
 			var oplogErr error
-
-			oplogVer, ok := oplog.GetKey(log.original.partialLog.Object, versionMark).(int32)
-			l.Logger.Debugf("single_writer doUpdate: have $, org_object:%v "+
-				"object_ver:%v\n", log.original.partialLog.Object, oplogVer)
-
-			if ok && oplogVer == 2 {
-				if update, oplogErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); oplogErr != nil {
-					// Time-series bucket update with column-store binary diff (e.g., sdata.b)
-					// cannot be converted to normal $set/$unset. Fall back to applyOps replay.
-					if strings.HasPrefix(collection, utils.VarSystemBucketsPrefix) {
-						l.Logger.Infof("fall back to applyOps for time-series bucket update on %s.%s: %v",
-							database, collection, oplogErr)
-						if applyErr := replayUpdateViaApplyOps(sw.conn.Client, log.original.partialLog); applyErr != nil {
-							return applyErr
-						}
-						continue
+			if update, oplogErr = log.original.partialLog.UpdateValue(); oplogErr != nil {
+				// Column-store diffs in time-series buckets need the original applyOps.
+				if strings.HasPrefix(collection, utils.VarSystemBucketsPrefix) {
+					l.Logger.Infof("single_writer fall back to applyOps for time-series bucket update on %s.%s: %v", database, collection, oplogErr)
+					if applyErr := replayUpdateViaApplyOps(sw.conn.Client, log.original.partialLog); applyErr != nil {
+						return applyErr
 					}
-					l.Logger.Errorf("doUpdate run failed err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
-					return oplogErr
+					continue
 				}
-			} else {
-				log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-				update = log.original.partialLog.Object
+				l.Logger.Errorf("doUpdate run failed err[%v] org_doc[%v]", oplogErr, log.original.partialLog)
+				return oplogErr
 			}
 
 			opts := options.Update()
@@ -363,11 +351,11 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 				//	l.Logger.Warnf("doUpdate runs upsert but lack documentKey: %v", log.original.partialLog)
 				// }
 
-				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.Query,
+				res, err = collectionHandle.UpdateOne(context.Background(), log.original.partialLog.QueryValue(),
 					update, opts)
 			}
 		} else {
-			update = log.original.partialLog.Object
+			update = log.original.partialLog.ObjectValue()
 
 			opts := options.Replace()
 			if upsert {
@@ -380,7 +368,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 				res, err = collectionHandle.ReplaceOne(context.Background(), log.original.partialLog.DocumentKey,
 					update, opts)
 			} else {
-				res, err = collectionHandle.ReplaceOne(context.Background(), log.original.partialLog.Query,
+				res, err = collectionHandle.ReplaceOne(context.Background(), log.original.partialLog.QueryValue(),
 					update, opts)
 			}
 
@@ -401,7 +389,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 			}
 
 			l.Logger.Errorf("doUpdate[upsert] old-data[%v] with new-data[%v] failed[%v]",
-				log.original.partialLog.Query, log.original.partialLog.Object, err)
+				log.original.partialLog.QueryValue(), log.original.partialLog.ObjectValue(), err)
 			return err
 		}
 		if res != nil {
@@ -409,13 +397,13 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 				if res.MatchedCount != 1 && res.UpsertedCount != 1 {
 					return fmt.Errorf("update fail(MatchedCount:%d ModifiedCount:%d UpsertedCount:%d) old-data[%v] with new-data[%v]",
 						res.MatchedCount, res.ModifiedCount, res.UpsertedCount,
-						log.original.partialLog.Query, log.original.partialLog.Object)
+						log.original.partialLog.QueryValue(), log.original.partialLog.ObjectValue())
 				}
 			} else {
 				if res.MatchedCount != 1 {
 					return fmt.Errorf("update fail(MatchedCount:%d ModifiedCount:%d MatchedCount:%d) old-data[%v] with new-data[%v]",
 						res.MatchedCount, res.ModifiedCount, res.MatchedCount,
-						log.original.partialLog.Query, log.original.partialLog.Object)
+						log.original.partialLog.QueryValue(), log.original.partialLog.ObjectValue())
 				}
 			}
 		}
@@ -445,9 +433,9 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 func (sw *SingleWriter) doDelete(database, collection string, metadata bson.E, oplogs []*OplogRecord) error {
 	collectionHandle := sw.conn.Client.Database(database).Collection(collection)
 	for _, log := range oplogs {
-		_, err := collectionHandle.DeleteOne(context.Background(), log.original.partialLog.Object)
+		_, err := collectionHandle.DeleteOne(context.Background(), log.original.partialLog.ObjectValue())
 		if err != nil {
-			l.Logger.Errorf("delete data[%v] failed[%v]", log.original.partialLog.Query, err)
+			l.Logger.Errorf("delete data[%v] failed[%v]", log.original.partialLog.QueryValue(), err)
 			return err
 		}
 
@@ -460,7 +448,7 @@ func (sw *SingleWriter) doDelete(database, collection string, metadata bson.E, o
 func (sw *SingleWriter) doCommand(database string, metadata bson.E, oplogs []*OplogRecord) error {
 	var err error
 	for _, log := range oplogs {
-		newObject := log.original.partialLog.Object
+		newObject := log.original.partialLog.ObjectValue()
 		operation, found := oplog.ExtraCommandName(newObject)
 		if conf.Options.FilterDDLEnable || (found && oplog.IsSyncDataCommand(operation)) {
 			// execute one by one with sequence order

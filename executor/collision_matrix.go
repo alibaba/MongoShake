@@ -72,42 +72,12 @@ func fillupOperationValues(log *PartialLogWithCallback) {
 		log.partialLog.UniqueIndexesUpdates = bson.M{}
 	}
 
-	o := log.partialLog.Object
 	for k := range log.partialLog.UniqueIndexes {
 		// multi key index like "name|phone", seperate by MultiColumnIndexSplitter
 		// every index value should be fetched respectively from oplog.o
 		for _, singleIndex := range strings.Split(k, MultiColumnIndexSplitter) {
 			// single index may be "aaa" or "aaa.bbb.ccc"
-			parent, _ := oplog.ConvertBsonD2M(o)
-			// all types of $inc, $mul, $rename, $unset, $set change to $set,$unset in oplog
-			// $set looks like o:{$set:{a:{b:1}}} or o:{$set:{"a.b":1}}
-			if m, exist := parent["$set"]; exist {
-				if child, ok := m.(bson.M); ok {
-					// skip $set operator
-					parent = child
-				}
-			}
-
-			var value interface{}
-			// check if there already has "a.b.c" in $set
-			if v, exist := parent[singleIndex]; exist {
-				value = v
-			} else {
-				cascades := strings.Split(singleIndex, ".")
-				descend := len(cascades) - 1
-				// going down
-				inPosition := true
-				for i := 0; i != descend; i++ {
-					if down, ok := parent[cascades[i]].(bson.M); ok {
-						parent = down
-					} else {
-						inPosition = false
-					}
-				}
-				if inPosition {
-					value = parent[cascades[len(cascades)-1]]
-				}
-			}
+			value := log.partialLog.IndexValue(singleIndex)
 
 			var fill interface{}
 			switch log.partialLog.Operation {

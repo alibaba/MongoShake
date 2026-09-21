@@ -85,10 +85,20 @@ func TestDeserializer(t *testing.T) {
 		out1 := <-syncer.logsQueue[0]
 		out2 := <-syncer.logsQueue[1]
 		assert.Equal(t, 1, len(out1), "should be equal")
-		assert.Equal(t, *log1, out1[0].Parsed.ParsedLog, "should be equal")
+		assert.Nil(t, out1[0].Parsed.Object)
+		encoded1, err := bson.Marshal(out1[0].Parsed)
+		assert.NoError(t, err)
+		var decoded1 oplog.ParsedLog
+		assert.NoError(t, bson.Unmarshal(encoded1, &decoded1))
+		assert.Equal(t, *log1, decoded1, "should be equal")
 		assert.Equal(t, time.Unix(1, 0).UTC(), out1[0].SourceTime, "should be equal")
 		assert.Equal(t, 1, len(out2), "should be equal")
-		assert.Equal(t, *log2, out2[0].Parsed.ParsedLog, "should be equal")
+		assert.Nil(t, out2[0].Parsed.Object)
+		encoded2, err := bson.Marshal(out2[0].Parsed)
+		assert.NoError(t, err)
+		var decoded2 oplog.ParsedLog
+		assert.NoError(t, bson.Unmarshal(encoded2, &decoded2))
+		assert.Equal(t, *log2, decoded2, "should be equal")
 		assert.Equal(t, time.Unix(2, 0).UTC(), out2[0].SourceTime, "should be equal")
 	}
 

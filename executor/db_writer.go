@@ -441,8 +441,8 @@ func replayUpdateViaApplyOps(client *mongo.Client, pLog *oplog.PartialLog) error
 	doc := bson.D{
 		{Key: "op", Value: pLog.Operation},
 		{Key: "ns", Value: pLog.Namespace},
-		{Key: "o", Value: pLog.Object},
-		{Key: "o2", Value: pLog.Query},
+		{Key: "o", Value: pLog.ObjectValue()},
+		{Key: "o2", Value: pLog.QueryValue()},
 	}
 	if pLog.UI != nil {
 		doc = append(doc, bson.E{Key: "ui", Value: pLog.UI})

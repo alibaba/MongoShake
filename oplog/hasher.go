@@ -122,12 +122,12 @@ func getValueFromBsonD(obj bson.D, key string) (interface{}, bool) {
 func GetIdOrNSFromOplog(log *PartialLog) interface{} {
 	switch log.Operation {
 	case "i", "d":
-		return GetKey(log.Object, "")
+		return log.ObjectKey("")
 	case "u":
-		if id, ok := getValueFromBsonD(log.Query, "_id"); ok {
+		if id, ok := LookupDocument(log.QueryValue(), "_id"); ok {
 			return id
 		} else {
-			return GetKey(log.Object, "")
+			return log.ObjectKey("")
 		}
 	case "c":
 		// we don't treat vectored insert oplog(o.applyOps:{$exists:true}) as txns and dispatch to fixed worker 0

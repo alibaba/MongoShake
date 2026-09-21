@@ -23,9 +23,9 @@ type CommandWriter struct {
 func (cw *CommandWriter) doInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord,
 	dupUpdate bool) error {
 
-	var inserts []bson.D
+	var inserts []interface{}
 	for _, log := range oplogs {
-		newObject := log.original.partialLog.Object
+		newObject := log.original.partialLog.ObjectValue()
 		inserts = append(inserts, newObject)
 		l.Logger.Debugf("command_writer:: insert %v", log.original.partialLog)
 	}
@@ -75,7 +75,7 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.E, 
 func (cw *CommandWriter) retryInsertIndividually(database, collection string, metadata bson.E,
 	oplogs []*OplogRecord) error {
 	for _, log := range oplogs {
-		retryErr := cw.runSingleInsertCmd(database, collection, metadata, log.original.partialLog.Object)
+		retryErr := cw.runSingleInsertCmd(database, collection, metadata, log.original.partialLog.ObjectValue())
 		if retryErr == nil {
 			continue
 		}
@@ -97,10 +97,10 @@ func (cw *CommandWriter) retryInsertIndividually(database, collection string, me
 	return nil
 }
 
-func (cw *CommandWriter) runSingleInsertCmd(database, collection string, metadata bson.E, doc bson.D) error {
+func (cw *CommandWriter) runSingleInsertCmd(database, collection string, metadata bson.E, doc interface{}) error {
 	insertCmd := bson.D{
 		{"insert", collection},
-		{"documents", []bson.D{doc}},
+		{"documents", []interface{}{doc}},
 		{"ordered", ExecuteOrdered},
 	}
 	if conf.Options.IncrSyncBypassDocumentValidation {
@@ -120,10 +120,10 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 	var updates []bson.D
 	for _, log := range oplogs {
 		// insert must have _id
-		if id := oplog.GetKey(log.original.partialLog.Object, ""); id != nil {
+		if id := log.original.partialLog.ObjectKey(""); id != nil {
 			updates = append(updates, bson.D{
 				{"q", bson.M{"_id": id}},
-				{"u", log.original.partialLog.Object},
+				{"u", log.original.partialLog.ObjectValue()},
 				{"upsert", upsert},
 				{"multi", false},
 			})
@@ -182,12 +182,12 @@ func (cw *CommandWriter) retryUpdateOnInsertIndividually(database, collection st
 	oplogs []*OplogRecord, upsert bool) error {
 	collectionHandle := cw.conn.Client.Database(database).Collection(collection)
 	for _, log := range oplogs {
-		id := oplog.GetKey(log.original.partialLog.Object, "")
+		id := log.original.partialLog.ObjectKey("")
 		if id == nil {
 			l.Logger.Warnf("retryUpdateOnInsertIndividually: _id look up failed. %v", log.original.partialLog)
 			continue
 		}
-		doc := log.original.partialLog.Object
+		doc := log.original.partialLog.ObjectValue()
 		idFilter := bson.M{"_id": id}
 
 		retryErr := cw.runSingleUpdateCmd(database, collection, metadata, idFilter, doc, upsert)
@@ -246,7 +246,7 @@ func (cw *CommandWriter) retryUpdateOnInsertIndividually(database, collection st
 }
 
 func (cw *CommandWriter) runSingleUpdateCmd(database, collection string, metadata bson.E,
-	filter interface{}, doc bson.D, upsert bool) error {
+	filter interface{}, doc interface{}, upsert bool) error {
 	updateCmd := bson.D{
 		{"update", collection},
 		{"updates", []bson.D{{
@@ -273,32 +273,21 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.E, 
 
 	var updates []bson.D
 	for _, log := range oplogs {
-		var newObject interface{}
-		var transErr error
-		oplogVer, ok := oplog.GetKey(log.original.partialLog.Object, versionMark).(int32)
-		// handle oplog {o.$v:2} with 'diff' field
-		if ok && oplogVer == 2 {
-			if newObject, transErr = oplog.DiffUpdateOplogToNormal(log.original.partialLog.Object); transErr != nil {
-				// Time-series bucket update with column-store binary diff (e.g., sdata.b)
-				// cannot be converted to normal $set/$unset. Fall back to applyOps replay.
-				if strings.HasPrefix(collection, utils.VarSystemBucketsPrefix) {
-					l.Logger.Infof("command_writer: fall back to applyOps for time-series bucket update on %s.%s: %v",
-						database, collection, transErr)
-					if applyErr := replayUpdateViaApplyOps(cw.conn.Client, log.original.partialLog); applyErr != nil {
-						return applyErr
-					}
-					continue
+		newObject, transErr := log.original.partialLog.UpdateValue()
+		if transErr != nil {
+			if strings.HasPrefix(collection, utils.VarSystemBucketsPrefix) {
+				l.Logger.Infof("command_writer fall back to applyOps for time-series bucket update on %s.%s: %v", database, collection, transErr)
+				if applyErr := replayUpdateViaApplyOps(cw.conn.Client, log.original.partialLog); applyErr != nil {
+					return applyErr
 				}
-				l.Logger.Errorf("doUpdate run failed err[%v] org_doc[%v]", transErr, log.original.partialLog)
-				return transErr
+				continue
 			}
-		} else {
-			log.original.partialLog.Object = oplog.RemoveFiled(log.original.partialLog.Object, versionMark)
-			newObject = log.original.partialLog.Object
+			l.Logger.Errorf("doUpdate run failed err[%v] org_doc[%v]", transErr, log.original.partialLog)
+			return transErr
 		}
 
 		updates = append(updates, bson.D{
-			{"q", log.original.partialLog.Query},
+			{"q", log.original.partialLog.QueryValue()},
 			{"u", newObject},
 			{"upsert", upsert},
 			{"multi", false}})
@@ -348,7 +337,7 @@ func (cw *CommandWriter) doDelete(database, collection string, metadata bson.E, 
 	var deleted []bson.D
 	var err error
 	for _, log := range oplogs {
-		deleted = append(deleted, bson.D{{"q", log.original.partialLog.Object}, {"limit", 0}})
+		deleted = append(deleted, bson.D{{"q", log.original.partialLog.ObjectValue()}, {"limit", 0}})
 		l.Logger.Debugf("command_writer:: delete %v", log.original.partialLog)
 	}
 

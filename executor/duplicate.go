@@ -19,7 +19,7 @@ func RecordDuplicatedOplog(conn *utils.MongoCommunityConn, coll string, records 
 		switch conf.Options.IncrSyncConflictWriteTo {
 		case DumpConflictToDB:
 			// discard conflict again
-			conn.Client.Database(utils.APPConflictDatabase).Collection(coll).InsertOne(nil, log.Object)
+			conn.Client.Database(utils.APPConflictDatabase).Collection(coll).InsertOne(nil, log.ObjectValue())
 		case NoDumpConflict:
 		}
 	}

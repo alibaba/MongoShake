@@ -43,6 +43,11 @@ type ParsedLog struct {
 	UI            *primitive.Binary   `bson:"ui,omitempty" json:"ui,omitempty"`                   // do not enable currently
 	Upsert        bool                `bson:"b,omitempty" json:"b,omitempty"`                     // upsert for update op
 	MultiOpType   *int                `bson:"multiOpType,omitempty" json:"multiOpType,omitempty"` // added in 8.0 for vectored insert
+
+	// Borrowed, immutable CRUD payloads. Use ObjectValue/QueryValue to read;
+	// call MaterializeObject before mutating Object. Not reflected wire fields.
+	objectRaw bson.Raw
+	queryRaw  bson.Raw
 }
 
 type PartialLog struct {
@@ -115,6 +120,11 @@ func (partialLog *PartialLog) Dump(keys map[string]struct{}, all bool) bson.D {
 			// out[tagName] = reflect.ValueOf(partialLog).Elem().Field(i).Interface()
 			value := reflect.ValueOf(partialLog.ParsedLog).Field(i).Interface()
 			tagName := strings.Split(tagNameWithOption, ",")[0]
+			if tagName == "o" {
+				value = partialLog.ObjectValue()
+			} else if tagName == "o2" {
+				value = partialLog.QueryValue()
+			}
 			if !all {
 				if _, ok := keys[tagName]; !ok {
 					continue
@@ -268,8 +278,8 @@ func GatherApplyOps(input []*PartialLog) (*GenericOplog, error) {
 		applyOpsList = append(applyOpsList, bson.M{
 			"op": ele.Operation,
 			"ns": ele.Namespace,
-			"o":  ele.Object,
-			"o2": ele.Query,
+			"o":  ele.ObjectValue(),
+			"o2": ele.QueryValue(),
 		})
 	}
 	newOplog.Object = bson.D{
@@ -459,4 +469,10 @@ func combinePrefixField(prefixField string, obj interface{}) interface{} {
 	}
 
 	return result
+}
+
+// IsLegacyIndexNamespace recognizes the legacy index collection, not similarly named user collections.
+func IsLegacyIndexNamespace(ns string) bool {
+	_, collection, found := strings.Cut(ns, ".")
+	return found && collection == "system.indexes"
 }

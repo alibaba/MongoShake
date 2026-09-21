@@ -77,6 +77,7 @@ type Configuration struct {
 	FullSyncExecutorImmutableShardKeyFallback bool   `config:"full_sync.executor.immutable_shard_key_fallback"` // add v2.8.9
 
 	// 3. incr sync
+	IncrSyncLazyOplogParse                    bool     `config:"incr_sync.lazy_oplog_parse"` // add v2.8.9
 	IncrSyncMongoFetchMethod                  string   `config:"incr_sync.mongo_fetch_method"`
 	IncrSyncChangeStreamWatchFullDocument     bool     `config:"incr_sync.change_stream.watch_full_document"`
 	IncrSyncReaderFetchBatchSize              int      `config:"incr_sync.reader.fetch_batch_size"`
@@ -137,7 +138,12 @@ func (configuration *Configuration) IsShardCluster() bool {
 	return len(configuration.MongoUrls) > 1
 }
 
-var Options Configuration
+// Seed defaults before ConfigLoader.Load so an explicit false remains false.
+var Options = DefaultConfiguration()
+
+func DefaultConfiguration() Configuration {
+	return Configuration{IncrSyncLazyOplogParse: true}
+}
 
 func GetSafeOptions() Configuration {
 	polish := new(Configuration)
