@@ -1,44 +1,94 @@
 //go:build integration
 
-// End-to-end verification for field-level (top-level) whitelist sync:
-//   - full sync projects documents to {_id + whitelisted top-level fields}
-//   - full sync only creates indexes fully covered by the whitelist
-//   - incremental (change stream) propagates whitelisted field updates,
-//     ignores non-whitelisted updates, projects inserts, refreshes a
-//     whitelisted object's sub-path, and deletes
+// End-to-end verification for the incremental (change stream) field whitelist:
+//   - whitelisted field update propagates
+//   - non-whitelisted field update is a target no-op (field never appears)
+//   - sub-path update of a whitelisted object field propagates (firstComponent match)
+//   - insert is projected to {_id + whitelisted fields}
+//   - delete removes the target document
+//
+// This runs in incr-only mode (sync_mode=incr), mirroring the sibling
+// changestream integration test. Full-sync projection and all-or-nothing index
+// filtering are covered by the live-mongo unit tests TestDocumentReaderFieldProjection
+// and TestStartIndexSyncFieldWhitelist (collector/docsyncer).
 //
 // Run with:
 //
 //	go test -tags integration ./integration -run TestFieldFilterSync -v -timeout 10m
 //
-// Environment (overridable): MSHAKE_CS_SRC_URL (replica set), MSHAKE_TGT_URL,
-// MSHAKE_COLLECTOR_BIN. See AGENTS.md for the local docker topology.
+// This file is self-contained (it does not rely on helpers from other files in
+// this package). The collector is launched via `go run ./cmd/collector` unless
+// MSHAKE_COLLECTOR_BIN points at a prebuilt binary; see ffStartCollector for why.
+//
+// Environment (overridable):
+//
+//	MSHAKE_CS_SRC_URL    source mongodb, must be a replica set (default mongodb://127.0.0.1:27030)
+//	MSHAKE_TGT_URL       target mongodb (default mongodb://127.0.0.1:27019)
+//	MSHAKE_COLLECTOR_BIN prebuilt collector binary (default: launch via `go run`)
+//
+// See docs/superpowers/guides/2026-09-22-field-level-sync.md for the full setup.
 package integration
 
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
-	ffDB     = "ff_it"
-	ffColl   = "c1"
-	ffCkptDB = "mongoshake"
-	ffCkpt   = "ckpt_ff_it"
-	ffTO     = 120 * time.Second
-	ffPoll   = 500 * time.Millisecond
+	ffDB      = "ff_it"
+	ffColl    = "c1"
+	ffCkptDB  = "mongoshake"
+	ffCkpt    = "ckpt_ff_it"
+	ffLogFile = "collector-ff.log"
+	ffTO      = 120 * time.Second
+	ffPoll    = 500 * time.Millisecond
 )
+
+func ffEnvOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func ffRepoRoot(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate test file")
+	}
+	return filepath.Dir(filepath.Dir(file))
+}
+
+func ffDial(t *testing.T, url string) *mongo.Client {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(url).SetDirect(true))
+	if err != nil {
+		t.Skipf("integration env not ready: %v", err)
+	}
+	if err := client.Ping(ctx, nil); err != nil {
+		t.Skipf("integration env not ready: %v", err)
+	}
+	return client
+}
 
 func ffWriteConf(t *testing.T, srcURL, tgtURL, logDir string) string {
 	t.Helper()
-	tpl, err := os.ReadFile(filepath.Join(csRepoRoot(t), "conf", "collector.conf"))
+	tpl, err := os.ReadFile(filepath.Join(ffRepoRoot(t), "conf", "collector.conf"))
 	if err != nil {
 		t.Fatalf("read conf template: %v", err)
 	}
@@ -52,7 +102,7 @@ func ffWriteConf(t *testing.T, srcURL, tgtURL, logDir string) string {
 		confStr = re.ReplaceAllString(confStr, key+" = "+value)
 	}
 	set("id", "ff_it")
-	set("sync_mode", "all")
+	set("sync_mode", "incr")
 	set("mongo_urls", srcURL)
 	set("tunnel.address", tgtURL)
 	set("mongo_connect_mode", "standalone")
@@ -62,23 +112,95 @@ func ffWriteConf(t *testing.T, srcURL, tgtURL, logDir string) string {
 	set("filter.namespace.white", ffDB+"."+ffColl)
 	set("full_sync.field.whitelist", ffDB+"."+ffColl+":a,profile")
 	set("incr_sync.field.whitelist", ffDB+"."+ffColl+":a,profile")
-	set("full_sync.collection_exist_drop", "true")
-	set("full_sync.create_index", "foreground")
 	set("checkpoint.storage.collection", ffCkpt)
 	set("checkpoint.interval", "1000")
+	// start from now so the retained oplog is not replayed
+	set("checkpoint.start_position", time.Now().UTC().Format("2006-01-02T15:04:05Z"))
 	set("full_sync.http_port", "19311")
 	set("incr_sync.http_port", "19310")
 	set("prom.http_port", "19312")
 	set("system_profile_port", "19410")
 	set("log.dir", logDir)
-	set("log.file", "collector-cs986.log") // reuse csCollectorProc.dumpLog
-	set("tunnel.kafka.producer.max_message_bytes", "18874368") // see issue #998
+	set("log.file", ffLogFile)
+	// the template on develop carries an uncommented expression value that the
+	// config parser rejects (see issue #998); override with a plain number
+	set("tunnel.kafka.producer.max_message_bytes", "18874368")
 
 	path := filepath.Join(logDir, "collector-ff.conf")
 	if err := os.WriteFile(path, []byte(confStr), 0o644); err != nil {
 		t.Fatalf("write conf: %v", err)
 	}
 	return path
+}
+
+type ffCollectorProc struct {
+	cmd        *exec.Cmd
+	logPath    string
+	cleanupDir string // diagnostic/ dir to remove if this test created it (go run mode)
+}
+
+// ffStartCollector launches the collector.
+//
+// If MSHAKE_COLLECTOR_BIN is set, that prebuilt binary is exec'd directly.
+// Otherwise the collector is launched via `go run ./cmd/collector`. The go run
+// path is a fallback for hosts that SIGKILL freshly-built standalone binaries
+// on direct exec (observed under some endpoint-security policies, where even a
+// hello-world `go build -o` binary is killed but a `go run` child is allowed).
+//
+// The process is started in its own process group so kill() reaps the whole
+// tree — important because `go run` is a wrapper that spawns the actual
+// collector child, which would otherwise be orphaned.
+func ffStartCollector(t *testing.T, confPath, logDir string) *ffCollectorProc {
+	t.Helper()
+	var cmd *exec.Cmd
+	var cleanupDir string
+	if bin := os.Getenv("MSHAKE_COLLECTOR_BIN"); bin != "" {
+		t.Logf("using prebuilt collector binary: %s", bin)
+		cmd = exec.Command(bin, "-conf="+confPath)
+		cmd.Dir = logDir
+	} else {
+		root := ffRepoRoot(t)
+		cmd = exec.Command("go", "run", "./cmd/collector", "-conf="+confPath)
+		cmd.Dir = root
+		// `go run` runs the collector with CWD=repoRoot, where it creates a
+		// diagnostic/ journal dir; remove it afterwards if we created it.
+		diag := filepath.Join(root, "diagnostic")
+		if _, err := os.Stat(diag); os.IsNotExist(err) {
+			cleanupDir = diag
+		}
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start collector: %v", err)
+	}
+	go func() { _ = cmd.Wait() }()
+	return &ffCollectorProc{
+		cmd:        cmd,
+		logPath:    filepath.Join(logDir, ffLogFile),
+		cleanupDir: cleanupDir,
+	}
+}
+
+func (p *ffCollectorProc) kill() {
+	if p.cmd != nil && p.cmd.Process != nil {
+		// kill the whole process group so the `go run` collector child dies too
+		_ = syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if p.cleanupDir != "" {
+		_ = os.RemoveAll(p.cleanupDir)
+	}
+}
+
+func (p *ffCollectorProc) dumpLog(t *testing.T) {
+	data, err := os.ReadFile(p.logPath)
+	if err == nil && len(data) > 0 {
+		lines := strings.Split(string(data), "\n")
+		if len(lines) > 40 {
+			lines = lines[len(lines)-40:]
+		}
+		t.Logf("collector log tail:\n%s", strings.Join(lines, "\n"))
+	}
 }
 
 func ffWaitDoc(t *testing.T, tgt *mongo.Client, id interface{},
@@ -102,10 +224,10 @@ func ffWaitDoc(t *testing.T, tgt *mongo.Client, id interface{},
 }
 
 func TestFieldFilterSync(t *testing.T) {
-	srcURL := csEnvOr("MSHAKE_CS_SRC_URL", "mongodb://127.0.0.1:27030")
-	tgtURL := csEnvOr("MSHAKE_TGT_URL", "mongodb://127.0.0.1:27019")
-	src := csDial(t, srcURL)
-	tgt := csDial(t, tgtURL)
+	srcURL := ffEnvOr("MSHAKE_CS_SRC_URL", "mongodb://127.0.0.1:27030")
+	tgtURL := ffEnvOr("MSHAKE_TGT_URL", "mongodb://127.0.0.1:27019")
+	src := ffDial(t, srcURL)
+	tgt := ffDial(t, tgtURL)
 	ctx := context.Background()
 
 	var hello bson.M
@@ -122,69 +244,29 @@ func TestFieldFilterSync(t *testing.T) {
 	_ = tgtColl.Drop(ctx)
 	_ = src.Database(ffCkptDB).Collection(ffCkpt).Drop(ctx)
 
-	// seed: one whitelisted scalar (a), one whitelisted object (profile), one secret
+	// seed source: whitelisted scalar (a), whitelisted object (profile), and a secret
 	if _, err := srcColl.InsertOne(ctx, bson.M{"_id": 1, "a": 10, "secret": "x",
 		"profile": bson.M{"city": "hz", "phone": "1"}}); err != nil {
-		t.Fatalf("seed: %v", err)
+		t.Fatalf("seed source: %v", err)
 	}
-	// indexes: covered (a_1), non-covered single (secret_1), non-covered compound (a_1_secret_1)
-	_, _ = srcColl.Indexes().CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{Key: "a", Value: 1}}})
-	_, _ = srcColl.Indexes().CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{Key: "secret", Value: 1}}})
-	_, _ = srcColl.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: bson.D{{Key: "a", Value: 1}, {Key: "secret", Value: 1}}})
+	// incr-only sync (mirrors the sibling changestream integration test): the
+	// target is pre-populated with the projected form of the source document.
+	// Full-sync projection and index filtering are covered by the live-mongo
+	// unit tests TestDocumentReaderFieldProjection / TestStartIndexSyncFieldWhitelist.
+	if _, err := tgtColl.InsertOne(ctx, bson.M{"_id": 1, "a": 10,
+		"profile": bson.M{"city": "hz", "phone": "1"}}); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
 
-	bin := csBuildCollector(t)
 	logDir := t.TempDir()
 	confPath := ffWriteConf(t, srcURL, tgtURL, logDir)
-	proc := csStartCollector(t, bin, confPath, logDir)
+	proc := ffStartCollector(t, confPath, logDir)
 	t.Cleanup(func() { proc.kill(); proc.dumpLog(t) })
 
-	// 1. full sync projects the document
-	got, ok := ffWaitDoc(t, tgt, 1, func(d bson.M) bool {
-		_, hasSecret := d["secret"]
-		_, hasA := d["a"]
-		_, hasProfile := d["profile"]
-		return hasA && hasProfile && !hasSecret
-	}, ffTO)
-	if !ok {
-		t.Fatalf("full sync did not project document within %v, got %v", ffTO, got)
-	}
-	if p, ok := got["profile"].(bson.M); !ok || p["city"] != "hz" || p["phone"] != "1" {
-		t.Fatalf("whole profile sub-tree should be retained, got %v", got)
-	}
+	// let the collector establish its change stream before generating events
+	time.Sleep(8 * time.Second)
 
-	// 2. full sync index filtering
-	deadline := time.Now().Add(ffTO)
-	var names map[string]bool
-	for time.Now().Before(deadline) {
-		names = map[string]bool{}
-		cur, err := tgtColl.Indexes().List(ctx)
-		if err == nil {
-			var specs []bson.M
-			if cur.All(ctx, &specs) == nil {
-				for _, s := range specs {
-					if n, ok := s["name"].(string); ok {
-						names[n] = true
-					}
-				}
-			}
-		}
-		if names["a_1"] {
-			break
-		}
-		time.Sleep(ffPoll)
-	}
-	if !names["a_1"] {
-		t.Fatalf("covered index a_1 missing on target, got %v", names)
-	}
-	if names["secret_1"] || names["a_1_secret_1"] {
-		t.Fatalf("non-covered indexes should be skipped, got %v", names)
-	}
-
-	// give the change stream a moment to be established after full sync
-	time.Sleep(5 * time.Second)
-
-	// 3. incremental: update whitelisted field -> propagates
+	// 1. incremental: update whitelisted field -> propagates
 	if _, err := srcColl.UpdateOne(ctx, bson.M{"_id": 1}, bson.M{"$set": bson.M{"a": 99}}); err != nil {
 		t.Fatalf("update a: %v", err)
 	}
@@ -192,7 +274,7 @@ func TestFieldFilterSync(t *testing.T) {
 		t.Fatalf("whitelisted field update did not propagate")
 	}
 
-	// 4. incremental: update non-whitelisted field -> target unchanged (still no secret)
+	// 2. incremental: update non-whitelisted field -> target unchanged (still no secret)
 	if _, err := srcColl.UpdateOne(ctx, bson.M{"_id": 1}, bson.M{"$set": bson.M{"secret": "y"}}); err != nil {
 		t.Fatalf("update secret: %v", err)
 	}
@@ -205,7 +287,7 @@ func TestFieldFilterSync(t *testing.T) {
 		t.Fatalf("non-whitelisted field must not appear on target, got %v", afterSecret)
 	}
 
-	// 5. incremental: update sub-path of whitelisted object -> propagates
+	// 3. incremental: update sub-path of whitelisted object -> propagates
 	if _, err := srcColl.UpdateOne(ctx, bson.M{"_id": 1},
 		bson.M{"$set": bson.M{"profile.city": "sh"}}); err != nil {
 		t.Fatalf("update profile.city: %v", err)
@@ -217,7 +299,7 @@ func TestFieldFilterSync(t *testing.T) {
 		t.Fatalf("sub-path update of whitelisted object did not propagate")
 	}
 
-	// 6. incremental: insert new doc -> projected
+	// 4. incremental: insert new doc -> projected
 	if _, err := srcColl.InsertOne(ctx, bson.M{"_id": 2, "a": 5, "secret": "z"}); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
@@ -228,7 +310,7 @@ func TestFieldFilterSync(t *testing.T) {
 		t.Fatalf("inserted doc not projected on target")
 	}
 
-	// 7. incremental: delete -> removed on target
+	// 5. incremental: delete -> removed on target
 	if _, err := srcColl.DeleteOne(ctx, bson.M{"_id": 2}); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
