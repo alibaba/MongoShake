@@ -7,6 +7,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 
 	"github.com/alibaba/MongoShake/v2/oplog"
+	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 // firstComponent returns the part of a field path before the first dot, so a
@@ -109,4 +110,94 @@ func IndexSpecCovered(indexSpec bson.D, fields map[string]struct{}) bool {
 		}
 	}
 	return true
+}
+
+// FieldFilter projects synced documents and indexes down to a per-namespace
+// top-level field whitelist. Incremental (change stream) only. It mutates
+// log.Object in place and returns true to drop the event when nothing
+// whitelisted remains (mirrors OpTypeFilter's rewrite-and-maybe-drop pattern).
+type FieldFilter struct {
+	whitelist map[string]map[string]struct{}
+}
+
+func NewFieldFilter(whitelist map[string]map[string]struct{}) *FieldFilter {
+	return &FieldFilter{whitelist: whitelist}
+}
+
+func (f *FieldFilter) Filter(log *oplog.PartialLog) bool {
+	if log.Operation == "c" {
+		return f.filterCommand(log)
+	}
+
+	fields, ok := f.whitelist[log.Namespace]
+	if !ok || len(fields) == 0 {
+		return false
+	}
+
+	switch log.Operation {
+	case "i":
+		if err := log.MaterializeObject(); err != nil {
+			l.Logger.Errorf("FieldFilter materialize object failed ns[%v]: %v", log.Namespace, err)
+			return false
+		}
+		log.Object = ProjectDocument(log.Object, fields)
+		return false
+	case "u":
+		if err := log.MaterializeObject(); err != nil {
+			l.Logger.Errorf("FieldFilter materialize object failed ns[%v]: %v", log.Namespace, err)
+			return false
+		}
+		if log.ObjectHasPrefix("$") {
+			newObj, empty := FilterModifiers(log.Object, fields)
+			if empty {
+				return true
+			}
+			log.Object = newObj
+			return false
+		}
+		log.Object = ProjectDocument(log.Object, fields)
+		return false
+	default: // "d" delete, "n" noop, others: leave untouched
+		return false
+	}
+}
+
+// filterCommand only handles createIndexes; all other commands pass through.
+// change stream emits createIndexes on ns "db.$cmd", so rebuild the collection
+// namespace from the command value to look up the whitelist.
+func (f *FieldFilter) filterCommand(log *oplog.PartialLog) bool {
+	if err := log.MaterializeObject(); err != nil {
+		l.Logger.Errorf("FieldFilter materialize object failed ns[%v]: %v", log.Namespace, err)
+		return false
+	}
+	command, found := oplog.ExtraCommandName(log.Object)
+	if !found || command != "createIndexes" {
+		return false
+	}
+	coll, ok := oplog.GetKey(log.Object, "createIndexes").(string)
+	if !ok {
+		return false
+	}
+	db := strings.SplitN(log.Namespace, ".", 2)[0]
+	fields, ok := f.whitelist[db+"."+coll]
+	if !ok || len(fields) == 0 {
+		return false
+	}
+	indexes, ok := oplog.GetKey(log.Object, "indexes").(bson.A)
+	if !ok {
+		return false
+	}
+	remain := make(bson.A, 0, len(indexes))
+	for _, ele := range indexes {
+		spec, ok := ele.(bson.D)
+		if !ok {
+			remain = append(remain, ele) // unknown shape, keep
+			continue
+		}
+		if IndexSpecCovered(spec, fields) {
+			remain = append(remain, ele)
+		}
+	}
+	oplog.SetFiled(log.Object, "indexes", remain)
+	return len(remain) == 0
 }

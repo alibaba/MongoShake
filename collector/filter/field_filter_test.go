@@ -5,6 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
+
+	"github.com/alibaba/MongoShake/v2/oplog"
 )
 
 func fieldSet(names ...string) map[string]struct{} {
@@ -78,4 +80,110 @@ func TestIndexSpecCovered(t *testing.T) {
 	assert.False(t, IndexSpecCovered(bson.D{
 		{Key: "key", Value: bson.D{{Key: "secret", Value: 1}}},
 	}, fields))
+}
+
+func TestFieldFilter(t *testing.T) {
+	wl := map[string]map[string]struct{}{
+		"db1.c1": fieldSet("a", "profile"),
+	}
+	f := NewFieldFilter(wl)
+
+	// ns not in whitelist -> untouched, keep
+	{
+		log := &oplog.PartialLog{ParsedLog: oplog.ParsedLog{
+			Namespace: "db1.other", Operation: "i",
+			Object: bson.D{{Key: "_id", Value: 1}, {Key: "secret", Value: "x"}},
+		}}
+		assert.False(t, f.Filter(log))
+		assert.Equal(t, bson.D{{Key: "_id", Value: 1}, {Key: "secret", Value: "x"}}, log.Object)
+	}
+
+	// insert -> project full document
+	{
+		log := &oplog.PartialLog{ParsedLog: oplog.ParsedLog{
+			Namespace: "db1.c1", Operation: "i",
+			Object: bson.D{{Key: "_id", Value: 1}, {Key: "a", Value: 10}, {Key: "secret", Value: "x"}},
+		}}
+		assert.False(t, f.Filter(log))
+		assert.Equal(t, bson.D{{Key: "_id", Value: 1}, {Key: "a", Value: 10}}, log.Object)
+	}
+
+	// replace (op=u, no $ prefix) -> project full document
+	{
+		log := &oplog.PartialLog{ParsedLog: oplog.ParsedLog{
+			Namespace: "db1.c1", Operation: "u",
+			Query:  bson.D{{Key: "_id", Value: 1}},
+			Object: bson.D{{Key: "_id", Value: 1}, {Key: "a", Value: 11}, {Key: "secret", Value: "y"}},
+		}}
+		assert.False(t, f.Filter(log))
+		assert.Equal(t, bson.D{{Key: "_id", Value: 1}, {Key: "a", Value: 11}}, log.Object)
+	}
+
+	// update modifier -> keep whitelisted (incl. sub-path), drop rest
+	{
+		log := &oplog.PartialLog{ParsedLog: oplog.ParsedLog{
+			Namespace: "db1.c1", Operation: "u",
+			Query: bson.D{{Key: "_id", Value: 1}},
+			Object: bson.D{
+				{Key: "$set", Value: bson.M{"a": 1, "secret": 2, "profile.city": "hz"}},
+				{Key: "$unset", Value: bson.M{"secret2": 1}},
+			},
+		}}
+		assert.False(t, f.Filter(log))
+		assert.Equal(t, bson.D{{Key: "$set", Value: bson.M{"a": 1, "profile.city": "hz"}}}, log.Object)
+	}
+
+	// update touching only non-whitelisted fields -> dropped
+	{
+		log := &oplog.PartialLog{ParsedLog: oplog.ParsedLog{
+			Namespace: "db1.c1", Operation: "u",
+			Query:  bson.D{{Key: "_id", Value: 1}},
+			Object: bson.D{{Key: "$set", Value: bson.M{"secret": 2}}},
+		}}
+		assert.True(t, f.Filter(log))
+	}
+
+	// delete -> untouched
+	{
+		log := &oplog.PartialLog{ParsedLog: oplog.ParsedLog{
+			Namespace: "db1.c1", Operation: "d",
+			Object: bson.D{{Key: "_id", Value: 1}},
+		}}
+		assert.False(t, f.Filter(log))
+		assert.Equal(t, bson.D{{Key: "_id", Value: 1}}, log.Object)
+	}
+}
+
+// change stream emits createIndexes on ns "db.$cmd": FieldFilter rebuilds the
+// collection ns (db + the createIndexes value) to look up the whitelist.
+func TestFieldFilterCreateIndexes(t *testing.T) {
+	wl := map[string]map[string]struct{}{"db1.c1": fieldSet("a")}
+	f := NewFieldFilter(wl)
+
+	// one covered + one not covered -> keep only covered
+	log := &oplog.PartialLog{ParsedLog: oplog.ParsedLog{
+		Namespace: "db1.$cmd", Operation: "c",
+		Object: bson.D{
+			{Key: "createIndexes", Value: "c1"},
+			{Key: "indexes", Value: bson.A{
+				bson.D{{Key: "key", Value: bson.D{{Key: "a", Value: 1}}}, {Key: "name", Value: "a_1"}},
+				bson.D{{Key: "key", Value: bson.D{{Key: "secret", Value: 1}}}, {Key: "name", Value: "secret_1"}},
+			}},
+		},
+	}}
+	assert.False(t, f.Filter(log))
+	indexes := oplog.GetKey(log.Object, "indexes").(bson.A)
+	assert.Len(t, indexes, 1)
+
+	// only non-covered -> drop whole log
+	log2 := &oplog.PartialLog{ParsedLog: oplog.ParsedLog{
+		Namespace: "db1.$cmd", Operation: "c",
+		Object: bson.D{
+			{Key: "createIndexes", Value: "c1"},
+			{Key: "indexes", Value: bson.A{
+				bson.D{{Key: "key", Value: bson.D{{Key: "secret", Value: 1}}}, {Key: "name", Value: "secret_1"}},
+			}},
+		},
+	}}
+	assert.True(t, f.Filter(log2))
 }

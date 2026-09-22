@@ -163,6 +163,11 @@ func NewOplogSyncer(
 		filterList = append(filterList, namespaceFilter)
 	}
 
+	// field-level whitelist projection (incremental, change_stream only)
+	if len(conf.Options.IncrSyncFieldWhitelistMap) != 0 {
+		filterList = append(filterList, filter.NewFieldFilter(conf.Options.IncrSyncFieldWhitelistMap))
+	}
+
 	// oplog filters. drop the oplog if any of the filter
 	// list returns true. The order of all filters is not significant.
 	// workerGroup is assigned later by syncer.bind()
