@@ -311,7 +311,9 @@ type DocumentReader struct {
 	// lastReadID tracks the _id of the last document successfully read
 	// from the cursor. Used to resume from the correct position when
 	// the cursor is rebuilt after a transient error (e.g. QueryPlanKilled).
-	lastReadID interface{}
+	// RawValue owns a copy of the BSON value because Cursor.Current is reused
+	// by the MongoDB driver on the next call to Next.
+	lastReadID bson.RawValue
 }
 
 // NewDocumentReader creates reader with mongodb url
@@ -372,21 +374,50 @@ func (reader *DocumentReader) NextDoc() (doc bson.Raw, err error) {
 	}
 
 	doc = reader.docCursor.Current
-
-	// Extract _id from the document for cursor resume on rebuild.
-	// We must copy the bytes because docCursor.Current is only valid
-	// until the next Next() call.
-	var docData bson.D
-	if err := bson.Unmarshal(doc, &docData); err == nil {
-		for _, bsonE := range docData {
-			if bsonE.Key == "_id" {
-				reader.lastReadID = bsonE.Value
-				break
-			}
-		}
-	}
+	reader.setLastReadID(doc)
+	// A successful read breaks a sequence of rebuild failures. Keep the
+	// rebuild limit for consecutive connection/cursor failures only.
+	reader.rebuild = 0
 
 	return doc, nil
+}
+
+func (reader *DocumentReader) setLastReadID(doc bson.Raw) {
+	id := doc.Lookup("_id")
+	if id.Type == 0 {
+		l.Logger.Warnf("reader[%s] read document without _id; cannot advance cursor resume point", reader)
+		return
+	}
+
+	value := make([]byte, len(id.Value))
+	copy(value, id.Value)
+	reader.lastReadID = bson.RawValue{Type: id.Type, Value: value}
+}
+
+// resumeQuery preserves the piece range in query and, after a cursor rebuild,
+// adds an _id lower bound. Readers are always sorted by _id, even when the
+// piece itself is split by a shard key, so the continuation must use _id too.
+func (reader *DocumentReader) resumeQuery() bson.M {
+	resumeQuery := make(bson.M, len(reader.query)+1)
+	for key, value := range reader.query {
+		resumeQuery[key] = value
+	}
+	if reader.lastReadID.Type == 0 {
+		return resumeQuery
+	}
+
+	// Do not mutate reader.query: its _id condition can be used again if a
+	// reader is reused or a later rebuild needs to retain its upper boundary.
+	idCondition := make(bson.M)
+	if original, ok := resumeQuery["_id"].(bson.M); ok {
+		for operator, value := range original {
+			idCondition[operator] = value
+		}
+	}
+	idCondition["$gt"] = reader.lastReadID
+	resumeQuery["_id"] = idCondition
+
+	return resumeQuery
 }
 
 // ensureNetwork establish the mongodb connection at first
@@ -410,41 +441,7 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 		return fmt.Errorf("reader[%s] rebuild too many times(%d)", reader.String(), reader.rebuild)
 	}
 
-	// Build resume query: if we have a lastReadID (cursor rebuild after transient
-	// error), use {_id: {$gt: lastReadID, $lte: end}} so we skip already-read docs.
-	// Otherwise use the original query from NewDocumentReader.
-	// Note: when key is "" (single-thread mode or splitVector fallback), the
-	// original query is empty (full collection scan). In that case we must use
-	// "_id" as the resume key, not the empty string.
-	resumeKey := reader.key
-	if resumeKey == "" {
-		resumeKey = "_id"
-	}
-	resumeQuery := make(bson.M)
-	if reader.lastReadID != nil {
-		innerQ := make(bson.M)
-		innerQ["$gt"] = reader.lastReadID
-		// preserve the original $lte bound if it exists
-		// When original key is "", query has no range key, so check both
-		// reader.key and "_id" for the $lte bound
-		var origInner bson.M
-		if orig, ok := reader.query[reader.key].(bson.M); ok {
-			origInner = orig
-		} else if orig, ok := reader.query["_id"].(bson.M); ok {
-			origInner = orig
-		}
-		if origInner != nil {
-			if end, ok := origInner["$lte"]; ok {
-				innerQ["$lte"] = end
-			}
-		}
-		resumeQuery[resumeKey] = innerQ
-	} else {
-		// first call, use original query
-		for k, v := range reader.query {
-			resumeQuery[k] = v
-		}
-	}
+	resumeQuery := reader.resumeQuery()
 
 	findOptions := new(options.FindOptions)
 	findOptions.SetSort(map[string]interface{}{
@@ -461,7 +458,7 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 		// timeseries collections can't use hint since they do not have _id index, #897
 		findOptions.SetHint(nil)
 	}
-	findOptions.SetComment(fmt.Sprintf("mongo-shake full sync: ns[%v] query[%v] rebuid-times[%v]",
+	findOptions.SetComment(fmt.Sprintf("mongo-shake full sync: ns[%v] query[%v] rebuild-times[%v]",
 		reader.ns, resumeQuery, reader.rebuild))
 
 	reader.docCursor, err = reader.client.Client.Database(reader.ns.Database).Collection(reader.ns.Collection, nil).
