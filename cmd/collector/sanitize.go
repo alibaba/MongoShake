@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -372,6 +373,120 @@ func parseDupKeySkipRules() error {
 	return nil
 }
 
+// parseFieldWhitelists parses full_sync.field.whitelist / incr_sync.field.whitelist
+// (format: db.coll:f1,f2;db2.coll2:g1), validates them against filter.namespace.white
+// and each other, then populates the generated maps on conf.Options.
+func parseFieldWhitelists() error {
+	fullMap, err := parseFieldWhitelistRules(conf.Options.FullSyncFieldWhitelist, "full_sync.field.whitelist")
+	if err != nil {
+		return err
+	}
+	incrMap, err := parseFieldWhitelistRules(conf.Options.IncrSyncFieldWhitelist, "incr_sync.field.whitelist")
+	if err != nil {
+		return err
+	}
+
+	if len(fullMap) == 0 && len(incrMap) == 0 {
+		conf.Options.FullSyncFieldWhitelistMap = fullMap
+		conf.Options.IncrSyncFieldWhitelistMap = incrMap
+		return nil
+	}
+
+	if len(incrMap) != 0 &&
+		conf.Options.IncrSyncMongoFetchMethod != utils.VarIncrSyncMongoFetchMethodChangeStream {
+		return fmt.Errorf("incr_sync.field.whitelist requires incr_sync.mongo_fetch_method = %s",
+			utils.VarIncrSyncMongoFetchMethodChangeStream)
+	}
+
+	if len(conf.Options.FilterNamespaceWhite) == 0 {
+		return fmt.Errorf("field whitelist requires filter.namespace.white to be set")
+	}
+	nsFilter := filter.NewNamespaceFilter(conf.Options.FilterNamespaceWhite, nil)
+	notCovered := make([]string, 0)
+	for ns := range fullMap {
+		if nsFilter.FilterNs(ns) {
+			notCovered = append(notCovered, ns)
+		}
+	}
+	for ns := range incrMap {
+		if nsFilter.FilterNs(ns) {
+			notCovered = append(notCovered, ns)
+		}
+	}
+	if len(notCovered) != 0 {
+		sort.Strings(notCovered)
+		return fmt.Errorf("field whitelist namespace(s) %v not covered by filter.namespace.white", notCovered)
+	}
+
+	for ns, fullFields := range fullMap {
+		incrFields, ok := incrMap[ns]
+		if !ok {
+			continue
+		}
+		if !fieldSetEqual(fullFields, incrFields) {
+			return fmt.Errorf("field whitelist mismatch for ns[%s]: full_sync=%v, incr_sync=%v",
+				ns, sortedFieldSet(fullFields), sortedFieldSet(incrFields))
+		}
+	}
+
+	conf.Options.FullSyncFieldWhitelistMap = fullMap
+	conf.Options.IncrSyncFieldWhitelistMap = incrMap
+	return nil
+}
+
+func parseFieldWhitelistRules(rules []string, confName string) (map[string]map[string]struct{}, error) {
+	out := make(map[string]map[string]struct{})
+	for _, rule := range rules {
+		rule = strings.TrimSpace(rule)
+		if rule == "" {
+			continue
+		}
+		parts := strings.SplitN(rule, ":", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("%s should be db.collection:field1,field2; got [%s]", confName, rule)
+		}
+		ns := strings.TrimSpace(parts[0])
+		if ns == "" || !strings.Contains(ns, ".") {
+			return nil, fmt.Errorf("%s namespace should be db.collection; got [%s]", confName, rule)
+		}
+		if _, ok := out[ns]; !ok {
+			out[ns] = make(map[string]struct{})
+		}
+		for _, field := range strings.Split(parts[1], ",") {
+			field = strings.TrimSpace(field)
+			if field == "" {
+				return nil, fmt.Errorf("%s contains empty field for [%s]", confName, rule)
+			}
+			if strings.Contains(field, ".") {
+				return nil, fmt.Errorf("%s does not support nested/dotted field [%s] in v1", confName, field)
+			}
+			out[ns][field] = struct{}{}
+		}
+	}
+	return out, nil
+}
+
+func fieldSetEqual(a, b map[string]struct{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if _, ok := b[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func sortedFieldSet(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func checkMasterQuorumOptions() error {
 	if !conf.Options.MasterQuorum {
 		return nil
@@ -524,6 +639,10 @@ func checkConflict() error {
 	if len(conf.Options.FilterPassSpecialDb) != 0 {
 		// init ns
 		filter.InitNs(conf.Options.FilterPassSpecialDb)
+	}
+	// field-level whitelist (parse + validate against filter.namespace.white)
+	if err := parseFieldWhitelists(); err != nil {
+		return err
 	}
 	// special variable
 	if conf.Options.SpecialSourceDBFlag != "" &&
