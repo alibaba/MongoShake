@@ -273,6 +273,14 @@ func StartIndexSync(indexMap map[utils.NS][]bson.D, toUrl string,
 						continue
 					}
 
+					// field whitelist: skip indexes referencing non-whitelisted fields
+					if fields := conf.Options.FullSyncFieldWhitelistMap[ns.Str()]; len(fields) > 0 {
+						if !filter.IndexSpecCovered(index, fields) {
+							l.Logger.Infof("skip index for ns[%v] not covered by field whitelist: %v", ns, index)
+							continue
+						}
+					}
+
 					newIndex := bson.D{}
 					for _, v := range index {
 						if v.Key == "ns" || v.Key == "v" || v.Key == "background" {
