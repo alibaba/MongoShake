@@ -137,6 +137,14 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() (err error
 		return err
 	}
 
+	// recreate time-series collections with the source's options before index sync
+	// or any data write, both of which would otherwise implicitly create an
+	// ordinary collection on the target (#993)
+	if err := docsyncer.StartCreateDestTimeSeriesCollection(coordinator.RealSourceFullSync, nsSet,
+		toConn, trans, conf.Options.MongoSslRootCaFile); err != nil {
+		return err
+	}
+
 	// enable shard if sharding -> sharding
 	shardingSync := docsyncer.IsShardingToSharding(fromIsSharding, toConn)
 	if shardingSync {
