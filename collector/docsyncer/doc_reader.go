@@ -464,7 +464,7 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	reader.docCursor, err = reader.client.Client.Database(reader.ns.Database).Collection(reader.ns.Collection, nil).
 		Find(nil, resumeQuery, findOptions)
 	if err != nil {
-		return fmt.Errorf("run find failed: %v", err)
+		return fmt.Errorf("run find failed: %w", err)
 	}
 
 	l.Logger.Infof("reader[%s] generates new cursor with resume query[%v]", reader.String(), resumeQuery)
