@@ -2358,19 +2358,35 @@ func TestTimeSeriesIntegration(t *testing.T) {
 		bucketId := bucketResults[0]["_id"]
 		// Mock a $v:2 diff update oplog with only scontrol section (parseable).
 		// Reference: real time-series update oplog from MongoDB 5.0+
+		//
+		// The fabricated control must not contradict the single measurement inserted
+		// above, and how strictly that is enforced depends on the server (#1006):
+		//
+		//	7.0.37  no validation at all
+		//	7.0.43  control.min, control.max and the data columns must carry the same
+		//	        field set, so a min-only "humidity" field is rejected with code 121
+		//	        ("Mismatch between the number of time-series control fields and the
+		//	        number of data fields")
+		//	8.x     control.min and control.max must also equal the column data exactly,
+		//	        so a merely in-range value is rejected with code 121 ("Incorrect
+		//	        column data min for field 'temperature'")
+		//
+		// Hence only temperature, which exists in min, max and data alike, is touched,
+		// and it is set to the value actually inserted; count equals the one
+		// measurement present. Any change to the insert above must be mirrored here.
 		bucketNs := tsTestDb + ".system.buckets." + tsCollection
 		updateObj := bson.D{
 			{Key: "$v", Value: int32(2)},
 			{Key: "diff", Value: bson.D{
 				{Key: "scontrol", Value: bson.D{
 					{Key: "u", Value: bson.D{
-						{Key: "count", Value: int32(5)},
+						{Key: "count", Value: int32(1)},
 					}},
 					{Key: "smin", Value: bson.D{
-						{Key: "u", Value: bson.D{{Key: "humidity", Value: 50}}},
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 22.5}}},
 					}},
 					{Key: "smax", Value: bson.D{
-						{Key: "u", Value: bson.D{{Key: "temperature", Value: 30}}},
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 22.5}}},
 					}},
 				}},
 			}},
@@ -2400,13 +2416,13 @@ func TestTimeSeriesIntegration(t *testing.T) {
 			{Key: "diff", Value: bson.D{
 				{Key: "scontrol", Value: bson.D{
 					{Key: "u", Value: bson.D{
-						{Key: "count", Value: int32(5)},
+						{Key: "count", Value: int32(1)},
 					}},
 					{Key: "smin", Value: bson.D{
-						{Key: "u", Value: bson.D{{Key: "humidity", Value: 50}}},
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 22.5}}},
 					}},
 					{Key: "smax", Value: bson.D{
-						{Key: "u", Value: bson.D{{Key: "temperature", Value: 30}}},
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 22.5}}},
 					}},
 				}},
 				{Key: "sdata", Value: bson.D{
@@ -2482,13 +2498,13 @@ func TestTimeSeriesIntegration(t *testing.T) {
 			{Key: "diff", Value: bson.D{
 				{Key: "scontrol", Value: bson.D{
 					{Key: "u", Value: bson.D{
-						{Key: "count", Value: int32(5)},
+						{Key: "count", Value: int32(1)},
 					}},
 					{Key: "smin", Value: bson.D{
-						{Key: "u", Value: bson.D{{Key: "humidity", Value: 50}}},
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 22.5}}},
 					}},
 					{Key: "smax", Value: bson.D{
-						{Key: "u", Value: bson.D{{Key: "temperature", Value: 30}}},
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 22.5}}},
 					}},
 				}},
 			}},
@@ -2513,7 +2529,7 @@ func TestTimeSeriesIntegration(t *testing.T) {
 			{Key: "diff", Value: bson.D{
 				{Key: "scontrol", Value: bson.D{
 					{Key: "u", Value: bson.D{
-						{Key: "count", Value: int32(5)},
+						{Key: "count", Value: int32(1)},
 					}},
 				}},
 				{Key: "sdata", Value: bson.D{
