@@ -159,8 +159,7 @@ func csWriteConf(t *testing.T, srcURL, tgtURL, logDir string) string {
 	// this test asserts on log content, and the default log.flush=false buffers
 	// writes for up to a second, which would make those assertions racy
 	set("log.flush", "true")
-	// the template on develop carries an uncommented expression value that the
-	// config parser rejects (see issue #998); override with a plain number
+	// pinned; the template's value was an unevaluated expression before #998
 	set("tunnel.kafka.producer.max_message_bytes", "18874368")
 
 	path := filepath.Join(logDir, "collector-cs986.conf")

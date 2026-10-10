@@ -149,7 +149,7 @@ func tsWriteConf(t *testing.T, srcURL, tgtURL, logDir string) string {
 	set("log.level", "info")
 	// the assertions below read the log, which log.flush=false leaves buffered
 	set("log.flush", "true")
-	// the template carries an uncommented expression value the parser rejects (#998)
+	// pinned; the template's value was an unevaluated expression before #998
 	set("tunnel.kafka.producer.max_message_bytes", "18874368")
 
 	path := filepath.Join(logDir, "collector-ts.conf")

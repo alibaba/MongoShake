@@ -148,7 +148,7 @@ func lzWriteConf(t *testing.T, srcURL, tgtURL, logDir, id string) string {
 	// the readiness probe reads the log to find out when the collector is up, so
 	// it must not sit in the 1s buffer that log.flush=false leaves it in
 	set("log.flush", "true")
-	// the template carries an uncommented expression value the parser rejects (#998)
+	// pinned; the template's value was an unevaluated expression before #998
 	set("tunnel.kafka.producer.max_message_bytes", "18874368")
 
 	path := filepath.Join(logDir, "collector-lazy.conf")
