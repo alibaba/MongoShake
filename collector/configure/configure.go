@@ -91,6 +91,7 @@ type Configuration struct {
 	IncrSyncAdaptiveBatchingMaxSize           int      `config:"incr_sync.adaptive.batching_max_size"`
 	IncrSyncFetcherBufferCapacity             int      `config:"incr_sync.fetcher.buffer_capacity"`
 	IncrSyncFetcherBufferSizeThresholdInKB    int      `config:"incr_sync.fetcher.buffer_size_threshold_in_kb"` // add v2.8.6
+	IncrSyncBarrierOrderingEnable             bool     `config:"incr_sync.barrier.ordering_enable"`             // add v2.8.10
 	IncrSyncExecutorUpsert                    bool     `config:"incr_sync.executor.upsert"`
 	IncrSyncExecutorInsertOnDupUpdate         bool     `config:"incr_sync.executor.insert_on_dup_update"`
 	IncrSyncExecutorDupKeyStrategy            string   `config:"incr_sync.executor.dup_key_strategy"`             // add v2.8.9

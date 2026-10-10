@@ -1,7 +1,6 @@
 package collector
 
 import (
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -12,7 +11,6 @@ import (
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	"github.com/alibaba/MongoShake/v2/executor"
 	"github.com/alibaba/MongoShake/v2/oplog"
 	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
@@ -39,50 +37,6 @@ var (
 		18, 116, 0, 255, 255, 255, 255, 255, 255, 255, 255, 0,
 	}
 )
-
-// DDLExecutor directly executes DDL on target MongoDB, bypassing the worker pipeline.
-// Only created for direct tunnel. For other tunnels, DDL still goes through worker[0].
-type DDLExecutor struct {
-	conn         *utils.MongoCommunityConn
-	fullFinishTs int64
-}
-
-// NewDDLExecutor creates a DDLExecutor with a direct connection to the target MongoDB.
-func NewDDLExecutor(mongoUrl string, fullFinishTs int64) *DDLExecutor {
-	conn, err := utils.NewMongoCommunityConn(
-		mongoUrl,
-		utils.VarMongoConnectModePrimary,
-		true,
-		utils.ReadWriteConcernDefault,
-		utils.ReadWriteConcernDefault,
-		conf.Options.TunnelMongoSslRootCaFile,
-	)
-	if err != nil {
-		l.Logger.Crashf("create DDL executor connection failed: %v", err)
-	}
-	return &DDLExecutor{conn: conn, fullFinishTs: fullFinishTs}
-}
-
-// Execute runs a DDL command directly on the target MongoDB.
-func (e *DDLExecutor) Execute(log *oplog.PartialLog) error {
-	namespace := log.Namespace
-	dc := strings.SplitN(namespace, ".", 2)
-	database := dc[0]
-	operation, _ := oplog.ExtraCommandName(log.Object)
-	l.Logger.Info("DDLExecutor: directly executing DDL [%s] on db[%s], ts=%v",
-		operation, database, log.Timestamp)
-
-	err := executor.RunCommand(database, operation, log, e.conn.Client)
-	if err != nil {
-		if executor.IgnoreError(err, "c", utils.TimeStampToInt64(log.Timestamp) <= e.fullFinishTs) {
-			l.Logger.Debug("DDLExecutor: ignore DDL error [%v]", err)
-			return nil
-		}
-		return err
-	}
-	l.Logger.Info("DDLExecutor: DDL [%s] executed successfully", operation)
-	return nil
-}
 
 func getTargetDelay() int64 {
 	if utils.IncrSentinelOptions.TargetDelay < 0 {
@@ -132,9 +86,12 @@ type Batcher struct {
 	// transaction buffer
 	txnBuffer *oplog.TxnBuffer
 
-	// ddlExecutor directly executes DDL on target MongoDB, bypassing the worker pipeline.
-	// Only created for direct tunnel. For other tunnels, DDL still goes through worker[0].
-	ddlExecutor *DDLExecutor
+	// ingestGate is the barrier-quiesce gate. It is set by the poll loop, right before a DDL it has
+	// just read is injected (see OplogSyncer.next), and released by that same loop once the pipeline
+	// is quiescent again. While it is set, next() reads nothing further from the reader. nil means
+	// open; the channel is only a marker -- the waiter loads the pointer in a loop and never
+	// receives on it, so closing it is just the release step.
+	ingestGate atomic.Pointer[chan struct{}]
 
 	// for ut only
 	utBatchesDelay struct {
@@ -146,13 +103,6 @@ type Batcher struct {
 
 func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
 	handler OplogHandler, workerGroup []*Worker) *Batcher {
-	// Only create DDL executor for direct tunnel (where DDL ordering matters)
-	var ddlExecutor *DDLExecutor
-	if conf.Options.Tunnel == utils.VarTunnelDirect && len(conf.Options.TunnelAddress) > 0 {
-		ddlExecutor = NewDDLExecutor(conf.Options.TunnelAddress[0],
-			utils.TimeStampToInt64(syncer.fullSyncFinishPosition))
-	}
-
 	return &Batcher{
 		syncer:          syncer,
 		filterList:      filterList,
@@ -161,7 +111,6 @@ func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
 		lastOplog:       fakeOplog,
 		lastFilterOplog: fakeOplog.Parsed,
 		txnBuffer:       oplog.NewBuffer(),
-		ddlExecutor:     ddlExecutor,
 	}
 }
 
@@ -335,14 +284,14 @@ func (batcher *Batcher) getBatchWithDelay() ([]*oplog.GenericOplog, bool) {
  * i d i c u i
  *      | |
  */
-func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barrier bool, allEmpty bool, exit bool, ddlOplogs []*oplog.GenericOplog) {
+func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barrier bool, allEmpty bool, exit bool) {
 	// picked raw oplogs and batching in sequence
 	batcher.batchGroup = make([][]*oplog.GenericOplog, len(batcher.workerGroup))
 	if batcher.barrierOplogs == nil {
 		batcher.barrierOplogs = make([]*oplog.GenericOplog, 0)
 	}
 
-	// Have barrier Oplogs to performed (transaction with command)
+	// Have barrier Oplogs to performed
 	if len(batcher.barrierOplogs) > 0 {
 		for _, v := range batcher.barrierOplogs {
 			if batcher.filter(v.Parsed) {
@@ -359,16 +308,55 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		}
 		batcher.barrierOplogs = nil
 
-		return batcher.batchGroup, true, batcher.setLastOplog(), false, nil
+		if !incrOrderingGuarantee() {
+			// Otherwise allEmpty may be true here, and the caller's `!allEmpty` guard is then
+			// allowed to skip the barrier branch.
+			return batcher.batchGroup, true, batcher.setLastOplog(), false
+		}
+
+		// direct: lastOplog still has to advance past the barrier oplogs just placed in batchGroup,
+		// and the round reports allEmpty=false even if every barrier oplog was dropped by the
+		// filters above, so the caller's `!allEmpty` guard can never swallow the barrier wait.
+		batcher.setLastOplog()
+		return batcher.batchGroup, true, false, false
 	}
 
 	// try to get batch
 	mergeBatch, exit := batcher.getBatchWithDelay()
 
 	if mergeBatch == nil {
-		return batcher.batchGroup, false, batcher.setLastOplog(), exit, nil
+		return batcher.batchGroup, false, batcher.setLastOplog(), exit
 	}
 
+	stopAt := batcher.processMergeBatch(mergeBatch)
+	if stopAt >= 0 {
+		// the oplogs behind the barrier wait for it to be done
+		batcher.remainLogs = mergeBatch[stopAt+1:]
+
+		if !incrOrderingGuarantee() {
+			// Otherwise the round keeps its original verdict: setLastOplog() supplies allEmpty.
+			return batcher.batchGroup, true, batcher.setLastOplog(), false
+		}
+
+		// lastOplog still has to advance past the oplogs that preceded the barrier: processMergeBatch
+		// put them in batchGroup before it stopped at the barrier.
+		batcher.setLastOplog()
+
+		// A barrier round always reports allEmpty=false, regardless of batchGroupEmpty(). When the
+		// barrier is mergeBatch[0] -- or every oplog before it was filtered -- batchGroup ends up
+		// empty, and reporting true lets startBatcher's `!allEmpty` guard skip the entire barrier
+		// branch: the wait for the oplogs dispatched ahead of the barrier and the forced checkpoint
+		// are both swallowed, and the barrier is handed to worker[0] on the next round while earlier
+		// DML is still queued in other workers -- a guaranteed reorder.
+		return batcher.batchGroup, true, false, false
+	}
+
+	return batcher.batchGroup, false, batcher.setLastOplog(), exit
+}
+
+// processMergeBatch filters mergeBatch and distributes it into batcher.batchGroup. It returns
+// the index of the barrier oplog that must run separately, or -1 when mergeBatch holds none.
+func (batcher *Batcher) processMergeBatch(mergeBatch []*oplog.GenericOplog) int {
 	for i, genericLog := range mergeBatch {
 		// filter oplog such like Noop or with gid
 		// PAY ATTENTION: we can't handle the oplog in transaction that has been filtered
@@ -389,11 +377,8 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 			if mustIndividual {
 				batcher.barrierOplogs = deliveredOps
 
-				batcher.remainLogs = mergeBatch[i+1:]
-
-				allEmpty := batcher.setLastOplog()
-				nimo.AssertTrue(allEmpty == true, "batcher.batchGroup don't be empty")
-				return batcher.batchGroup, true, allEmpty, false, nil
+				nimo.AssertTrue(batcher.batchGroupEmpty(), "batcher.batchGroup don't be empty")
+				return i
 			} else {
 				for _, ele := range deliveredOps {
 					batcher.addIntoBatchGroup(ele, false)
@@ -429,12 +414,10 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		if ddlFilter.Filter(genericLog.Parsed) {
 
 			if conf.Options.FilterDDLEnable {
-				// DDL is returned via ddlOplogs for direct execution by startBatcher
-				ddlOplogs = append(ddlOplogs, genericLog)
+				// DDL is executed as a barrier: it is handed to worker[0] on its own round
+				batcher.barrierOplogs = append(batcher.barrierOplogs, genericLog)
 
-				batcher.remainLogs = mergeBatch[i+1:]
-
-				return batcher.batchGroup, true, batcher.setLastOplog(), false, ddlOplogs
+				return i
 			} else {
 				// filter
 				batcher.syncer.replMetric.AddFilter(1)
@@ -448,15 +431,14 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		batcher.addIntoBatchGroup(genericLog, false)
 	}
 
-	return batcher.batchGroup, false, batcher.setLastOplog(), exit, nil
+	return -1
 }
 
 func (batcher *Batcher) setLastOplog() bool {
 	// all oplogs are filtered?
-	allEmpty := true
+	allEmpty := batcher.batchGroupEmpty()
 	for _, ele := range batcher.batchGroup {
 		if ele != nil && len(ele) > 0 {
-			allEmpty = false
 			rawLast := ele[len(ele)-1]
 			if primitive.CompareTimestamp(rawLast.Parsed.Timestamp, batcher.lastOplog.Parsed.Timestamp) > 0 {
 				batcher.lastOplog = rawLast
@@ -464,6 +446,44 @@ func (batcher *Batcher) setLastOplog() bool {
 		}
 	}
 	return allEmpty
+}
+
+// batchGroupEmpty reports whether batchGroup holds no oplog yet.
+func (batcher *Batcher) batchGroupEmpty() bool {
+	for _, ele := range batcher.batchGroup {
+		if ele != nil && len(ele) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// setIngestGate closes the gate, leaving an already-closed gate untouched so a release can never
+// be missed. The poll loop is the only writer; the compare-and-swap only keeps a stray second
+// caller from clobbering a live gate.
+func (batcher *Batcher) setIngestGate() {
+	if batcher.ingestGate.Load() == nil {
+		gate := make(chan struct{})
+		if !batcher.ingestGate.CompareAndSwap(nil, &gate) {
+			close(gate) // a live gate won: this marker has no owner
+		}
+	}
+}
+
+// clearIngestGate releases the gate set by setIngestGate. The pointer is taken out by the same
+// compare-and-swap that authorizes the close, so the same channel is never closed twice.
+// Releasing an already open gate is a no-op.
+func (batcher *Batcher) clearIngestGate() {
+	for {
+		p := batcher.ingestGate.Load()
+		if p == nil {
+			return // already open
+		}
+		if batcher.ingestGate.CompareAndSwap(p, nil) {
+			close(*p)
+			return
+		}
+	}
 }
 
 // addIntoBatchGroup
@@ -583,8 +603,10 @@ func (batcher *Batcher) currentQueue() uint64 {
 }
 
 // waitForAllWorkersIdle waits until all workers have empty queues and all dispatched
-// oplogs have been acknowledged (ack == unack). This ensures all DML operations are
-// completed before DDL execution.
+// oplogs have been acknowledged (ack == unack), i.e. until every oplog handed to a worker
+// has been applied on the target. Only meaningful for the direct tunnel, whose Send() is a
+// synchronous write; the callers gate on incrOrderingGuarantee(). The Pause/Shutdown escape
+// mirrors the one in checkCheckpointUpdate's barrier wait.
 func (batcher *Batcher) waitForAllWorkersIdle() bool {
 	l.Logger.Info("%s waiting for all workers to be idle (barrier)", batcher.syncer)
 
@@ -617,31 +639,4 @@ func (batcher *Batcher) waitForAllWorkersIdle() bool {
 
 		utils.YieldInMs(DDLCheckpointInterval)
 	}
-}
-
-// executeDDLDirectly executes DDL operations directly on the target MongoDB,
-// bypassing the worker pipeline. For direct tunnel, DDL is executed by DDLExecutor.
-// For non-direct tunnel, DDL falls back to being dispatched to worker[0].
-func (batcher *Batcher) executeDDLDirectly(ddlOplogs []*oplog.GenericOplog) error {
-	if batcher.ddlExecutor == nil {
-		// Non-direct tunnel: fall back to dispatching DDL to worker[0]
-		for _, v := range ddlOplogs {
-			batcher.addIntoBatchGroup(v, true)
-		}
-		return nil
-	}
-
-	// Direct tunnel: execute DDL directly, bypassing worker pipeline
-	for _, ddlLog := range ddlOplogs {
-		if batcher.filter(ddlLog.Parsed) {
-			batcher.lastFilterOplog = ddlLog.Parsed
-			continue
-		}
-		if err := batcher.ddlExecutor.Execute(ddlLog.Parsed); err != nil {
-			return err
-		}
-		batcher.syncer.replMetric.AddApply(1)
-		batcher.syncer.replMetric.AddSuccess(1)
-	}
-	return nil
 }
