@@ -218,6 +218,11 @@ func (p *Persister) flushDiskBufferLocked() error {
 }
 
 func (p *Persister) bufferInput(input []byte) {
+	// The only entry point through which a raw oplog enters the in-memory pipeline.
+	// Mirror it in rawInFlight so the entrance quiesce can prove the pipeline empty:
+	// every op counted here is matched by a deserializer decrement once it reaches a
+	// logsQueue.
+	atomic.AddInt64(&p.sync.rawInFlight, 1)
 	p.Buffer = append(p.Buffer, input)
 	p.bufferSize += uint64(len(input))
 	p.updateBufferUsedMetric()
@@ -258,6 +263,40 @@ func (p *Persister) PushToPendingQueue(input []byte) {
 	if p.shouldDispatchBuffer(flush) {
 		p.dispatchBuffer()
 	}
+}
+
+// FlushBuffer forces whatever raw oplog is still sitting in Buffer into the pending queue
+// right now, without waiting for the size thresholds to trip.
+//
+// Buffer has exactly one writer at a time: the poll goroutine outside disk replay, and
+// retrieve() while the disk queue is being replayed. Appending to a slice while another
+// goroutine reads it is not safe, so only that owner may flush, and this method enforces the
+// rule rather than trusting the caller: during disk replay it does nothing, because retrieve()
+// pushes each disk batch forward itself.
+//
+// The poll goroutine calls it on its way to the ingest gate (see OplogSyncer.next): rawInFlight
+// counts an op from the moment it entered Buffer, so an op left behind here would keep
+// rawInFlight > 0 forever and stall the quiesce wait on a batch nobody is left to push.
+//
+// Not to be replaced by Inject(nil): in disk-persist mode it takes the "no need to store"
+// branch, and on other stages it lands in a Panic branch.
+func (p *Persister) FlushBuffer() {
+	if p.enableDiskPersist && p.GetFetchStage() != utils.FetchStageStoreMemoryApply {
+		// retrieve() owns Buffer while the disk queue is replayed; the poll goroutine is not
+		// buffering anything of its own yet.
+		return
+	}
+	p.flushOwnedBuffer()
+}
+
+// flushOwnedBuffer pushes Buffer forward with no ownership check. Call it only from the
+// goroutine that is currently writing Buffer.
+func (p *Persister) flushOwnedBuffer() {
+	if len(p.Buffer) == 0 {
+		return
+	}
+	// flush=true with a non-empty Buffer makes shouldDispatchBuffer dispatch immediately
+	p.PushToPendingQueue(nil)
 }
 
 func (p *Persister) updateBufferUsedMetric() {
@@ -343,6 +382,16 @@ Wait:
 				p.PushToPendingQueue(data)
 			}
 			replayedAny = true
+			// Push the batch forward now instead of waiting for the size threshold: this goroutine
+			// owns Buffer while it replays, and an op parked here while it blocks on the disk queue
+			// would keep rawInFlight > 0 and stall a barrier round. This is the owner-side flush, so
+			// it is the same single-writer path FlushBuffer guards from the other goroutine.
+			//
+			// direct only: outside the ordering guarantee rawInFlight is read by nothing, so every
+			// other tunnel keeps dispatching on the size threshold here.
+			if incrOrderingGuarantee() {
+				p.flushOwnedBuffer()
+			}
 
 			// move to next read
 			if err := p.DiskQueue.Advance(len(readData)); err != nil {

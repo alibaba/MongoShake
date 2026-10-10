@@ -2,6 +2,7 @@ package collector
 
 import (
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
+	sourceReader "github.com/alibaba/MongoShake/v2/collector/reader"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
 )
@@ -137,6 +139,16 @@ func mockOplogs(length int, ddlGiven []int, noopGiven []int, txnGiven []int, sta
 	}
 	// fmt.Println("--------------")
 	return output
+}
+
+// rawOplogRaw round-trips a GenericOplog through bson, the way the persister hands raw
+// bytes to the deserializer in production.
+func rawOplogRaw(log *oplog.GenericOplog) []byte {
+	raw, err := bson.Marshal(&log.Parsed.ParsedLog)
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 func mockTxnPartialOplogs(startTs int64, normalOplog bool) []*oplog.GenericOplog {
@@ -806,6 +818,19 @@ func TestBatchMore(t *testing.T) {
 
 	utils.InitialLogger("", "", "debug", true, 1)
 
+	// This branch's ordering contract is direct-only and needs incr_sync.barrier.ordering_enable,
+	// and the expectations below pin it: a barrier round reports allEmpty=false so startBatcher's
+	// `!allEmpty` guard cannot skip the barrier branch. The rounds where the contract does not apply
+	// -- another tunnel, or the switch off -- are asserted separately, on the same round shape, in
+	// the "barrier is the first element of mergeBatch" case.
+	origTunnel, origOrderingEnable := conf.Options.Tunnel, conf.Options.IncrSyncBarrierOrderingEnable
+	defer func() {
+		conf.Options.Tunnel = origTunnel
+		conf.Options.IncrSyncBarrierOrderingEnable = origOrderingEnable
+	}()
+	conf.Options.Tunnel = utils.VarTunnelDirect
+	conf.Options.IncrSyncBarrierOrderingEnable = true
+
 	var nr int
 	// normal
 	{
@@ -985,6 +1010,55 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, utils.TimeToTimestamp(206), batcher.lastOplog.Parsed.Timestamp, "should be equal")
 	}
 
+	// barrier is the first element of mergeBatch: batchGroup ends up empty. With the ordering
+	// guarantee in force the round still reports allEmpty=false, so startBatcher's `!allEmpty`
+	// guard cannot skip the wait for the oplogs dispatched ahead of the barrier. Without it --
+	// another tunnel, an unset tunnel, or direct with incr_sync.barrier.ordering_enable off --
+	// allEmpty=true is allowed to skip that wait, and that must not change.
+	{
+		fmt.Printf("TestBatchMore case %d.\n", nr)
+		nr++
+
+		origTunnel, origOrderingEnable := conf.Options.Tunnel, conf.Options.IncrSyncBarrierOrderingEnable
+		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
+		conf.Options.FilterDDLEnable = true
+
+		for _, tc := range []struct {
+			tunnel   string
+			enable   bool
+			allEmpty bool
+		}{
+			{utils.VarTunnelDirect, true, false},
+			{utils.VarTunnelDirect, false, true}, // direct alone is not enough: the switch defaults to off
+			{"", true, true},                     // an unset tunnel counts as non-direct, so it keeps the original verdict
+			{utils.VarTunnelKafka, true, true},
+		} {
+			conf.Options.Tunnel = tc.tunnel
+			conf.Options.IncrSyncBarrierOrderingEnable = tc.enable
+
+			desc := fmt.Sprintf("tunnel %q, ordering_enable %v", tc.tunnel, tc.enable)
+
+			syncer := mockSyncer()
+			filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+			batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
+
+			// ts 0 is the ddl, so the barrier is mergeBatch[0] and nothing reaches batchGroup
+			syncer.logsQueue[0] <- mockOplogs(5, []int{0}, nil, nil, 0)
+			syncer.logsQueue[1] <- mockOplogs(6, nil, nil, nil, 100)
+			syncer.logsQueue[2] <- mockOplogs(7, nil, nil, nil, 200)
+
+			batchedOplog, barrier, allEmpty, _ := batcher.BatchMore()
+			assert.Equal(t, true, barrier, "%s should report a barrier", desc)
+			assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
+			assert.Equal(t, tc.allEmpty, allEmpty, "%s should report allEmpty=%v", desc, tc.allEmpty)
+			assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
+			assert.Equal(t, 17, len(batcher.remainLogs), "should be equal")
+		}
+
+		conf.Options.Tunnel = origTunnel
+		conf.Options.IncrSyncBarrierOrderingEnable = origOrderingEnable
+	}
+
 	// has several ddl
 	{
 		fmt.Printf("TestBatchMore case %d.\n", nr)
@@ -1065,10 +1139,17 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, utils.TimeToTimestamp(204), batcher.lastOplog.Parsed.Timestamp, "should be equal")
 
 		// 5 in logsQ[2]
+		//
+		// A round that carries a barrier always reports allEmpty=false, even when batchGroup comes
+		// out empty: the barrier is parked in barrierOplogs to be dispatched on the next round, so
+		// whether any DML happened to precede it used to be what decided the flag. startBatcher's
+		// `!allEmpty` guard reads that flag, so the rounds where it came out empty skipped the
+		// barrier wait and the forced checkpoint with it. Every assertion below that pairs
+		// barrier=true with an empty batchGroup pins the new contract.
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1126,7 +1207,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ := batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 17, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1207,7 +1288,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ := batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 4, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1227,7 +1308,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 3, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1247,7 +1328,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 2, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1270,7 +1351,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1290,7 +1371,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1422,7 +1503,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ := batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1467,7 +1548,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ := batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 17, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -1530,7 +1611,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2253,7 +2334,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ := batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 8, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2313,7 +2394,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2393,7 +2474,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 7, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2413,7 +2494,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 6, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2433,7 +2514,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 5, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2463,7 +2544,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 7, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2503,7 +2584,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 2, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2523,7 +2604,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2568,7 +2649,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ := batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2686,7 +2767,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 3, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2706,7 +2787,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 2, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2726,7 +2807,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2746,7 +2827,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2832,6 +2913,387 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, utils.TimeToTimestamp(2), batcher.lastFilterOplog.Timestamp, "should be equal")
 		assert.Equal(t, utils.TimeToTimestamp(104), batcher.lastOplog.Parsed.Timestamp, "should be equal")
 	}
+}
+
+/*
+ * Regression for the stall a real run hit: the pipeline stopped with the ingest gate closed and the
+ * whole sync waiting forever.
+ *
+ * Buffer has exactly one writer -- the poll goroutine -- and the gate keeps that goroutine from
+ * fetching anything that could trip the buffer size threshold again. So an oplog left in Buffer
+ * when the gate closes is never dispatched, rawInFlight never returns to zero (it counts an oplog
+ * from the moment it entered Buffer), and the quiesce wait spins on a batch nobody is left to push.
+ *
+ * The flush therefore belongs to Buffer's owner: the poll goroutine pushes it forward on its way to
+ * the gate. This test drives that path: one op is fetched and buffered while the gate is open, the
+ * gate closes, and the next() that parks on it has to push the op forward first.
+ */
+func TestNextFlushesBufferBeforeParkingOnGate(t *testing.T) {
+	utils.InitialLogger("", "", "debug", true, 1)
+
+	origCapacity := conf.Options.IncrSyncFetcherBufferCapacity
+	defer func() {
+		conf.Options.IncrSyncFetcherBufferCapacity = origCapacity
+	}()
+	// keep the buffer from dispatching on size, so the op really is parked in Buffer
+	conf.Options.IncrSyncFetcherBufferCapacity = 100
+
+	syncer := mockSyncer()
+	syncer.PendingQueue[0] = make(chan [][]byte, 10)
+	syncer.batcher = &Batcher{syncer: syncer}
+	syncer.persister = NewPersister("test", syncer)
+
+	dml := mockOplogs(1, nil, nil, nil, 50)
+	raw := rawOplogRaw(dml[0])
+	if raw == nil {
+		t.Fatalf("marshal raw dml failed")
+	}
+	syncer.reader = &stubReader{ops: [][]byte{raw}}
+
+	// gate open: next() fetches the op and buffers it
+	assert.Equal(t, true, syncer.next(), "should be equal")
+	assert.Equal(t, 1, len(syncer.persister.Buffer), "the op should be parked in the persister buffer")
+	assert.Equal(t, int64(1), atomic.LoadInt64(&syncer.rawInFlight), "the buffered op should be counted in flight")
+	assert.Equal(t, 0, len(syncer.PendingQueue[0]), "nothing should have reached the pending queue yet")
+
+	// barrier round: the gate closes, so the next() call must flush before it parks
+	syncer.batcher.setIngestGate()
+	parked := make(chan struct{})
+	go func() {
+		defer close(parked)
+		syncer.next()
+	}()
+
+	select {
+	case batch := <-syncer.PendingQueue[0]:
+		assert.Equal(t, 1, len(batch), "the buffered op should have been pushed forward")
+		assert.Equal(t, raw, batch[0], "should be equal")
+	case <-time.After(nextGateWaitTimeout):
+		t.Fatal("next() parked on the closed gate without flushing the persister buffer: " +
+			"the op would keep rawInFlight > 0 and stall the quiesce wait forever")
+	}
+	// the op is now on its way to a logsQueue, so only the deserializer releases its count
+	assert.Equal(t, int64(1), atomic.LoadInt64(&syncer.rawInFlight), "the op should still be in flight")
+
+	syncer.batcher.clearIngestGate()
+	select {
+	case <-parked:
+	case <-time.After(nextGateWaitTimeout):
+		t.Fatal("next() did not resume after the gate was released")
+	}
+	// read Buffer only after the parked next() has returned (the channel close orders the two):
+	// reading it right after the queue receive would race with the reset dispatchBuffer does
+	// after its send, and the last Inject(nil) of the resumed call dispatches nothing
+	assert.Equal(t, 0, len(syncer.persister.Buffer), "the buffer should be empty after the flush")
+}
+
+// nextGateWaitTimeout has to outlast one park-loop yield: next() sleeps barrierQuiescePollIntervalMs
+// between gate checks, so a released gate is only noticed on the following round.
+const nextGateWaitTimeout = 2 * SyncerFetchErrorRetryMs * time.Millisecond
+
+// entranceWaitTimeout is the budget for the entrance's quiesce wait, which needs two deserializer
+// and batcher round trips plus the confirm gap.
+const entranceWaitTimeout = 5 * time.Second
+
+// TestIsEntryBarrierClassifiesDDLOnly pins the entrance's classification: a DDL is gated, and the
+// cheap screen in front of the parse may only skip oplogs that provably cannot be one.
+func TestIsEntryBarrierClassifiesDDLOnly(t *testing.T) {
+	utils.InitialLogger("", "", "debug", true, 1)
+
+	origTunnel := conf.Options.Tunnel
+	origOrderingEnable := conf.Options.IncrSyncBarrierOrderingEnable
+	origDDL := conf.Options.FilterDDLEnable
+	origFetchMethod := conf.Options.IncrSyncMongoFetchMethod
+	defer func() {
+		conf.Options.Tunnel = origTunnel
+		conf.Options.IncrSyncBarrierOrderingEnable = origOrderingEnable
+		conf.Options.FilterDDLEnable = origDDL
+		conf.Options.IncrSyncMongoFetchMethod = origFetchMethod
+	}()
+	conf.Options.Tunnel = utils.VarTunnelDirect
+	conf.Options.IncrSyncBarrierOrderingEnable = true
+	conf.Options.FilterDDLEnable = true
+	conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodOplog
+
+	syncer := &OplogSyncer{}
+	rawOf := func(d bson.D) []byte {
+		raw, err := bson.Marshal(d)
+		if err != nil {
+			t.Fatalf("marshal failed: %v", err)
+		}
+		return raw
+	}
+	ts := func() bson.E { return bson.E{Key: "ts", Value: utils.Int64ToTimestamp(100)} }
+
+	ddlCommand := rawOf(bson.D{ts(), {Key: "op", Value: "c"}, {Key: "ns", Value: "a.$cmd"},
+		{Key: "o", Value: bson.D{{Key: "drop", Value: "b"}}}})
+	cases := []struct {
+		name string
+		raw  []byte
+		want bool
+	}{
+		{"ddl command", ddlCommand, true},
+		{"applyOps is not a barrier", rawOf(bson.D{ts(), {Key: "op", Value: "c"}, {Key: "ns", Value: "admin.$cmd"},
+			{Key: "o", Value: bson.D{{Key: "applyOps", Value: bson.A{}}}}}), false},
+		{"plain insert", rawOf(bson.D{ts(), {Key: "op", Value: "i"}, {Key: "ns", Value: "a.b"},
+			{Key: "o", Value: bson.D{{Key: "_id", Value: 1}}}}), false},
+		{"system.indexes write", rawOf(bson.D{ts(), {Key: "op", Value: "i"}, {Key: "ns", Value: "a.system.indexes"},
+			{Key: "o", Value: bson.D{{Key: "v", Value: 2}}}}), true},
+		{"empty raw", nil, false},
+	}
+	for _, tc := range cases {
+		assert.Equal(t, tc.want, syncer.isEntryBarrier(tc.raw), tc.name)
+	}
+
+	// the screen keeps only what it can read for sure: a change stream event has no "op" field, so
+	// every operation type but the four data ones has to fall through to the parse
+	event := func(operationType string) bson.Raw {
+		return bson.Raw(rawOf(bson.D{
+			{Key: "operationType", Value: operationType},
+			{Key: "ns", Value: bson.D{{Key: "db", Value: "a"}, {Key: "coll", Value: "b"}}},
+		}))
+	}
+	assert.Equal(t, false, mayBeDDL(event("insert")), "an insert event cannot be a DDL")
+	assert.Equal(t, false, mayBeDDL(event("update")), "an update event cannot be a DDL")
+	assert.Equal(t, true, mayBeDDL(event("drop")), "a drop event has to be parsed")
+	assert.Equal(t, true, mayBeDDL(event("invalidate")), "an unrecognised event type has to be parsed")
+
+	// scope: the guarantee needs tunnel=direct *and* the switch, and no DDL barrier is configured at
+	// all unless FilterDDLEnable says so
+	conf.Options.Tunnel = utils.VarTunnelKafka
+	assert.Equal(t, false, syncer.isEntryBarrier(ddlCommand), "non-direct must not gate")
+	conf.Options.Tunnel = ""
+	assert.Equal(t, false, syncer.isEntryBarrier(ddlCommand), "an unset tunnel counts as non-direct")
+	conf.Options.Tunnel = utils.VarTunnelDirect
+	conf.Options.IncrSyncBarrierOrderingEnable = false
+	assert.Equal(t, false, syncer.isEntryBarrier(ddlCommand), "ordering_enable off must not gate")
+	conf.Options.IncrSyncBarrierOrderingEnable = true
+	conf.Options.FilterDDLEnable = false
+	assert.Equal(t, false, syncer.isEntryBarrier(ddlCommand), "FilterDDLEnable off means no DDL barrier")
+}
+
+/*
+ * The regression the entrance gate exists for: getBatch concatenates logs queues by index, not by
+ * timestamp, and persister hands batches out round robin. A queue that fell behind therefore holds
+ * oplogs older than the DDL the batcher is about to park, and without the gate the batcher parks
+ * the DDL and applies those older DMLs in a later round -- the DDL running before the DML that was
+ * written ahead of it.
+ *
+ * The gate closes before the DDL is injected, so what this test can assert is the observable that
+ * buys: by the time the DDL reached the pipeline, every oplog written before it had already left
+ * the in-flight region and been taken by the batcher.
+ */
+func TestNextGatesDDLUntilPipelineQuiesced(t *testing.T) {
+	utils.InitialLogger("", "", "debug", true, 1)
+
+	origTunnel := conf.Options.Tunnel
+	origOrderingEnable := conf.Options.IncrSyncBarrierOrderingEnable
+	origCapacity := conf.Options.IncrSyncFetcherBufferCapacity
+	origDDL := conf.Options.FilterDDLEnable
+	origFetchMethod := conf.Options.IncrSyncMongoFetchMethod
+	defer func() {
+		conf.Options.Tunnel = origTunnel
+		conf.Options.IncrSyncBarrierOrderingEnable = origOrderingEnable
+		conf.Options.IncrSyncFetcherBufferCapacity = origCapacity
+		conf.Options.FilterDDLEnable = origDDL
+		conf.Options.IncrSyncMongoFetchMethod = origFetchMethod
+	}()
+	conf.Options.Tunnel = utils.VarTunnelDirect
+	conf.Options.IncrSyncBarrierOrderingEnable = true
+	conf.Options.FilterDDLEnable = true
+	conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodOplog
+	conf.Options.IncrSyncFetcherBufferCapacity = 100 // keep Buffer from flushing on size
+
+	syncer := mockSyncer()
+	// dispatchBuffer hands batches out round robin, so *every* queue has to exist: leaving the
+	// second one nil would block that dispatch forever on the nil channel, and the gate with it.
+	// One queue is all this test needs.
+	syncer.PendingQueue = []chan [][]byte{make(chan [][]byte, 10)}
+	syncer.batcher = NewBatcher(syncer, filter.OplogFilterChain{}, syncer, []*Worker{new(Worker)})
+	syncer.persister = NewPersister("test", syncer)
+
+	rawOf := func(ts int64, ddl bool) []byte {
+		var ddlGiven []int
+		if ddl {
+			ddlGiven = []int{0}
+		}
+		raw := rawOplogRaw(mockOplogs(1, ddlGiven, nil, nil, ts)[0])
+		if raw == nil {
+			t.Fatalf("marshal raw oplog failed")
+		}
+		return raw
+	}
+	syncer.reader = &stubReader{ops: [][]byte{rawOf(50, false), rawOf(51, false), rawOf(100, true)}}
+
+	// the resident deserializer, as production runs it: take a pending batch, push it into
+	// logsQueue, then release its share of rawInFlight. Both loops run for the length of the test
+	// and are left blocked on their channel when it ends.
+	go func() {
+		for batch := range syncer.PendingQueue[0] {
+			logs := make([]*oplog.GenericOplog, 0, len(batch))
+			for _, raw := range batch {
+				log, err := parseRawOplog(raw)
+				if err != nil {
+					t.Errorf("parse failed: %v", err)
+					continue
+				}
+				logs = append(logs, &oplog.GenericOplog{Raw: raw, Parsed: log})
+			}
+			syncer.logsQueue[0] <- logs
+			atomic.AddInt64(&syncer.rawInFlight, -int64(len(logs)))
+		}
+	}()
+
+	// the batcher side: take whatever reaches logsQueue, so an empty queue -- the quiesce
+	// condition -- is reachable exactly as it is in production
+	consumed := make(chan int64, 10)
+	go func() {
+		for logs := range syncer.logsQueue[0] {
+			for _, log := range logs {
+				// mockOplogs stamps ts through utils.TimeToTimestamp, which carries the value in T,
+				// so read it back the same way rather than through TimeStampToInt64.
+				consumed <- int64(log.Parsed.Timestamp.T)
+			}
+		}
+	}()
+
+	// two plain DMLs go in ungated
+	assert.Equal(t, true, syncer.next(), "should be equal")
+	assert.Equal(t, true, syncer.next(), "should be equal")
+	assert.Nil(t, syncer.batcher.ingestGate.Load(), "plain DMLs must not gate ingest")
+
+	// the DDL: next() has to hold it back until both DMLs have left the in-flight region
+	injected := make(chan bool, 1)
+	go func() { injected <- syncer.next() }()
+	select {
+	case <-injected:
+	case <-time.After(entranceWaitTimeout):
+		t.Fatal("next() did not return on the DDL: the entrance wait never saw a quiesced pipeline")
+	}
+
+	assert.Equal(t, 2, len(consumed), "both DMLs must have reached the batcher before the DDL was injected")
+	assert.Equal(t, int64(1), atomic.LoadInt64(&syncer.rawInFlight), "only the DDL should still be in flight")
+	assert.NotNil(t, syncer.batcher.ingestGate.Load(), "the gate stays closed until the DDL has been taken too")
+
+	// one more round: the parked next() flushes the DDL forward, waits for it to be taken, and only
+	// then reopens the gate
+	resumed := make(chan struct{})
+	go func() {
+		defer close(resumed)
+		syncer.next()
+	}()
+	deadline := time.Now().Add(entranceWaitTimeout)
+	for syncer.batcher.ingestGate.Load() != nil && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	assert.Nil(t, syncer.batcher.ingestGate.Load(), "the gate must reopen once the pipeline is quiescent")
+
+	// Let that call finish before the deferred config restore runs: it reads conf.Options on its way
+	// through the reader, and restoring underneath a live goroutine is a data race. Bounded, since
+	// the reader is exhausted and the call returns as soon as the gate is open.
+	select {
+	case <-resumed:
+	case <-time.After(entranceWaitTimeout):
+		t.Fatal("next() did not return after the gate was released")
+	}
+
+	// The gate opens as soon as the DDL has left the in-flight region, which is a moment before the
+	// batcher-side goroutine has read it off the channel, so wait for that handover instead of
+	// sampling it. What the gate promises is exactly this: delivery into a logs queue, no later.
+	deadline = time.Now().Add(entranceWaitTimeout)
+	for len(consumed) < 3 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+
+	var order []int64
+	for len(consumed) > 0 {
+		order = append(order, <-consumed)
+	}
+	assert.Equal(t, []int64{50, 51, 100}, order, "the DMLs must be dispatched before the DDL they precede")
+}
+
+// TestNextDoesNotGateOutsideDirect pins the scope of the whole mechanism: outside direct -- and
+// inside direct with the incr_sync.barrier.ordering_enable switch left off -- next() injects a DDL
+// straight through and touches no gate. The switch defaults to false, so it has to be the second
+// case that proves the gate needs both conditions and neither one alone.
+func TestNextDoesNotGateOutsideDirect(t *testing.T) {
+	utils.InitialLogger("", "", "debug", true, 1)
+
+	origTunnel := conf.Options.Tunnel
+	origOrderingEnable := conf.Options.IncrSyncBarrierOrderingEnable
+	origCapacity := conf.Options.IncrSyncFetcherBufferCapacity
+	origDDL := conf.Options.FilterDDLEnable
+	origFetchMethod := conf.Options.IncrSyncMongoFetchMethod
+	defer func() {
+		conf.Options.Tunnel = origTunnel
+		conf.Options.IncrSyncBarrierOrderingEnable = origOrderingEnable
+		conf.Options.IncrSyncFetcherBufferCapacity = origCapacity
+		conf.Options.FilterDDLEnable = origDDL
+		conf.Options.IncrSyncMongoFetchMethod = origFetchMethod
+	}()
+	conf.Options.FilterDDLEnable = true
+	conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodOplog
+	conf.Options.IncrSyncFetcherBufferCapacity = 100
+
+	for _, tc := range []struct {
+		tunnel string
+		enable bool
+	}{
+		{utils.VarTunnelKafka, true},
+		{"", true},                     // an unset tunnel is non-direct
+		{utils.VarTunnelDirect, false}, // the switch is off by default: direct alone must not gate
+	} {
+		conf.Options.Tunnel = tc.tunnel
+		conf.Options.IncrSyncBarrierOrderingEnable = tc.enable
+		desc := fmt.Sprintf("tunnel %q, ordering_enable %v", tc.tunnel, tc.enable)
+
+		syncer := mockSyncer()
+		syncer.PendingQueue[0] = make(chan [][]byte, 10)
+		syncer.batcher = NewBatcher(syncer, filter.OplogFilterChain{}, syncer, []*Worker{new(Worker)})
+		syncer.persister = NewPersister("test", syncer)
+
+		raw := rawOplogRaw(mockOplogs(1, []int{0}, nil, nil, 100)[0])
+		if raw == nil {
+			t.Fatalf("marshal raw ddl failed")
+		}
+		syncer.reader = &stubReader{ops: [][]byte{raw}}
+
+		done := make(chan bool, 1)
+		go func() { done <- syncer.next() }()
+		select {
+		case ok := <-done:
+			assert.Equal(t, true, ok, "%s: next() should return", desc)
+		case <-time.After(nextGateWaitTimeout):
+			t.Fatalf("%s: next() stalled on a DDL: the ordering gate must not engage", desc)
+		}
+		assert.Nil(t, syncer.batcher.ingestGate.Load(), "%s: no gate", desc)
+		assert.Equal(t, 1, len(syncer.persister.Buffer), "%s: the DDL should have been injected as usual", desc)
+	}
+}
+
+// stubReader hands out a fixed list of raw oplogs and then reports a timeout, the way a real
+// reader waits for the source to produce something.
+type stubReader struct {
+	ops   [][]byte
+	index int
+}
+
+func (r *stubReader) Name() string                         { return "stub" }
+func (r *stubReader) StartFetcher()                        {}
+func (r *stubReader) SetQueryTimestampOnEmpty(interface{}) {}
+func (r *stubReader) UpdateQueryTimestamp(int64)           {}
+func (r *stubReader) EnsureNetwork() error                 { return nil }
+func (r *stubReader) FetchNewestTimestamp() (interface{}, error) {
+	return nil, nil
+}
+
+func (r *stubReader) Next() ([]byte, error) {
+	if r.index >= len(r.ops) {
+		return nil, sourceReader.TimeoutError
+	}
+	op := r.ops[r.index]
+	r.index++
+	return op, nil
 }
 
 func mockBatcher(nsWhite []string, nsBlack []string) *Batcher {

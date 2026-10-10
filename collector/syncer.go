@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	nimo "github.com/gugemichael/nimo4go"
@@ -35,6 +36,13 @@ const (
 	FilterCheckpointGap           = utils.VarSyncerFilterCheckpointGap
 	FilterCheckpointCheckInterval = utils.VarSyncerFilterCheckpointCheckInterval
 	CheckCheckpointUpdateTimes    = utils.VarSyncerCheckCheckpointUpdateTimes
+
+	// barrierQuiescePollIntervalMs is how long the entrance waits between quiescence reads.
+	barrierQuiescePollIntervalMs = 10
+	// barrierQuiesceConfirmGapMs separates the two reads that a quiescence decision needs.
+	barrierQuiesceConfirmGapMs = 20
+	// barrierQuiesceWarnRounds is how many rounds pass before a stuck quiesce is logged (~10s).
+	barrierQuiesceWarnRounds = 1000
 )
 
 var DDLCheckpointInterval int64 = utils.VarSyncerDDLCheckpointIntervalMs
@@ -106,6 +114,15 @@ type OplogSyncer struct {
 
 	// fetcher health state: "normal", "degraded", "error"
 	fetcherState string
+
+	// rawInFlight counts every raw oplog that has entered the in-memory pipeline
+	// (Persister.bufferInput) and has not yet been pushed into a logsQueue by the
+	// deserializer. It is incremented on ingest and decremented right after the
+	// deserializer's push completes, so rawInFlight == 0 provably means "no oplog
+	// is still travelling from the persister to the batcher". The entrance gate
+	// reads it to turn "the queues look empty right now" into a real quiescence
+	// proof (see pipelineQuiesced).
+	rawInFlight int64
 }
 
 // NewOplogSyncer return a new OplogSyncer.
@@ -265,17 +282,29 @@ func (sync *OplogSyncer) startBatcher() {
 			return
 		}
 
-		// Re-confirm barrier checkpoint if previous wait was interrupted by Pause/Shutdown.
-		// Do not process new ops until the DDL execution is confirmed.
+		// Re-confirm the barrier if the previous wait was interrupted by Pause/Shutdown: the
+		// oplogs dispatched ahead of it have to be applied before the barrier round is released.
+		// Do not process new ops until that is confirmed.
+		//
+		// The interrupted round left the ingest gate closed on purpose, and no call here re-opens
+		// it: the poll loop releases the gate on its own as soon as the pipeline is quiescent
+		// again, so a run with no further DDL ahead is not left with ingest stopped.
 		if pendingBarrierTs > 0 {
-			if sync.checkCheckpointUpdate(true, pendingBarrierTs) {
-				l.Logger.Infof("%s pending barrier checkpoint[%v] confirmed after resume",
-					sync, utils.ExtractTimestampForLog(pendingBarrierTs))
-				pendingBarrierTs = 0
+			confirmed := false
+			if incrOrderingGuarantee() {
+				// direct: the real worker acks, not the persisted checkpoint
+				confirmed = batcher.waitForAllWorkersIdle()
 			} else {
+				// otherwise: the persisted checkpoint of the oplogs dispatched ahead of the barrier
+				confirmed = sync.checkCheckpointUpdate(true, pendingBarrierTs)
+			}
+			if !confirmed {
 				utils.YieldInMs(DDLCheckpointInterval)
 				return
 			}
+			l.Logger.Infof("%s pending barrier[%v] confirmed after resume",
+				sync, utils.ExtractTimestampForLog(pendingBarrierTs))
+			pendingBarrierTs = 0
 		}
 
 		// As much as we can batch more from logs queue. batcher can merge
@@ -312,13 +341,28 @@ func (sync *OplogSyncer) startBatcher() {
 				}
 			}
 
-			// flush checkpoint value
-			sync.checkpoint(true, 0)
-			if !sync.checkCheckpointUpdate(true, newestTs) {
-				l.Logger.Warnf("%s exit: barrier wait interrupted, checkpoint may not have reached %v. "+
-					"Not setting CanClose to avoid premature exit", sync, utils.ExtractTimestampForLog(newestTs))
-				pendingBarrierTs = newestTs
-				return
+			if incrOrderingGuarantee() {
+				// Wait for everything dispatched to be applied before flushing the checkpoint, so a
+				// restart cannot resume past an oplog that was never written.
+				if !batcher.waitForAllWorkersIdle() {
+					l.Logger.Warnf("%s exit: barrier wait interrupted, checkpoint may not have reached %v. "+
+						"Not setting CanClose to avoid premature exit", sync, utils.ExtractTimestampForLog(newestTs))
+					pendingBarrierTs = newestTs
+					return
+				}
+				// flush checkpoint value
+				sync.checkpoint(true, 0)
+			} else {
+				// otherwise: flush the checkpoint, then wait for the persisted value to catch up
+				// with it.
+				// flush checkpoint value
+				sync.checkpoint(true, 0)
+				if !sync.checkCheckpointUpdate(true, newestTs) {
+					l.Logger.Warnf("%s exit: barrier wait interrupted, checkpoint may not have reached %v. "+
+						"Not setting CanClose to avoid premature exit", sync, utils.ExtractTimestampForLog(newestTs))
+					pendingBarrierTs = newestTs
+					return
+				}
 			}
 			sync.CanClose = true
 			l.Logger.Infof("%s blocking and waiting exits, checkpoint: %v", sync, utils.ExtractTimestampForLog(newestTs))
@@ -336,11 +380,29 @@ func (sync *OplogSyncer) startBatcher() {
 
 			filterFlag = false
 
-			// flush checkpoint value
-			sync.checkpoint(barrier, 0)
-			if barrier && !sync.checkCheckpointUpdate(true, newestTs) {
-				pendingBarrierTs = newestTs
-				return
+			if incrOrderingGuarantee() {
+				if barrier {
+					// The barrier oplogs have just been handed to worker[0], together with the DML
+					// that precedes them. Wait for the real acks instead of comparing against the
+					// persisted checkpoint: that checkpoint holds the min ack of oplogs already
+					// dispatched, and a lagging logs queue can have pushed it past newestTs -- which
+					// is exactly what let a DDL run before the DML written ahead of it.
+					if !batcher.waitForAllWorkersIdle() {
+						pendingBarrierTs = newestTs
+						return
+					}
+				}
+				// flush checkpoint value
+				sync.checkpoint(barrier, 0)
+			} else {
+				// otherwise: flush the checkpoint first, then wait for the persisted value to
+				// catch up with it.
+				// flush checkpoint value
+				sync.checkpoint(barrier, 0)
+				if barrier && !sync.checkCheckpointUpdate(true, newestTs) {
+					pendingBarrierTs = newestTs
+					return
+				}
 			}
 		} else {
 			// if log is nil, check whether filterLog is empty
@@ -487,24 +549,33 @@ func newOplogParser(lazy bool) func([]byte) (*oplog.PartialLog, error) {
 		return oplog.ParseRaw
 	}
 	return func(input []byte) (*oplog.PartialLog, error) {
+		// Note the destination: the flat oplog document maps onto the embedded ParsedLog, not
+		// onto PartialLog, which carries extra non-persistent fields next to it.
 		log := &oplog.PartialLog{}
 		err := bson.Unmarshal(input, &log.ParsedLog)
 		return log, err
 	}
 }
 
-func (sync *OplogSyncer) deserializer(index int) {
-	// parser is used to parse the raw []byte
-	var parser func(input []byte) (*oplog.PartialLog, error)
+// newRawOplogParser builds the parser that turns one raw oplog into a PartialLog for the configured
+// fetch method: a change stream event, or an oplog document parsed lazily or eagerly according to
+// incr_sync.lazy_oplog_parse. It is built once per caller -- the deserializer hoists it out of its
+// loop -- and it is the single entry point both the deserializer and the entrance's DDL
+// classification go through, so a raw oplog is never interpreted two different ways.
+func newRawOplogParser() func([]byte) (*oplog.PartialLog, error) {
 	if conf.Options.IncrSyncMongoFetchMethod == utils.VarIncrSyncMongoFetchMethodChangeStream {
 		// parse []byte (change stream event format) -> oplog
-		parser = func(input []byte) (*oplog.PartialLog, error) {
+		return func(input []byte) (*oplog.PartialLog, error) {
 			return oplog.ConvertEvent2Oplog(input, conf.Options.IncrSyncChangeStreamWatchFullDocument)
 		}
-	} else {
-		// parse []byte (oplog format) -> oplog
-		parser = newOplogParser(conf.Options.IncrSyncLazyOplogParse)
 	}
+	// parse []byte (oplog format) -> oplog
+	return newOplogParser(conf.Options.IncrSyncLazyOplogParse)
+}
+
+func (sync *OplogSyncer) deserializer(index int) {
+	// parser is used to parse the raw []byte
+	parser := newRawOplogParser()
 
 	// combiner is used to combine data and send to downstream
 	var combiner func(raw []byte, log *oplog.PartialLog, sourceTime time.Time) *oplog.GenericOplog
@@ -557,6 +628,10 @@ func (sync *OplogSyncer) deserializer(index int) {
 		sync.recordLastFetchStats(deserializeLogs, time.Now().UTC())
 		sync.logsQueue[index] <- deserializeLogs
 		sync.updateLogsQueueMetric(index)
+		// one raw batch has fully landed in logsQueue, release its share of rawInFlight.
+		// The decrement happens only after the push above completes, so a quiesce check that
+		// reads rawInFlight == 0 can be sure this batch is already visible to its next sweep.
+		atomic.AddInt64(&sync.rawInFlight, -int64(len(deserializeLogs)))
 		l.Logger.Debugf("deserializer[%v] send %d to logsQueue, pending: %d", index, len(deserializeLogs), nPending)
 	}
 }
@@ -590,6 +665,16 @@ func extractSourceTime(raw []byte, log *oplog.PartialLog) time.Time {
 	}
 
 	return sourceTimeFromTimestamp(log.Timestamp)
+}
+
+// pendingQueueDepths reports the raw batch backlog of every pending queue, for the quiesce warning
+// below. len() on a channel is safe to call concurrently with send/receive.
+func (sync *OplogSyncer) pendingQueueDepths() []int {
+	depths := make([]int, len(sync.PendingQueue))
+	for i := range sync.PendingQueue {
+		depths[i] = len(sync.PendingQueue[i])
+	}
+	return depths
 }
 
 func (sync *OplogSyncer) updatePendingQueueMetric(index int) {
@@ -631,6 +716,139 @@ func (sync *OplogSyncer) recordLastFetchStats(logs []*oplog.GenericOplog, now ti
 	}
 }
 
+// incrOrderingGuarantee reports whether this branch's DDL/DML ordering guarantee is in force for
+// the configured tunnel. Both conditions are required:
+//
+//   - tunnel = direct. The guarantee is mongo2mongo only: every other tunnel hands ordering to its
+//     own receiver, and an unset tunnel (a config file without the key) counts as non-direct.
+//
+//   - incr_sync.barrier.ordering_enable = true. It defaults to false, which doubles as the rollback
+//     lever: the entrance quiesce can hold the whole pipeline, so switching it off from the config
+//     beats rebuilding a binary.
+//
+// With either condition off, every guarded site below falls through to the pre-existing behaviour.
+// The reader package cannot import this one (it would be a cycle), so it carries its own copy of the
+// same predicate -- see collector/reader/oplog_reader.go:incrOrderingGuarantee.
+func incrOrderingGuarantee() bool {
+	return conf.Options.Tunnel == utils.VarTunnelDirect &&
+		conf.Options.IncrSyncBarrierOrderingEnable
+}
+
+// isEntryBarrier reports whether raw is an oplog that has to be gated at the pipeline entrance --
+// a DDL that BatchMore will later turn into a barrier.
+//
+// Only oplogs that provably cannot be a DDL are skipped: the gate is released on pipeline state (see
+// next), so gating one the batcher would not treat as a barrier merely costs a quiesce wait, while
+// missing a real barrier loses the guarantee. The verdict is ddlFilter.Filter -- the very predicate
+// processMergeBatch stops on -- so the two cannot disagree.
+//
+// Transaction commits are not classified here: a commit's oplogs live in txnBuffer and are delivered
+// as a unit, which the entrance cannot decide without touching that buffer (see limitation 1 in
+// docs/fixes/fix-ddl-dml-ordering-ingest-gate.md).
+func (sync *OplogSyncer) isEntryBarrier(raw []byte) bool {
+	if !incrOrderingGuarantee() || raw == nil || !conf.Options.FilterDDLEnable {
+		return false
+	}
+	if !mayBeDDL(bson.Raw(raw)) {
+		return false
+	}
+	log, err := parseRawOplog(raw)
+	if err != nil {
+		// Unparseable raw document: let the deserializer crash on it, where the real diagnostics
+		// live. Classifying it as a barrier here would gate on nothing.
+		return false
+	}
+	return ddlFilter.Filter(log)
+}
+
+// mayBeDDL is the entrance's cheap screen: it reports whether raw still has to be parsed to decide
+// whether it is a DDL. ddlFilter.Filter fires either on an op:"c" command other than applyOps, or
+// on an oplog whose namespace ends in system.indexes, so both shapes -- and anything this screen
+// cannot read -- have to fall through to the full check. Everything else is a plain data oplog.
+func mayBeDDL(raw bson.Raw) bool {
+	if ns, ok := raw.Lookup("ns").StringValueOK(); ok && strings.HasSuffix(ns, "system.indexes") {
+		return true
+	}
+	if op, ok := raw.Lookup("op").StringValueOK(); ok {
+		return op == "c" // oplog: a DDL is always a command
+	}
+	// change stream: the event document carries no "op" field. Only the four data operation types
+	// convert to something other than a command (see oplog.ConvertEvent2Oplog), so every other
+	// type -- including each DDL-shaped one -- is parsed rather than skipped.
+	if operationType, ok := raw.Lookup("operationType").StringValueOK(); ok {
+		switch operationType {
+		case "insert", "update", "delete", "replace":
+			return false
+		}
+	}
+	return true
+}
+
+// parseRawOplog parses one raw oplog the way the pipeline parses it, for the configured fetch
+// method. The deserializer and the entrance classification both build their parser from
+// newRawOplogParser, so a raw oplog is never interpreted two different ways and the two cannot
+// drift apart.
+func parseRawOplog(raw []byte) (*oplog.PartialLog, error) {
+	return newRawOplogParser()(raw)
+}
+
+// pipelineQuiesced reports whether every oplog that entered the in-memory pipeline has already
+// been handed to the batcher. rawInFlight counts from bufferInput (the single ingress) down to the
+// deserializer's push, and it is decremented only after that push completes, so a zero reading is
+// proof -- a single atomic load, no TOCTOU -- that nothing is still travelling between the
+// persister and the batcher. The queues have to be empty as well: a batch that has arrived is only
+// quiesced once the batcher has taken it.
+//
+// Nothing is consumed here. The deserializers and the batcher keep running while this is polled,
+// which is what lets the gate wait without stalling the pipeline.
+func (sync *OplogSyncer) pipelineQuiesced() bool {
+	if atomic.LoadInt64(&sync.rawInFlight) != 0 {
+		return false
+	}
+	for i := range sync.logsQueue {
+		if len(sync.logsQueue[i]) != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// waitPipelineQuiesced blocks until pipelineQuiesced holds twice in a row.
+//
+// The second read is the confirm pass: a deserializer's decrement lands just after its push, and
+// the disk-replay ingress (Persister.retrieve) can hand a batch over while this goroutine is
+// between the two reads, so one clean reading is not yet proof that the tail is in. The wait covers
+// the in-memory pipeline only: an oplog already handed to the batcher (remainLogs, batchGroup) or
+// held in txnBuffer is ordered by the batcher's own barrier round, not here.
+func (sync *OplogSyncer) waitPipelineQuiesced() {
+	for round := 1; ; round++ {
+		if utils.IncrSentinelOptions.Pause || utils.IncrSentinelOptions.Shutdown ||
+			utils.IncrSentinelOptions.ExitPoint > 0 {
+			// Shutting down: the exit round confirms the workers and flushes the checkpoint itself,
+			// so waiting for the pipeline here would only delay it. Reported, not silent.
+			l.Logger.Warnf("%s DDL barrier quiesce interrupted by sentinel (Pause=%v, Shutdown=%v, ExitPoint=%d)",
+				sync, utils.IncrSentinelOptions.Pause, utils.IncrSentinelOptions.Shutdown,
+				utils.IncrSentinelOptions.ExitPoint)
+			return
+		}
+		if sync.pipelineQuiesced() {
+			utils.YieldInMs(barrierQuiesceConfirmGapMs)
+			if sync.pipelineQuiesced() {
+				return
+			}
+		}
+		utils.YieldInMs(barrierQuiescePollIntervalMs)
+
+		// rawInFlight and the pending queue depths are what tell the two stalls apart: a non-empty
+		// queue with rawInFlight stuck means a deserializer is not keeping up, while empty queues
+		// with rawInFlight > 0 mean an oplog never left the persister's Buffer.
+		if round%barrierQuiesceWarnRounds == 0 {
+			l.Logger.Warnf("%s DDL barrier is waiting for the pipeline to quiesce: %d rounds, rawInFlight[%d] pendingQueue%v",
+				sync, round, atomic.LoadInt64(&sync.rawInFlight), sync.pendingQueueDepths())
+		}
+	}
+}
+
 // only master(maybe several mongo-shake start) can poll oplog.
 func (sync *OplogSyncer) poll() {
 	// we should reload checkpoint. in case of other collector
@@ -664,6 +882,32 @@ func (sync *OplogSyncer) poll() {
 
 // fetch oplog from reader.
 func (sync *OplogSyncer) next() bool {
+	// Ingest gate, closed side: a DDL has been read and injected, and the pipeline has not been
+	// proven quiescent since. Reading further from the reader now would only add oplogs *after* that
+	// DDL, so hold here until quiescence is back, then reopen.
+	//
+	// The gate is released from here, on pipeline state, rather than by the batcher once it has
+	// applied the barrier. A release that depended on the batcher recognising a barrier would hang
+	// this goroutine -- and with it all ingest -- on the first disagreement between the entrance's
+	// classification and the batcher's. State cannot disagree with itself: whatever the batcher
+	// decided, the gate reopens once every oplog has left the pipeline's queues.
+	for sync.batcher.ingestGate.Load() != nil {
+		if utils.IncrSentinelOptions.Pause || utils.IncrSentinelOptions.Shutdown ||
+			utils.IncrSentinelOptions.ExitPoint > 0 {
+			return true // sentinel: stop ingesting and let the outer loop exit
+		}
+		// Whatever this goroutine had already buffered has to go forward before quiescence is
+		// reachable: rawInFlight counts an oplog from the moment it entered Buffer, so one left
+		// sitting there would never be released. Safe because this goroutine is Buffer's only
+		// writer outside disk replay (FlushBuffer enforces that), and a no-op once Buffer is empty.
+		sync.persister.FlushBuffer()
+		if sync.pipelineQuiesced() {
+			sync.batcher.clearIngestGate()
+			continue
+		}
+		utils.YieldInMs(barrierQuiescePollIntervalMs)
+	}
+
 	var log []byte
 	var err error
 	if log, err = sync.reader.Next(); log != nil {
@@ -695,6 +939,19 @@ func (sync *OplogSyncer) next() bool {
 		}
 
 		// alarm
+	}
+
+	// Ingest gate, closing side: this oplog is a DDL, so it must not reach the batcher until every
+	// oplog written before it is already in a logsQueue. persister hands batches out round robin,
+	// while getBatch concatenates by queue index -- a queue that fell behind still holds oplogs
+	// older than this DDL, and without this wait the batcher would park the DDL and dispatch those
+	// older oplogs in a later round, i.e. apply the DDL before the DML written ahead of it.
+	//
+	// Nothing is read from the reader between here and Inject, so no later oplog can slip in.
+	if sync.isEntryBarrier(log) {
+		sync.batcher.setIngestGate()
+		sync.persister.FlushBuffer()
+		sync.waitPipelineQuiesced()
 	}
 
 	// buffered oplog or trigger to flush. log is nil

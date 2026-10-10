@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"sync/atomic"
 	"time"
 
 	nimo "github.com/gugemichael/nimo4go"
@@ -84,6 +85,13 @@ type Batcher struct {
 
 	// transaction buffer
 	txnBuffer *oplog.TxnBuffer
+
+	// ingestGate is the barrier-quiesce gate. It is set by the poll loop, right before a DDL it has
+	// just read is injected (see OplogSyncer.next), and released by that same loop once the pipeline
+	// is quiescent again. While it is set, next() reads nothing further from the reader. nil means
+	// open; the channel is only a marker -- the waiter loads the pointer in a loop and never
+	// receives on it, so closing it is just the release step.
+	ingestGate atomic.Pointer[chan struct{}]
 
 	// for ut only
 	utBatchesDelay struct {
@@ -300,7 +308,17 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		}
 		batcher.barrierOplogs = nil
 
-		return batcher.batchGroup, true, batcher.setLastOplog(), false
+		if !incrOrderingGuarantee() {
+			// Otherwise allEmpty may be true here, and the caller's `!allEmpty` guard is then
+			// allowed to skip the barrier branch.
+			return batcher.batchGroup, true, batcher.setLastOplog(), false
+		}
+
+		// direct: lastOplog still has to advance past the barrier oplogs just placed in batchGroup,
+		// and the round reports allEmpty=false even if every barrier oplog was dropped by the
+		// filters above, so the caller's `!allEmpty` guard can never swallow the barrier wait.
+		batcher.setLastOplog()
+		return batcher.batchGroup, true, false, false
 	}
 
 	// try to get batch
@@ -310,6 +328,35 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		return batcher.batchGroup, false, batcher.setLastOplog(), exit
 	}
 
+	stopAt := batcher.processMergeBatch(mergeBatch)
+	if stopAt >= 0 {
+		// the oplogs behind the barrier wait for it to be done
+		batcher.remainLogs = mergeBatch[stopAt+1:]
+
+		if !incrOrderingGuarantee() {
+			// Otherwise the round keeps its original verdict: setLastOplog() supplies allEmpty.
+			return batcher.batchGroup, true, batcher.setLastOplog(), false
+		}
+
+		// lastOplog still has to advance past the oplogs that preceded the barrier: processMergeBatch
+		// put them in batchGroup before it stopped at the barrier.
+		batcher.setLastOplog()
+
+		// A barrier round always reports allEmpty=false, regardless of batchGroupEmpty(). When the
+		// barrier is mergeBatch[0] -- or every oplog before it was filtered -- batchGroup ends up
+		// empty, and reporting true lets startBatcher's `!allEmpty` guard skip the entire barrier
+		// branch: the wait for the oplogs dispatched ahead of the barrier and the forced checkpoint
+		// are both swallowed, and the barrier is handed to worker[0] on the next round while earlier
+		// DML is still queued in other workers -- a guaranteed reorder.
+		return batcher.batchGroup, true, false, false
+	}
+
+	return batcher.batchGroup, false, batcher.setLastOplog(), exit
+}
+
+// processMergeBatch filters mergeBatch and distributes it into batcher.batchGroup. It returns
+// the index of the barrier oplog that must run separately, or -1 when mergeBatch holds none.
+func (batcher *Batcher) processMergeBatch(mergeBatch []*oplog.GenericOplog) int {
 	for i, genericLog := range mergeBatch {
 		// filter oplog such like Noop or with gid
 		// PAY ATTENTION: we can't handle the oplog in transaction that has been filtered
@@ -330,11 +377,8 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 			if mustIndividual {
 				batcher.barrierOplogs = deliveredOps
 
-				batcher.remainLogs = mergeBatch[i+1:]
-
-				allEmpty := batcher.setLastOplog()
-				nimo.AssertTrue(allEmpty == true, "batcher.batchGroup don't be empty")
-				return batcher.batchGroup, true, allEmpty, false
+				nimo.AssertTrue(batcher.batchGroupEmpty(), "batcher.batchGroup don't be empty")
+				return i
 			} else {
 				for _, ele := range deliveredOps {
 					batcher.addIntoBatchGroup(ele, false)
@@ -370,11 +414,10 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		if ddlFilter.Filter(genericLog.Parsed) {
 
 			if conf.Options.FilterDDLEnable {
+				// DDL is executed as a barrier: it is handed to worker[0] on its own round
 				batcher.barrierOplogs = append(batcher.barrierOplogs, genericLog)
 
-				batcher.remainLogs = mergeBatch[i+1:]
-
-				return batcher.batchGroup, true, batcher.setLastOplog(), false
+				return i
 			} else {
 				// filter
 				batcher.syncer.replMetric.AddFilter(1)
@@ -388,15 +431,14 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		batcher.addIntoBatchGroup(genericLog, false)
 	}
 
-	return batcher.batchGroup, false, batcher.setLastOplog(), exit
+	return -1
 }
 
 func (batcher *Batcher) setLastOplog() bool {
 	// all oplogs are filtered?
-	allEmpty := true
+	allEmpty := batcher.batchGroupEmpty()
 	for _, ele := range batcher.batchGroup {
 		if ele != nil && len(ele) > 0 {
-			allEmpty = false
 			rawLast := ele[len(ele)-1]
 			if primitive.CompareTimestamp(rawLast.Parsed.Timestamp, batcher.lastOplog.Parsed.Timestamp) > 0 {
 				batcher.lastOplog = rawLast
@@ -404,6 +446,44 @@ func (batcher *Batcher) setLastOplog() bool {
 		}
 	}
 	return allEmpty
+}
+
+// batchGroupEmpty reports whether batchGroup holds no oplog yet.
+func (batcher *Batcher) batchGroupEmpty() bool {
+	for _, ele := range batcher.batchGroup {
+		if ele != nil && len(ele) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// setIngestGate closes the gate, leaving an already-closed gate untouched so a release can never
+// be missed. The poll loop is the only writer; the compare-and-swap only keeps a stray second
+// caller from clobbering a live gate.
+func (batcher *Batcher) setIngestGate() {
+	if batcher.ingestGate.Load() == nil {
+		gate := make(chan struct{})
+		if !batcher.ingestGate.CompareAndSwap(nil, &gate) {
+			close(gate) // a live gate won: this marker has no owner
+		}
+	}
+}
+
+// clearIngestGate releases the gate set by setIngestGate. The pointer is taken out by the same
+// compare-and-swap that authorizes the close, so the same channel is never closed twice.
+// Releasing an already open gate is a no-op.
+func (batcher *Batcher) clearIngestGate() {
+	for {
+		p := batcher.ingestGate.Load()
+		if p == nil {
+			return // already open
+		}
+		if batcher.ingestGate.CompareAndSwap(p, nil) {
+			close(*p)
+			return
+		}
+	}
 }
 
 // addIntoBatchGroup
@@ -520,4 +600,43 @@ func (batcher *Batcher) moveToNextQueue() {
 
 func (batcher *Batcher) currentQueue() uint64 {
 	return batcher.nextQueue
+}
+
+// waitForAllWorkersIdle waits until all workers have empty queues and all dispatched
+// oplogs have been acknowledged (ack == unack), i.e. until every oplog handed to a worker
+// has been applied on the target. Only meaningful for the direct tunnel, whose Send() is a
+// synchronous write; the callers gate on incrOrderingGuarantee(). The Pause/Shutdown escape
+// mirrors the one in checkCheckpointUpdate's barrier wait.
+func (batcher *Batcher) waitForAllWorkersIdle() bool {
+	l.Logger.Info("%s waiting for all workers to be idle (barrier)", batcher.syncer)
+
+	for i := 0; ; i++ {
+		if utils.IncrSentinelOptions.Pause || utils.IncrSentinelOptions.Shutdown {
+			l.Logger.Warn("%s barrier wait interrupted by sentinel (Pause=%v, Shutdown=%v)",
+				batcher.syncer, utils.IncrSentinelOptions.Pause, utils.IncrSentinelOptions.Shutdown)
+			return false
+		}
+
+		allIdle := true
+		for _, worker := range batcher.workerGroup {
+			queueLen := len(worker.queue)
+			ack := atomic.LoadInt64(&worker.ack)
+			unack := atomic.LoadInt64(&worker.unack)
+			if queueLen > 0 || (unack != ack) {
+				allIdle = false
+				break
+			}
+		}
+
+		if allIdle {
+			l.Logger.Info("%s all workers are idle, barrier satisfied", batcher.syncer)
+			return true
+		}
+
+		if i%CheckCheckpointUpdateTimes == 0 {
+			l.Logger.Info("%s[%d] waiting for workers to be idle", batcher.syncer, i)
+		}
+
+		utils.YieldInMs(DDLCheckpointInterval)
+	}
 }

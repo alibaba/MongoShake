@@ -58,6 +58,17 @@ type OplogReader struct {
 
 	firstRead bool
 
+	// lastFetchedTs is the timestamp of the last oplog successfully read from the cursor and
+	// handed to oplogChan. It is the fetch watermark.
+	//
+	// query[QueryTs] is driven by the batcher's last *dispatched* timestamp, which trails this
+	// watermark: oplogChan is buffered so the fetcher runs ahead of the poll goroutine, and
+	// getBatch concatenates by queue index rather than by ts, so the dispatched timestamp can even
+	// move backwards. Rebuilding the cursor from that trailing point re-delivers oplogs that are
+	// already inside the pipeline -- including oplogs older than a barrier the pipeline is about
+	// to apply, which is exactly the reordering the barrier is supposed to rule out.
+	lastFetchedTs int64
+
 	// cappedErrorCount tracks consecutive CappedPositionLost errors
 	cappedErrorCount int
 }
@@ -99,6 +110,58 @@ func (or *OplogReader) UpdateQueryTimestamp(ts int64) {
 
 func (or *OplogReader) getQueryTimestamp() int64 {
 	return utils.TimeStampToInt64(or.query[QueryTs].(bson.M)[QueryOpGT].(primitive.Timestamp))
+}
+
+// incrOrderingGuarantee reports whether the DDL/DML ordering guarantee is in force for the
+// configured tunnel: mongo2mongo (direct) only, and only with incr_sync.barrier.ordering_enable
+// set. Every other tunnel hands ordering to its own receiver and is left alone here; an unset
+// tunnel is treated as non-direct, and an absent switch key as off.
+//
+// This is a copy of collector.incrOrderingGuarantee: the reader package must not import collector
+// (that would be an import cycle). Both copies are a one-line read of the config, which is what
+// keeps them cheap to hold in sync.
+func incrOrderingGuarantee() bool {
+	return conf.Options.Tunnel == utils.VarTunnelDirect &&
+		conf.Options.IncrSyncBarrierOrderingEnable
+}
+
+// trackFetchedTs advances the fetch watermark to the timestamp of the oplog that has just been
+// read. It never moves backwards, so a cursor rebuild can never restart below a position that has
+// already been handed to the pipeline. Oplogs without a usable ts are ignored: they cannot be
+// ordered anyway, and leaving the watermark where it is only costs a re-delivery.
+//
+// Inert outside direct: the watermark only exists to keep the ordering guarantee's cursor rebuild
+// from re-delivering oplogs past a barrier, so elsewhere it stays at zero and changes nothing.
+func (or *OplogReader) trackFetchedTs(raw bson.Raw) {
+	if !incrOrderingGuarantee() {
+		return
+	}
+	t, i, ok := raw.Lookup(QueryTs).TimestampOK()
+	if !ok {
+		return
+	}
+	if ts := utils.TimeStampToInt64(primitive.Timestamp{T: t, I: i}); ts > or.lastFetchedTs {
+		or.lastFetchedTs = ts
+	}
+}
+
+// advanceQueryBaseToFetchWatermark moves query[QueryTs] forward to the fetch watermark, and reports
+// whether it moved. A rebuild must not resume below the fetch watermark (see lastFetchedTs), and
+// the capped-oplog check that follows has to compare against where we will actually resume rather
+// than against a stale trailing point -- otherwise a lagging dispatched timestamp can be mistaken
+// for "the source oplog rolled past us", which the caller treats as a fatal error.
+//
+// Direct only, like the watermark itself: with no watermark the base already is the dispatched
+// timestamp the cursor is built from.
+func (or *OplogReader) advanceQueryBaseToFetchWatermark() bool {
+	if !incrOrderingGuarantee() {
+		return false
+	}
+	if or.lastFetchedTs <= or.getQueryTimestamp() {
+		return false
+	}
+	or.UpdateQueryTimestamp(or.lastFetchedTs)
+	return true
 }
 
 // Next returns an oplog by raw bytes which is []byte
@@ -200,6 +263,9 @@ func (or *OplogReader) fetcher() {
 
 		// successfully read data, reset capped error counter
 		or.cappedErrorCount = 0
+		// advance the fetch watermark before handing the oplog over, so a cursor rebuild that
+		// happens after this point cannot resume below it
+		or.trackFetchedTs(or.oplogsCursor.Current)
 		or.oplogChan <- &retOplog{cloneOplogRaw(or.oplogsCursor.Current), nil}
 	}
 }
@@ -257,6 +323,16 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 	 */
 	oldestTs := or.getOldestTimestamp()
 	queryTs = or.getQueryTimestamp()
+	// Never rebuild below the fetch watermark: everything up to it has already been handed to the
+	// pipeline, so restarting lower re-delivers oplogs that are already in flight (see
+	// lastFetchedTs). Its return value says whether the base moved, and the local queryTs has to
+	// follow, because the capped check below must judge the position we are actually going to
+	// resume from.
+	if or.advanceQueryBaseToFetchWatermark() {
+		queryTs = or.getQueryTimestamp()
+		l.Logger.Infof("%s rebuild cursor from fetch watermark[%v]",
+			or.String(), utils.ExtractTimestampForLog(queryTs))
+	}
 	if oldestTs > queryTs {
 		if !or.firstRead {
 			l.Logger.Errorf("oplog_reader queryTs[%v] is behind oldest oplog[%v], oplog may have been overwritten (CappedPositionLost)",
