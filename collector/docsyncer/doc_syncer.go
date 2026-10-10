@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -517,6 +518,24 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 	 */
 	// fetch index
 
+	// Verify that the number of documents actually read roughly matches
+	// the expected total from collStats. A large discrepancy can expose a
+	// failed cursor resume, although collStats can also include orphaned
+	// documents or documents deleted while the sync is running.
+	totalCount := atomic.LoadUint64(&collectionMetric.TotalCount)
+	finishCount := atomic.LoadUint64(&collectionMetric.FinishCount)
+	if totalCount > 0 {
+		ratio := collectionMetric.ProgressRatio()
+		if ratio < 0.9 {
+			l.Logger.Warnf("collection[%v] sync completed with finishCount[%v] below totalCount[%v] (%.1f%%). "+
+				"Investigate if unexpected: source collStats may include orphaned documents or concurrent deletes.",
+				ns, finishCount, totalCount, ratio*100)
+		} else {
+			l.Logger.Infof("collection[%v] sync verification: finishCount[%v]/totalCount[%v] = %.1f%%",
+				ns, finishCount, totalCount, ratio*100)
+		}
+	}
+
 	// set collection finish
 	syncer.markCollectionFinished(ns, collectionMetric)
 
@@ -529,12 +548,39 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 	buffer := make([]*bson.Raw, 0, bufferSize)
 	bufferByteSize := 0
 
+	const maxConsecutiveRetries = 10
+	const initialRetryDelay = 5 * time.Second
+	const maxRetryDelay = 20 * time.Second
+	consecutiveRetries := 0
+	retryDelay := initialRetryDelay
+
 	for {
 		doc, err := reader.NextDoc()
-		// doc, err := reader.NextDocMgo()
 		if err != nil {
+			// Retry transient source-side errors that are safe to continue
+			// after cursor rebuild (e.g. QueryPlanKilled from orphan cleanup,
+			// cursor timeouts, network resets). The cursor will be rebuilt
+			// from lastReadID via ensureNetwork() so no data is lost.
+			if isTransientReadError(err) && consecutiveRetries < maxConsecutiveRetries {
+				consecutiveRetries++
+				l.Logger.Warnf("splitter reader[%v] hit transient error, retrying (%d left) from lastReadID[%v]: %v",
+					reader, maxConsecutiveRetries-consecutiveRetries, reader.lastReadID, err)
+				reader.releaseCursor()
+				time.Sleep(retryDelay)
+				retryDelay *= 2
+				if retryDelay > maxRetryDelay {
+					retryDelay = maxRetryDelay
+				}
+				continue
+			}
 			return fmt.Errorf("splitter reader[%v] get next document failed: %v", reader, err)
-		} else if doc == nil {
+		}
+
+		// Retry limits apply only to consecutive failures. A reader can run for
+		// hours and survive isolated cursor kills without exhausting its budget.
+		consecutiveRetries = 0
+		retryDelay = initialRetryDelay
+		if doc == nil {
 			syncer.addCollectionFinishedDocs(reader.ns, collectionMetric, uint64(len(buffer)))
 			colExecutor.Sync(buffer)
 			syncer.replMetric.AddSuccess(uint64(len(buffer))) // only used to calculate the tps which is extract from "success"
@@ -574,6 +620,49 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 	reader.Close()
 	// reader.CloseMgo()
 	return nil
+}
+
+// isTransientReadError checks whether a cursor read error is transient and safe
+// to retry by rebuilding the cursor from lastReadID. These errors are caused by
+// ephemeral server-side events (orphan range cleanup killing cursors, cursor
+// timeouts on idle shards, network resets) and typically resolve on their own.
+func isTransientReadError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var commandError mongo.CommandError
+	if errors.As(err, &commandError) {
+		switch commandError.Code {
+		case 43, 175, 237: // CursorNotFound, QueryPlanKilled, CursorKilled
+			return true
+		}
+		switch commandError.Name {
+		case "CursorNotFound", "QueryPlanKilled", "CursorKilled":
+			return true
+		}
+	}
+
+	// Also match by message substring for cases where the driver doesn't
+	// expose the code properly (nested "caused by" chains from mongos)
+	msg := strings.ToLower(err.Error())
+	transientPatterns := []string{
+		"queryplankilled",
+		"cursornotfound",
+		"cursorkilled",
+		"orphan range cleanup",
+		"read has been terminated",
+		"cursor not found",
+		"cursor id invalid",
+	}
+	for _, p := range transientPatterns {
+		if strings.Contains(msg, p) {
+			return true
+		}
+	}
+	if strings.Contains(msg, "cursor id ") && strings.Contains(msg, " not found") {
+		return true
+	}
+	return false
 }
 
 // RestAPI restful api
