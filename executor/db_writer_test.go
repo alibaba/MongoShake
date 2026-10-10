@@ -2462,9 +2462,19 @@ func TestTimeSeriesIntegration(t *testing.T) {
 			},
 		}
 		// This should fall back to applyOps because sdata.b cannot be parsed.
-		// The applyOps may fail on the server side (auth or because the diff is fabricated),
-		// but it should NOT fail with the "unknow Key[b]" parse error.
+		//
+		// The blobs above are invented bytes, so the server has to reject them: below
+		// 8.0 because `b` is not a diff section there at all (4770503 "Unexpected
+		// section: b in document diff"), on 8.x because the bytes are not a valid BSON
+		// Column (6067608 "Invalid BSON Column encoding"). Requiring an error is what
+		// makes this case mean anything: were ConvertV2Oplog ever changed to translate
+		// `b` instead of bailing out, the update would take the ordinary path and
+		// silently succeed. What must not happen is the parser's own "unknow Key[b]"
+		// surfacing as the failure. A successful column-store replay is covered by
+		// TestTimeSeriesBucketBinaryColumnReplay, which uses a real diff (#1009).
 		err = writer.doUpdate(tsTestDb, "system.buckets."+tsCollection, bson.E{}, updateOplogsWithBinary, false)
+		assert.NotEqual(t, nil, err,
+			"the fabricated binary column blobs must be rejected server-side")
 		if err != nil {
 			assert.NotContains(t, err.Error(), "unknow Key",
 				"error should NOT be from DiffUpdateOplogToNormal parse; should be from applyOps server-side")
@@ -2474,8 +2484,6 @@ func TestTimeSeriesIntegration(t *testing.T) {
 			} else {
 				fmt.Printf("  [expected] applyOps fallback returned server-side error: %v\n", err)
 			}
-		} else {
-			fmt.Println("  applyOps fallback succeeded (server accepted the fabricated diff)")
 		}
 	}
 	// ---- CommandWriter.doUpdate: system.buckets $v:2 diff handling ----
@@ -2555,12 +2563,14 @@ func TestTimeSeriesIntegration(t *testing.T) {
 			},
 		}}
 		err = cmdWriter.doUpdate(tsTestDb, "system.buckets."+tsCollection, gid, binaryOplogs, false)
+		// as in the SingleWriter case above: the fabricated blobs have to be rejected
+		// server-side, and the parser's own error must not be what surfaces
+		assert.NotEqual(t, nil, err,
+			"the fabricated binary column blobs must be rejected server-side")
 		if err != nil {
 			assert.NotContains(t, err.Error(), "unknow Key",
 				"CommandWriter error should NOT be from DiffUpdateOplogToNormal parse")
 			fmt.Printf("  [expected] CommandWriter applyOps fallback returned: %v\n", err)
-		} else {
-			fmt.Println("  CommandWriter applyOps fallback succeeded")
 		}
 	}
 	// ---- RunCommand: commitIndexBuild with originalSpec ----

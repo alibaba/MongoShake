@@ -309,6 +309,11 @@ func TestLazyOplogEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	_ = src.Database(lazyDB).Drop(ctx)
 	_ = tgt.Database(lazyDB).Drop(ctx)
+	// A checkpoint left by an earlier run wins over checkpoint.start_position, so the
+	// collector would resume from that old position and replay everything the
+	// source's oplog holds in between, other tests' namespaces included. The other
+	// integration tests drop theirs for the same reason.
+	_ = src.Database("mongoshake").Collection(lazyCkpt).Drop(ctx)
 
 	logDir := t.TempDir()
 	confPath := lzWriteConf(t, srcURL, tgtURL, logDir,

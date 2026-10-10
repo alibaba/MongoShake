@@ -55,7 +55,7 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.E, o
 			strings.HasSuffix(log.original.partialLog.Namespace, utils.VarSystemViewsCollection) {
 			l.Logger.Warnf("use 'applyOps' to handle insert op to ns[%v]", log.original.partialLog.Namespace)
 			result := sw.conn.Client.Database("admin").RunCommand(
-				nil, bson.D{{Key: "applyOps", Value: []oplog.ParsedLog{log.original.partialLog.ParsedLog}}})
+				nil, bson.D{{Key: "applyOps", Value: []bson.D{applyOpsDoc(log.original.partialLog)}}})
 			if result.Err() != nil {
 				return result.Err()
 			}
