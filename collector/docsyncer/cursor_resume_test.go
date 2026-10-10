@@ -43,11 +43,11 @@ func TestDocumentReaderResumeQueryUsesIDForAllReaderModes(t *testing.T) {
 			resume: bson.M{"_id": bson.M{"$gt": lastReadID}},
 		},
 		{
-			name:  "id range reader",
-			key:   "_id",
-			start: int32(10),
-			end:   int32(200),
-			query: bson.M{"_id": bson.M{"$gt": int32(10), "$lte": int32(200)}},
+			name:   "id range reader",
+			key:    "_id",
+			start:  int32(10),
+			end:    int32(200),
+			query:  bson.M{"_id": bson.M{"$gt": int32(10), "$lte": int32(200)}},
 			resume: bson.M{"_id": bson.M{"$gt": lastReadID, "$lte": int32(200)}},
 		},
 	}
