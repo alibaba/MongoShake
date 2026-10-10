@@ -137,10 +137,10 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() (err error
 		return err
 	}
 
-	// recreate time-series collections with the source's options before index sync
-	// or any data write, both of which would otherwise implicitly create an
-	// ordinary collection on the target (#993)
-	if err := docsyncer.StartCreateDestTimeSeriesCollection(coordinator.RealSourceFullSync, nsSet,
+	// recreate time-series and capped collections with the source's options before
+	// index sync or any data write, both of which would otherwise implicitly
+	// create an ordinary collection on the target (#993, #995)
+	if err := docsyncer.StartCreateDestSpecialCollections(coordinator.RealSourceFullSync, nsSet,
 		toConn, trans, conf.Options.MongoSslRootCaFile); err != nil {
 		return err
 	}
