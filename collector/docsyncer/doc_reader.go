@@ -12,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	"github.com/alibaba/MongoShake/v2/collector/filter"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
@@ -460,6 +461,11 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	}
 	findOptions.SetComment(fmt.Sprintf("mongo-shake full sync: ns[%v] query[%v] rebuild-times[%v]",
 		reader.ns, resumeQuery, reader.rebuild))
+
+	// field-level whitelist: server-side inclusion projection (top-level fields)
+	if fields := conf.Options.FullSyncFieldWhitelistMap[reader.ns.Str()]; len(fields) > 0 {
+		findOptions.SetProjection(filter.BuildInclusionProjection(fields))
+	}
 
 	reader.docCursor, err = reader.client.Client.Database(reader.ns.Database).Collection(reader.ns.Collection, nil).
 		Find(nil, resumeQuery, findOptions)
