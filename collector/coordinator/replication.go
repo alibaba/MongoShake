@@ -117,6 +117,12 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	if conn, err = utils.NewMongoCommunityConn(checkpointStorageUrl, utils.VarMongoConnectModePrimary, true,
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault,
 		conf.Options.CheckpointStorageUrlMongoSslRootCaFile); conn == nil || !conn.IsGood() || err != nil {
+		if conn != nil {
+			conn.Close()
+		}
+		if err == nil {
+			err = fmt.Errorf("checkpoint storage[%v] is not reachable", utils.BlockMongoUrlPassword(checkpointStorageUrl, "***"))
+		}
 		l.Logger.Criticalf("Connect checkpointStorageUrl[%v] error[%v]. Please add primary node into 'mongo_urls' "+
 			"if 'context.storage.url' is empty", checkpointStorageUrl, err)
 		return err
@@ -127,6 +133,12 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		if conn, err = utils.NewMongoCommunityConn(src.URL, conf.Options.MongoConnectMode, true,
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault,
 			conf.Options.MongoSslRootCaFile); conn == nil || !conn.IsGood() || err != nil {
+			if conn != nil {
+				conn.Close()
+			}
+			if err == nil {
+				err = fmt.Errorf("mongo server[%v] is not reachable", utils.BlockMongoUrlPassword(src.URL, "***"))
+			}
 
 			l.Logger.Criticalf("Connect mongo server error. %v, url : %s. "+
 				"See https://github.com/alibaba/MongoShake/wiki/FAQ"+

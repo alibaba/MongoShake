@@ -233,12 +233,12 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 				delOpts := options.BulkWrite().SetOrdered(false)
 				_, delErr := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, deleteModels, delOpts)
 				if delErr != nil {
-					return fmt.Errorf("delete+insert fallback: delete failed on ns[%v.%v]: %v", database, collection, delErr)
+					return fmt.Errorf("delete+insert fallback: delete failed on ns[%v.%v]: %w", database, collection, delErr)
 				}
 				insOpts := options.BulkWrite().SetOrdered(false)
 				_, insErr := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, reInsertModels, insOpts)
 				if insErr != nil {
-					return fmt.Errorf("delete+insert fallback: re-insert failed on ns[%v.%v]: %v", database, collection, insErr)
+					return fmt.Errorf("delete+insert fallback: re-insert failed on ns[%v.%v]: %w", database, collection, insErr)
 				}
 				l.Logger.Infof("delete+insert fallback succeeded for %d docs on ns[%v.%v]", len(deleteModels), database, collection)
 			}
