@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	"github.com/alibaba/MongoShake/v2/collector/filter"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
 	l "github.com/alibaba/MongoShake/v2/pkg/log"
@@ -64,13 +65,16 @@ type OplogReader struct {
 
 // NewOplogReader creates reader with mongodb url
 func NewOplogReader(src string, replset string) *OplogReader {
+	query := bson.M{"fromMigrate": bson.M{"$ne": true}}
+	// Use the initialized namespace policy so filter.pass.special.db can
+	// explicitly enable config instead of losing its oplogs at the source.
+	if new(filter.AutologousFilter).FilterNs("config.$cmd") {
+		query["ns"] = bson.M{"$not": primitive.Regex{Pattern: "^config\\.", Options: "i"}}
+	}
 	return &OplogReader{
-		src:     src,
-		replset: replset,
-		query: bson.M{
-			"fromMigrate": bson.M{"$ne": true},
-			"ns":          bson.M{"$not": primitive.Regex{Pattern: "^config\\.", Options: "i"}},
-		},
+		src:       src,
+		replset:   replset,
+		query:     query,
 		oplogChan: make(chan *retOplog, 10*conf.Options.IncrSyncReaderFetchBatchSize), // ten times of batchSize
 		firstRead: true,
 	}

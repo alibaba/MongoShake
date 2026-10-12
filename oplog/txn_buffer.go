@@ -433,6 +433,12 @@ func bsonDocToOplog(doc bson.D) (*ParsedLog, error) {
 				return nil, fmt.Errorf(opConvertErrorFmt, "b filed", "not a bool")
 			}
 			op.Upsert = b
+		case "fromMigrate":
+			fromMigrate, ok := v.Value.(bool)
+			if !ok {
+				return nil, fmt.Errorf(opConvertErrorFmt, "fromMigrate field", "not a bool")
+			}
+			op.FromMigrate = fromMigrate
 		}
 	}
 

@@ -127,14 +127,7 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 		return true
 	}
 
-	if moveChunkFilter.Filter(log) {
-		// fromMigrate deletes are source-internal chunk migration cleanup.
-		// The source and target are independent clusters — the target
-		// should not replicate the source's internal chunk movements.
-		// Full sync wrote each document to the correct location via mongos;
-		// skipping this cleanup delete is safe and avoids accidental data loss.
-		l.Logger.Infof("skip fromMigrate oplog, source chunk migration does not affect target. oplog[%v]", log)
-		batcher.syncer.replMetric.AddFilter(1)
+	if batcher.filterMigration(log) {
 		return true
 	}
 
@@ -149,6 +142,17 @@ func (batcher *Batcher) filter(log *oplog.PartialLog) bool {
 		return false
 	}
 	return false
+}
+
+func (batcher *Batcher) filterMigration(log *oplog.PartialLog) bool {
+	if !moveChunkFilter.Filter(log) {
+		return false
+	}
+	// Inserts, updates and deletes caused by source-internal migration must
+	// not be replayed as user writes against the independent target cluster.
+	l.Logger.Debugf("skip fromMigrate oplog[%v]", log)
+	batcher.syncer.replMetric.AddFilter(1)
+	return true
 }
 
 func (batcher *Batcher) dispatchBatches(batchGroup [][]*oplog.GenericOplog) (work bool) {
@@ -332,6 +336,12 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 			if !isRet {
 				continue
 			}
+			deliveredOps = batcher.filterInnerMigrationOps(deliveredOps)
+			if len(deliveredOps) == 0 {
+				// The transaction has been assembled and purged, but has no target
+				// work left. Preserve any user writes already collected in this batch.
+				continue
+			}
 			if mustIndividual {
 				batcher.barrierOplogs = deliveredOps
 
@@ -358,14 +368,18 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 						err, genericLog.Parsed.ParsedLog)
 				}
 
+				innerOps := make([]*oplog.GenericOplog, 0, len(deliveredOps))
 				for _, ele := range deliveredOps {
-					batcher.addIntoBatchGroup(&oplog.GenericOplog{
+					innerOps = append(innerOps, &oplog.GenericOplog{
 						Raw:        nil,
 						SourceTime: genericLog.SourceTime,
 						Parsed: &oplog.PartialLog{
 							ParsedLog: ele,
 						},
-					}, false)
+					})
+				}
+				for _, ele := range batcher.filterInnerMigrationOps(innerOps) {
+					batcher.addIntoBatchGroup(ele, false)
 				}
 				continue
 			}
@@ -419,6 +433,14 @@ func (batcher *Batcher) addIntoBatchGroup(genericLog *oplog.GenericOplog, isBarr
 	if genericLog == fakeOplog {
 		return
 	}
+	// applyOps and transaction operations can carry their own fromMigrate
+	// marker. Check after extraction, without dropping their parent before
+	// transaction assembly/commit. Keep the filtered timestamp for checkpoint
+	// progress when the last or all inner operations are migration events.
+	if batcher.filterMigration(genericLog.Parsed) {
+		batcher.lastFilterOplog = genericLog.Parsed
+		return
+	}
 
 	batcher.handler.Handle(genericLog.Parsed)
 
@@ -431,6 +453,29 @@ func (batcher *Batcher) addIntoBatchGroup(genericLog *oplog.GenericOplog, isBarr
 	batcher.batchGroup[which] = append(batcher.batchGroup[which], genericLog)
 
 	// l.Logger.Debugf("add into worker[%v]: %v", which, genericLog.Parsed.ParsedLog)
+}
+
+// filterInnerMigrationOps runs after transaction assembly and before dispatch.
+// When a filtered tail owned the parent's timestamp, move that boundary to the
+// last user operation. Worker acknowledgements can then cover the whole applyOps
+// instead of leaving a checkpoint inside a record that would be replayed.
+func (batcher *Batcher) filterInnerMigrationOps(ops []*oplog.GenericOplog) []*oplog.GenericOplog {
+	if len(ops) == 0 {
+		return ops
+	}
+	boundary := ops[len(ops)-1].Parsed.Timestamp
+	remaining := make([]*oplog.GenericOplog, 0, len(ops))
+	for _, op := range ops {
+		if batcher.filterMigration(op.Parsed) {
+			batcher.lastFilterOplog = op.Parsed
+			continue
+		}
+		remaining = append(remaining, op)
+	}
+	if len(remaining) > 0 {
+		remaining[len(remaining)-1].Parsed.Timestamp = boundary
+	}
+	return remaining
 }
 
 func (batcher *Batcher) isTransaction(partialLog *oplog.PartialLog) (oplog.TxnMeta, bool) {
