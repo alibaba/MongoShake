@@ -23,11 +23,13 @@ func (writer *DirectWriter) Prepare() bool {
 	nimo.AssertTrue(len(writer.RemoteAddrs) > 0, "RemoteAddrs must > 0")
 
 	first := writer.RemoteAddrs[0]
-	if _, err := utils.NewMongoCommunityConn(first, utils.VarMongoConnectModeSecondaryPreferred, true,
-		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.TunnelMongoSslRootCaFile); err != nil {
+	conn, err := utils.NewMongoCommunityConn(first, utils.VarMongoConnectModeSecondaryPreferred, true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.TunnelMongoSslRootCaFile)
+	if err != nil {
 		l.Logger.Criticalf("target mongo server[%s] connect failed: %s", first, err.Error())
 		return false
 	}
+	conn.Close()
 
 	urlChoose := writer.ReplayerId % uint32(len(writer.RemoteAddrs))
 	writer.BatchExecutor = &executor.BatchGroupExecutor{
