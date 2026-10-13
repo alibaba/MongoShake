@@ -12,6 +12,10 @@ import (
 const (
 	FrequentInSeconds        = 5
 	TimeFormat        string = "2006-01-02 15:04:05"
+
+	// metricTickPeriod drives the goroutine in startup(). FrequentInSeconds counts
+	// ticks, so the two have to stay in step.
+	metricTickPeriod = 1 * time.Second
 )
 
 const (
@@ -81,7 +85,11 @@ type ReplicationMetric struct {
 	// replication status
 	ReplStatus ReplicationStatus
 
-	isClosed bool
+	// Unlike the counters above, which are plain integers reached through
+	// atomic.LoadUint64(&field), this one is an atomic type: Close() writes it from the
+	// owner goroutine while startup()'s ticker goroutine reads it. It also makes
+	// ReplicationMetric non-copyable, so it must only ever be used through a pointer.
+	isClosed atomic.Bool
 }
 
 //var Metric *ReplicationMetric
@@ -103,7 +111,7 @@ func (metric *ReplicationMetric) init() {
 }
 
 func (metric *ReplicationMetric) Close() {
-	metric.isClosed = true
+	metric.isClosed.Store(true)
 	if metric.STAGE == TypeIncr {
 		SetMongoShakeSyncState(metric.NAME, metric.STAGE, SyncStateStopped)
 	}
@@ -122,11 +130,13 @@ func (metric *ReplicationMetric) resetEverySecond(items []*MetricDelta) {
 func (metric *ReplicationMetric) startup() {
 	metric.init()
 	go func() {
+		ticker := time.NewTicker(metricTickPeriod)
+		defer ticker.Stop()
 		tick := 0
 		// items that need be reset
 		resetItems := []*MetricDelta{&metric.OplogSuccess}
-		for range time.NewTicker(1 * time.Second).C {
-			if metric.isClosed {
+		for range ticker.C {
+			if metric.isClosed.Load() {
 				break
 			}
 
