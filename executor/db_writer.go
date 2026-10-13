@@ -10,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
 	l "github.com/alibaba/MongoShake/v2/pkg/log"
@@ -431,6 +432,30 @@ func extractOriginalSpecs(obj bson.D) bson.A {
 		}
 	}
 	return result
+}
+
+// bypassDocumentValidationFor reports whether bypassDocumentValidation may be sent for
+// this collection.
+//
+// Whether the server tolerates it on a time-series bucket namespace depends on the patch
+// release. Inserting one real bucket into system.buckets.<ts collection>:
+//
+//	7.0.37   omitted / false / true   all accepted
+//	7.0.43   omitted / false accepted, true rejected with code 2
+//	         "bypassDocumentValidation is not permitted on timeseries collections"
+//	8.0.4    omitted / false / true   all accepted
+//	8.2.12   omitted / false / true   all accepted
+//
+// Honouring incr_sync.executor.bypass_document_validation there would make the same
+// replay succeed or fail depending on the target's patch level, so the option is omitted
+// for bucket namespaces; omitting it is accepted everywhere, and explicitly sending false
+// is too, which is what the command writer's else branch already does.
+//
+// The prefix is matched rather than calling IsTimeSeriesCollection, which would issue a
+// listCollections per write. Bucket namespaces always carry the prefix.
+func bypassDocumentValidationFor(collection string) bool {
+	return conf.Options.IncrSyncBypassDocumentValidation &&
+		!strings.HasPrefix(collection, utils.VarSystemBucketsPrefix)
 }
 
 // applyOpsDoc renders one oplog entry as an applyOps input document.

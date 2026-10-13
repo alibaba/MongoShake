@@ -52,7 +52,7 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 	}
 
 	opts := options.BulkWrite().SetOrdered(false)
-	if conf.Options.IncrSyncBypassDocumentValidation {
+	if bypassDocumentValidationFor(collection) {
 		opts = opts.SetBypassDocumentValidation(true)
 	}
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, opts)
@@ -157,7 +157,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 	}
 
 	opts := options.BulkWrite()
-	if conf.Options.IncrSyncBypassDocumentValidation {
+	if bypassDocumentValidationFor(collection) {
 		opts = opts.SetBypassDocumentValidation(true)
 	}
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, opts)
@@ -448,7 +448,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 	}
 
 	opts := options.BulkWrite()
-	if conf.Options.IncrSyncBypassDocumentValidation {
+	if bypassDocumentValidationFor(collection) {
 		opts = opts.SetBypassDocumentValidation(true)
 	}
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(

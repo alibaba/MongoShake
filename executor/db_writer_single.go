@@ -63,7 +63,7 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.E, o
 		}
 
 		opts := options.InsertOne()
-		if conf.Options.IncrSyncBypassDocumentValidation {
+		if bypassDocumentValidationFor(collection) {
 			opts = opts.SetBypassDocumentValidation(true)
 		}
 		if _, err := collectionHandle.InsertOne(context.Background(), log.original.partialLog.ObjectValue(), opts); err != nil {
@@ -131,7 +131,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 		for _, update := range updates {
 
 			opts := options.Update().SetUpsert(true)
-			if conf.Options.IncrSyncBypassDocumentValidation {
+			if bypassDocumentValidationFor(collection) {
 				opts = opts.SetBypassDocumentValidation(true)
 			}
 			res, err := collectionHandle.UpdateOne(context.Background(), update.id,
@@ -214,7 +214,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 	} else {
 		for _, update := range updates {
 			opts := options.Update().SetUpsert(false)
-			if conf.Options.IncrSyncBypassDocumentValidation {
+			if bypassDocumentValidationFor(collection) {
 				opts = opts.SetBypassDocumentValidation(true)
 			}
 			res, err := collectionHandle.UpdateOne(context.Background(), update.id,
@@ -341,7 +341,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 			if upsert {
 				opts.SetUpsert(true)
 			}
-			if conf.Options.IncrSyncBypassDocumentValidation {
+			if bypassDocumentValidationFor(collection) {
 				opts = opts.SetBypassDocumentValidation(true)
 			}
 			if upsert && len(log.original.partialLog.DocumentKey) > 0 {
@@ -362,7 +362,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 			if upsert {
 				opts.SetUpsert(true)
 			}
-			if conf.Options.IncrSyncBypassDocumentValidation {
+			if bypassDocumentValidationFor(collection) {
 				opts = opts.SetBypassDocumentValidation(true)
 			}
 			if upsert && len(log.original.partialLog.DocumentKey) > 0 {

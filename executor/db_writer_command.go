@@ -37,7 +37,7 @@ func (cw *CommandWriter) doInsert(database, collection string, metadata bson.E, 
 		{"documents", inserts},
 		{"ordered", ExecuteOrdered},
 	}
-	if conf.Options.IncrSyncBypassDocumentValidation {
+	if bypassDocumentValidationFor(collection) {
 		insertCmd = append(insertCmd, bson.E{Key: "bypassDocumentValidation", Value: true})
 	} else {
 		insertCmd = append(insertCmd, bson.E{Key: "bypassDocumentValidation", Value: false})
@@ -103,7 +103,7 @@ func (cw *CommandWriter) runSingleInsertCmd(database, collection string, metadat
 		{"documents", []interface{}{doc}},
 		{"ordered", ExecuteOrdered},
 	}
-	if conf.Options.IncrSyncBypassDocumentValidation {
+	if bypassDocumentValidationFor(collection) {
 		insertCmd = append(insertCmd, bson.E{Key: "bypassDocumentValidation", Value: true})
 	} else {
 		insertCmd = append(insertCmd, bson.E{Key: "bypassDocumentValidation", Value: false})
@@ -143,7 +143,7 @@ func (cw *CommandWriter) doUpdateOnInsert(database, collection string, metadata 
 		{"updates", updates},
 		{"ordered", ExecuteOrdered},
 	}
-	if conf.Options.IncrSyncBypassDocumentValidation {
+	if bypassDocumentValidationFor(collection) {
 		updateCmd = append(updateCmd, bson.E{Key: "bypassDocumentValidation", Value: true})
 	} else {
 		updateCmd = append(updateCmd, bson.E{Key: "bypassDocumentValidation", Value: false})
@@ -257,7 +257,7 @@ func (cw *CommandWriter) runSingleUpdateCmd(database, collection string, metadat
 		}}},
 		{"ordered", ExecuteOrdered},
 	}
-	if conf.Options.IncrSyncBypassDocumentValidation {
+	if bypassDocumentValidationFor(collection) {
 		updateCmd = append(updateCmd, bson.E{Key: "bypassDocumentValidation", Value: true})
 	} else {
 		updateCmd = append(updateCmd, bson.E{Key: "bypassDocumentValidation", Value: false})
@@ -305,7 +305,7 @@ func (cw *CommandWriter) doUpdate(database, collection string, metadata bson.E, 
 		{"updates", updates},
 		{"ordered", ExecuteOrdered},
 	}
-	if conf.Options.IncrSyncBypassDocumentValidation {
+	if bypassDocumentValidationFor(collection) {
 		updateCmd = append(updateCmd, bson.E{Key: "bypassDocumentValidation", Value: true})
 	} else {
 		updateCmd = append(updateCmd, bson.E{Key: "bypassDocumentValidation", Value: false})
