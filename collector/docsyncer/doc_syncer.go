@@ -437,6 +437,7 @@ func StartIndexSync(indexMap map[utils.NS][]bson.D, toUrl string,
 	wg.Add(collExecutorParallel)
 	for i := 0; i < collExecutorParallel; i++ {
 		nimo.GoRoutine(func() {
+			defer wg.Done()
 			var conn *utils.MongoCommunityConn
 			var err error
 			conn, err = utils.NewMongoCommunityConn(toUrl, utils.VarMongoConnectModePrimary, true,
@@ -446,7 +447,6 @@ func StartIndexSync(indexMap map[utils.NS][]bson.D, toUrl string,
 				return
 			}
 			defer conn.Close()
-			defer wg.Done()
 
 			for {
 				indexNs, ok := <-namespaces

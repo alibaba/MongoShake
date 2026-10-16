@@ -28,6 +28,10 @@ func (exec *Executor) ensureConnection() bool {
 			writeConcern = utils.ReadWriteConcernMajority
 		}
 
+		if exec.conn != nil {
+			exec.dropConnection()
+		}
+
 		if conn, err := utils.NewMongoCommunityConn(exec.MongoUrl, utils.VarMongoConnectModePrimary, true,
 			utils.ReadWriteConcernDefault, writeConcern,
 			conf.Options.TunnelMongoSslRootCaFile); err != nil {
@@ -132,7 +136,10 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 				" error[%v], logs number[%d], firstLog: %s",
 				exec.batchExecutor.ReplayerId, exec.id, group.ns, group.op, reflect.TypeOf(err), err.Error(), count,
 				group.oplogRecords[0].original.partialLog)
-			exec.dropConnection()
+			// only rebuild the client on connection-level errors, server errors keep it
+			if mongo.IsNetworkError(err) || mongo.IsTimeout(err) {
+				exec.dropConnection()
+			}
 			atomic.AddUint64(&exec.metricError, uint64(len(group.oplogRecords)))
 			exec.addOperationMetric("error", uint64(len(group.oplogRecords)))
 			exec.addNsMapMetric(group.ns, "e", len(group.oplogRecords))
