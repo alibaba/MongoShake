@@ -806,6 +806,16 @@ func TestBatchMore(t *testing.T) {
 
 	utils.InitialLogger("", "", "debug", true, 1)
 
+	// The ordering contract asserted below needs a direct tunnel and the switch on; the
+	// "barrier is the first element of mergeBatch" case covers the combinations that don't.
+	origTunnel, origOrderingEnable := conf.Options.Tunnel, conf.Options.IncrSyncBarrierOrderingEnable
+	defer func() {
+		conf.Options.Tunnel = origTunnel
+		conf.Options.IncrSyncBarrierOrderingEnable = origOrderingEnable
+	}()
+	conf.Options.Tunnel = utils.VarTunnelDirect
+	conf.Options.IncrSyncBarrierOrderingEnable = true
+
 	var nr int
 	// normal
 	{
@@ -985,6 +995,53 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, utils.TimeToTimestamp(206), batcher.lastOplog.Parsed.Timestamp, "should be equal")
 	}
 
+	// barrier is the first element of mergeBatch: batchGroup ends up empty. With the ordering
+	// guarantee in force the round still reports allEmpty=false; without it, allEmpty stays true.
+	{
+		fmt.Printf("TestBatchMore case %d.\n", nr)
+		nr++
+
+		// the matrix below ends on kafka; the cases after this block need the guarantee back
+		origTunnel, origOrderingEnable := conf.Options.Tunnel, conf.Options.IncrSyncBarrierOrderingEnable
+		conf.Options.IncrSyncAdaptiveBatchingMaxSize = 100
+		conf.Options.FilterDDLEnable = true
+
+		for _, tc := range []struct {
+			tunnel   string
+			enable   bool
+			allEmpty bool
+		}{
+			{utils.VarTunnelDirect, true, false},
+			{utils.VarTunnelDirect, false, true}, // direct alone is not enough: the switch defaults to off
+			{"", true, true},                     // an unset tunnel counts as non-direct, so it keeps the original verdict
+			{utils.VarTunnelKafka, true, true},
+		} {
+			conf.Options.Tunnel = tc.tunnel
+			conf.Options.IncrSyncBarrierOrderingEnable = tc.enable
+
+			desc := fmt.Sprintf("tunnel %q, ordering_enable %v", tc.tunnel, tc.enable)
+
+			syncer := mockSyncer()
+			filterList := filter.OplogFilterChain{new(filter.AutologousFilter), new(filter.NoopFilter)}
+			batcher := NewBatcher(syncer, filterList, syncer, []*Worker{new(Worker)})
+
+			// ts 0 is the ddl, so the barrier is mergeBatch[0] and nothing reaches batchGroup
+			syncer.logsQueue[0] <- mockOplogs(5, []int{0}, nil, nil, 0)
+			syncer.logsQueue[1] <- mockOplogs(6, nil, nil, nil, 100)
+			syncer.logsQueue[2] <- mockOplogs(7, nil, nil, nil, 200)
+
+			batchedOplog, barrier, allEmpty, _ := batcher.BatchMore()
+			assert.Equal(t, true, barrier, "%s should report a barrier", desc)
+			assert.Equal(t, 0, len(batchedOplog[0]), "%s should batch nothing", desc)
+			assert.Equal(t, tc.allEmpty, allEmpty, "%s should report allEmpty=%v", desc, tc.allEmpty)
+			assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
+			assert.Equal(t, 17, len(batcher.remainLogs), "should be equal")
+		}
+
+		conf.Options.Tunnel = origTunnel
+		conf.Options.IncrSyncBarrierOrderingEnable = origOrderingEnable
+	}
+
 	// has several ddl
 	{
 		fmt.Printf("TestBatchMore case %d.\n", nr)
@@ -1065,10 +1122,11 @@ func TestBatchMore(t *testing.T) {
 		assert.Equal(t, utils.TimeToTimestamp(204), batcher.lastOplog.Parsed.Timestamp, "should be equal")
 
 		// 5 in logsQ[2]
+		// A barrier round reports allEmpty=false even when batchGroup comes out empty.
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1126,7 +1184,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ := batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 17, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1207,7 +1265,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ := batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 4, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1227,7 +1285,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 3, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1247,7 +1305,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 2, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1270,7 +1328,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1290,7 +1348,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1422,7 +1480,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ := batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, fakeOplog.Parsed, batcher.lastFilterOplog, "should be equal")
@@ -1467,7 +1525,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ := batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 17, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -1530,7 +1588,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2253,7 +2311,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ := batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 8, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2313,7 +2371,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2393,7 +2451,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 7, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2413,7 +2471,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 6, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2433,7 +2491,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 5, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2463,7 +2521,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 7, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2503,7 +2561,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 2, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2523,7 +2581,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2568,7 +2626,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ := batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 1, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2686,7 +2744,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 3, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2706,7 +2764,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 2, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2726,7 +2784,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 1, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")
@@ -2746,7 +2804,7 @@ func TestBatchMore(t *testing.T) {
 		batchedOplog, barrier, allEmpty, _ = batcher.BatchMore()
 		assert.Equal(t, true, barrier, "should be equal")
 		assert.Equal(t, 0, len(batchedOplog[0]), "should be equal")
-		assert.Equal(t, true, allEmpty, "should be equal")
+		assert.Equal(t, false, allEmpty, "should be equal")
 		assert.Equal(t, 0, len(batcher.remainLogs), "should be equal")
 		assert.Equal(t, 3, len(batcher.barrierOplogs), "should be equal")
 		assert.Equal(t, 0, batcher.txnBuffer.Size(), "should be equal")

@@ -174,3 +174,41 @@ func TestCheckConflictRejectPrometheusSystemProfilePortConflict(t *testing.T) {
 	err := checkConflict()
 	assert.EqualError(t, err, "system_profile_port should not equal to prom.http_port")
 }
+
+func TestCheckIneffectiveOptionsBarrierOrdering(t *testing.T) {
+	origin := conf.Options
+	defer func() {
+		conf.Options = origin
+	}()
+
+	replicaSet := []string{"mongodb://source-a"}
+	shardCluster := []string{"mongodb://source-a", "mongodb://source-b"}
+
+	cases := []struct {
+		desc      string
+		tunnel    string
+		enable    bool
+		mongoUrls []string
+		want      int
+	}{
+		{"direct + on, replica set", utils.VarTunnelDirect, true, replicaSet, 0},
+		{"kafka + on, replica set", utils.VarTunnelKafka, true, replicaSet, 1},
+		{"direct + on, shard cluster", utils.VarTunnelDirect, true, shardCluster, 1},
+		{"kafka + on, shard cluster", utils.VarTunnelKafka, true, shardCluster, 2},
+		{"kafka + off, shard cluster", utils.VarTunnelKafka, false, shardCluster, 0},
+	}
+
+	for _, c := range cases {
+		conf.Options = conf.Configuration{
+			Tunnel:                        c.tunnel,
+			IncrSyncBarrierOrderingEnable: c.enable,
+			MongoUrls:                     c.mongoUrls,
+		}
+
+		warnings := checkIneffectiveOptions()
+		assert.Len(t, warnings, c.want, c.desc)
+		for _, warning := range warnings {
+			assert.Contains(t, warning, "incr_sync.barrier.ordering_enable", c.desc)
+		}
+	}
+}
