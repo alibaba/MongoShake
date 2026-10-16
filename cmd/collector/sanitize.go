@@ -57,6 +57,31 @@ func SanitizeOptions() error {
 	return checkConflict()
 }
 
+// checkIneffectiveOptions returns warnings for option combinations that are accepted but have no
+// effect. The caller logs them after the logger is initialized.
+func checkIneffectiveOptions() []string {
+	var warnings []string
+
+	if !conf.Options.IncrSyncBarrierOrderingEnable {
+		return warnings
+	}
+	// the guarantee needs a direct tunnel, every other tunnel hands ordering to its own receiver
+	if conf.Options.Tunnel != utils.VarTunnelDirect {
+		warnings = append(warnings, fmt.Sprintf("incr_sync.barrier.ordering_enable is set but "+
+			"incr_sync.tunnel[%v] != '%v': this tunnel hands ordering to its own receiver, so the "+
+			"DDL/DML ordering guarantee is not supported and the switch has no effect",
+			conf.Options.Tunnel, utils.VarTunnelDirect))
+	}
+	// the barrier is per-syncer, and a shard cluster runs one syncer per shard
+	if conf.Options.IsShardCluster() {
+		warnings = append(warnings, "incr_sync.barrier.ordering_enable is set but the source is a "+
+			"shard cluster, where every shard has its own syncer: DDL/DML ordering across shards is "+
+			"not guaranteed")
+	}
+
+	return warnings
+}
+
 func handleDeprecateConf() error {
 	// IncrSyncTunnel has deprecated since v2.4.1
 	if conf.Options.Tunnel == "" && conf.Options.IncrSyncTunnel != "" {

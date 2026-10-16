@@ -55,6 +55,13 @@ func getExitPoint() primitive.Timestamp {
 	return utils.Int64ToTimestamp(utils.IncrSentinelOptions.ExitPoint)
 }
 
+// incrOrderingGuarantee reports whether the DDL/DML ordering guarantee is in force: a direct
+// tunnel, which applies oplogs itself, plus incr_sync.barrier.ordering_enable.
+func incrOrderingGuarantee() bool {
+	return conf.Options.Tunnel == utils.VarTunnelDirect &&
+		conf.Options.IncrSyncBarrierOrderingEnable
+}
+
 // Batcher is used to batch oplog before sending in order to improve performance.
 type Batcher struct {
 	// related oplog syncer. not owned
@@ -360,6 +367,7 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		}
 		batcher.barrierOplogs = nil
 
+		// no guard here: the barrier oplogs have already been moved into batchGroup
 		return batcher.batchGroup, true, batcher.setLastOplog(), false
 	}
 
@@ -370,6 +378,31 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		return batcher.batchGroup, false, batcher.setLastOplog(), exit
 	}
 
+	stopAt := batcher.processMergeBatch(mergeBatch)
+	if stopAt >= 0 {
+		// the oplogs behind the barrier wait for it to be done
+		batcher.remainLogs = mergeBatch[stopAt+1:]
+
+		if !incrOrderingGuarantee() {
+			return batcher.batchGroup, true, batcher.setLastOplog(), false
+		}
+
+		// advance lastOplog past the oplogs that processMergeBatch put in batchGroup
+		batcher.setLastOplog()
+
+		// Always report allEmpty=false: when the barrier is mergeBatch[0], or everything
+		// before it was filtered, batchGroup is empty and setLastOplog() would report true,
+		// which makes startBatcher's `!allEmpty` guard skip the barrier wait and the forced
+		// checkpoint, letting the DDL overtake the DML already dispatched.
+		return batcher.batchGroup, true, false, false
+	}
+
+	return batcher.batchGroup, false, batcher.setLastOplog(), exit
+}
+
+// processMergeBatch filters mergeBatch and distributes it into batcher.batchGroup. It returns
+// the index of the barrier oplog that must run separately, or -1 when mergeBatch holds none.
+func (batcher *Batcher) processMergeBatch(mergeBatch []*oplog.GenericOplog) int {
 	for i, genericLog := range mergeBatch {
 		// filter oplog such like Noop or with gid
 		// PAY ATTENTION: we can't handle the oplog in transaction that has been filtered
@@ -390,11 +423,9 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 			if mustIndividual {
 				batcher.barrierOplogs = deliveredOps
 
-				batcher.remainLogs = mergeBatch[i+1:]
-
 				allEmpty := batcher.setLastOplog()
 				nimo.AssertTrue(allEmpty == true, "batcher.batchGroup don't be empty")
-				return batcher.batchGroup, true, allEmpty, false
+				return i
 			} else {
 				for _, ele := range deliveredOps {
 					batcher.addIntoBatchGroup(ele, false)
@@ -430,11 +461,10 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		if ddlFilter.Filter(genericLog.Parsed) {
 
 			if conf.Options.FilterDDLEnable {
+				// DDL is executed as a barrier: it is handed to worker[0] on its own round
 				batcher.barrierOplogs = append(batcher.barrierOplogs, genericLog)
 
-				batcher.remainLogs = mergeBatch[i+1:]
-
-				return batcher.batchGroup, true, batcher.setLastOplog(), false
+				return i
 			} else {
 				// filter
 				batcher.syncer.replMetric.AddFilter(1)
@@ -448,7 +478,7 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		batcher.addIntoBatchGroup(genericLog, false)
 	}
 
-	return batcher.batchGroup, false, batcher.setLastOplog(), exit
+	return -1
 }
 
 func (batcher *Batcher) setLastOplog() bool {
