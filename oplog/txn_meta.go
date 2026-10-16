@@ -133,6 +133,11 @@ func (m TxnMeta) IsTxn() bool {
 	return m != TxnMeta{}
 }
 
+// ID returns the unique transaction identifier.
+func (m TxnMeta) ID() TxnID {
+	return m.id
+}
+
 func (m TxnMeta) String() string {
 	return fmt.Sprintf("id:{%v, %v}, commit:%v, abort:%v, partial:%v, prepare:%v, prevOpTime:%v",
 		m.id.lsid, m.id.txnNumber, m.commit, m.abort, m.partial, m.prepare, m.prevOpTime)

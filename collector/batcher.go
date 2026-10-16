@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"sync"
 	"time"
 
 	nimo "github.com/gugemichael/nimo4go"
@@ -85,6 +86,14 @@ type Batcher struct {
 	// transaction buffer
 	txnBuffer *oplog.TxnBuffer
 
+	// txnPins holds, for every transaction whose data is not yet acked by
+	// workers, the packed timestamp of its first buffered oplog entry. The
+	// persisted checkpoint must stay below the oldest pin: the buffered
+	// entries only live in memory, so a restart must be able to re-fetch
+	// them from the source oplog.
+	txnPinsMu sync.Mutex
+	txnPins   map[oplog.TxnID]*txnPin
+
 	// for ut only
 	utBatchesDelay struct {
 		flag        bool                  // ut enable?
@@ -103,7 +112,58 @@ func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
 		lastOplog:       fakeOplog,
 		lastFilterOplog: fakeOplog.Parsed,
 		txnBuffer:       oplog.NewBuffer(),
+		txnPins:         make(map[oplog.TxnID]*txnPin),
 	}
+}
+
+// txnPin tracks the crash-safety window of one buffered transaction.
+type txnPin struct {
+	startTs   int64 // packed ts of the first buffered entry
+	releaseTs int64 // 0 while buffering; commit ts once inner ops are handed over
+}
+
+func (batcher *Batcher) pinTxn(id oplog.TxnID, startTs int64) {
+	batcher.txnPinsMu.Lock()
+	defer batcher.txnPinsMu.Unlock()
+	if _, ok := batcher.txnPins[id]; !ok {
+		batcher.txnPins[id] = &txnPin{startTs: startTs}
+	}
+}
+
+func (batcher *Batcher) unpinTxn(id oplog.TxnID) {
+	batcher.txnPinsMu.Lock()
+	defer batcher.txnPinsMu.Unlock()
+	delete(batcher.txnPins, id)
+}
+
+// stageTxnPinRelease marks that the transaction's inner ops (whose largest
+// timestamp is releaseTs) have been handed over for dispatch. The pin is
+// dropped once worker acks reach releaseTs.
+func (batcher *Batcher) stageTxnPinRelease(id oplog.TxnID, releaseTs int64) {
+	batcher.txnPinsMu.Lock()
+	defer batcher.txnPinsMu.Unlock()
+	if pin, ok := batcher.txnPins[id]; ok {
+		pin.releaseTs = releaseTs
+	}
+}
+
+// OldestUnackedTxnPinTs releases every pin whose inner ops are fully acked
+// (ackedTs >= releaseTs) and returns the packed start timestamp of the oldest
+// remaining pinned transaction, or 0 when nothing is pinned.
+func (batcher *Batcher) OldestUnackedTxnPinTs(ackedTs int64) int64 {
+	batcher.txnPinsMu.Lock()
+	defer batcher.txnPinsMu.Unlock()
+	var oldest int64
+	for id, pin := range batcher.txnPins {
+		if pin.releaseTs > 0 && ackedTs >= pin.releaseTs {
+			delete(batcher.txnPins, id)
+			continue
+		}
+		if oldest == 0 || pin.startTs < oldest {
+			oldest = pin.startTs
+		}
+	}
+	return oldest
 }
 
 func (batcher *Batcher) Fini() {
@@ -451,6 +511,9 @@ func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta,
 		l.Logger.Panicf("%s add oplog to txnbuffer failed, err[%v] oplog[%v]",
 			batcher.syncer, err, genericLog.Parsed.ParsedLog)
 	}
+	// the buffered entries only live in memory: hold the persisted checkpoint
+	// below this transaction until its inner ops are acked by workers
+	batcher.pinTxn(txnMeta.ID(), utils.TimeStampToInt64(genericLog.Parsed.Timestamp))
 
 	// distributed transaction is abort, ignore these Oplogs and clear buffer
 	if txnMeta.IsAbort() {
@@ -459,6 +522,7 @@ func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta,
 			l.Logger.Panicf("%s cleaning up txnBuffer failed, err[%v] oplog[%v]",
 				batcher.syncer, err, genericLog.Parsed.ParsedLog)
 		}
+		batcher.unpinTxn(txnMeta.ID())
 
 		batcher.syncer.replMetric.AddFilter(1)
 		batcher.lastFilterOplog = genericLog.Parsed
@@ -509,6 +573,9 @@ Loop:
 	if err != nil {
 		l.Logger.Panicf("error cleaning up transaction buffer, err[%v]", err)
 	}
+	// inner ops carry timestamps up to the commit ts (see ExtractInnerOps);
+	// keep the pin until workers ack them
+	batcher.stageTxnPinRelease(txnMeta.ID(), utils.TimeStampToInt64(genericLog.Parsed.Timestamp))
 
 	return true, mustIndividual, deliveredOps
 }

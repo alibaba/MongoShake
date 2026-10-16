@@ -163,6 +163,23 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs int64) bool {
 	l.Logger.Infof("checkpoint func lowest:%v inMemoryTs:%v flush:%v inputTs:%v",
 		utils.ExtractTimestampForLog(lowest), utils.ExtractTimestampForLog(inMemoryTs), flush, inputTs)
 
+	// hold the persisted checkpoint below the oldest transaction whose
+	// buffered oplogs have not been acked yet: those entries only live in
+	// memory, so a restart must be able to re-fetch them from the source.
+	// ackTs has to be real worker-ack progress rather than the candidate above:
+	// when inputTs > 0 the candidate is inputTs, which says nothing about what
+	// the workers have acked. batcher is nil for callers that drive checkpoint()
+	// directly, and calculateWorkerLowestCheckpoint dereferences it.
+	ackTs := lowest
+	if inputTs > 0 && sync.batcher != nil {
+		if wl, werr := sync.calculateWorkerLowestCheckpoint(); werr == nil && wl > 0 {
+			ackTs = wl
+		} else {
+			ackTs = 0
+		}
+	}
+	lowest = sync.clampCheckpointByTxnPin(lowest, ackTs)
+
 	lowestInt64 := lowest
 	if conf.Options.FullSyncReaderOplogStoreDisk && sync.persister.diskQueueLastTs > 0 {
 		checkpointTs := inMemoryTs
@@ -204,6 +221,22 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs int64) bool {
 	l.Logger.Warnf("CheckpointOperation updated is not suitable. lowest [%d]. current [%v]. inputTs [%v]. reason : %v",
 		lowest, utils.ExtractTimestampForLog(inMemoryTs), inputTs, err)
 	return false
+}
+
+// clampCheckpointByTxnPin caps the checkpoint candidate below the oldest
+// transaction whose buffered oplogs are not fully acked. ackTs is the current
+// worker ack progress used to release completed pins.
+func (sync *OplogSyncer) clampCheckpointByTxnPin(candidate, ackTs int64) int64 {
+	if sync.batcher == nil || candidate <= 0 {
+		return candidate
+	}
+	pin := sync.batcher.OldestUnackedTxnPinTs(ackTs)
+	if pin > 0 && candidate >= pin {
+		l.Logger.Infof("CheckpointOperation clamp candidate[%v] below buffered transaction start[%v]",
+			utils.ExtractTimestampForLog(candidate), utils.ExtractTimestampForLog(pin))
+		return pin - 1
+	}
+	return candidate
 }
 
 func (sync *OplogSyncer) finishNonEmptyDiskSpool(checkpointTs, finishTs int64) bool {
