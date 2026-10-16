@@ -10,6 +10,7 @@ import (
 	nimo "github.com/gugemichael/nimo4go"
 	"github.com/mongodb/mongo-tools-common/json"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -1225,8 +1226,20 @@ func TestConvertEvent2Oplog(t *testing.T) {
 		collNames, err := client.Database("testDb").ListCollectionNames(context.Background(),
 			bson.M{"type": "collection"})
 		assert.Equal(t, nil, err, "should be equal")
-		assert.Equal(t, 1, len(collNames), "should be equal")
-		assert.Equal(t, collNames[0], "testColl", "should be equal")
+		// Count only user collections. On a shared cluster testDb can also hold
+		// system.profile — it appears once profiling has ever been enabled there
+		// and comes back after the dropDatabase above — which failed this
+		// exact-count assertion for reasons unrelated to the code under test.
+		// require, not assert: indexing userColls[0] on an empty slice would
+		// otherwise panic and take down the rest of the package (#1018).
+		var userColls []string
+		for _, name := range collNames {
+			if !strings.HasPrefix(name, "system.") {
+				userColls = append(userColls, name)
+			}
+		}
+		require.Equal(t, 1, len(userColls), "expected only testColl, got %v", collNames)
+		assert.Equal(t, "testColl", userColls[0], "should be equal")
 		count, err := client.Database("config").Collection("collections").CountDocuments(context.Background(),
 			bson.M{"_id": "testDb.testColl"})
 		assert.Equal(t, nil, err, "should be equal")
