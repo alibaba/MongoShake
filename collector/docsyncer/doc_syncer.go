@@ -104,6 +104,197 @@ func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoCom
 	return nil
 }
 
+// specialCollectionKind labels the collection kinds whose creation options full
+// sync has to replay on the target. Both are invisible to the write path: an
+// implicitly created collection is an ordinary one, so the source's properties
+// are lost without any error being raised.
+type specialCollectionKind string
+
+const (
+	kindTimeSeries specialCollectionKind = "time-series"
+	kindCapped     specialCollectionKind = "capped"
+)
+
+// destCollectionSpec carries one collection's creation options exactly as the
+// source reports them, so they can be replayed on the target verbatim.
+type destCollectionSpec struct {
+	name    string
+	kind    specialCollectionKind
+	options bson.M
+}
+
+// matchesTarget reports whether an existing target collection already has the
+// properties this spec stands for, and so must be left alone.
+func (spec destCollectionSpec) matchesTarget(docType string, docOptions bson.M) bool {
+	if spec.kind == kindTimeSeries {
+		return docType == "timeseries"
+	}
+	if capped, ok := docOptions["capped"].(bool); ok {
+		return capped
+	}
+	return false
+}
+
+// mismatchMessage explains why an existing target collection cannot be given the
+// source's properties. Neither kind can be added in place, and dropping the
+// user's data here would be destructive, so both are reported rather than fixed.
+func (spec destCollectionSpec) mismatchMessage(toNS utils.NS, docType string) string {
+	if spec.kind == kindTimeSeries {
+		return fmt.Sprintf("collection %v already exists in dest mongodb as type[%v] while the source is "+
+			"a time-series collection. Its time-series properties cannot be added in place, so it keeps "+
+			"an _id_ unique index the source does not have and reruns will fail with E11000. Drop it and "+
+			"rerun, or set full_sync.collection_exist_drop = true", toNS, docType)
+	}
+	// collMod's convertToCapped is gone from the server: MongoDB 7.0 rejects it
+	// with "BSON field 'collMod.convertToCapped' is an unknown field"
+	return fmt.Sprintf("collection %v already exists in dest mongodb as type[%v] while the source is "+
+		"a capped collection. Capped properties cannot be added to an existing collection, so the "+
+		"target will keep growing where the source wraps around. Drop it and rerun, or set "+
+		"full_sync.collection_exist_drop = true", toNS, docType)
+}
+
+// StartCreateDestSpecialCollections creates the target's time-series (#993) and
+// capped (#995) collections before anything else touches them.
+//
+// Ordering matters: createIndex on a missing collection implicitly creates an
+// ordinary one, and so does the first inserted document. Either silently drops
+// the source's properties. For a time-series collection that leaves the target
+// with an _id_ unique index the source does not have, so every rerun then fails
+// with E11000. For a capped collection it leaves an unbounded target: the source
+// wraps around at size/max while the target keeps every document forever, which
+// fills the disk and is what makes the two sides report different counts. This
+// must therefore run after the optional drop and before index sync and data sync.
+func StartCreateDestSpecialCollections(sources []*utils.MongoSource, nsSet map[utils.NS]struct{},
+	toConn *utils.MongoCommunityConn, nsTrans *transform.NamespaceTransform, sslRootFile string) error {
+	if conf.Options.FullSyncExecutorDebug {
+		l.Logger.Infof("full_sync.executor.debug set, no need to create time-series or capped collections")
+		return nil
+	}
+	if toConn == nil || len(nsSet) == 0 {
+		return nil
+	}
+
+	// only ask the source about databases that hold a namespace we are syncing
+	dbs := make(map[string]struct{})
+	for ns := range nsSet {
+		dbs[ns.Database] = struct{}{}
+	}
+
+	handled := make(map[string]struct{}, len(nsSet))
+	for _, src := range sources {
+		fromConn, err := utils.NewMongoCommunityConn(src.URL, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, sslRootFile)
+		if err != nil {
+			return fmt.Errorf("connect to source mongodb[%s] for time-series and capped collections failed: %v",
+				utils.BlockMongoUrlPassword(src.URL, "***"), err)
+		}
+
+		for db := range dbs {
+			specs, err := listSpecialCollectionSpecs(fromConn, db)
+			if err != nil {
+				fromConn.Close()
+				return fmt.Errorf("list time-series and capped collections of source db[%v] failed: %v", db, err)
+			}
+			for _, spec := range specs {
+				ns := utils.NS{Database: db, Collection: spec.name}
+				if _, ok := nsSet[ns]; !ok {
+					continue
+				}
+				toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
+				if _, done := handled[toNS.Str()]; done {
+					continue
+				}
+				handled[toNS.Str()] = struct{}{}
+				if err := createSpecialCollection(toConn, toNS, spec); err != nil {
+					fromConn.Close()
+					return err
+				}
+			}
+		}
+		fromConn.Close()
+	}
+	return nil
+}
+
+func listSpecialCollectionSpecs(conn *utils.MongoCommunityConn, db string) ([]destCollectionSpec, error) {
+	// one pass covers both kinds, which are disjoint: a time-series collection
+	// reports type "timeseries", a capped one is an ordinary "collection" carrying
+	// options.capped
+	cur, err := conn.Client.Database(db).ListCollections(nil, bson.M{
+		"$or": bson.A{
+			bson.M{"type": "timeseries"},
+			bson.M{"options.capped": true},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(nil)
+
+	var specs []destCollectionSpec
+	for cur.Next(nil) {
+		var doc struct {
+			Name    string `bson:"name"`
+			Type    string `bson:"type"`
+			Options bson.M `bson:"options"`
+		}
+		if err := bson.Unmarshal(cur.Current, &doc); err != nil {
+			return nil, err
+		}
+		kind := kindCapped
+		if doc.Type == "timeseries" {
+			kind = kindTimeSeries
+		}
+		specs = append(specs, destCollectionSpec{name: doc.Name, kind: kind, options: doc.Options})
+	}
+	return specs, cur.Err()
+}
+
+func createSpecialCollection(toConn *utils.MongoCommunityConn, toNS utils.NS, spec destCollectionSpec) error {
+	cur, err := toConn.Client.Database(toNS.Database).ListCollections(nil, bson.M{"name": toNS.Collection})
+	if err != nil {
+		return fmt.Errorf("list collection %v of dest mongodb failed: %v", toNS, err)
+	}
+	defer cur.Close(nil)
+	for cur.Next(nil) {
+		var doc struct {
+			Type    string `bson:"type"`
+			Options bson.M `bson:"options"`
+		}
+		if err := bson.Unmarshal(cur.Current, &doc); err != nil {
+			return fmt.Errorf("parse collection info of %v on the target failed: %v", toNS, err)
+		}
+		if spec.matchesTarget(doc.Type, doc.Options) {
+			l.Logger.Infof("%v collection %v already exists in dest mongodb, keep it", spec.kind, toNS)
+			return nil
+		}
+		l.Logger.Errorf("%v", spec.mismatchMessage(toNS, doc.Type))
+		return nil
+	}
+	if err := cur.Err(); err != nil {
+		return fmt.Errorf("list collection %v of dest mongodb failed: %v", toNS, err)
+	}
+
+	// pass the source's options through verbatim. For a capped collection they are
+	// {capped, size, max} — listCollections reports uuid under info, not options,
+	// so nothing unsettable leaks in. For a time-series collection they carry
+	// timeField, metaField, granularity, the derived bucket span and
+	// expireAfterSeconds. A target older than the source may reject a field it does
+	// not know, which is a real incompatibility worth failing on rather than
+	// papering over.
+	cmd := bson.D{{"create", toNS.Collection}}
+	for k, v := range spec.options {
+		cmd = append(cmd, bson.E{Key: k, Value: v})
+	}
+	if err := toConn.Client.Database(toNS.Database).RunCommand(nil, cmd).Err(); err != nil {
+		return fmt.Errorf("create %v collection %v of dest mongodb with options %v failed: %v",
+			spec.kind, toNS, spec.options, err)
+	}
+	l.Logger.Infof("create %v collection %v of dest mongodb with options %v succeed",
+		spec.kind, toNS, spec.options)
+	return nil
+}
+
 func StartNamespaceSpecSyncForSharding(csUrl string, toConn *utils.MongoCommunityConn,
 	nsTrans *transform.NamespaceTransform) error {
 	l.Logger.Infof("document syncer namespace spec for sharding begin")

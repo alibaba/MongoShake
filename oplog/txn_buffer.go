@@ -34,7 +34,12 @@ type txnState struct {
 	ingestErr  error
 	stopChan   chan struct{}
 	startTime  TxnOpTime
-	wg         sync.WaitGroup
+	// sawData records whether any data-carrying entry (applyOps with
+	// prepare/partialTxn or plain applyOps) was ever ingested. A state whose
+	// only entry is the final commit means the earlier entries were lost,
+	// e.g. the checkpoint advanced past them before a restart.
+	sawData bool
+	wg      sync.WaitGroup
 }
 
 func newTxnState(op *GenericOplog) *txnState {
@@ -131,6 +136,7 @@ LOOP:
 		select {
 		case t := <-state.ingestChan:
 			if t.meta.IsData() {
+				state.sawData = true
 				// process it
 				innerOps, err := ExtractInnerOps(&t.op.Parsed.ParsedLog)
 				if err != nil {
@@ -192,6 +198,18 @@ func (b *TxnBuffer) GetTxnStream(m TxnMeta) (<-chan *GenericOplog, <-chan error)
 
 	if state.ingestErr != nil {
 		return sendErrAndClose(opChan, errChan, state.ingestErr)
+	}
+
+	if !state.sawData {
+		// The only entry ever ingested for this transaction is its final
+		// commit: the prepare/partialTxn oplogs were never seen. This happens
+		// when the checkpoint advanced past the in-memory buffered entries
+		// before a restart. Streaming an empty transaction here would be
+		// silent data loss, so fail loudly instead.
+		return sendErrAndClose(opChan, errChan, fmt.Errorf(
+			"GetTxnStream state for %v has no buffered data entries: "+
+				"prepare/partialTxn oplogs were never received (possibly skipped "+
+				"after a restart because the checkpoint advanced past them)", m.id))
 	}
 
 	// Launch streaming goroutine

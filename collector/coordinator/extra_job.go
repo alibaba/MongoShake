@@ -72,16 +72,27 @@ func (cui *CheckUniqueIndexExistsJob) Name() string {
 }
 
 func (cui *CheckUniqueIndexExistsJob) innerRun() error {
-	var err error
 	conns := make([]*utils.MongoCommunityConn, len(cui.urls))
+	defer func() {
+		for _, conn := range conns {
+			if conn != nil {
+				conn.Close()
+			}
+		}
+	}()
+
 	for i, source := range cui.urls {
-		conns[i], err = utils.NewMongoCommunityConn(source.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
+		conn, err := utils.NewMongoCommunityConn(source.URL, utils.VarMongoConnectModeSecondaryPreferred, true,
 			utils.ReadWriteConcernMajority, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
-			l.Logger.Errorf("extra job[%s] connect source[%v] failed: %v",
+			// Run() treats any error as fatal, which is the point: this job only exists
+			// to abort a shard_by_object_id configuration that a unique index makes
+			// unsafe. Returning nil here would leave the guard silently disabled for
+			// the rest of the run.
+			return fmt.Errorf("extra job[%s] connect source[%v] failed: %v",
 				cui.Name(), utils.BlockMongoUrlPassword(source.URL, "***"), err)
-			return nil
 		}
+		conns[i] = conn
 	}
 
 	// parse collection to ns
@@ -90,38 +101,52 @@ func (cui *CheckUniqueIndexExistsJob) innerRun() error {
 		nsList = append(nsList, utils.NewNS(c))
 	}
 
-	for range time.NewTicker(time.Duration(cui.interval) * time.Second).C {
+	ticker := time.NewTicker(time.Duration(cui.interval) * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
 		l.Logger.Debugf("extra job[%s] check", cui.Name())
-		for i, source := range cui.urls {
-			for _, ns := range nsList {
-				l.Logger.Debugf("extra job[%s] check[%v]", cui.Name(), ns)
-				cursor, err := conns[i].Client.Database(ns.Database).Collection(ns.Collection).
-					Indexes().List(context.Background())
-				if err != nil {
-					l.Logger.Errorf("extra job[%s] list indexes for [%s.%s] failed: %v",
-						cui.Name(), ns.Database, ns.Collection, err)
+		if err := cui.checkOnce(conns, nsList); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// checkOnce makes a single pass over every source and namespace and returns as soon as
+// it finds a unique index other than _id. Separating one pass from the polling loop is
+// what lets a caller check once and return instead of entering a loop that only exits
+// when the index it is looking for turns up.
+func (cui *CheckUniqueIndexExistsJob) checkOnce(conns []*utils.MongoCommunityConn, nsList []utils.NS) error {
+	for i, source := range cui.urls {
+		for _, ns := range nsList {
+			l.Logger.Debugf("extra job[%s] check[%v]", cui.Name(), ns)
+			cursor, err := conns[i].Client.Database(ns.Database).Collection(ns.Collection).
+				Indexes().List(context.Background())
+			if err != nil {
+				l.Logger.Errorf("extra job[%s] list indexes for [%s.%s] failed: %v",
+					cui.Name(), ns.Database, ns.Collection, err)
+				continue
+			}
+			for cursor.Next(context.Background()) {
+				nameVal, nErr := cursor.Current.LookupErr("name")
+				uniqueVal, uErr := cursor.Current.LookupErr("unique")
+				if nErr != nil || uErr != nil {
 					continue
 				}
-				for cursor.Next(context.Background()) {
-					nameVal, nErr := cursor.Current.LookupErr("name")
-					uniqueVal, uErr := cursor.Current.LookupErr("unique")
-					if nErr != nil || uErr != nil {
-						continue
-					}
 
-					nameStr, nameOk := nameVal.StringValueOK()
-					uniqueBool, uniqueOk := uniqueVal.BooleanOK()
-					if nameOk && uniqueOk && uniqueBool &&
-						!strings.HasPrefix(nameStr, "_id") {
-						cursor.Close(context.Background())
-						return fmt.Errorf("extra job[%s] with source[%v] query "+
-							"collection[%s - %s] find unique[%v]", cui.Name(),
-							utils.BlockMongoUrlPassword(source.URL, "***"),
-							ns.Database, ns.Collection, cursor.Current)
-					}
+				nameStr, nameOk := nameVal.StringValueOK()
+				uniqueBool, uniqueOk := uniqueVal.BooleanOK()
+				if nameOk && uniqueOk && uniqueBool &&
+					!strings.HasPrefix(nameStr, "_id") {
+					cursor.Close(context.Background())
+					return fmt.Errorf("extra job[%s] with source[%v] query "+
+						"collection[%s - %s] find unique[%v]", cui.Name(),
+						utils.BlockMongoUrlPassword(source.URL, "***"),
+						ns.Database, ns.Collection, cursor.Current)
 				}
-				cursor.Close(context.Background())
 			}
+			cursor.Close(context.Background())
 		}
 	}
 

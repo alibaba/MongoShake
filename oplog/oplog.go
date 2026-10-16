@@ -25,24 +25,29 @@ type GenericOplog struct {
 }
 
 type ParsedLog struct {
-	Timestamp     primitive.Timestamp `bson:"ts" json:"ts"`
-	Term          *int64              `bson:"t" json:"t"`
-	Hash          *int64              `bson:"h" json:"h"`
-	Version       int                 `bson:"v" json:"v"`
-	Operation     string              `bson:"op" json:"op"`
-	Gid           string              `bson:"g,omitempty" json:"g,omitempty"`
-	Namespace     string              `bson:"ns" json:"ns"`
-	Object        bson.D              `bson:"o" json:"o"`
-	Query         bson.D              `bson:"o2" json:"o2"`                                       // update condition
-	UniqueIndexes bson.M              `bson:"uk,omitempty" json:"uk,omitempty"`                   //
-	LSID          bson.Raw            `bson:"lsid,omitempty" json:"lsid,omitempty"`               // mark the session id, used in transaction
-	FromMigrate   bool                `bson:"fromMigrate,omitempty" json:"fromMigrate,omitempty"` // move chunk
-	TxnNumber     *int64              `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`     // transaction number in session
-	DocumentKey   bson.D              `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists when source collection is sharded, only including shard key and _id
-	PrevOpTime    bson.Raw            `bson:"prevOpTime,omitempty" json:"prevOpTime,omitempty"`
-	UI            *primitive.Binary   `bson:"ui,omitempty" json:"ui,omitempty"`                   // do not enable currently
-	Upsert        bool                `bson:"b,omitempty" json:"b,omitempty"`                     // upsert for update op
-	MultiOpType   *int                `bson:"multiOpType,omitempty" json:"multiOpType,omitempty"` // added in 8.0 for vectored insert
+	Timestamp primitive.Timestamp `bson:"ts" json:"ts"`
+	Term      *int64              `bson:"t" json:"t"`
+	// Hash maps to the oplog 'h' field.
+	// omitempty is required: MongoDB 7.0+ (SERVER-69062) rejects applyOps input
+	// containing 'h' with IDLUnknownField; MongoDB 9.0+ (SERVER-128506) reuses
+	// 'h' as docHash with a different semantic, so the field must be absent
+	// rather than serialized as null when not present in the source oplog.
+	Hash          *int64            `bson:"h,omitempty" json:"h,omitempty"`
+	Version       int               `bson:"v" json:"v"`
+	Operation     string            `bson:"op" json:"op"`
+	Gid           string            `bson:"g,omitempty" json:"g,omitempty"`
+	Namespace     string            `bson:"ns" json:"ns"`
+	Object        bson.D            `bson:"o" json:"o"`
+	Query         bson.D            `bson:"o2" json:"o2"`                                       // update condition
+	UniqueIndexes bson.M            `bson:"uk,omitempty" json:"uk,omitempty"`                   //
+	LSID          bson.Raw          `bson:"lsid,omitempty" json:"lsid,omitempty"`               // mark the session id, used in transaction
+	FromMigrate   bool              `bson:"fromMigrate,omitempty" json:"fromMigrate,omitempty"` // move chunk
+	TxnNumber     *int64            `bson:"txnNumber,omitempty" json:"txnNumber,omitempty"`     // transaction number in session
+	DocumentKey   bson.D            `bson:"documentKey,omitempty" json:"documentKey,omitempty"` // exists when source collection is sharded, only including shard key and _id
+	PrevOpTime    bson.Raw          `bson:"prevOpTime,omitempty" json:"prevOpTime,omitempty"`
+	UI            *primitive.Binary `bson:"ui,omitempty" json:"ui,omitempty"`                   // do not enable currently
+	Upsert        bool              `bson:"b,omitempty" json:"b,omitempty"`                     // upsert for update op
+	MultiOpType   *int              `bson:"multiOpType,omitempty" json:"multiOpType,omitempty"` // added in 8.0 for vectored insert
 
 	// Borrowed, immutable CRUD payloads. Use ObjectValue/QueryValue to read;
 	// call MaterializeObject before mutating Object. Not reflected wire fields.

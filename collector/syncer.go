@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -441,6 +442,17 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) boo
 					sync, i, utils.ExtractTimestampForLog(newestTs))
 				return true
 			}
+			// the persisted checkpoint may be pinned below an in-flight
+			// transaction; worker ack progress is the real barrier condition
+			if sync.batcher != nil {
+				if wl, werr := sync.calculateWorkerLowestCheckpoint(); werr == nil && wl >= newestTs {
+					l.Logger.Infof("%s[%v] barrier satisfied by worker ack[%v] >= newest[%v] "+
+						"while persisted checkpoint[%v] is pinned",
+						sync, i, utils.ExtractTimestampForLog(wl), utils.ExtractTimestampForLog(newestTs),
+						utils.ExtractTimestampForLog(checkpointTs))
+					return true
+				}
+			}
 			utils.YieldInMs(DDLCheckpointInterval)
 
 			if barrierCkptFlushFunc(sync) {
@@ -547,6 +559,10 @@ func (sync *OplogSyncer) deserializer(index int) {
 		for _, rawLog := range batchRawLogs {
 			log, err := parser(rawLog)
 			if err != nil {
+				if errors.Is(err, oplog.ErrEmptyChangeStreamUpdate) {
+					l.Logger.Warnf("%s deserializer skip empty change stream update: %v", sync, err)
+					continue
+				}
 				l.Logger.Panicf("%s deserializer parse data failed[%v]", sync, err)
 			}
 			sourceTime := extractSourceTime(rawLog, log)

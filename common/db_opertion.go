@@ -300,6 +300,41 @@ func GetListCollectionQueryCondition(conn *MongoCommunityConn) bson.M {
 	return queryCondition
 }
 
+// ListTimeSeriesNamespaces returns "db.collection" for every time-series collection on
+// the server, keeping only those filterFunc accepts. filterFunc has the same meaning as
+// GetDbNamespace's - true keeps the namespace - and nil keeps all of them.
+//
+// The logical name is reported, never the backing system.buckets.* collection. Callers
+// fetching increments through a change stream need this because change streams do not
+// surface time-series writes on any MongoDB version: bucket writes only ever reach the
+// oplog, watching the logical collection is rejected outright, and showExpandedEvents
+// adds nothing but the create DDL. See
+// https://www.mongodb.com/docs/manual/core/timeseries/timeseries-limitations/
+func ListTimeSeriesNamespaces(conn *MongoCommunityConn, filterFunc func(name string) bool) ([]string, error) {
+	dbNames, err := conn.Client.ListDatabaseNames(nil, bson.M{})
+	if err != nil {
+		return nil, fmt.Errorf("get database names error: %v", err)
+	}
+	sort.Strings(dbNames)
+
+	var found []string
+	for _, db := range dbNames {
+		// The "timeseries" type only exists from 5.0; an older server matches nothing.
+		colNames, err := conn.Client.Database(db).ListCollectionNames(nil, bson.M{"type": "timeseries"})
+		if err != nil {
+			return nil, fmt.Errorf("get time-series collection names of db[%v] error: %v", db, err)
+		}
+		for _, col := range colNames {
+			ns := db + "." + col
+			if filterFunc != nil && !filterFunc(ns) {
+				continue
+			}
+			found = append(found, ns)
+		}
+	}
+	return found, nil
+}
+
 // GetDbNamespace return db namespace. return:
 // @[]NS: namespace list, e.g., []{"a.b", "a.c"}
 // @map[string][]string: db->collection map. e.g., "a"->[]string{"b", "c"}

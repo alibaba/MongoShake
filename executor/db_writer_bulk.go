@@ -35,7 +35,7 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 			// {EnforceConstraints:false} outside the mongo server
 			l.Logger.Warnf("use 'applyOps' to handle insert op to ns[%v]", log.original.partialLog.Namespace)
 			result := bw.conn.Client.Database("admin").RunCommand(
-				nil, bson.D{{Key: "applyOps", Value: []oplog.ParsedLog{log.original.partialLog.ParsedLog}}})
+				nil, bson.D{{Key: "applyOps", Value: []bson.D{applyOpsDoc(log.original.partialLog)}}})
 			if result.Err() != nil {
 				return result.Err()
 			}
@@ -52,7 +52,7 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 	}
 
 	opts := options.BulkWrite().SetOrdered(false)
-	if conf.Options.IncrSyncBypassDocumentValidation {
+	if bypassDocumentValidationFor(collection) {
 		opts = opts.SetBypassDocumentValidation(true)
 	}
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, opts)
@@ -157,7 +157,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 	}
 
 	opts := options.BulkWrite()
-	if conf.Options.IncrSyncBypassDocumentValidation {
+	if bypassDocumentValidationFor(collection) {
 		opts = opts.SetBypassDocumentValidation(true)
 	}
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(nil, models, opts)
@@ -390,7 +390,8 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 			if newObject, oplogErr = log.original.partialLog.UpdateValue(); oplogErr != nil {
 				// Column-store diffs in time-series buckets need the original applyOps.
 				if strings.HasPrefix(collection, utils.VarSystemBucketsPrefix) {
-					l.Logger.Infof("bulk_writer fall back to applyOps for time-series bucket update on %s.%s: %v", database, collection, oplogErr)
+					// oplogErr embeds the raw column-store binary diff, so it is left out of the log.
+					l.Logger.Infof("bulk_writer fall back to applyOps for time-series bucket update on %s.%s", database, collection)
 					if applyErr := replayUpdateViaApplyOps(bw.conn.Client, log.original.partialLog); applyErr != nil {
 						return applyErr
 					}
@@ -447,7 +448,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 	}
 
 	opts := options.BulkWrite()
-	if conf.Options.IncrSyncBypassDocumentValidation {
+	if bypassDocumentValidationFor(collection) {
 		opts = opts.SetBypassDocumentValidation(true)
 	}
 	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(

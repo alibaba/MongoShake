@@ -253,6 +253,16 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 						wError, "full_sync.executor.insert_on_dup_update")
 				}
 
+				// The fallback below replays a duplicate as UpdateOne({_id}, {$set: doc}).
+				// Time-series collections reject every non-multi update, so it cannot
+				// succeed there; say so instead of issuing a write that always fails (#993).
+				if exec.conn.IsTimeSeriesCollection(ns.Database, ns.Collection) {
+					return fmt.Errorf("duplicate key error[%v] on time-series collection %v: "+
+						"full_sync.executor.insert_on_dup_update replays duplicates as an update by _id, "+
+						"which time-series collections do not support. Clean the collection on the target "+
+						"mongodb and restart the full-sync stage", wError, ns)
+				}
+
 				dupDocument := *modelDocs[wError.Index]
 				var updateFilter bson.D
 				updateFilterBool := false

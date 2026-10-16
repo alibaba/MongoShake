@@ -10,6 +10,7 @@ import (
 
 	"github.com/mongodb/mongo-tools-common/json"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -445,9 +446,22 @@ func TestSingleWriter(t *testing.T) {
 			mockOplogRecord(2, 2, 1),
 		}
 
+		// The replacement changes _id (1 -> 2) on a collection sharded by {x},
+		// so the server must reject it on every version. The rejection *reason*
+		// is version-specific: 7.0 fails first on routing (the filter carries no
+		// shard key -> "Failed to target upsert by query"), while 8.0 routes the
+		// upsert from the replacement document and fails on the immutable _id
+		// instead. Assert the cross-version invariant, and keep the reason check
+		// as a set so a genuinely new error still surfaces (#1018).
+		// require, not assert: on 8.0 the old assert.NotEqual(nil, err) let
+		// execution fall through to err.Error() on a nil error and panic, which
+		// took down every later test in this package.
 		err = writer.doUpdate(testDb, testCollection, bson.E{}, inserts, true)
-		assert.NotEqual(t, nil, err, "should be equal")
-		assert.Equal(t, true, strings.Contains(err.Error(), "Failed to target upsert by query"), "should be equal")
+		require.Error(t, err, "upsert that alters _id on a sharded collection must be rejected")
+		assert.True(t,
+			strings.Contains(err.Error(), "Failed to target upsert by query") ||
+				utils.IsImmutableShardKeyError(err),
+			"unexpected rejection reason: %v", err)
 		fmt.Println(err)
 
 		inserts[0].original.partialLog.DocumentKey = bson.D{
@@ -938,11 +952,23 @@ func TestBulkWriter(t *testing.T) {
 			mockOplogRecord(2, 2, 2),
 		}
 
+		// Without DocumentKey the upsert filter is {_id} only, so it carries no
+		// shard key. Whether the server rejects that is version-specific, and is
+		// not what this case verifies: 7.0 refuses to route it ("Failed to
+		// target upsert by query"), 8.0 accepts it and derives the target shard
+		// from the replacement document. Measured on a 2-shard 8.0.4 cluster
+		// with chunks split so that x=1 and x=2 live on different shards: each
+		// document landed on the shard owning its chunk, and the DocumentKey
+		// round below was an idempotent replace rather than a second insert —
+		// no orphaned duplicate. The end state is 2 documents on both versions,
+		// which is what the assertions after the DocumentKey round check (#1018).
+		//
+		// The old assert.NotEqual(nil, err) here was worse than version-brittle:
+		// on 8.0 err is nil, the following err.Error() panicked, and that panic
+		// killed the test binary — so every test after TestBulkWriter in this
+		// package had never actually run on 8.x.
 		err = writer.doUpdate(testDb, testCollection, bson.E{}, inserts, true)
-		assert.NotEqual(t, nil, err, "should be equal")
-		assert.Equal(t, true, strings.Contains(err.Error(),
-			"Failed to target upsert by query"), "should be equal")
-		fmt.Println(err)
+		fmt.Printf("upsert without DocumentKey: err=%v (rejected pre-8.0, accepted on 8.0+)\n", err)
 
 		inserts[0].original.partialLog.DocumentKey = bson.D{
 			{"_id", 1},
@@ -1432,11 +1458,13 @@ func TestCommandWriter(t *testing.T) {
 			mockOplogRecord(2, 2, 2),
 		}
 
+		// Same version-specific expectation as the TestBulkWriter case above:
+		// the filter carries no shard key, 7.0 refuses to route the upsert while
+		// 8.0 accepts it and routes from the replacement document. The invariant
+		// worth asserting is the end state after the shard-key-bearing round,
+		// which the assertions below already cover (#1018).
 		err = writer.doUpdate(testDb, testCollection, bson.E{}, inserts, true)
-		assert.NotEqual(t, nil, err, "should be equal")
-		assert.Equal(t, true, strings.Contains(err.Error(),
-			"Failed to target upsert by query"), "should be equal")
-		fmt.Println(err)
+		fmt.Printf("upsert without shard key in filter: err=%v (rejected pre-8.0, accepted on 8.0+)\n", err)
 
 		// filter have _id & shardKey will update successfully
 		inserts[0].original.partialLog.Query = bson.D{
@@ -2250,7 +2278,7 @@ func TestHasOriginalSpec(t *testing.T) {
 //   - doInsert: system.views insert bypassed via 'applyOps' command
 //   - doUpdate: system.buckets $v:2 diff with unparseable binary falls back to 'applyOps' command
 //   - RunCommand: commitIndexBuild with originalSpec converted to createIndexes on logical collection
-//   instead of system.buckets.xx
+//     instead of system.buckets.xx
 func TestTimeSeriesIntegration(t *testing.T) {
 	utils.InitialLogger("", "", "debug", true, 1)
 	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
@@ -2358,19 +2386,35 @@ func TestTimeSeriesIntegration(t *testing.T) {
 		bucketId := bucketResults[0]["_id"]
 		// Mock a $v:2 diff update oplog with only scontrol section (parseable).
 		// Reference: real time-series update oplog from MongoDB 5.0+
+		//
+		// The fabricated control must not contradict the single measurement inserted
+		// above, and how strictly that is enforced depends on the server (#1006):
+		//
+		//	7.0.37  no validation at all
+		//	7.0.43  control.min, control.max and the data columns must carry the same
+		//	        field set, so a min-only "humidity" field is rejected with code 121
+		//	        ("Mismatch between the number of time-series control fields and the
+		//	        number of data fields")
+		//	8.x     control.min and control.max must also equal the column data exactly,
+		//	        so a merely in-range value is rejected with code 121 ("Incorrect
+		//	        column data min for field 'temperature'")
+		//
+		// Hence only temperature, which exists in min, max and data alike, is touched,
+		// and it is set to the value actually inserted; count equals the one
+		// measurement present. Any change to the insert above must be mirrored here.
 		bucketNs := tsTestDb + ".system.buckets." + tsCollection
 		updateObj := bson.D{
 			{Key: "$v", Value: int32(2)},
 			{Key: "diff", Value: bson.D{
 				{Key: "scontrol", Value: bson.D{
 					{Key: "u", Value: bson.D{
-						{Key: "count", Value: int32(5)},
+						{Key: "count", Value: int32(1)},
 					}},
 					{Key: "smin", Value: bson.D{
-						{Key: "u", Value: bson.D{{Key: "humidity", Value: 50}}},
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 22.5}}},
 					}},
 					{Key: "smax", Value: bson.D{
-						{Key: "u", Value: bson.D{{Key: "temperature", Value: 30}}},
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 22.5}}},
 					}},
 				}},
 			}},
@@ -2400,13 +2444,13 @@ func TestTimeSeriesIntegration(t *testing.T) {
 			{Key: "diff", Value: bson.D{
 				{Key: "scontrol", Value: bson.D{
 					{Key: "u", Value: bson.D{
-						{Key: "count", Value: int32(5)},
+						{Key: "count", Value: int32(1)},
 					}},
 					{Key: "smin", Value: bson.D{
-						{Key: "u", Value: bson.D{{Key: "humidity", Value: 50}}},
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 22.5}}},
 					}},
 					{Key: "smax", Value: bson.D{
-						{Key: "u", Value: bson.D{{Key: "temperature", Value: 30}}},
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 22.5}}},
 					}},
 				}},
 				{Key: "sdata", Value: bson.D{
@@ -2445,21 +2489,39 @@ func TestTimeSeriesIntegration(t *testing.T) {
 				},
 			},
 		}
-		// This should fall back to applyOps because sdata.b cannot be parsed.
-		// The applyOps may fail on the server side (auth or because the diff is fabricated),
-		// but it should NOT fail with the "unknow Key[b]" parse error.
+		// The invariant this case protects is MongoShake's, not the server's: a
+		// binary column-store diff (`sdata.b`) must NOT be translated into an
+		// ordinary update, because if it were, the update would silently take the
+		// normal path instead of the applyOps fallback. Assert that directly on the
+		// parser.
+		//
+		// Asserting on the server's reaction instead — as this case used to — is
+		// version-dependent, and made it fail across the whole 8.0.x line while
+		// testing nothing about MongoShake: 7.0.37 rejects the invented bytes with
+		// 4770503 "Unexpected section: b in document diff" and 8.2.12 with 6067608
+		// "Invalid BSON Column encoding", but 8.0.4 and 8.0.10 accept them outright
+		// (measured on all four). A successful column-store replay is covered by
+		// TestTimeSeriesBucketBinaryColumnReplay, which uses a real diff (#1009).
+		_, parseErr := oplog.DiffUpdateOplogToNormal(updateObjWithBinary)
+		require.Error(t, parseErr,
+			"DiffUpdateOplogToNormal must bail out on a binary column-store diff, "+
+				"otherwise the update skips the applyOps fallback")
+		assert.Contains(t, parseErr.Error(), "parse diffOplog failed",
+			"the bail-out must come from the diff parser (oplog.go:380), not some unrelated failure")
+
+		// End-to-end: the bail-out must be turned into the applyOps fallback for
+		// system.buckets.* instead of surfacing as a hard failure. What the server
+		// then does with the invented bytes is version-specific, so only the
+		// routing invariant is asserted here. Note the guard this replaces looked
+		// for "unknow Key" in the surfaced error — that is oplog.go:452, a branch
+		// this path never reaches, so the old assertion could not fail.
 		err = writer.doUpdate(tsTestDb, "system.buckets."+tsCollection, bson.E{}, updateOplogsWithBinary, false)
 		if err != nil {
-			assert.NotContains(t, err.Error(), "unknow Key",
-				"error should NOT be from DiffUpdateOplogToNormal parse; should be from applyOps server-side")
-			if strings.Contains(err.Error(), "Unauthorized") ||
-				strings.Contains(err.Error(), "not authorized") {
-				fmt.Printf("  [ok] system.buckets update correctly routed to applyOps (auth denied): %v\n", err)
-			} else {
-				fmt.Printf("  [expected] applyOps fallback returned server-side error: %v\n", err)
-			}
+			assert.NotContains(t, err.Error(), "parse diffOplog failed",
+				"the surfaced error must come from the applyOps fallback, not from MongoShake's own diff parser")
+			fmt.Printf("  [info] applyOps fallback returned a server-side error: %v\n", err)
 		} else {
-			fmt.Println("  applyOps fallback succeeded (server accepted the fabricated diff)")
+			fmt.Printf("  [info] applyOps fallback accepted by the server (8.0.x does not validate BSON Column bytes)\n")
 		}
 	}
 	// ---- CommandWriter.doUpdate: system.buckets $v:2 diff handling ----
@@ -2482,13 +2544,13 @@ func TestTimeSeriesIntegration(t *testing.T) {
 			{Key: "diff", Value: bson.D{
 				{Key: "scontrol", Value: bson.D{
 					{Key: "u", Value: bson.D{
-						{Key: "count", Value: int32(5)},
+						{Key: "count", Value: int32(1)},
 					}},
 					{Key: "smin", Value: bson.D{
-						{Key: "u", Value: bson.D{{Key: "humidity", Value: 50}}},
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 22.5}}},
 					}},
 					{Key: "smax", Value: bson.D{
-						{Key: "u", Value: bson.D{{Key: "temperature", Value: 30}}},
+						{Key: "u", Value: bson.D{{Key: "temperature", Value: 22.5}}},
 					}},
 				}},
 			}},
@@ -2513,7 +2575,7 @@ func TestTimeSeriesIntegration(t *testing.T) {
 			{Key: "diff", Value: bson.D{
 				{Key: "scontrol", Value: bson.D{
 					{Key: "u", Value: bson.D{
-						{Key: "count", Value: int32(5)},
+						{Key: "count", Value: int32(1)},
 					}},
 				}},
 				{Key: "sdata", Value: bson.D{
@@ -2538,13 +2600,22 @@ func TestTimeSeriesIntegration(t *testing.T) {
 				},
 			},
 		}}
+		// As in the SingleWriter case above: assert MongoShake's own bail-out on the
+		// parser rather than the server's reaction to the invented bytes, which is
+		// version-dependent — 8.0.x accepts them outright (#1018).
+		_, parseErr := oplog.DiffUpdateOplogToNormal(binaryObj)
+		require.Error(t, parseErr,
+			"DiffUpdateOplogToNormal must bail out on a binary column-store diff")
+		assert.Contains(t, parseErr.Error(), "parse diffOplog failed",
+			"the bail-out must come from the diff parser (oplog.go:380), not some unrelated failure")
+
 		err = cmdWriter.doUpdate(tsTestDb, "system.buckets."+tsCollection, gid, binaryOplogs, false)
 		if err != nil {
-			assert.NotContains(t, err.Error(), "unknow Key",
-				"CommandWriter error should NOT be from DiffUpdateOplogToNormal parse")
-			fmt.Printf("  [expected] CommandWriter applyOps fallback returned: %v\n", err)
+			assert.NotContains(t, err.Error(), "parse diffOplog failed",
+				"the surfaced error must come from the applyOps fallback, not from MongoShake's own diff parser")
+			fmt.Printf("  [info] CommandWriter applyOps fallback returned: %v\n", err)
 		} else {
-			fmt.Println("  CommandWriter applyOps fallback succeeded")
+			fmt.Printf("  [info] CommandWriter applyOps fallback accepted by the server\n")
 		}
 	}
 	// ---- RunCommand: commitIndexBuild with originalSpec ----

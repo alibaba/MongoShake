@@ -55,7 +55,7 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.E, o
 			strings.HasSuffix(log.original.partialLog.Namespace, utils.VarSystemViewsCollection) {
 			l.Logger.Warnf("use 'applyOps' to handle insert op to ns[%v]", log.original.partialLog.Namespace)
 			result := sw.conn.Client.Database("admin").RunCommand(
-				nil, bson.D{{Key: "applyOps", Value: []oplog.ParsedLog{log.original.partialLog.ParsedLog}}})
+				nil, bson.D{{Key: "applyOps", Value: []bson.D{applyOpsDoc(log.original.partialLog)}}})
 			if result.Err() != nil {
 				return result.Err()
 			}
@@ -63,7 +63,7 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.E, o
 		}
 
 		opts := options.InsertOne()
-		if conf.Options.IncrSyncBypassDocumentValidation {
+		if bypassDocumentValidationFor(collection) {
 			opts = opts.SetBypassDocumentValidation(true)
 		}
 		if _, err := collectionHandle.InsertOne(context.Background(), log.original.partialLog.ObjectValue(), opts); err != nil {
@@ -131,7 +131,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 		for _, update := range updates {
 
 			opts := options.Update().SetUpsert(true)
-			if conf.Options.IncrSyncBypassDocumentValidation {
+			if bypassDocumentValidationFor(collection) {
 				opts = opts.SetBypassDocumentValidation(true)
 			}
 			res, err := collectionHandle.UpdateOne(context.Background(), update.id,
@@ -214,7 +214,7 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 	} else {
 		for _, update := range updates {
 			opts := options.Update().SetUpsert(false)
-			if conf.Options.IncrSyncBypassDocumentValidation {
+			if bypassDocumentValidationFor(collection) {
 				opts = opts.SetBypassDocumentValidation(true)
 			}
 			res, err := collectionHandle.UpdateOne(context.Background(), update.id,
@@ -326,7 +326,8 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 			if update, oplogErr = log.original.partialLog.UpdateValue(); oplogErr != nil {
 				// Column-store diffs in time-series buckets need the original applyOps.
 				if strings.HasPrefix(collection, utils.VarSystemBucketsPrefix) {
-					l.Logger.Infof("single_writer fall back to applyOps for time-series bucket update on %s.%s: %v", database, collection, oplogErr)
+					// oplogErr embeds the raw column-store binary diff, so it is left out of the log.
+					l.Logger.Infof("single_writer fall back to applyOps for time-series bucket update on %s.%s", database, collection)
 					if applyErr := replayUpdateViaApplyOps(sw.conn.Client, log.original.partialLog); applyErr != nil {
 						return applyErr
 					}
@@ -340,7 +341,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 			if upsert {
 				opts.SetUpsert(true)
 			}
-			if conf.Options.IncrSyncBypassDocumentValidation {
+			if bypassDocumentValidationFor(collection) {
 				opts = opts.SetBypassDocumentValidation(true)
 			}
 			if upsert && len(log.original.partialLog.DocumentKey) > 0 {
@@ -361,7 +362,7 @@ func (sw *SingleWriter) doUpdate(database, collection string, metadata bson.E, o
 			if upsert {
 				opts.SetUpsert(true)
 			}
-			if conf.Options.IncrSyncBypassDocumentValidation {
+			if bypassDocumentValidationFor(collection) {
 				opts = opts.SetBypassDocumentValidation(true)
 			}
 			if upsert && len(log.original.partialLog.DocumentKey) > 0 {

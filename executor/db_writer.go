@@ -10,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
 	l "github.com/alibaba/MongoShake/v2/pkg/log"
@@ -433,20 +434,67 @@ func extractOriginalSpecs(obj bson.D) bson.A {
 	return result
 }
 
+// bypassDocumentValidationFor reports whether bypassDocumentValidation may be sent for
+// this collection.
+//
+// Whether the server tolerates it on a time-series bucket namespace depends on the patch
+// release. Inserting one real bucket into system.buckets.<ts collection>:
+//
+//	7.0.37   omitted / false / true   all accepted
+//	7.0.43   omitted / false accepted, true rejected with code 2
+//	         "bypassDocumentValidation is not permitted on timeseries collections"
+//	8.0.4    omitted / false / true   all accepted
+//	8.2.12   omitted / false / true   all accepted
+//
+// Honouring incr_sync.executor.bypass_document_validation there would make the same
+// replay succeed or fail depending on the target's patch level, so the option is omitted
+// for bucket namespaces; omitting it is accepted everywhere, and explicitly sending false
+// is too, which is what the command writer's else branch already does.
+//
+// The prefix is matched rather than calling IsTimeSeriesCollection, which would issue a
+// listCollections per write. Bucket namespaces always carry the prefix.
+func bypassDocumentValidationFor(collection string) bool {
+	return conf.Options.IncrSyncBypassDocumentValidation &&
+		!strings.HasPrefix(collection, utils.VarSystemBucketsPrefix)
+}
+
+// applyOpsDoc renders one oplog entry as an applyOps input document.
+//
+// ui is deliberately left out. applyOps requires it to name the same collection
+// as ns, and this is the source's uuid for a collection the target created
+// independently, so forwarding it fails every replay with Location3318200
+// "Namespace ... and UUID ... point to different collections". The other applyOps
+// paths in this file strip it the same way, through utils.ApplyOpsFilter and
+// oplog.RemoveFiled(doc, uuidMark).
+//
+// Only the fields an op actually carries are emitted. PartialLog.Dump is not
+// usable here: it serialises every tagged field, including empty bson.Raw ones
+// such as lsid and prevOpTime, which the driver rejects with "cannot marshal
+// type primitive.D to a BSON Document: couldn't read length from src".
+func applyOpsDoc(pLog *oplog.PartialLog) bson.D {
+	doc := bson.D{
+		{Key: "op", Value: pLog.Operation},
+		{Key: "ns", Value: pLog.Namespace},
+		{Key: "o", Value: pLog.ObjectValue()},
+	}
+	switch query := pLog.QueryValue().(type) {
+	case bson.D:
+		if len(query) > 0 {
+			doc = append(doc, bson.E{Key: "o2", Value: query})
+		}
+	case bson.Raw:
+		if len(query) > 0 {
+			doc = append(doc, bson.E{Key: "o2", Value: query})
+		}
+	}
+	return doc
+}
+
 // replayUpdateViaApplyOps replays an update oplog directly via applyOps command,
 // preserving the original $v:2 diff format. This is used for time-series bucket
 // updates that contain column-store binary diffs which cannot be converted to
 // standard $set/$unset operations.
 func replayUpdateViaApplyOps(client *mongo.Client, pLog *oplog.PartialLog) error {
-	doc := bson.D{
-		{Key: "op", Value: pLog.Operation},
-		{Key: "ns", Value: pLog.Namespace},
-		{Key: "o", Value: pLog.ObjectValue()},
-		{Key: "o2", Value: pLog.QueryValue()},
-	}
-	if pLog.UI != nil {
-		doc = append(doc, bson.E{Key: "ui", Value: pLog.UI})
-	}
 	return client.Database("admin").RunCommand(context.Background(),
-		bson.D{{Key: "applyOps", Value: []interface{}{doc}}}).Err()
+		bson.D{{Key: "applyOps", Value: []interface{}{applyOpsDoc(pLog)}}}).Err()
 }

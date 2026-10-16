@@ -198,3 +198,44 @@ func TestGetAllNamespace(t *testing.T) {
 			Int64ToTimestamp(biggestOld), Int64ToTimestamp(smallestOld), tsMap)
 	}
 }
+
+func TestListTimeSeriesNamespaces(t *testing.T) {
+	conn, err := NewMongoCommunityConn(testMongoAddress, VarMongoConnectModePrimary, true,
+		ReadWriteConcernDefault, ReadWriteConcernDefault, "")
+	if err != nil {
+		t.Skipf("no mongodb at %s: %v", testMongoAddress, err)
+	}
+	defer conn.Close()
+	ctx := context.Background()
+
+	const db = "ts_scan_test"
+	_ = conn.Client.Database(db).Drop(ctx)
+	// A time-series database left behind holds a dangling view definition, which makes
+	// the server reject listCollections for that whole database and so breaks unrelated
+	// tests that run afterwards.
+	defer func() { _ = conn.Client.Database(db).Drop(ctx) }()
+
+	err = conn.Client.Database(db).RunCommand(ctx, bson.D{
+		{Key: "create", Value: "gps"},
+		{Key: "timeseries", Value: bson.D{{Key: "timeField", Value: "ts"}}},
+	}).Err()
+	if err != nil {
+		t.Skipf("server cannot create time-series collections (needs 5.0+): %v", err)
+	}
+	_, err = conn.Client.Database(db).Collection("plain").InsertOne(ctx, bson.M{"_id": 1})
+	assert.Equal(t, nil, err, "insert into the ordinary control collection")
+
+	// The server is shared, so other databases may hold time-series collections of their
+	// own. Assert on membership rather than on the whole list.
+	got, err := ListTimeSeriesNamespaces(conn, nil)
+	assert.Equal(t, nil, err, "list time-series namespaces")
+	assert.Contains(t, got, db+".gps", "the time-series collection is reported by its logical name")
+	assert.NotContains(t, got, db+".plain", "an ordinary collection is not time-series")
+	assert.NotContains(t, got, db+".system.buckets.gps",
+		"the backing bucket collection is not reported separately")
+
+	// filterFunc keeps only what it accepts, matching GetDbNamespace's convention
+	kept, err := ListTimeSeriesNamespaces(conn, func(ns string) bool { return ns == db+".something-else" })
+	assert.Equal(t, nil, err, "list time-series namespaces with a filter")
+	assert.NotContains(t, kept, db+".gps", "a namespace the filter rejects must not be reported")
+}

@@ -2,16 +2,17 @@ package sharding
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"reflect"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	"github.com/alibaba/MongoShake/v2/oplog"
 	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
@@ -74,6 +75,110 @@ type ShardingChunkMap map[string]map[string]*ShardCollection
 
 type DBChunkMap map[string]*ShardCollection
 
+// ChunkDoc is one config.chunks document.
+//
+// MongoDB 5.0 replaced the "ns" field with the collection "uuid". Measured
+// against real servers: 4.4.30 writes ns and no uuid, while 5.0.33 / 6.0.28 /
+// 7.0.37 / 8.0.4 / 8.2.12 all write uuid and no ns. Both are decoded and the
+// namespace is recovered through collectionIndex.resolve, so a single code
+// path serves every version without probing the server.
+type ChunkDoc struct {
+	Ns    string           `bson:"ns"`
+	UUID  primitive.Binary `bson:"uuid"`
+	Min   *bson.Raw        `bson:"min"`
+	Max   *bson.Raw        `bson:"max"`
+	Shard string           `bson:"shard"`
+}
+
+// CollectionDoc is one config.collections document. _id is the namespace
+// string on every version from 4.4 through 8.2, which is what makes the
+// uuid -> namespace reverse lookup possible.
+type CollectionDoc struct {
+	Ns   string           `bson:"_id"`
+	UUID primitive.Binary `bson:"uuid"`
+	Key  bson.D           `bson:"key"`
+}
+
+// collectionMeta is a config.collections entry reduced to what chunk
+// interpretation needs: the namespace plus its shard key columns and the
+// per-column shard type.
+type collectionMeta struct {
+	ns         string
+	keys       []string
+	shardTypes []string
+}
+
+// collectionIndex resolves a chunk to its collection. byNS serves pre-5.0
+// chunks (which name the namespace themselves), byUUID serves 5.0+ chunks
+// (which only carry the uuid).
+type collectionIndex struct {
+	byNS   map[string]*collectionMeta
+	byUUID map[string]*collectionMeta
+}
+
+// uuidKey stringifies a Binary so it can be used as a map key —
+// primitive.Binary holds a slice and is therefore not comparable.
+func uuidKey(u primitive.Binary) string {
+	return hex.EncodeToString(u.Data)
+}
+
+// buildCollectionIndex parses config.collections in one pass. Besides making
+// the uuid -> namespace lookup possible, this removes the per-chunk FindOne
+// the previous implementation issued: a cluster with N chunks used to cost N
+// round trips to the config server.
+//
+// An entry without a usable shard key is skipped with a warning rather than
+// failing the build — the previous code only errored once a chunk actually
+// referenced that namespace, and keeping such an entry would leave the chunk
+// min/max validation indexing an empty key list. Chunks of a skipped entry
+// then fail to resolve and are dropped individually by buildChunkMap.
+func buildCollectionIndex(docs []CollectionDoc) (*collectionIndex, error) {
+	idx := &collectionIndex{
+		byNS:   make(map[string]*collectionMeta, len(docs)),
+		byUUID: make(map[string]*collectionMeta, len(docs)),
+	}
+	for _, doc := range docs {
+		if len(doc.Key) == 0 {
+			l.Logger.Warnf("buildCollectionIndex skip collection[%v] with no shard key", doc.Ns)
+			continue
+		}
+		keys, shardTypes, err := parseShardKey(doc.Key)
+		if err != nil {
+			return nil, fmt.Errorf("config.collections entry[%v]: %w", doc.Ns, err)
+		}
+		meta := &collectionMeta{ns: doc.Ns, keys: keys, shardTypes: shardTypes}
+		if doc.Ns != "" {
+			idx.byNS[doc.Ns] = meta
+		}
+		if len(doc.UUID.Data) > 0 {
+			idx.byUUID[uuidKey(doc.UUID)] = meta
+		}
+	}
+	return idx, nil
+}
+
+// resolve recovers the collection a chunk belongs to. The chunk's own ns wins
+// when present; otherwise the uuid is looked up. An ns that is not in the
+// index still falls through to the uuid, so a chunk carrying a stale ns is
+// resolved rather than dropped.
+func (idx *collectionIndex) resolve(chunkNs string, chunkUUID primitive.Binary) (*collectionMeta, error) {
+	if chunkNs != "" {
+		if meta, ok := idx.byNS[chunkNs]; ok {
+			return meta, nil
+		}
+	}
+	if len(chunkUUID.Data) > 0 {
+		if meta, ok := idx.byUUID[uuidKey(chunkUUID)]; ok {
+			return meta, nil
+		}
+		return nil, fmt.Errorf("no config.collections entry for chunk uuid[%x]", chunkUUID.Data)
+	}
+	if chunkNs != "" {
+		return nil, fmt.Errorf("no config.collections entry for namespace[%v]", chunkNs)
+	}
+	return nil, fmt.Errorf("chunk carries neither ns nor uuid")
+}
+
 func GetChunkMapByUrl(csUrl string) (ShardingChunkMap, error) {
 	var conn *utils.MongoCommunityConn
 	var err error
@@ -83,124 +188,153 @@ func GetChunkMapByUrl(csUrl string) (ShardingChunkMap, error) {
 	}
 	defer conn.Close()
 
-	chunkMap := make(ShardingChunkMap)
 	type ShardDoc struct {
 		Tag  string `bson:"_id"`
 		Host string `bson:"host"`
 	}
-	// map: _id -> replset name
+	// map: config.shards _id -> replset name
 	shardMap := make(map[string]string)
-	var shardDoc ShardDoc
-
 	shardCursor, err := conn.Client.Database(ConfigDB).Collection(ShardCol).Find(context.Background(), bson.M{})
 	if err != nil {
 		return nil, err
 	}
 	for shardCursor.Next(context.Background()) {
-		err = shardCursor.Decode(&shardDoc)
-		if err != nil {
-			l.Logger.Warnf("GetChunkMapByUrl Decode Failed, err[%v]", err)
+		var shardDoc ShardDoc
+		if err = shardCursor.Decode(&shardDoc); err != nil {
+			l.Logger.Warnf("GetChunkMapByUrl decode config.shards failed, err[%v]", err)
 			continue
 		}
-
-		replset := strings.Split(shardDoc.Host, "/")[0]
-		shardMap[shardDoc.Tag] = replset
-		chunkMap[replset] = make(DBChunkMap)
+		shardMap[shardDoc.Tag] = strings.Split(shardDoc.Host, "/")[0]
 	}
 
-	type ChunkDoc struct {
-		Ns    string    `bson:"ns"`
-		Min   *bson.Raw `bson:"min"`
-		Max   *bson.Raw `bson:"max"`
-		Shard string    `bson:"shard"`
+	// config.collections is read once, up front: it supplies both the shard key
+	// of each namespace and the uuid -> namespace mapping that 5.0+ chunks need.
+	var collectionDocs []CollectionDoc
+	colCursor, err := conn.Client.Database(ConfigDB).Collection(CollectionCol).Find(context.Background(), bson.M{})
+	if err != nil {
+		return nil, err
 	}
+	for colCursor.Next(context.Background()) {
+		var colDoc CollectionDoc
+		if err = colCursor.Decode(&colDoc); err != nil {
+			l.Logger.Warnf("GetChunkMapByUrl decode config.collections failed, err[%v]", err)
+			continue
+		}
+		collectionDocs = append(collectionDocs, colDoc)
+	}
+	idx, err := buildCollectionIndex(collectionDocs)
+	if err != nil {
+		return nil, err
+	}
+
 	// only sharded collections exist on "config.chunks"
-	var chunkDoc ChunkDoc
+	var chunks []ChunkDoc
 	chunkCursor, err := conn.Client.Database(ConfigDB).Collection(ChunkCol).Find(context.Background(), bson.M{})
 	if err != nil {
 		return nil, err
 	}
 	for chunkCursor.Next(context.Background()) {
-		err = chunkCursor.Decode(&chunkDoc)
+		var chunkDoc ChunkDoc
+		if err = chunkCursor.Decode(&chunkDoc); err != nil {
+			l.Logger.Warnf("GetChunkMapByUrl decode config.chunks failed, err[%v]", err)
+			continue
+		}
+		chunks = append(chunks, chunkDoc)
+	}
+
+	return buildChunkMap(shardMap, idx, chunks)
+}
+
+// buildChunkMap assembles {replset: {namespace: *ShardCollection}} from the
+// shard list and the decoded chunks. It is pure so the pre-5.0 and 5.0+ chunk
+// shapes can be exercised without a config server.
+func buildChunkMap(shardMap map[string]string, idx *collectionIndex, chunks []ChunkDoc) (ShardingChunkMap, error) {
+	chunkMap := make(ShardingChunkMap, len(shardMap))
+	for _, replset := range shardMap {
+		chunkMap[replset] = make(DBChunkMap)
+	}
+
+	unresolved := 0
+	for i := range chunks {
+		chunk := &chunks[i]
+		meta, err := idx.resolve(chunk.Ns, chunk.UUID)
 		if err != nil {
-			l.Logger.Warnf("GetChunkMapByUrl Decode Failed, err[%v]", err)
+			// A collection dropped between the config.collections read and the
+			// config.chunks read lands here. Skip the chunk instead of aborting:
+			// the remaining ones are still usable.
+			unresolved++
+			l.Logger.Warnf("buildChunkMap skip chunk[%v] on shard[%v]: %v", i, chunk.Shard, err)
 			continue
 		}
 
-		// get all keys and per-key shard type(range or hashed)
-		keys, shardTypes, err := GetColShardType(conn, chunkDoc.Ns)
-		if err != nil {
-			return nil, err
+		replset, ok := shardMap[chunk.Shard]
+		if !ok {
+			return nil, fmt.Errorf("buildChunkMap chunk[%v] of %v refers to shard[%v] which is "+
+				"absent from config.shards", i, meta.ns, chunk.Shard)
 		}
 
-		// the namespace is sharded, chunk map of each shard need to initialize
+		// the namespace is sharded, so every replset needs an entry for it —
+		// including the ones holding none of its chunks. OrphanFilter reads
+		// presence to tell "sharded collection" apart from "not sharded".
 		for _, dbChunkMap := range chunkMap {
-			if _, ok := dbChunkMap[chunkDoc.Ns]; !ok {
-				dbChunkMap[chunkDoc.Ns] = &ShardCollection{Keys: keys, ShardTypes: shardTypes}
+			if _, exists := dbChunkMap[meta.ns]; !exists {
+				dbChunkMap[meta.ns] = &ShardCollection{Keys: meta.keys, ShardTypes: meta.shardTypes}
 			}
 		}
 
-		// validate "min" and "max" in chunk
-		replset := shardMap[chunkDoc.Shard]
+		if chunk.Min == nil || chunk.Max == nil {
+			return nil, fmt.Errorf("buildChunkMap chunk[%v] of %v has nil min/max (min nil[%v] max nil[%v])",
+				i, meta.ns, chunk.Min == nil, chunk.Max == nil)
+		}
 		var minD, maxD bson.D
-		err1 := bson.Unmarshal(*chunkDoc.Min, &minD)
-		err2 := bson.Unmarshal(*chunkDoc.Max, &maxD)
-		if err1 != nil || err2 != nil || len(minD) != len(maxD) {
-			return nil, fmt.Errorf("GetChunkMapByUrl get illegal chunk doc min[%v] max[%v]. err1[%v] err2[%v]",
-				minD, maxD, err1, err2)
+		errMin := bson.Unmarshal(*chunk.Min, &minD)
+		errMax := bson.Unmarshal(*chunk.Max, &maxD)
+		if errMin != nil || errMax != nil {
+			return nil, fmt.Errorf("buildChunkMap chunk[%v] of %v has illegal min/max. errMin[%v] errMax[%v]",
+				i, meta.ns, errMin, errMax)
+		}
+		// widths must agree with each other and with the shard key, otherwise
+		// the key lookups below would run off the end of meta.keys
+		if len(minD) != len(maxD) || len(minD) != len(meta.keys) {
+			return nil, fmt.Errorf("buildChunkMap chunk[%v] of %v width mismatch: min[%v] max[%v] shardKey[%v]",
+				i, meta.ns, minD, maxD, meta.keys)
 		}
 
-		shardCol := chunkMap[replset][chunkDoc.Ns]
-		var mins, maxs []interface{}
-		for i, item := range minD {
-			if item.Key != shardCol.Keys[i] {
-				return nil, fmt.Errorf("GetChunkMapByUrl get illegal chunk doc min[%v] keys[%v]",
-					minD, shardCol.Keys)
+		shardCol := chunkMap[replset][meta.ns]
+		mins := make([]interface{}, 0, len(minD))
+		maxs := make([]interface{}, 0, len(maxD))
+		for j, item := range minD {
+			if item.Key != meta.keys[j] {
+				return nil, fmt.Errorf("buildChunkMap chunk[%v] of %v min keys[%v] != shard keys[%v]",
+					i, meta.ns, minD, meta.keys)
 			}
 			mins = append(mins, item.Value)
 		}
-		for i, item := range maxD {
-			if item.Key != shardCol.Keys[i] {
-				return nil, fmt.Errorf("GetChunkMapByUrl get illegal chunk doc max[%v] keys[%v]",
-					maxD, shardCol.Keys)
+		for j, item := range maxD {
+			if item.Key != meta.keys[j] {
+				return nil, fmt.Errorf("buildChunkMap chunk[%v] of %v max keys[%v] != shard keys[%v]",
+					i, meta.ns, maxD, meta.keys)
 			}
 			maxs = append(maxs, item.Value)
 		}
-		chunkRange := &ChunkRange{Mins: mins, Maxs: maxs}
-		shardCol.Chunks = append(shardCol.Chunks, chunkRange)
+		shardCol.Chunks = append(shardCol.Chunks, &ChunkRange{Mins: mins, Maxs: maxs})
 	}
+
+	// Nothing resolved means the chunk map would come back empty and
+	// OrphanFilter would silently stop filtering — the failure class #978 was
+	// about. Fail loudly instead of handing back a map that looks valid.
+	if unresolved > 0 && unresolved == len(chunks) {
+		return nil, fmt.Errorf("buildChunkMap resolved none of the %v config.chunks documents against "+
+			"config.collections, so the orphan filter would silently do nothing; check that mongo_cs_url "+
+			"points at the config server of the source cluster", len(chunks))
+	}
+
 	return chunkMap, nil
 }
 
-// GetColShardType returns the shard key columns and the per-column shard
-// type for the given namespace. The second return value has the same length
-// as the first; each entry is either HashedShard or RangedShard.
-//
-// Compound shard keys can mix the two — e.g. {a: 1, b: "hashed"} (MongoDB
-// 4.4+ compound hashed). Callers must consult the per-column type when
-// deciding whether to ComputeHash; treating the whole collection as a
-// single type silently mis-classifies documents at the shard boundary.
-func GetColShardType(conn *utils.MongoCommunityConn, namespace string) ([]string, []string, error) {
-	var colDoc bson.D
-	if err := conn.Client.Database(ConfigDB).Collection(CollectionCol).FindOne(context.Background(),
-		bson.M{"_id": namespace}).Decode(&colDoc); err != nil {
-		return nil, nil, err
-	}
-
-	keyDoc, ok := oplog.GetKey(colDoc, "key").(bson.D)
-	if !ok {
-		return nil, nil, fmt.Errorf("GetColShardType with namespace[%v] has no key item in doc %v", namespace, colDoc)
-	}
-	keys, shardTypes, err := parseShardKey(keyDoc)
-	if err != nil {
-		return nil, nil, fmt.Errorf("GetColShardType with namespace[%v]: %w", namespace, err)
-	}
-	return keys, shardTypes, nil
-}
-
 // parseShardKey turns a config.collections "key" subdocument into the per-
-// column (name, type) pair. It is the pure data path of GetColShardType and
-// is split out so we can unit-test compound hashed shard keys without a
+// column (name, type) pair. It is the pure data path of buildCollectionIndex
+// and is split out so we can unit-test compound hashed shard keys without a
 // mongos. Each item's value is either a string ("hashed") or a numeric
 // direction (1 / -1, including int32/int64/float64 as decoded by the BSON
 // driver). The two slices returned are 1:1 with keyDoc and are intentionally
