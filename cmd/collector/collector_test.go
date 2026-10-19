@@ -150,7 +150,7 @@ func TestDupKeyStrategyDefaultAndValidation(t *testing.T) {
 		utils.VarIncrSyncExecutorDupKeyStrategySkip,
 	} {
 		conf.Options = conf.Configuration{
-			MongoUrls:                       []string{"mongodb://127.0.0.1:27017"},
+			MongoUrls:                      []string{"mongodb://127.0.0.1:27017"},
 			IncrSyncExecutorDupKeyStrategy: strategy,
 		}
 		if strategy == utils.VarIncrSyncExecutorDupKeyStrategySkip {
@@ -160,7 +160,7 @@ func TestDupKeyStrategyDefaultAndValidation(t *testing.T) {
 	}
 
 	conf.Options = conf.Configuration{
-		MongoUrls:                       []string{"mongodb://127.0.0.1:27017"},
+		MongoUrls:                      []string{"mongodb://127.0.0.1:27017"},
 		IncrSyncExecutorDupKeyStrategy: "bad",
 	}
 	assert.Error(t, checkDefaultValue(), "should be equal")

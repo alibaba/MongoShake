@@ -9,6 +9,7 @@
 *.yml
 !docs/monitor/*.yml
 !tests/integration/**/*.yml
+!.github/workflows/*.yml
 tags
 *.bak
 *.tar.gz

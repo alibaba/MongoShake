@@ -1,0 +1,56 @@
+name: ci
+
+# The MongoDB-backed suite (go test -p 1 ./...) is deliberately NOT run here: it
+# needs a replica set, a config server and a sharded cluster, and a single
+# service container cannot provide all three. The release gate stays a local run
+# until that is solved. See issue #1026.
+#
+# go vet is also deliberately absent. It exits 1 on this tree with 946
+# "struct literal uses unkeyed fields" findings, nearly all on
+# bson/primitive.E{...} positional literals, which are idiomatic in MongoDB
+# code. A permanently red gate teaches people to ignore gates. #1023 and #1024
+# cleared the two findings that were real (copylocks and a shift by the operand
+# width); reconsider vet once the unkeyed-fields noise is dealt with.
+
+on:
+  push:
+    branches: [develop, master]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # go.work, not go.mod: go.work is tracked and declares go 1.24.5, so
+      # installing go.mod's 1.21 would make the toolchain reject the workspace
+      # file before it built anything. This matches what a local build does.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.work
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      # git ls-files rather than gofmt -l . so the untracked mongo-shake-v*
+      # release staging directories cannot contribute noise.
+      - name: gofmt
+        run: |
+          unformatted=$(git ls-files -z '*.go' | xargs -0 gofmt -l)
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      # Packages verified to pass with every MONGOSHAKE_TEST_URL* unset.
+      # ./common is excluded on purpose: it dials a real server.
+      - name: Tests that need no MongoDB
+        run: |
+          go test -count=1 -p 1 \
+            ./collector/configure \
+            ./collector/filter \
+            ./collector/transform \
+            ./collector/spool
