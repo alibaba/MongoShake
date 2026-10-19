@@ -129,4 +129,9 @@ We also provide some tools for synchronization in Shake series.<br>
 | renheqiang |                       |
 | dobesv |   dobesv@gmail.com    |
 | pengzhenyi2015 | 503282373@qq.com |
-| SisyphusSQ | |
+| SisyphusSQ | https://sisyphuslab.cn |
+| mrnonz | http://mrnonz.com |
+| ccfuncy | |
+| conan912 | |
+| FranzLi347 | lifranz347@gmail.com |
+| Suarez1024 | |
