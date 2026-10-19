@@ -29,7 +29,6 @@ type Configuration struct {
 	MongoCsUrl                             string   `config:"mongo_cs_url"`
 	MongoSUrl                              string   `config:"mongo_s_url"`
 	MongoSslRootCaFile                     string   `config:"mongo_ssl_root_ca_file"` // add v2.6.2
-	MongoSslClientCaFile                   string   `config:"mongo_ssl_root_ca_file"`
 	MongoConnectMode                       string   `config:"mongo_connect_mode"`
 	Tunnel                                 string   `config:"tunnel"`
 	TunnelAddress                          []string `config:"tunnel.address"`
