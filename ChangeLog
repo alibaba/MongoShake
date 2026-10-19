@@ -1,3 +1,36 @@
+2026-10-19 Alibaba Cloud.
+    * version: 2.8.9
+    * BUGFIX: #968, ensure MongoCluster cleanup on all exit paths for comparison scripts (thanks @mrnonz)
+    * IMPROVE: #971, fix comparison scripts correctness and performance issues (thanks @mrnonz)
+    * BUGFIX: comparison.py support handle NaN value and fix the semantics of the 'all' mode
+    * REFINE: align comparison.py with comparison_3x.py as much as possible
+    * BUGFIX: resolve non-_id unique index E11000 dup key blocking incremental sync
+    * BUGFIX: #934, make DDL barrier wait unbounded with Pause/Shutdown awareness
+    * FEATURE: #907, add configurable tunnel.kafka.version with metadata refresh and retry
+    * FEATURE: #973, unify duplicate-key handling under incr_sync.executor.dup_key_strategy (thanks @ccfuncy)
+    * IMPROVE: #980, enhance prometheus sync metrics (thanks @ccfuncy)
+    * BUGFIX: #981, harden orphan filtering and disk-replay edge cases
+    * BUGFIX: #985, route change stream replace events to ReplaceOne instead of $set update (thanks @conan912)
+    * BUGFIX: #991, remove defer exec.conn.Close() from DocExecutor.start() (thanks @ccfuncy)
+    * FEATURE: #987, replace disk oplog queue with pebble spool; drops go-diskqueue in favor of cockroachdb/pebble (thanks @SisyphusSQ)
+    * FEATURE: #999, add immutable shard key delete+insert fallback for full sync and incr sync (thanks @ccfuncy)
+    * IMPROVE: #1003, lazily decode oplog BSON payloads (thanks @FranzLi347)
+    * BUGFIX: #1005, resume cursor from lastReadID on transient errors like QueryPlanKilled (thanks @ccfuncy)
+    * BUGFIX: keep raw column-store diffs out of the applyOps fallback log
+    * BUGFIX: add omitempty to ParsedLog.Hash to avoid IDLUnknownField on MongoDB 7.0+
+    * BUGFIX: #986, handle truncatedArrays in change stream update events
+    * BUGFIX: #993, adapt full sync to time-series collections
+    * BUGFIX: #995, preserve capped collections in full sync
+    * BUGFIX: #998, make the shipped collector.conf template parseable
+    * BUGFIX: #1009, keep the source collection uuid out of every applyOps replay
+    * BUGFIX: #1008, make ReplicationMetric.Close race-free and stop its ticker
+    * BUGFIX: #1000, keep bypassDocumentValidation off time-series bucket writes and warn under change_stream
+    * REFINE: #1016, bound two unbounded test polls and make the index guard fail loudly
+    * BUGFIX: #1017, resolve chunk namespaces by uuid for MongoDB 5.0+
+    * REFINE: #1018, assert cross-version invariants instead of 7.0-only server behaviour in tests
+    * BUGFIX: #997, pin checkpoint below buffered transactions to prevent silent data loss
+    * BUGFIX: #990, fix DDL and DML execution order race condition (thanks @Suarez1024)
+
 2026-04-28 Alibaba Cloud.
     * version: 2.8.8
     * FEATURE: #949, support filtering oplog by op type with filter.cmds (thanks @SisyphusSQ)
