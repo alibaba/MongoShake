@@ -6,7 +6,8 @@ var (
 		FeatureCompatibleVersion: 1,
 	}
 	FcvConfiguration = Configuration{
-		CurrentVersion:           12,
+		// must track conf.version in conf/collector.conf; TestFcvCountersAgree enforces both
+		CurrentVersion:           14,
 		FeatureCompatibleVersion: 10,
 	}
 
@@ -29,6 +30,8 @@ var (
 		10: "2.6.4",  // remove full_sync.reader.read_document_count; add full_sync.reader.parallel_thread, incr_sync.reader.fetch_batch_size, skip.nsshardkey.verify
 		11: "2.8.6",  // add incr_sync.fetcher.buffer_size_threshold_in_kb, full_sync.do_not_shard_destination
 		12: "2.8.7",  // add incr_sync.executor.bypass_document_validation, tunnel.kafka.sasl.enable, tunnel.kafka.sasl.auth, tunnel.kafka.sasl.mechanism, tunnel.kafka.compression, tunnel.kafka.producer.max_message_bytes, full_sync.reader.split_max_chunk_size
+		13: "2.8.7",  // never shipped: 0fbb387 moved conf/collector.conf straight from 13 to 14 within the v2.8.7 cycle
+		14: "2.8.7",  // first shipped in v2.8.7; v2.8.8 and v2.8.9 added conf keys without bumping conf.version
 	}
 )
 
