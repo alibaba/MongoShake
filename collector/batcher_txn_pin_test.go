@@ -3,8 +3,8 @@ package collector
 import (
 	"testing"
 
-	"github.com/alibaba/MongoShake/v2/collector/filter"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	"github.com/alibaba/MongoShake/v2/collector/filter"
 	utils "github.com/alibaba/MongoShake/v2/common"
 
 	"github.com/stretchr/testify/assert"
