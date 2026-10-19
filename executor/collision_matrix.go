@@ -166,7 +166,11 @@ func calculateSignature(object interface{}) (sign float64) {
 			sign = 31.0*sign + float64(c)
 		}
 	case primitive.Timestamp: // numbers
-		sign = float64(int64(o.T<<32) + int64(o.I))
+		// o.T is a uint32, so o.T<<32 is always zero; the shift has to happen
+		// after widening. Above 2^53 the float64 conversion rounds the
+		// increment away, which is why the test only asserts exactness for
+		// small T -- see TestCalculateSignatureUsesTimestampSeconds.
+		sign = float64(int64(o.T)<<32 + int64(o.I))
 	case int, uint, int8, uint8, int16, uint16, int32, uint32, int64, uint64, float32, float64:
 		if v, ok := object.(float64); ok {
 			sign = float64(v)
