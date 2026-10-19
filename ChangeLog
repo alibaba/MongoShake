@@ -22,7 +22,7 @@
     * BUGFIX: #993, adapt full sync to time-series collections
     * BUGFIX: #995, preserve capped collections in full sync
     * BUGFIX: #998, make the shipped collector.conf template parseable
-    * BUGFIX: #1009, keep the source collection uuid out of every applyOps replay
+    * BUGFIX: #1009, #1010, keep the source collection uuid out of every applyOps replay
     * BUGFIX: #1008, make ReplicationMetric.Close race-free and stop its ticker
     * BUGFIX: #1000, keep bypassDocumentValidation off time-series bucket writes and warn under change_stream
     * REFINE: #1016, bound two unbounded test polls and make the index guard fail loudly
