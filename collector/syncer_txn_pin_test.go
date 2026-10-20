@@ -19,13 +19,13 @@ func TestCheckCheckpointUpdateUsesWorkerAckWhenCheckpointPinned(t *testing.T) {
 
 	origGetFunc := barrierCkptGetFunc
 	origFlushFunc := barrierCkptFlushFunc
-	origInterval := DDLCheckpointInterval
+	origInterval := BarrierCheckpointInterval
 	defer func() {
 		barrierCkptGetFunc = origGetFunc
 		barrierCkptFlushFunc = origFlushFunc
-		DDLCheckpointInterval = origInterval
+		BarrierCheckpointInterval = origInterval
 	}()
-	DDLCheckpointInterval = 1
+	BarrierCheckpointInterval = time.Millisecond
 
 	pinnedTs := utils.TimeStampToInt64(utils.TimeToTimestamp(99))
 	newestTs := utils.TimeStampToInt64(utils.TimeToTimestamp(101))

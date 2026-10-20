@@ -92,10 +92,10 @@ const (
 
 	// syncer timing constants
 	VarSyncerFetchErrorRetryMs             = 6000 // interval(ms) to wait after fetch error before retrying
-	VarSyncerDDLCheckpointIntervalMs       = 300  // interval(ms) between DDL checkpoint checks
+	VarSyncerBarrierCheckpointIntervalMs   = 10   // fallback interval(ms) between barrier checkpoint checks
+	VarWorkerProbeIntervalMs               = 300  // interval(ms) between idle worker probes
 	VarSyncerFilterCheckpointGap           = 180  // duration(seconds) without checkpoint update before mandatory flush
 	VarSyncerFilterCheckpointCheckInterval = 180  // interval(seconds) between filter-only checkpoint checks
-	VarSyncerCheckCheckpointUpdateTimes    = 10   // max retry count for checkpoint update verification
 
 	// pipeline queue sizing
 	VarSyncerPipelineQueueMaxNr    = 4
