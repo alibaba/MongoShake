@@ -24,7 +24,7 @@ type BulkWriter struct {
 	fullFinishTs int64
 }
 
-func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord, dupUpdate bool) error {
+func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, oplogs []*OplogRecord, dupUpdate bool) (insertErr error) {
 
 	var models []mongo.WriteModel
 	var modelOplogs []*OplogRecord
@@ -60,9 +60,29 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 	if err != nil {
 		var bulkErr mongo.BulkWriteException
 		ok := errors.As(err, &bulkErr)
+		// Aggregate pure duplicates after the selected conversion/ignore/skip
+		// path succeeds. Skip still validates every error code and index below;
+		// rejected batches retain their full warning detail.
+		handledByConfig := dupUpdate ||
+			conf.Options.IncrSyncExecutorDupKeyStrategy == "" ||
+			conf.Options.IncrSyncExecutorDupKeyStrategy == utils.VarIncrSyncExecutorDupKeyStrategyIgnore ||
+			conf.Options.IncrSyncExecutorDupKeyStrategy == utils.VarIncrSyncExecutorDupKeyStrategySkip
 		if !ok {
 			l.Logger.Warnf("insert docs with length[%v] into ns[%v] of dest mongo failed[type:%T err:%v] res[%v]",
 				len(models), database+"."+collection, err, err, res)
+		} else if handledByConfig && utils.AllWriteErrorsDupKey(bulkErr) {
+			l.Logger.Debugf("insert docs with length[%v] into ns[%s.%s] of dest mongo handling dup[%v] res[%v]",
+				len(models), database, collection, bulkErr, res)
+			// The conversion can still fail; record handled batches only
+			// after the selected duplicate-key strategy returns success.
+			defer func() {
+				if insertErr == nil {
+					utils.GlobalDupKeyLog.ReportHandled(database+"."+collection, len(bulkErr.WriteErrors), err)
+				} else {
+					l.Logger.Warnf("insert docs with length[%v] into ns[%s.%s] of dest mongo failed[%v] res[%v]",
+						len(models), database, collection, bulkErr, res)
+				}
+			}()
 		} else {
 			l.Logger.Warnf("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
 				len(models), database+"."+collection, bulkErr, res)
@@ -72,12 +92,16 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 			// update on duplicated key occur
 			if dupUpdate {
 				RecordDuplicatedOplog(bw.conn, collection, oplogs)
-				l.Logger.Infof("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
+				l.Logger.Debugf("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
 				return bw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.IncrSyncExecutorUpsert)
 			}
 			switch conf.Options.IncrSyncExecutorDupKeyStrategy {
 			case "", utils.VarIncrSyncExecutorDupKeyStrategyIgnore:
-				return handleDupKeyOnInsert(bw.conn, database, collection, oplogs, err, "bulk_writer::doInsert")
+				// The bulk error is already retained at Debug and successful
+				// pure duplicates are summarized by the defer above. Keep the
+				// shared single/command-writer helper's per-op logging separate.
+				RecordDuplicatedOplog(bw.conn, collection, oplogs)
+				return nil
 			case utils.VarIncrSyncExecutorDupKeyStrategySkip:
 				return bw.handleBulkInsertDupKeySkip(database, collection, modelOplogs, err)
 			default:
@@ -112,7 +136,7 @@ func (bw *BulkWriter) handleBulkInsertDupKeySkip(database, collection string, op
 	for _, writeErr := range bulkErr.WriteErrors {
 		RecordDuplicatedOplog(bw.conn, collection, []*OplogRecord{oplogs[writeErr.Index]})
 	}
-	l.Logger.Warnf("bulk_writer::doInsert duplicated oplogs skipped, ns[%s.%s], err[%v]",
+	l.Logger.Debugf("bulk_writer::doInsert duplicated oplogs skipped, ns[%s.%s], err[%v]",
 		database, collection, err)
 	return nil
 }

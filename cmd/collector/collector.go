@@ -45,6 +45,7 @@ func main() {
 	var err error
 	defer handleExit()
 	defer func() {
+		utils.GlobalDupKeyLog.Flush()
 		if l.Logger != nil {
 			_ = l.Logger.Close()
 		}
