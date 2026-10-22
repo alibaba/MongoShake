@@ -1,8 +1,3 @@
-Unreleased
-    * REFINE: aggregate successfully handled full-sync and BulkWriter duplicate-key logs; keep complete errors at Debug.
-    * REFINE: move per-batch "update or.query to" and complete applyOps payloads from Info to Debug; initial query timestamp stays at Info.
-    * NOTE: CommandWriter and SingleWriter per-operation duplicate logging is outside this aggregation scope.
-
 2026-10-19 Alibaba Cloud.
     * version: 2.8.9
     * BUGFIX: #968, ensure MongoCluster cleanup on all exit paths for comparison scripts (thanks @mrnonz)
