@@ -19,13 +19,13 @@ func handleDupKeyOnInsert(conn *utils.MongoCommunityConn, database, collection s
 	case "", utils.VarIncrSyncExecutorDupKeyStrategyIgnore:
 		RecordDuplicatedOplog(conn, collection, oplogs)
 		l.Logger.Infof("%s duplicated oplogs ignored, ns[%s.%s], err[%v]",
-			logPrefix, database, collection, err)
+			logPrefix, database, collection, utils.TruncateError(err, 300))
 		return nil
 	case utils.VarIncrSyncExecutorDupKeyStrategySkip:
 		if skip, indexName := shouldSkipDupKeyOnInsert(database, collection, err); skip {
 			RecordDuplicatedOplog(conn, collection, oplogs)
 			l.Logger.Warnf("%s duplicated oplogs skipped, ns[%s.%s], index[%s], err[%v]",
-				logPrefix, database, collection, indexName, err)
+				logPrefix, database, collection, indexName, utils.TruncateError(err, 300))
 			return nil
 		}
 		return err

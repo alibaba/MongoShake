@@ -182,7 +182,7 @@ func (exec *DocExecutor) start() {
 }
 
 // use by full sync
-func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
+func (exec *DocExecutor) doSync(docs []*bson.Raw) (syncErr error) {
 	if len(docs) == 0 || conf.Options.FullSyncExecutorDebug {
 		return nil
 	}
@@ -235,10 +235,23 @@ func (exec *DocExecutor) doSync(docs []*bson.Raw) error {
 		bulkErr, ok := err.(mongo.BulkWriteException)
 		if !ok {
 			l.Logger.Warnf("insert docs with length[%v] into ns[%v] of dest mongo failed[type:%T err:%v] res[%v]",
-				len(models), ns, err, err, res)
+				len(models), ns.Str(), err, err, res)
+		} else if utils.AllWriteErrorsDupKey(bulkErr) && conf.Options.FullSyncExecutorInsertOnDupUpdate {
+			l.Logger.Debugf("insert docs with length[%v] into ns[%s.%s] of dest mongo handling dup[%v] res[%v]",
+				len(models), ns.Database, ns.Collection, bulkErr, res)
+			// Count the batch only if the update (including any fallback)
+			// below succeeds. Configuration alone does not guarantee that.
+			defer func() {
+				if syncErr == nil {
+					utils.GlobalDupKeyLog.ReportHandled(ns.Database+"."+ns.Collection, len(bulkErr.WriteErrors), err)
+				} else {
+					l.Logger.Warnf("insert docs with length[%v] into ns[%s.%s] of dest mongo failed[%v] res[%v]",
+						len(models), ns.Database, ns.Collection, bulkErr, res)
+				}
+			}()
 		} else {
 			l.Logger.Warnf("insert docs with length[%v] into ns[%v] of dest mongo failed[%v] res[%v]",
-				len(models), ns, bulkErr, res)
+				len(models), ns.Str(), bulkErr, res)
 		}
 
 		var updateModels []mongo.WriteModel

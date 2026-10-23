@@ -59,6 +59,7 @@ func getTimestampMap(sources []*utils.MongoSource, sslRootFile string) (map[stri
 }
 
 func (coordinator *ReplicationCoordinator) startDocumentReplication() (err error) {
+	defer utils.GlobalDupKeyLog.Flush()
 	utils.SetMongoShakeSyncStage(conf.Options.Id, utils.TypeFull)
 	utils.SetMongoShakeSyncState(conf.Options.Id, utils.TypeFull, utils.SyncStateRunning)
 	defer func() {
