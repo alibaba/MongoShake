@@ -7,6 +7,7 @@ import (
 
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
 	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/oplog"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -44,6 +45,9 @@ func TestCheckCheckpointUpdateUsesWorkerAckWhenCheckpointPinned(t *testing.T) {
 		Replset: "test-pinned-barrier",
 		batcher: &Batcher{workerGroup: []*Worker{worker}},
 	}
+
+	syncer.batcher.txnPins = make(map[oplog.TxnID]*txnPin)
+	syncer.batcher.pinTxn(oplog.TxnID{}, utils.TimeStampToInt64(utils.TimeToTimestamp(100)))
 
 	done := make(chan bool, 1)
 	go func() {

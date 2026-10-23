@@ -92,7 +92,7 @@ const (
 
 	// syncer timing constants
 	VarSyncerFetchErrorRetryMs             = 6000 // interval(ms) to wait after fetch error before retrying
-	VarSyncerBarrierCheckpointIntervalMs   = 10   // fallback interval(ms) between barrier checkpoint checks
+	VarSyncerBarrierCheckpointIntervalMs   = 300  // fallback interval(ms); worker ACK notifications wake immediately
 	VarWorkerProbeIntervalMs               = 300  // interval(ms) between idle worker probes
 	VarSyncerFilterCheckpointGap           = 180  // duration(seconds) without checkpoint update before mandatory flush
 	VarSyncerFilterCheckpointCheckInterval = 180  // interval(seconds) between filter-only checkpoint checks

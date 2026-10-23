@@ -23,10 +23,10 @@ func newBarrierTestSyncer(t *testing.T) *OplogSyncer {
 	if l.Logger == nil {
 		require.NoError(t, utils.InitialLogger("", "", "error", true, 2))
 	}
-	get, flush, interval := barrierCkptGetFunc, barrierCkptFlushFunc, BarrierCheckpointInterval
+	get, flush, interval, retry := barrierCkptGetFunc, barrierCkptFlushFunc, BarrierCheckpointInterval, BarrierCheckpointRetryInterval
 	sentinel := utils.IncrSentinelOptions
 	t.Cleanup(func() {
-		barrierCkptGetFunc, barrierCkptFlushFunc, BarrierCheckpointInterval = get, flush, interval
+		barrierCkptGetFunc, barrierCkptFlushFunc, BarrierCheckpointInterval, BarrierCheckpointRetryInterval = get, flush, interval, retry
 		utils.IncrSentinelOptions = sentinel
 	})
 	utils.IncrSentinelOptions.Pause = false
@@ -123,7 +123,7 @@ func TestBarrierCheckpointFlushesAckThatAdvancesDuringFlush(t *testing.T) {
 	syncer := newBarrierTestSyncer(t)
 	worker := &Worker{syncer: syncer, ack: 50, unack: 100}
 	syncer.batcher = &Batcher{workerGroup: []*Worker{worker}}
-	persisted := int64(50)
+	persisted := int64(25)
 	flushes := 0
 	barrierCkptGetFunc = func(*OplogSyncer) (*ckpt.CheckpointContext, error) {
 		return &ckpt.CheckpointContext{Timestamp: persisted}, nil

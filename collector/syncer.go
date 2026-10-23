@@ -40,9 +40,13 @@ const (
 	BarrierInterruptedRetryInterval     = 300 * time.Millisecond
 )
 
-// ACK notifications normally wake barriers immediately. Polling also retries
-// checkpoint persistence and observes Pause/Shutdown without a worker ACK.
-var BarrierCheckpointInterval = time.Duration(utils.VarSyncerBarrierCheckpointIntervalMs) * time.Millisecond
+// ACK notifications wake barriers immediately. Fallback polling observes
+// missed notifications and sentinel changes; checkpoint I/O has its own retry
+// deadline so frequent notifications cannot amplify failed writes.
+var (
+	BarrierCheckpointInterval      = time.Duration(utils.VarSyncerBarrierCheckpointIntervalMs) * time.Millisecond
+	BarrierCheckpointRetryInterval = 300 * time.Millisecond
+)
 
 var barrierCkptGetFunc = func(sync *OplogSyncer) (*ckpt.CheckpointContext, error) {
 	checkpoint, _, err := sync.ckptManager.Get()
@@ -423,72 +427,98 @@ func (sync *OplogSyncer) startBatcher() {
 }
 
 func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) bool {
-	if barrier && newestTs > 0 {
-		l.Logger.Infof("%s checkCheckpointUpdate find barrier", sync)
-		var checkpointTs int64
-		var nextLog time.Time
-		confirmingFlush := false
-		for i := 0; ; i++ {
-			if utils.IncrSentinelOptions.Pause || utils.IncrSentinelOptions.Shutdown {
-				l.Logger.Warnf("%s barrier wait interrupted by sentinel (Pause=%v, Shutdown=%v)",
-					sync, utils.IncrSentinelOptions.Pause, utils.IncrSentinelOptions.Shutdown)
-				return false
-			}
+	if !barrier || newestTs <= 0 {
+		return false
+	}
+	l.Logger.Infof("%s checkCheckpointUpdate find barrier", sync)
+	var checkpointTs, lastFlushAck int64
+	var haveCheckpoint, flushFailed bool
+	var nextRead, nextFlush, nextLog time.Time
+	for i := 0; ; i++ {
+		if utils.IncrSentinelOptions.Pause || utils.IncrSentinelOptions.Shutdown {
+			l.Logger.Warnf("%s barrier wait interrupted by sentinel (Pause=%v, Shutdown=%v)",
+				sync, utils.IncrSentinelOptions.Pause, utils.IncrSentinelOptions.Shutdown)
+			return false
+		}
 
+		if !time.Now().Before(nextRead) {
 			checkpoint, err := barrierCkptGetFunc(sync)
 			if err != nil {
 				l.Logger.Errorf("%s[%v] get remote checkpoint failed: %v", sync, i, err)
-				time.Sleep(BarrierCheckpointErrorRetryInterval)
-				continue
-			}
-
-			checkpointTs = checkpoint.Timestamp
-
-			if now := time.Now(); !now.Before(nextLog) {
-				l.Logger.Infof("%s[%v] compare remote checkpoint[%v] to local newestTs[%v]", sync, i,
-					utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
-				nextLog = now.Add(BarrierCheckpointLogInterval)
-			}
-			if checkpointTs >= newestTs {
-				l.Logger.Infof("%s[%v] barrier checkpoint already updated to newest[%v]",
-					sync, i, utils.ExtractTimestampForLog(newestTs))
-				return true
-			}
-			// Workers may already have completed since the caller's first flush.
-			// Persist their ACKs before waiting, then immediately read back a
-			// successful update. A notification alone never releases the barrier.
-			if !confirmingFlush && barrierCkptFlushFunc(sync) {
-				confirmingFlush = true
-				continue
-			}
-			// the persisted checkpoint may be pinned below an in-flight
-			// transaction; worker ack progress is the real barrier condition
-			if sync.batcher != nil {
-				if wl, werr := sync.calculateWorkerLowestCheckpoint(); werr == nil && wl >= newestTs {
-					// ACK may have advanced during the flush above. Recalculate and
-					// persist it now so a completed final barrier does not leave a
-					// releasable transaction pin/checkpoint stale until more input.
-					// A genuinely pinned checkpoint may still stay behind.
-					barrierCkptFlushFunc(sync)
-					l.Logger.Infof("%s[%v] barrier satisfied by worker ack[%v] >= newest[%v] "+
-						"while persisted checkpoint[%v] is pinned",
-						sync, i, utils.ExtractTimestampForLog(wl), utils.ExtractTimestampForLog(newestTs),
-						utils.ExtractTimestampForLog(checkpointTs))
-					return true
+				haveCheckpoint = false
+				nextRead = time.Now().Add(BarrierCheckpointErrorRetryInterval)
+			} else {
+				checkpointTs, haveCheckpoint = checkpoint.Timestamp, true
+				nextRead = time.Now().Add(BarrierCheckpointRetryInterval)
+				if now := time.Now(); !now.Before(nextLog) {
+					l.Logger.Infof("%s[%v] compare remote checkpoint[%v] to local newestTs[%v]", sync, i,
+						utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
+					nextLog = now.Add(BarrierCheckpointLogInterval)
 				}
 			}
-			// A successful write whose readback is still behind must not cause
-			// an unbounded read/write loop against checkpoint storage.
-			confirmingFlush = false
-			timer := time.NewTimer(BarrierCheckpointInterval)
-			select {
-			case <-sync.workerAckNotify:
-			case <-timer.C:
-			}
-			timer.Stop()
 		}
+
+		needFlush := false
+		if haveCheckpoint {
+			if checkpointTs >= newestTs {
+				return true
+			}
+			var ack, pin int64
+			var ackErr error
+			if sync.batcher != nil {
+				ack, ackErr = sync.calculateWorkerLowestCheckpoint()
+				if ackErr == nil {
+					pin = sync.batcher.OldestUnackedTxnPinTs(ack)
+				}
+			}
+			// A genuinely pending transaction may keep the checkpoint below
+			// this barrier even though its workers are done. Do not put an
+			// unrelated checkpoint write on that ACK-only completion path.
+			if ackErr == nil && ack >= newestTs && pin > 0 && pin <= newestTs {
+				l.Logger.Infof("%s[%v] barrier satisfied by worker ack[%v] >= newest[%v] while transaction pin[%v] remains",
+					sync, i, utils.ExtractTimestampForLog(ack), utils.ExtractTimestampForLog(newestTs),
+					utils.ExtractTimestampForLog(pin))
+				return true
+			}
+
+			candidate := ack
+			if pin > 0 && candidate >= pin {
+				candidate = pin - 1
+			}
+			needFlush = sync.batcher == nil || (ackErr == nil && candidate > checkpointTs)
+			// A fresh ACK can bypass the idle retry deadline after a successful
+			// flush, but notifications must not bypass a failed write's backoff.
+			freshAck := !flushFailed && candidate > lastFlushAck
+			if needFlush && (!time.Now().Before(nextFlush) || freshAck) {
+				lastFlushAck = candidate
+				flushed := barrierCkptFlushFunc(sync)
+				flushFailed = !flushed
+				nextFlush = time.Now().Add(BarrierCheckpointRetryInterval)
+				if flushed {
+					// Confirm a successful write immediately. A stale readback is
+					// retried on the I/O deadline, not once per notification.
+					nextRead = time.Time{}
+					continue
+				}
+			}
+		}
+
+		wait := BarrierCheckpointInterval
+		if remaining := time.Until(nextRead); remaining < wait {
+			wait = remaining
+		}
+		if needFlush {
+			if remaining := time.Until(nextFlush); remaining > 0 && remaining < wait {
+				wait = remaining
+			}
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-sync.workerAckNotify:
+		case <-timer.C:
+		}
+		timer.Stop()
 	}
-	return false
 }
 
 /********************************deserializer begin**********************************/

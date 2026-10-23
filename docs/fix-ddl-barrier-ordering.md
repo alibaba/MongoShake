@@ -102,19 +102,26 @@ worker 还未 ACK，batcher 会先等待 300ms 才重新刷新 checkpoint。
 
 | 用途 | 行为 |
 |------|------|
-| Barrier 等待 | Worker ACK 改变时立即唤醒，10ms 定时检查兜底 |
+| Barrier 等待 | Worker ACK 改变时立即唤醒，300ms 定时检查兜底 |
+| Checkpoint I/O | 独立 300ms 重试期限；写失败后 ACK 通知不绕过退避 |
 | Worker 空闲 probe | 保持 300ms，不随 barrier 检查加快 |
 | Checkpoint 读取失败 | 保持 900ms 重试间隔 |
 | 长时间 barrier 等待的比较日志 | 按时间限频，每 3 秒输出一次 |
 
 每个 syncer 使用容量为 1 的 channel 合并 ACK 通知；worker 用非阻塞发送，
 batcher 暂停或处理较慢时不会阻塞 worker。通知只是重新检查的提示，不能直接
-放行 barrier。batcher 保留 develop 的放行规则：持久化 checkpoint 达到
-`newestTs`，或者所有相关 worker 的安全 ACK 水位达到 `newestTs`。后一条规则
+放行 barrier。batcher 仅在以下条件之一满足时放行：持久化 checkpoint 达到
+`newestTs`，或者所有相关 worker 的安全 ACK 水位达到 `newestTs` 且仍有
+未提交事务 pin 阻挡该位置的持久化。后一条规则
 允许持久化 checkpoint 因未决事务被钉住时继续推进，避免 pin 与 barrier 互相等待。
 checkpoint 的事务 pin 保护保持原样。
-刷新成功后立即读回，不额外等待计时器。没有新 ACK 时，定时检查仍会重试
-checkpoint 写入/读取，并观察 Pause/Shutdown。
+刷新成功后立即读回，不额外等待计时器。成功刷新后的新 ACK 可立即触发新的
+持久化；同一水位、失败写入和滞后读回则遵守独立的 I/O 重试期限。没有新 ACK
+时，300ms 兜底检查仍会重试并观察 Pause/Shutdown。
+
+仍有未提交事务 pin 时，已满足的 ACK barrier 不发起无关 checkpoint 写入；
+最后一个已完成 pin 被真实 ACK 解除后，仍须持久化并读回最终 checkpoint。
+这两条路径分别覆盖，避免将“仍被其他事务 pin 住”与“已完成但尚未持久化”混淆。
 
 事务分类、DDL 前后 barrier、Pause/Shutdown 后的 `pendingBarrierTs` 恢复确认
 均保留。此优化不改变事务在目标端的执行语义，也不跳过未确认的操作。
@@ -129,3 +136,12 @@ checkpoint 写入/读取，并观察 Pause/Shutdown。
 - Pause/Shutdown 中断后，恢复时重新确认原来的目标位置。
 - DDL 和单条 insert 的 prepared 事务保持前序 DML、独立操作、后序 DML 的分批顺序，慢 worker 未确认时 barrier 不放行。
 - 将 barrier 兜底间隔改成 1ms，worker probe 仍保持 300ms。
+
+新增 checkpoint I/O 回归位于 `collector/barrier_checkpoint_io_test.go`：
+
+- 本机 HTTP checkpoint 服务实际返回 503，验证无进展和持续新 ACK 下的读写重试限速。
+- 阻塞 checkpoint POST，验证真正仍被未提交事务 pin 住的已完成 ACK barrier 不等待写入。
+- 成功刷新后的新 ACK 不等待 I/O 重试期限。
+- 已完成 pin 仍须清理，并持久化、读回最终 checkpoint。
+
+这些用例使用真实 HTTP 存储和模拟 worker ACK；不能替代真实 MongoDB、持久化耐久性和故障恢复的完整回归。
