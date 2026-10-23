@@ -272,16 +272,16 @@ func TestCheckCheckpointUpdate(t *testing.T) {
 
 	origGetFunc := barrierCkptGetFunc
 	origFlushFunc := barrierCkptFlushFunc
-	origInterval := DDLCheckpointInterval
+	origInterval := BarrierCheckpointInterval
 	defer func() {
 		barrierCkptGetFunc = origGetFunc
 		barrierCkptFlushFunc = origFlushFunc
-		DDLCheckpointInterval = origInterval
+		BarrierCheckpointInterval = origInterval
 		utils.IncrSentinelOptions.Pause = false
 		utils.IncrSentinelOptions.Shutdown = false
 	}()
 
-	DDLCheckpointInterval = 1
+	BarrierCheckpointInterval = time.Millisecond
 
 	var nr int
 

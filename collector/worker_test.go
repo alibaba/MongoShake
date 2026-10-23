@@ -6,11 +6,53 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
 )
+
+func TestWorkerACKNotificationsAreCoalesced(t *testing.T) {
+	syncer := &OplogSyncer{workerAckNotify: make(chan struct{}, 1)}
+	worker := &Worker{syncer: syncer}
+	for ack := int64(1); ack <= 100; ack++ {
+		worker.setAck(ack)
+	}
+	require.Equal(t, int64(100), worker.GetAck())
+	require.Len(t, syncer.workerAckNotify, 1, "a slow batcher must not block ACK updates")
+	<-syncer.workerAckNotify
+	worker.setAck(100)
+	require.Empty(t, syncer.workerAckNotify, "unchanged ACKs need no notification")
+	worker.setAck(101)
+	require.Len(t, syncer.workerAckNotify, 1)
+	// Workers used without a notification channel still update ACK normally.
+	worker.syncer = &OplogSyncer{}
+	worker.setAck(102)
+	require.Equal(t, int64(102), worker.GetAck())
+}
+
+func TestWorkerProbeIntervalIndependentOfBarrier(t *testing.T) {
+	oldInterval := BarrierCheckpointInterval
+	BarrierCheckpointInterval = time.Millisecond
+	t.Cleanup(func() { BarrierCheckpointInterval = oldInterval })
+	worker := &Worker{queue: make(chan []*oplog.GenericOplog, 1)}
+	done := make(chan time.Duration, 1)
+	go func() {
+		start := time.Now()
+		worker.findFirstAvailableBatch()
+		done <- time.Since(start)
+	}()
+	select {
+	case elapsed := <-done:
+		require.GreaterOrEqual(t, elapsed, WorkerProbeInterval)
+		require.Equal(t, 300*time.Millisecond, WorkerProbeInterval)
+	case <-time.After(time.Second):
+		worker.queue <- nil
+		<-done
+		t.Fatal("idle worker did not reach its probe interval")
+	}
+}
 
 func TestObservePutDelayUsesLatestAckedOplog(t *testing.T) {
 	now := time.Unix(1_700_000_200, 0).UTC()

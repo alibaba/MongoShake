@@ -32,13 +32,21 @@ const (
 	PipelineQueueMinNr    = utils.VarSyncerPipelineQueueMinNr
 	PipelineQueueLen      = utils.VarSyncerPipelineQueueLen
 
-	SyncerFetchErrorRetryMs       = utils.VarSyncerFetchErrorRetryMs
-	FilterCheckpointGap           = utils.VarSyncerFilterCheckpointGap
-	FilterCheckpointCheckInterval = utils.VarSyncerFilterCheckpointCheckInterval
-	CheckCheckpointUpdateTimes    = utils.VarSyncerCheckCheckpointUpdateTimes
+	SyncerFetchErrorRetryMs             = utils.VarSyncerFetchErrorRetryMs
+	FilterCheckpointGap                 = utils.VarSyncerFilterCheckpointGap
+	FilterCheckpointCheckInterval       = utils.VarSyncerFilterCheckpointCheckInterval
+	BarrierCheckpointLogInterval        = 3 * time.Second
+	BarrierCheckpointErrorRetryInterval = 900 * time.Millisecond
+	BarrierInterruptedRetryInterval     = 300 * time.Millisecond
 )
 
-var DDLCheckpointInterval int64 = utils.VarSyncerDDLCheckpointIntervalMs
+// ACK notifications wake barriers immediately. Fallback polling observes
+// missed notifications and sentinel changes; checkpoint I/O has its own retry
+// deadline so frequent notifications cannot amplify failed writes.
+var (
+	BarrierCheckpointInterval      = time.Duration(utils.VarSyncerBarrierCheckpointIntervalMs) * time.Millisecond
+	BarrierCheckpointRetryInterval = 300 * time.Millisecond
+)
 
 var barrierCkptGetFunc = func(sync *OplogSyncer) (*ckpt.CheckpointContext, error) {
 	checkpoint, _, err := sync.ckptManager.Get()
@@ -98,6 +106,10 @@ type OplogSyncer struct {
 	startTime time.Time
 	ckptTime  time.Time
 
+	// Coalesced ACK notifications are hints only; checkpoint and worker-ACK
+	// safety conditions are rechecked before a barrier can be released.
+	workerAckNotify chan struct{}
+
 	replMetric *utils.ReplicationMetric
 
 	// can be closed
@@ -134,9 +146,10 @@ func NewOplogSyncer(
 		fullSyncFinishPosition: utils.Int64ToTimestamp(fullSyncFinishPosition),
 		journal: journal.NewJournal(journal.FileName(
 			fmt.Sprintf("%s.%s", conf.Options.Id, replset))),
-		reader:       reader,
-		qos:          utils.StartQoS(0, 1, &utils.IncrSentinelOptions.TPS), // default is 0 which means do not limit
-		fetcherState: "normal",
+		reader:          reader,
+		qos:             utils.StartQoS(0, 1, &utils.IncrSentinelOptions.TPS), // default is 0 which means do not limit
+		fetcherState:    "normal",
+		workerAckNotify: make(chan struct{}, 1),
 	}
 
 	// concurrent level hasher
@@ -274,7 +287,7 @@ func (sync *OplogSyncer) startBatcher() {
 					sync, utils.ExtractTimestampForLog(pendingBarrierTs))
 				pendingBarrierTs = 0
 			} else {
-				utils.YieldInMs(DDLCheckpointInterval)
+				time.Sleep(BarrierInterruptedRetryInterval)
 				return
 			}
 		}
@@ -414,53 +427,98 @@ func (sync *OplogSyncer) startBatcher() {
 }
 
 func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) bool {
-	if barrier && newestTs > 0 {
-		l.Logger.Infof("%s checkCheckpointUpdate find barrier", sync)
-		var checkpointTs int64
-		for i := 0; ; i++ {
-			if utils.IncrSentinelOptions.Pause || utils.IncrSentinelOptions.Shutdown {
-				l.Logger.Warnf("%s barrier wait interrupted by sentinel (Pause=%v, Shutdown=%v)",
-					sync, utils.IncrSentinelOptions.Pause, utils.IncrSentinelOptions.Shutdown)
-				return false
-			}
+	if !barrier || newestTs <= 0 {
+		return false
+	}
+	l.Logger.Infof("%s checkCheckpointUpdate find barrier", sync)
+	var checkpointTs, lastFlushAck int64
+	var haveCheckpoint, flushFailed bool
+	var nextRead, nextFlush, nextLog time.Time
+	for i := 0; ; i++ {
+		if utils.IncrSentinelOptions.Pause || utils.IncrSentinelOptions.Shutdown {
+			l.Logger.Warnf("%s barrier wait interrupted by sentinel (Pause=%v, Shutdown=%v)",
+				sync, utils.IncrSentinelOptions.Pause, utils.IncrSentinelOptions.Shutdown)
+			return false
+		}
 
+		if !time.Now().Before(nextRead) {
 			checkpoint, err := barrierCkptGetFunc(sync)
 			if err != nil {
 				l.Logger.Errorf("%s[%v] get remote checkpoint failed: %v", sync, i, err)
-				utils.YieldInMs(DDLCheckpointInterval * 3)
-				continue
-			}
-
-			checkpointTs = checkpoint.Timestamp
-
-			if i%CheckCheckpointUpdateTimes == 0 {
-				l.Logger.Infof("%s[%v] compare remote checkpoint[%v] to local newestTs[%v]", sync, i,
-					utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
-			}
-			if checkpointTs >= newestTs {
-				l.Logger.Infof("%s[%v] barrier checkpoint already updated to newest[%v]",
-					sync, i, utils.ExtractTimestampForLog(newestTs))
-				return true
-			}
-			// the persisted checkpoint may be pinned below an in-flight
-			// transaction; worker ack progress is the real barrier condition
-			if sync.batcher != nil {
-				if wl, werr := sync.calculateWorkerLowestCheckpoint(); werr == nil && wl >= newestTs {
-					l.Logger.Infof("%s[%v] barrier satisfied by worker ack[%v] >= newest[%v] "+
-						"while persisted checkpoint[%v] is pinned",
-						sync, i, utils.ExtractTimestampForLog(wl), utils.ExtractTimestampForLog(newestTs),
-						utils.ExtractTimestampForLog(checkpointTs))
-					return true
+				haveCheckpoint = false
+				nextRead = time.Now().Add(BarrierCheckpointErrorRetryInterval)
+			} else {
+				checkpointTs, haveCheckpoint = checkpoint.Timestamp, true
+				nextRead = time.Now().Add(BarrierCheckpointRetryInterval)
+				if now := time.Now(); !now.Before(nextLog) {
+					l.Logger.Infof("%s[%v] compare remote checkpoint[%v] to local newestTs[%v]", sync, i,
+						utils.ExtractTimestampForLog(checkpointTs), utils.ExtractTimestampForLog(newestTs))
+					nextLog = now.Add(BarrierCheckpointLogInterval)
 				}
 			}
-			utils.YieldInMs(DDLCheckpointInterval)
+		}
 
-			if barrierCkptFlushFunc(sync) {
-				l.Logger.Infof("[%v] checkCheckpointUpdate checkpoint update succeed", i)
+		needFlush := false
+		if haveCheckpoint {
+			if checkpointTs >= newestTs {
+				return true
+			}
+			var ack, pin int64
+			var ackErr error
+			if sync.batcher != nil {
+				ack, ackErr = sync.calculateWorkerLowestCheckpoint()
+				if ackErr == nil {
+					pin = sync.batcher.OldestUnackedTxnPinTs(ack)
+				}
+			}
+			// A genuinely pending transaction may keep the checkpoint below
+			// this barrier even though its workers are done. Do not put an
+			// unrelated checkpoint write on that ACK-only completion path.
+			if ackErr == nil && ack >= newestTs && pin > 0 && pin <= newestTs {
+				l.Logger.Infof("%s[%v] barrier satisfied by worker ack[%v] >= newest[%v] while transaction pin[%v] remains",
+					sync, i, utils.ExtractTimestampForLog(ack), utils.ExtractTimestampForLog(newestTs),
+					utils.ExtractTimestampForLog(pin))
+				return true
+			}
+
+			candidate := ack
+			if pin > 0 && candidate >= pin {
+				candidate = pin - 1
+			}
+			needFlush = sync.batcher == nil || (ackErr == nil && candidate > checkpointTs)
+			// A fresh ACK can bypass the idle retry deadline after a successful
+			// flush, but notifications must not bypass a failed write's backoff.
+			freshAck := !flushFailed && candidate > lastFlushAck
+			if needFlush && (!time.Now().Before(nextFlush) || freshAck) {
+				lastFlushAck = candidate
+				flushed := barrierCkptFlushFunc(sync)
+				flushFailed = !flushed
+				nextFlush = time.Now().Add(BarrierCheckpointRetryInterval)
+				if flushed {
+					// Confirm a successful write immediately. A stale readback is
+					// retried on the I/O deadline, not once per notification.
+					nextRead = time.Time{}
+					continue
+				}
 			}
 		}
+
+		wait := BarrierCheckpointInterval
+		if remaining := time.Until(nextRead); remaining < wait {
+			wait = remaining
+		}
+		if needFlush {
+			if remaining := time.Until(nextFlush); remaining > 0 && remaining < wait {
+				wait = remaining
+			}
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-sync.workerAckNotify:
+		case <-timer.C:
+		}
+		timer.Stop()
 	}
-	return false
 }
 
 /********************************deserializer begin**********************************/
