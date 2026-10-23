@@ -189,11 +189,11 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 					l.Logger.Warnf("single_writer doUpdateOnInsert hit immutable shard key on ns[%v.%v], _id[%v], trying delete+insert: %v",
 						database, collection, update.id, err)
 					if _, delErr := collectionHandle.DeleteOne(context.Background(), update.id); delErr != nil {
-						return fmt.Errorf("single_writer delete+insert fallback: delete _id[%v] failed on ns[%v.%v]: %v",
+						return fmt.Errorf("single_writer delete+insert fallback: delete _id[%v] failed on ns[%v.%v]: %w",
 							update.id, database, collection, delErr)
 					}
 					if _, insErr := collectionHandle.InsertOne(context.Background(), update.data); insErr != nil {
-						return fmt.Errorf("single_writer delete+insert fallback: re-insert _id[%v] failed on ns[%v.%v]: %v",
+						return fmt.Errorf("single_writer delete+insert fallback: re-insert _id[%v] failed on ns[%v.%v]: %w",
 							update.id, database, collection, insErr)
 					}
 					l.Logger.Infof("single_writer delete+insert fallback succeeded for _id[%v] on ns[%v.%v]",
@@ -237,12 +237,12 @@ func (sw *SingleWriter) doUpdateOnInsert(database, collection string, metadata b
 						database, collection, update.id, err)
 					// Delete old document
 					if _, delErr := collectionHandle.DeleteOne(context.Background(), update.id); delErr != nil {
-						return fmt.Errorf("single_writer delete+insert fallback: delete _id[%v] failed on ns[%v.%v]: %v",
+						return fmt.Errorf("single_writer delete+insert fallback: delete _id[%v] failed on ns[%v.%v]: %w",
 							update.id, database, collection, delErr)
 					}
 					// Re-insert with new shard key values
 					if _, insErr := collectionHandle.InsertOne(context.Background(), update.data); insErr != nil {
-						return fmt.Errorf("single_writer delete+insert fallback: re-insert _id[%v] failed on ns[%v.%v]: %v",
+						return fmt.Errorf("single_writer delete+insert fallback: re-insert _id[%v] failed on ns[%v.%v]: %w",
 							update.id, database, collection, insErr)
 					}
 					l.Logger.Infof("single_writer delete+insert fallback succeeded for _id[%v] on ns[%v.%v]",

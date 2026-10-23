@@ -151,11 +151,13 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 		return nil, fmt.Errorf("new client failed: %v", err)
 	}
 	if err := client.Connect(ctx); err != nil {
+		disconnect(client)
 		return nil, fmt.Errorf("connect to %s failed: %v", BlockMongoUrlPassword(url, "***"), err)
 	}
 
 	// ping
 	if err = client.Ping(ctx, clientOps.ReadPreference); err != nil {
+		disconnect(client)
 		return nil, fmt.Errorf("ping to %v failed: %v\n"+
 			"If mongo server is standalone(single node) or conn address is different with mongo server address"+
 			" try a standalone mode by mongodb://ip:port/admin?directConnection=true",
@@ -172,11 +174,20 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 
 func (conn *MongoCommunityConn) Close() {
 	l.Logger.Infof("Close client with %s", BlockMongoUrlPassword(conn.URL, "***"))
-	_ = conn.Client.Disconnect(conn.ctx)
+	disconnect(conn.Client)
+}
+
+// disconnect bounds Disconnect so endSessions against a dead topology cannot block forever.
+func disconnect(client *mongo.Client) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = client.Disconnect(ctx)
 }
 
 func (conn *MongoCommunityConn) IsGood() bool {
-	if err := conn.Client.Ping(nil, nil); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := conn.Client.Ping(ctx, nil); err != nil {
 		return false
 	}
 
@@ -312,7 +323,8 @@ func EncodeMongoURI(uri string) (string, error) {
 		return "", fmt.Errorf("missing username or password in username:password")
 	}
 
-	// split hosts and path
+	// split query string, then hosts and path
+	afterUserInfo, rawQuery, _ := strings.Cut(afterUserInfo, "?")
 	hostPathParts := strings.SplitN(afterUserInfo, "/", 2)
 	host := hostPathParts[0]
 	var path string
@@ -324,10 +336,11 @@ func EncodeMongoURI(uri string) (string, error) {
 
 	// generate URL
 	u := &url.URL{
-		Scheme: scheme,
-		User:   url.UserPassword(username, password),
-		Host:   host,
-		Path:   path,
+		Scheme:   scheme,
+		User:     url.UserPassword(username, password),
+		Host:     host,
+		Path:     path,
+		RawQuery: rawQuery,
 	}
 
 	return u.String(), nil
