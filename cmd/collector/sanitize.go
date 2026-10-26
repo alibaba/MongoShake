@@ -434,22 +434,24 @@ func normalizeFilterOpTypes(opTypes []string) ([]string, error) {
 func checkConnection() error {
 	// check mongo_urls
 	for _, mongo := range conf.Options.MongoUrls {
-		_, err := utils.NewMongoCommunityConn(mongo, conf.Options.MongoConnectMode, true,
+		conn, err := utils.NewMongoCommunityConn(mongo, conf.Options.MongoConnectMode, true,
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return fmt.Errorf("connect source mongodb[%v] failed[%v]",
 				utils.BlockMongoUrlPassword(mongo, "***"), err)
 		}
+		conn.Close()
 	}
 
 	// check mongo_cs_url
 	if conf.Options.MongoCsUrl != "" {
-		_, err := utils.NewMongoCommunityConn(conf.Options.MongoCsUrl, utils.VarMongoConnectModeSecondaryPreferred,
+		conn, err := utils.NewMongoCommunityConn(conf.Options.MongoCsUrl, utils.VarMongoConnectModeSecondaryPreferred,
 			true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return fmt.Errorf("connect config-server[%v] failed[%v]",
 				utils.BlockMongoUrlPassword(conf.Options.MongoCsUrl, "***"), err)
 		}
+		conn.Close()
 	}
 
 	// check tunnel address
@@ -469,6 +471,7 @@ func checkConnection() error {
 			if i == 0 {
 				conf.Options.TargetDBVersion, _ = utils.GetDBVersion(targetConn)
 			}
+			targetConn.Close()
 		}
 	}
 
@@ -478,8 +481,12 @@ func checkConnection() error {
 		return err
 	}
 
-	sourceConn, _ := utils.NewMongoCommunityConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
+	sourceConn, err := utils.NewMongoCommunityConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
+	if err != nil {
+		return fmt.Errorf("connect source mongodb[%v] failed[%v]", utils.BlockMongoUrlPassword(source, "***"), err)
+	}
+	defer sourceConn.Close()
 	// ignore error
 	conf.Options.SourceDBVersion, _ = utils.GetDBVersion(sourceConn)
 	if ok, err := utils.GetAndCompareVersion(sourceConn, utils.VarMongoVersion26,
@@ -614,6 +621,7 @@ func checkConflict() error {
 			return fmt.Errorf("connect source[%v] failed[%v]",
 				utils.BlockMongoUrlPassword(source, "***"), err)
 		}
+		defer conn.Close()
 		if isOk, err := utils.GetAndCompareVersion(conn, utils.VarMongoVersion401, conf.Options.SourceDBVersion); err != nil {
 			return fmt.Errorf("compare source[%v] to %s failed[%v]", source, utils.VarMongoVersion401, err)
 		} else if !isOk {
