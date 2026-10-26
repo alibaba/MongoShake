@@ -54,3 +54,11 @@ jobs:
             ./collector/filter \
             ./collector/transform \
             ./collector/spool
+
+      # ACK/barrier unit regressions use loopback HTTP stores or mocks and
+      # need no MongoDB. Live MongoDB suites remain a separate release gate.
+      - name: ACK and barrier race regressions
+        run: |
+          go test -race ./collector \
+            -run '^(TestBarrier.*|TestCheckCheckpointUpdate.*|TestWorkerACKNotifications.*|TestWorkerProbeInterval.*|TestCalculateWorkerLowestCheckpoint|TestDispatchBatches)$' \
+            -count=3 -shuffle=on -timeout=10m

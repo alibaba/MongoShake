@@ -119,7 +119,7 @@ func TestBarrierCheckpointFlushesReadyWorkersBeforeAckFallback(t *testing.T) {
 	require.Equal(t, 2, reads, "read back a successful flush immediately")
 }
 
-func TestBarrierCheckpointFlushesAckThatAdvancesDuringFlush(t *testing.T) {
+func TestBarrierCheckpointFlushesAckThatAdvancesDuringSuccessfulFlush(t *testing.T) {
 	syncer := newBarrierTestSyncer(t)
 	worker := &Worker{syncer: syncer, ack: 50, unack: 100}
 	syncer.batcher = &Batcher{workerGroup: []*Worker{worker}}
@@ -131,8 +131,9 @@ func TestBarrierCheckpointFlushesAckThatAdvancesDuringFlush(t *testing.T) {
 	barrierCkptFlushFunc = func(*OplogSyncer) bool {
 		flushes++
 		if flushes == 1 {
+			persisted = worker.GetAck()
 			worker.setAck(100)
-			return false
+			return true
 		}
 		persisted = worker.GetAck()
 		return true

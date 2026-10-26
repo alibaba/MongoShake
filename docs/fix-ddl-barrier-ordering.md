@@ -110,18 +110,21 @@ worker 还未 ACK，batcher 会先等待 300ms 才重新刷新 checkpoint。
 
 每个 syncer 使用容量为 1 的 channel 合并 ACK 通知；worker 用非阻塞发送，
 batcher 暂停或处理较慢时不会阻塞 worker。通知只是重新检查的提示，不能直接
-放行 barrier。batcher 仅在以下条件之一满足时放行：持久化 checkpoint 达到
-`newestTs`，或者所有相关 worker 的安全 ACK 水位达到 `newestTs` 且仍有
-未提交事务 pin 阻挡该位置的持久化。后一条规则
-允许持久化 checkpoint 因未决事务被钉住时继续推进，避免 pin 与 barrier 互相等待。
-checkpoint 的事务 pin 保护保持原样。
-刷新成功后立即读回，不额外等待计时器。成功刷新后的新 ACK 可立即触发新的
-持久化；同一水位、失败写入和滞后读回则遵守独立的 I/O 重试期限。没有新 ACK
-时，300ms 兜底检查仍会重试并观察 Pause/Shutdown。
+放行 barrier。batcher 重新计算所有相关 worker 的安全 ACK 水位，保留 develop
+的两条顺序确认路径：持久化 checkpoint 达到 `newestTs`，或者真实 worker ACK
+达到 `newestTs`。ACK 完成不代表 checkpoint 已持久化。
 
-仍有未提交事务 pin 时，已满足的 ACK barrier 不发起无关 checkpoint 写入；
-最后一个已完成 pin 被真实 ACK 解除后，仍须持久化并读回最终 checkpoint。
-这两条路径分别覆盖，避免将“仍被其他事务 pin 住”与“已完成但尚未持久化”混淆。
+仍有未完成事务 pin 阻挡当前位置时，已满足的 ACK barrier 不发起无关写入。
+没有该 pin 时，按 I/O 期限尽力刷新；健康情况下立即读回。checkpoint 写入失败、
+读回失败或滞后不能阻止已经完成的 ACK barrier，正常 batcher checkpoint 路径在
+存储恢复后继续持久化。没有完成 ACK 时，不得因通知或成功写入但滞后的读回而
+提前放行。事务 pin 的注册、释放和持久化保护保持原样。
+
+中间 ACK 只按独立 I/O 期限刷新。仅安全候选水位已达到本次 barrier 目标时，新的
+ACK 才能绕过成功写入后的期限，避免多 worker 交错推进放大远端读写；失败写入
+的退避不被绕过。没有新 ACK 时，定时检查仍会重试并观察 Pause/Shutdown。
+最终一致性验收和重启测试仍须单独确认持久化 checkpoint 覆盖结束 fence，不能
+把 ACK barrier 返回成功当成落盘证明。
 
 事务分类、DDL 前后 barrier、Pause/Shutdown 后的 `pendingBarrierTs` 恢复确认
 均保留。此优化不改变事务在目标端的执行语义，也不跳过未确认的操作。
@@ -142,6 +145,28 @@ checkpoint 的事务 pin 保护保持原样。
 - 本机 HTTP checkpoint 服务实际返回 503，验证无进展和持续新 ACK 下的读写重试限速。
 - 阻塞 checkpoint POST，验证真正仍被未提交事务 pin 住的已完成 ACK barrier 不等待写入。
 - 成功刷新后的新 ACK 不等待 I/O 重试期限。
-- 已完成 pin 仍须清理，并持久化、读回最终 checkpoint。
+- 已完成 pin 仍须清理，健康存储下持久化并读回最终 checkpoint。
+- 无 pin、已完成 pin、位于目标之后的 pin：真实 HTTP 写失败不阻塞已完成 ACK。
+- 成功写入后的滞后/失败读回不阻塞已完成 ACK，且不伪造持久化状态。
+- 存储恢复后，正常 checkpoint 路径能够补齐持久化。
+- 8 个 worker 分阶段推进时，中间 ACK 不越过 I/O 期限；最终 ACK 可立即刷新。
+- helper cleanup 恢复 barrier 与 I/O 间隔，随机执行顺序不泄漏配置。
 
 这些用例使用真实 HTTP 存储和模拟 worker ACK；不能替代真实 MongoDB、持久化耐久性和故障恢复的完整回归。
+
+### 验证口径与兼容性
+
+CI 显式运行无需 MongoDB 的 ACK/barrier race 回归；真实 MongoDB 测试仍通过
+环境变量选择隔离实例，不能以 CI 单测代替真实数据、持久化和故障恢复验收。
+这两种启用机制分别服务单元和端到端测试，不要求把已有 live 入口改成 build tag。
+
+`TestBarrierLive` 的可选 3 倍阈值是 60 笔小事务、同样单 worker 的特定旧等待
+逻辑对照，计时包含启动与末尾 checkpoint；保留原断言。PR 正文约 2.40 倍来自
+另一套至少 60 秒的 develop 混合负载稳态对照，两者不能互相替代或混报。
+
+旧导出名称保留为 deprecated 兼容声明，避免仅因重命名而导致外部源码编译失败。
+旧 `DDLCheckpointInterval` 变量仅保留名称与类型；调节新 barrier 兜底间隔应使用
+`BarrierCheckpointInterval`，worker probe 不再共享该变量。
+
+相关顺序与 pin 背景：[#990](https://github.com/alibaba/MongoShake/pull/990)、
+[#997](https://github.com/alibaba/MongoShake/issues/997)。本次不包含独立事务回放修复。

@@ -18,19 +18,30 @@ import (
 )
 
 type barrierCheckpointStore struct {
-	timestamp atomic.Int64
-	reads     atomic.Int64
-	writes    atomic.Int64
-	failWrite bool
-	entered   chan struct{}
-	release   <-chan struct{}
+	timestamp         atomic.Int64
+	reads             atomic.Int64
+	writes            atomic.Int64
+	failWrite         bool
+	rejectWrites      *atomic.Bool
+	readbackTimestamp int64
+	failReadback      bool
+	entered           chan struct{}
+	release           <-chan struct{}
 }
 
 func (store *barrierCheckpointStore) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		store.reads.Add(1)
+		if store.failReadback && store.writes.Load() > 0 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		timestamp := store.timestamp.Load()
+		if store.readbackTimestamp > 0 && store.writes.Load() > 0 {
+			timestamp = store.readbackTimestamp
+		}
 		_ = json.NewEncoder(w).Encode(&ckpt.CheckpointContext{
-			Name: "barrier-io", Timestamp: store.timestamp.Load(), Version: utils.FcvCheckpoint.CurrentVersion,
+			Name: "barrier-io", Timestamp: timestamp, Version: utils.FcvCheckpoint.CurrentVersion,
 		})
 		return
 	}
@@ -42,7 +53,7 @@ func (store *barrierCheckpointStore) ServeHTTP(w http.ResponseWriter, r *http.Re
 		}
 		<-store.release
 	}
-	if store.failWrite {
+	if store.failWrite || (store.rejectWrites != nil && store.rejectWrites.Load()) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}

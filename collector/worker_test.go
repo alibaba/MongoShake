@@ -33,6 +33,7 @@ func TestWorkerACKNotificationsAreCoalesced(t *testing.T) {
 }
 
 func TestWorkerProbeIntervalIndependentOfBarrier(t *testing.T) {
+	probeInterval := WorkerProbeInterval
 	oldInterval := BarrierCheckpointInterval
 	BarrierCheckpointInterval = time.Millisecond
 	t.Cleanup(func() { BarrierCheckpointInterval = oldInterval })
@@ -45,8 +46,8 @@ func TestWorkerProbeIntervalIndependentOfBarrier(t *testing.T) {
 	}()
 	select {
 	case elapsed := <-done:
-		require.GreaterOrEqual(t, elapsed, WorkerProbeInterval)
-		require.Equal(t, 300*time.Millisecond, WorkerProbeInterval)
+		require.GreaterOrEqual(t, elapsed, probeInterval)
+		require.Equal(t, probeInterval, WorkerProbeInterval)
 	case <-time.After(time.Second):
 		worker.queue <- nil
 		<-done

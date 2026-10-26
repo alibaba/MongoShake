@@ -66,6 +66,8 @@ func TestBarrierLive(t *testing.T) {
 		CheckpointReached bool    `json:"checkpoint_reached_end_fence"`
 		PauseConfirmed    bool    `json:"pause_resume_confirmed"`
 		WriteErrorSeen    bool    `json:"checkpoint_write_error_seen"`
+		OutageProgress    bool    `json:"progress_during_checkpoint_outage"`
+		OutageCheckpoint  int64   `json:"checkpoint_during_outage"`
 		Passed            bool    `json:"passed"`
 	}
 	results := []result{}
@@ -78,16 +80,17 @@ func TestBarrierLive(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(output, "results.json"), append(data, '\n'), 0600))
 	})
 	for _, tc := range []struct {
-		name, binary                  string
-		workers                       int
-		ddl, pause, checkpointFailure bool
+		name, binary                                    string
+		workers                                         int
+		ddl, pause, checkpointFailure, checkpointOutage bool
 	}{
-		{"before_300ms", before, 1, false, false, false},
-		{"after_one_worker", after, 1, false, false, false},
-		{"after_two_workers", after, 2, false, false, false},
-		{"ddl_slow_worker", after, 2, true, false, false},
-		{"pause_resume", after, 2, false, true, false},
-		{"checkpoint_retry", after, 2, false, false, true},
+		{"before_300ms", before, 1, false, false, false, false},
+		{"after_one_worker", after, 1, false, false, false, false},
+		{"after_two_workers", after, 2, false, false, false, false},
+		{"ddl_slow_worker", after, 2, true, false, false, false},
+		{"pause_resume", after, 2, false, true, false, false},
+		{"checkpoint_retry", after, 2, false, false, true, false},
+		{"checkpoint_outage", after, 2, false, false, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.binary == "" {
@@ -148,11 +151,19 @@ func TestBarrierLive(t *testing.T) {
 				if tc.checkpointFailure {
 					data = bson.D{{Key: "failCommands", Value: bson.A{"update"}}, {Key: "errorCode", Value: 2}}
 				}
+				var mode interface{} = bson.D{{Key: "times", Value: 1}}
+				if tc.checkpointOutage {
+					mode = "alwaysOn"
+				}
 				require.NoError(t, target.Database("admin").RunCommand(ctx, bson.D{
-					{Key: "configureFailPoint", Value: "failCommand"}, {Key: "mode", Value: bson.D{{Key: "times", Value: 1}}}, {Key: "data", Value: data},
+					{Key: "configureFailPoint", Value: "failCommand"}, {Key: "mode", Value: mode}, {Key: "data", Value: data},
 				}).Err())
 				t.Cleanup(func() {
-					_ = target.Database("admin").RunCommand(context.Background(), bson.D{{Key: "configureFailPoint", Value: "failCommand"}, {Key: "mode", Value: "off"}}).Err()
+					cleanup, stop := context.WithTimeout(context.Background(), 10*time.Second)
+					defer stop()
+					if err := target.Database("admin").RunCommand(cleanup, bson.D{{Key: "configureFailPoint", Value: "failCommand"}, {Key: "mode", Value: "off"}}).Err(); err != nil {
+						t.Errorf("failpoint cleanup: %v", err)
+					}
 				})
 			}
 			caseDir := filepath.Join(output, tc.name)
@@ -208,6 +219,38 @@ log.flush = true
 				}
 			}
 			t.Cleanup(stopCollector)
+			t.Cleanup(func() {
+				if !t.Failed() {
+					return
+				}
+				stopCollector()
+				cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				snapshot := bson.M{}
+				for label, collection := range map[string]*mongo.Collection{
+					"source_docs": srcDB.Collection("docs"), "target_docs": dstDB.Collection("docs"),
+					"source_progress": srcDB.Collection("progress"), "target_progress": dstDB.Collection("progress"),
+					"checkpoint": ckptDB.Collection("checkpoint"),
+				} {
+					cursor, err := collection.Find(cleanup, bson.D{})
+					if err != nil {
+						t.Errorf("snapshot %s: %v", label, err)
+						continue
+					}
+					var docs []bson.M
+					if err := cursor.All(cleanup, &docs); err != nil {
+						t.Errorf("snapshot %s: %v", label, err)
+					}
+					snapshot[label] = docs
+				}
+				data, err := bson.MarshalExtJSON(snapshot, true, false)
+				if err == nil {
+					err = os.WriteFile(filepath.Join(caseDir, "failure-snapshot.ejson"), data, 0600)
+				}
+				if err != nil {
+					t.Errorf("write failure snapshot: %v", err)
+				}
+			})
 			if tc.pause {
 				base := fmt.Sprintf("http://127.0.0.1:%d", api)
 				require.Eventually(t, func() bool {
@@ -237,11 +280,43 @@ log.flush = true
 				}, time.Second, 10*time.Millisecond)
 				setPause(t, base, false)
 			}
+			durableEnd := end
+			if tc.checkpointOutage {
+				collectionExists := func(name string) bool {
+					names, err := dstDB.ListCollectionNames(ctx, bson.D{{Key: "name", Value: name}})
+					return err == nil && len(names) == 1
+				}
+				require.Eventually(t, func() bool { return collectionExists("end_fence") }, 15*time.Second, 20*time.Millisecond)
+				// This input follows an already-applied DDL while every checkpoint
+				// update still fails. Seeing it proves the batcher passed that
+				// DDL's ACK barrier rather than merely applying the DDL itself.
+				marker := bson.M{"_id": "during_outage", "value": true}
+				_, err = srcDB.Collection("progress").InsertOne(ctx, marker)
+				require.NoError(t, err)
+				require.NoError(t, srcDB.CreateCollection(ctx, "outage_progress"))
+				durableEnd = lastOplogTS(t, ctx, source)
+				require.Eventually(t, func() bool { return collectionExists("outage_progress") }, 15*time.Second, 20*time.Millisecond, "checkpoint outage blocked later DML/DDL; log: %s", logPath)
+				var actual bson.M
+				require.NoError(t, dstDB.Collection("progress").FindOne(ctx, bson.D{{Key: "_id", Value: "during_outage"}}).Decode(&actual))
+				require.Equal(t, marker, actual)
+				var checkpoint struct {
+					TS int64 `bson:"ckpt"`
+				}
+				require.NoError(t, ckptDB.Collection("checkpoint").FindOne(ctx, bson.D{{Key: "name", Value: "barrier_src"}}).Decode(&checkpoint))
+				entry.OutageCheckpoint = checkpoint.TS
+				require.Equal(t, timestampValue(start), checkpoint.TS, "ACK completion must not fabricate durable progress")
+				entry.OutageProgress = true
+				require.NoError(t, target.Database("admin").RunCommand(ctx, bson.D{{Key: "configureFailPoint", Value: "failCommand"}, {Key: "mode", Value: "off"}}).Err())
+				// Finite normal input resumes the existing checkpoint writer;
+				// neither the checkpoint nor transaction pins are edited.
+				require.NoError(t, srcDB.CreateCollection(ctx, "recovery_fence"))
+				require.Eventually(t, func() bool { return collectionExists("recovery_fence") }, 15*time.Second, 20*time.Millisecond)
+			}
 			require.Eventually(t, func() bool {
 				var checkpoint struct {
 					TS int64 `bson:"ckpt"`
 				}
-				return ckptDB.Collection("checkpoint").FindOne(ctx, bson.D{{Key: "name", Value: "barrier_src"}}).Decode(&checkpoint) == nil && checkpoint.TS >= timestampValue(end)
+				return ckptDB.Collection("checkpoint").FindOne(ctx, bson.D{{Key: "name", Value: "barrier_src"}}).Decode(&checkpoint) == nil && checkpoint.TS >= timestampValue(durableEnd)
 			}, 45*time.Second, 20*time.Millisecond, "collector did not reach end fence; log: %s", logPath)
 			entry.Seconds, entry.CheckpointReached = time.Since(started).Seconds(), true
 			entry.Documents, err = dstDB.Collection("docs").CountDocuments(ctx, bson.D{})
@@ -256,11 +331,11 @@ log.flush = true
 			} else {
 				require.Equal(t, int64(60), entry.Documents)
 				for i := 0; i < 60; i++ {
-					var actual struct {
-						Value int `bson:"value"`
-					}
-					require.NoError(t, dstDB.Collection("docs").FindOne(ctx, bson.D{{Key: "_id", Value: i}}).Decode(&actual))
-					require.Equal(t, i, actual.Value)
+					var expected, actual bson.M
+					filter := bson.D{{Key: "_id", Value: i}}
+					require.NoError(t, srcDB.Collection("docs").FindOne(ctx, filter).Decode(&expected))
+					require.NoError(t, dstDB.Collection("docs").FindOne(ctx, filter).Decode(&actual))
+					require.Equal(t, expected, actual, "full BSON content differs for document %d", i)
 				}
 			}
 			stopCollector()

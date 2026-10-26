@@ -97,6 +97,11 @@ const (
 	VarSyncerFilterCheckpointGap           = 180  // duration(seconds) without checkpoint update before mandatory flush
 	VarSyncerFilterCheckpointCheckInterval = 180  // interval(seconds) between filter-only checkpoint checks
 
+	// Deprecated: use VarSyncerBarrierCheckpointIntervalMs.
+	VarSyncerDDLCheckpointIntervalMs = VarSyncerBarrierCheckpointIntervalMs
+	// Deprecated: barrier logging now uses an elapsed-time interval.
+	VarSyncerCheckCheckpointUpdateTimes = 10
+
 	// pipeline queue sizing
 	VarSyncerPipelineQueueMaxNr    = 4
 	VarSyncerPipelineQueueMiddleNr = 2
