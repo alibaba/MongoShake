@@ -16,7 +16,10 @@ import (
 	"github.com/alibaba/MongoShake/v2/tunnel"
 )
 
-const MaxUnAckListLength = 128 * 256
+const (
+	MaxUnAckListLength  = 128 * 256
+	WorkerProbeInterval = time.Duration(utils.VarWorkerProbeIntervalMs) * time.Millisecond
+)
 
 type Worker struct {
 	// parent syncer
@@ -99,6 +102,18 @@ func (worker *Worker) GetUnAck() int64 {
 	return atomic.LoadInt64(&worker.unack)
 }
 
+func (worker *Worker) setAck(ack int64) {
+	if atomic.SwapInt64(&worker.ack, ack) == ack || worker.syncer == nil {
+		return
+	}
+	// A slow or paused batcher must never block the worker. One queued hint is
+	// enough: the batcher recalculates the checkpoint from every worker's ACK.
+	select {
+	case worker.syncer.workerAckNotify <- struct{}{}:
+	default:
+	}
+}
+
 func (worker *Worker) Offer(batch []*oplog.GenericOplog) {
 	if batch != nil {
 		atomic.StoreInt64(&worker.unack, utils.TimeStampToInt64(batch[len(batch)-1].Parsed.Timestamp))
@@ -129,7 +144,7 @@ func (worker *Worker) findFirstAvailableBatch() []*oplog.GenericOplog {
 		select {
 		case batch = <-worker.queue:
 			worker.updateJobsQueuedMetric()
-		case <-time.After(time.Duration(DDLCheckpointInterval) * time.Millisecond): // timeout, add probe message here
+		case <-time.After(WorkerProbeInterval): // timeout, add probe message here
 			return nil
 		}
 
@@ -214,7 +229,7 @@ func (worker *Worker) transfer(batch []*oplog.GenericOplog) {
 				worker.syncer.replMetric.AddApply(uint64(len(logs)))
 				worker.retain(batch)
 				// update ack
-				atomic.StoreInt64(&worker.ack, replyAndAcked)
+				worker.setAck(replyAndAcked)
 				worker.observePutDelay(replyAndAcked, time.Now().UTC())
 				done = true
 			}
@@ -246,7 +261,7 @@ func (worker *Worker) probe() {
 	if replyAcked := worker.writeController.Send([]*oplog.GenericOplog{}, tunnel.MsgProbe); replyAcked > 0 {
 		// only change ack offset on reply is OK
 		worker.syncer.replMetric.SetLSNACK(replyAcked)
-		atomic.StoreInt64(&worker.ack, replyAcked)
+		worker.setAck(replyAcked)
 		worker.observePutDelay(replyAcked, time.Now().UTC())
 	}
 }
