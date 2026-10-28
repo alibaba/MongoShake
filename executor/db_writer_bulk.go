@@ -89,6 +89,18 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 		}
 
 		if utils.DuplicateKey(err) {
+			// DuplicateKey only reports that SOME write error is a duplicate key,
+			// so a batch mixing E11000 with e.g. a document validation failure
+			// would be converted or ignored as a whole. The rejected documents
+			// would then be acknowledged without ever being written, and the
+			// checkpoint would move past them. Only handle batches whose write
+			// errors are all duplicates.
+			if ok && !utils.AllWriteErrorsDupKey(bulkErr) {
+				l.Logger.Warnf("insert docs with length[%v] into ns[%s.%s] of dest mongo mixed "+
+					"duplicate and non-duplicate errors, refusing to handle the batch: %v",
+					len(models), database, collection, bulkErr)
+				return err
+			}
 			// update on duplicated key occur
 			if dupUpdate {
 				RecordDuplicatedOplog(bw.conn, collection, oplogs)
