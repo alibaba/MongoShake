@@ -173,6 +173,36 @@ func (exec *Executor) errorIgnore(err error, ns, op string) bool {
 		return false
 	}
 
+	// HasErrorCode matches any cause in a write exception. Ignore the batch
+	// only when every write error is individually acceptable and durability
+	// has been confirmed; one known error must not hide another failure.
+	switch e := err.(type) {
+	case mongo.BulkWriteException:
+		if e.WriteConcernError != nil || len(e.WriteErrors) == 0 {
+			return false
+		}
+		for _, writeError := range e.WriteErrors {
+			if !exec.errorIgnore(writeError.WriteError, ns, op) {
+				return false
+			}
+		}
+		return true
+	case *mongo.BulkWriteException:
+		return e != nil && exec.errorIgnore(*e, ns, op)
+	case mongo.WriteException:
+		if e.WriteConcernError != nil || len(e.WriteErrors) == 0 {
+			return false
+		}
+		for _, writeError := range e.WriteErrors {
+			if !exec.errorIgnore(writeError, ns, op) {
+				return false
+			}
+		}
+		return true
+	case *mongo.WriteException:
+		return e != nil && exec.errorIgnore(*e, ns, op)
+	}
+
 	er, ok := err.(mongo.ServerError)
 	if !ok {
 		return false
