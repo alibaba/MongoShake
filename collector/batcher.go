@@ -568,24 +568,19 @@ func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta,
 	mustIndividual = true
 	// transaction can be commit now
 	ops, errs := batcher.txnBuffer.GetTxnStream(txnMeta)
-Loop:
-	for {
-		select {
-		case o, ok := <-ops:
-			if !ok {
-				break Loop
-			}
-			if o.Parsed.Operation == "c" {
-				haveCommandInTransaction = true
-			}
+	for o := range ops {
+		if o.Parsed.Operation == "c" {
+			haveCommandInTransaction = true
+		}
 
-			// Raw will be filling in Send->LogEntryEncode
-			deliveredOps = append(deliveredOps, o)
-		case err := <-errs:
-			if err != nil {
-				l.Logger.Panicf("error replaying transaction, err[%v]", err)
-			}
-			break Loop
+		// Raw will be filled in Send->LogEntryEncode.
+		deliveredOps = append(deliveredOps, o)
+	}
+	// The data channel also closes on failure. Always consume the terminal
+	// error instead of letting a select choose the closed data channel first.
+	for err := range errs {
+		if err != nil {
+			l.Logger.Panicf("error replaying transaction, err[%v]", err)
 		}
 	}
 
@@ -602,6 +597,14 @@ Loop:
 	err = batcher.txnBuffer.PurgeTxn(txnMeta)
 	if err != nil {
 		l.Logger.Panicf("error cleaning up transaction buffer, err[%v]", err)
+	}
+	if len(deliveredOps) == 0 {
+		// A validated empty/fully filtered transaction has no worker operations
+		// to ACK. Complete its lifecycle here, keeping all other pins intact.
+		batcher.unpinTxn(txnMeta.ID())
+		batcher.syncer.replMetric.AddFilter(1)
+		batcher.lastFilterOplog = genericLog.Parsed
+		return false, false, nil
 	}
 	// inner ops carry timestamps up to the commit ts (see ExtractInnerOps);
 	// keep the pin until workers ack them

@@ -248,7 +248,7 @@
           "commitTimestamp":{"$timestamp":{"t":1515616500,"i":11}}
         },
         "lsid":{"id":{"$binary":{"base64":"GK+8+nZ+Eem9p6vK9BEt9g==","subType":"04"}}},"txnNumber":{"$numberLong":"1"},
-        "prevOpTime":{"ts":{"$timestamp":{"t":1515616500,"i":1}},"t":{"$numberLong":"1"} }
+        "prevOpTime":{"ts":{"$timestamp":{"t":1515616500,"i":3}},"t":{"$numberLong":"1"} }
       }
     ],
     "ns": "txntest.g",
@@ -323,7 +323,7 @@
         "op":"c","ns":"admin.$cmd",
         "o":{"abortTransaction":1 },
         "lsid":{"id":{"$binary":{"base64":"HK+8+nZ+Eem9p6vK9BEt9g==","subType":"04"}}},"txnNumber":{"$numberLong":"1"},
-        "prevOpTime":{"ts":{"$timestamp":{"t":1515616500,"i":1}},"t":{"$numberLong":"1"} }
+        "prevOpTime":{"ts":{"$timestamp":{"t":1515616500,"i":3}},"t":{"$numberLong":"1"} }
       }
     ],
     "ns": "txntest.h",

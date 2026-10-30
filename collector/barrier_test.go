@@ -346,7 +346,8 @@ func TestBarrierPreservesDDLAndPreparedTransactionOrder(t *testing.T) {
 			}}}
 			input := []*oplog.GenericOplog{before, barrierOp, after}
 			if kind == "prepared transaction" {
-				txn := int64(1)
+				txn, term := int64(1), int64(1)
+				barrierOp.Parsed.Term = &term
 				barrierOp.Parsed.Namespace = "admin.$cmd"
 				barrierOp.Parsed.LSID = utils.MarshalData(bson.D{{Key: "id", Value: primitive.NewObjectID()}})
 				barrierOp.Parsed.TxnNumber = &txn
@@ -358,7 +359,7 @@ func TestBarrierPreservesDDLAndPreparedTransactionOrder(t *testing.T) {
 					}}}, {Key: "prepare", Value: true},
 				}
 				commit := &oplog.GenericOplog{Parsed: &oplog.PartialLog{ParsedLog: oplog.ParsedLog{
-					Timestamp: primitive.Timestamp{T: 102, I: 1}, Operation: "c", Namespace: "admin.$cmd",
+					Timestamp: primitive.Timestamp{T: 102, I: 1}, Term: &term, Operation: "c", Namespace: "admin.$cmd",
 					LSID: barrierOp.Parsed.LSID, TxnNumber: &txn,
 					PrevOpTime: utils.MarshalData(bson.D{{Key: "ts", Value: barrierOp.Parsed.Timestamp}, {Key: "t", Value: int64(1)}}),
 					Object:     bson.D{{Key: "commitTransaction", Value: 1}, {Key: "commitTimestamp", Value: barrierOp.Parsed.Timestamp}},
