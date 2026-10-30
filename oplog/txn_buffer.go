@@ -39,7 +39,12 @@ type txnState struct {
 	// only entry is the final commit means the earlier entries were lost,
 	// e.g. the checkpoint advanced past them before a restart.
 	sawData bool
-	wg      sync.WaitGroup
+	// Chain state is owned by AddOp under the buffer lock so a broken
+	// predecessor is rejected before any later checkpoint can advance.
+	// Predecessors refer to timestamp/term, not the legacy hash.
+	chainStarted bool
+	lastOpTime   TxnOpTime
+	wg           sync.WaitGroup
 }
 
 func newTxnState(op *GenericOplog) *txnState {
@@ -115,6 +120,19 @@ func (b *TxnBuffer) AddOp(m TxnMeta, op *GenericOplog) error {
 	state, ok := b.txns[m.id]
 	if !ok {
 		state = newTxnState(op)
+	}
+	// Abort has no business effects to replay. Keep the existing orphan
+	// commit diagnostic when no data envelope was received at all.
+	if !m.IsAbort() && (m.IsData() || state.chainStarted) {
+		if err := state.checkTxnChain(m); err != nil {
+			return err
+		}
+	}
+	if m.IsData() {
+		state.chainStarted = true
+		state.lastOpTime = TxnOpTime{Timestamp: op.Parsed.Timestamp, Term: op.Parsed.Term}
+	}
+	if !ok {
 		b.txns[m.id] = state
 		b.wg.Add(1)
 		state.wg.Add(1)
@@ -163,6 +181,45 @@ LOOP:
 	close(state.ingestDone)
 	state.wg.Done()
 	b.wg.Done()
+}
+
+// checkTxnChain validates every link before any buffered business operations
+// can be streamed. NewTxnMeta supplies an empty predecessor for legacy entries
+// without prevOpTime; that is valid only for the first data envelope.
+func (state *txnState) checkTxnChain(meta TxnMeta) error {
+	fail := func(reason string) error {
+		return fmt.Errorf("transaction oplog chain for %v: %s", meta.ID(), reason)
+	}
+	raw := bson.Raw(meta.prevOpTime)
+	if err := raw.Validate(); err != nil {
+		return fail(fmt.Sprintf("invalid prevOpTime BSON: %v", err))
+	}
+	value, err := raw.LookupErr("ts")
+	if err != nil {
+		return fail("prevOpTime is missing ts")
+	}
+	sec, inc, ok := value.TimestampOK()
+	if !ok {
+		return fail("prevOpTime.ts is not a BSON timestamp")
+	}
+	previous := TxnOpTime{Timestamp: primitive.Timestamp{T: sec, I: inc}}
+	if value, err := raw.LookupErr("t"); err == nil {
+		term, ok := value.Int64OK()
+		if !ok {
+			return fail("prevOpTime.t is not a BSON int64")
+		}
+		previous.Term = &term
+	}
+	if !state.chainStarted {
+		if previous.Timestamp != (primitive.Timestamp{}) {
+			return fail(fmt.Sprintf("missing first data entry: first received envelope refers to %v", previous))
+		}
+		return nil
+	}
+	if !TxnOpTimeEquals(previous, state.lastOpTime) {
+		return fail(fmt.Sprintf("predecessor %v does not match last received data entry %v", previous, state.lastOpTime))
+	}
+	return nil
 }
 
 // GetTxnStream returns a channel of Oplog entries in a transaction and a
