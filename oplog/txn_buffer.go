@@ -97,9 +97,10 @@ func (b *TxnBuffer) Size() int {
 
 // AddOp sends a transaction oplog entry to a background goroutine (starting
 // one for a new transaction TxnID) for asynchronous pre-processing and storage.
-// If the oplog entry is not a transaction, an error will be returned.  Any
-// errors during processing can be discovered later via the error channel from
-// `GetTxnStream`.
+// A stopped buffer, a non-transaction entry, or an invalid predecessor chain
+// returns an error synchronously, before the entry is queued for processing.
+// Errors from asynchronous processing are reported later through the error
+// channel returned by GetTxnStream.
 //
 // Must not be called concurrently with other transaction-related operations.
 // Must not be called for a given transaction after starting to stream that
