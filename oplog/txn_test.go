@@ -301,6 +301,10 @@ func TestOldestTimestamp(t *testing.T) {
 	}
 	// Constructing manually requires pointers to int64, so they can't be constants.
 	txnN := []int64{0, 1}
+	previous, err := bson.Marshal(bson.D{{Key: "ts", Value: primitive.Timestamp{T: 1234, I: 1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ops := []ParsedLog{
 		{
 			Timestamp: primitive.Timestamp{T: 1234, I: 1},
@@ -325,11 +329,12 @@ func TestOldestTimestamp(t *testing.T) {
 			},
 		},
 		{
-			Timestamp: primitive.Timestamp{T: 1236, I: 1},
-			LSID:      bson.Raw{0, 0, 0, 0, 1},
-			TxnNumber: &txnN[0],
-			Operation: "c",
-			Namespace: "admin.$cmd",
+			Timestamp:  primitive.Timestamp{T: 1236, I: 1},
+			PrevOpTime: previous,
+			LSID:       bson.Raw{0, 0, 0, 0, 1},
+			TxnNumber:  &txnN[0],
+			Operation:  "c",
+			Namespace:  "admin.$cmd",
 			Object: bson.D{
 				{"applyOps", bson.A{bson.D{{"op", "n"}}}},
 				{"partialTxn", true},

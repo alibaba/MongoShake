@@ -83,11 +83,20 @@ func (filter *OpTypeFilter) Filter(log *oplog.PartialLog) bool {
 	}
 
 	oplog.SetFiled(log.Object, "applyOps", remainOps)
+	drop := len(remainOps) == 0 && dropEmptyApplyOps(log)
 	l.Logger.Infof("OpTypeFilter filtered %d inner applyOps ops, drop oplog?[%v]",
-		filteredCount, len(remainOps) == 0)
+		filteredCount, drop)
 	// full payload can be huge (whole transaction documents); debug only.
 	l.Logger.Debugf("OpTypeFilter applyOps after reorganize: %v", log.Object)
-	return len(remainOps) == 0
+	return drop
+}
+
+// Empty transaction applyOps still carry prepare/partial/final state. Keep the
+// envelope so the buffer can distinguish a filtered transaction from missing
+// history. Vectored inserts and non-transaction applyOps retain their drop rule.
+func dropEmptyApplyOps(log *oplog.PartialLog) bool {
+	meta, err := oplog.NewTxnMeta(log.ParsedLog)
+	return err == nil && !meta.IsTxn()
 }
 
 // hasApplyOpsDMLFilter reports whether inner applyOps rewriting is relevant for
@@ -378,16 +387,16 @@ func (filter *NamespaceFilter) Filter(log *oplog.PartialLog) bool {
 				}
 			}
 			oplog.SetFiled(log.Object, "applyOps", remainOps)
+			drop := len(remainOps) == 0 && dropEmptyApplyOps(log)
 			if len(remainOps) == 0 {
-				// the whole transaction got filtered out — a notable drop event.
-				l.Logger.Infof("NamespaceFilter applyOps filtered entire txn, drop oplog")
+				l.Logger.Infof("NamespaceFilter applyOps has no selected ops, drop oplog?[%v]", drop)
 			} else {
 				// partial/kept inner ops is the steady-state path; keep it quiet.
 				l.Logger.Debugf("NamespaceFilter applyOps remainOps[%d] inner ops", len(remainOps))
 			}
 			// full payload can be huge (whole transaction documents); debug only.
 			l.Logger.Debugf("NamespaceFilter applyOps after reorganize: %v", log.Object)
-			return len(remainOps) == 0
+			return drop
 		default:
 			// such as: dropDatabase
 			return filter.filter(log)
