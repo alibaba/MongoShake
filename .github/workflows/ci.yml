@@ -55,6 +55,11 @@ jobs:
             ./collector/transform \
             ./collector/spool
 
+      # TLS chain verification regressions build certificates in memory and
+      # need no MongoDB; ./common is otherwise excluded from this job.
+      - name: TLS configuration regressions
+        run: go test ./common -run '^TestNewChainVerifyingTLSConfig' -count=1
+
       # ACK/barrier unit regressions use loopback HTTP stores or mocks and
       # need no MongoDB. Live MongoDB suites remain a separate release gate.
       - name: ACK and barrier race regressions

@@ -88,7 +88,7 @@ add tag when releasing: "release-v{version}-{date}". for example: "release-v1.0.
 ---
 Run `./bin/collector.darwin` or `collector.linux` which is built in OSX and Linux respectively.
 
-Or you can build mongo-shake yourself according to the following steps(go version needs >= 15.10):
+Or you can build mongo-shake yourself according to the following steps (Go 1.27.3 or newer is required; older toolchains download it through GOTOOLCHAIN when network access is available, and offline builders must install it first):
 
 *  git clone https://github.com/alibaba/MongoShake.git
 *  cd MongoShake
@@ -96,6 +96,23 @@ Or you can build mongo-shake yourself according to the following steps(go versio
 *  ./bin/collector -conf=conf/collector.conf 
 
 please note: user must modify collector.conf first to match needs. You can also use \"start.sh\" script which supports hypervisor mechanism in Linux OS only.
+
+# TLS
+---
+Set `mongo_ssl_root_ca_file` to enable TLS for the source and target MongoDB
+connections (setting it enables TLS even if the URI has no `tls=true`). The CA
+bundle is used to verify the server certificate chain, and every certificate in
+the PEM file is loaded. Hostname verification is disabled so IP-addressed
+endpoints keep working; use a CA that only signs the endpoints MongoShake
+connects to.
+
+`tunnel.mongo_ssl_root_ca_file` applies the same behaviour to the direct tunnel
+and Kafka TLS connection, and `checkpoint.storage.url.mongo_ssl_root_ca_file`
+applies it to the checkpoint store.
+
+If a connection fails with `server certificate chain verification failed`,
+check that the bundle chains to the server certificate, that the certificate is
+not expired, and that it carries the ServerAuth extended key usage.
 
 # Shake series tool
 ---

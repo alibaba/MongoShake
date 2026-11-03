@@ -2,10 +2,7 @@ package kafka
 
 import (
 	"compress/gzip"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
-	"io/ioutil"
 	"strings"
 	"time"
 
@@ -70,17 +67,11 @@ func NewConfig(rootCaFile string) (*Config, error) {
 
 	// ssl
 	if rootCaFile != "" {
-		sslConfig := &tls.Config{
-			InsecureSkipVerify: true,
-		}
-		caCert, err := ioutil.ReadFile(rootCaFile)
+		sslConfig, err := utils.NewChainVerifyingTLSConfig(rootCaFile)
 		if err != nil {
 			l.Logger.Criticalf("failed to load the ca cert file[%s] failed: %s", rootCaFile, err.Error())
 			return nil, err
 		}
-		caCertPool := x509.NewCertPool()
-		caCertPool.AppendCertsFromPEM(caCert)
-		sslConfig.RootCAs = caCertPool
 		config.Net.TLS.Config = sslConfig
 		config.Net.TLS.Enable = true
 	}
