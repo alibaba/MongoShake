@@ -250,7 +250,14 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 		fallthrough
 	case "dropIndexes":
 		// using applyOps directly, refer to mongo-tools:HandleNonTxnOp
-		// ensure every shard collection's uuid is same
+		//
+		// The source collection uuid (log.UI) is deliberately left out. applyOps
+		// resolves a command by uuid when one is supplied, and the target owns
+		// its own collection uuids: a source uuid that names nothing there makes
+		// drop / collMod / dropIndex(es) a silent no-op, and makes create rename
+		// the existing target collection to tmp<rand>.create before building a
+		// new empty one in its place (#1039). A replay is namespace-scoped, so
+		// the command is sent without it.
 		doc := bson.M{}
 		doc["ts"] = log.Timestamp
 		if log.Version > 0 {
@@ -266,10 +273,6 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 		}
 		if log.Query != nil && len(log.Query) > 0 {
 			doc["o2"] = log.Query
-		}
-		// uuid BinDataType == 3 or 4, see "BinDataType" in src/mongo/bson/bsontypes.h
-		if log.UI != nil && (log.UI.Subtype == 3 || log.UI.Subtype == 4) {
-			doc["ui"] = log.UI
 		}
 		l.Logger.Infof("run applyOps for %s: %v", operation, doc)
 		err = client.Database("admin").RunCommand(context.Background(),
