@@ -2,8 +2,10 @@ package utils
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -169,40 +171,114 @@ func (conn *MongoCommunityConn) AcquireReplicaSetName() string {
 }
 
 func (conn *MongoCommunityConn) HasUniqueIndex(queryCondition bson.M) bool {
-	checkNs := make([]NS, 0, 128)
-	var databases []string
-	var err error
-	if databases, err = conn.Client.ListDatabaseNames(nil, bson.M{}); err != nil {
-		l.Logger.Criticalf("Couldn't get databases from remote server: %v", err)
+	nsList, err := conn.ListUniqueIndexNamespaces(queryCondition)
+	if err != nil {
+		l.Logger.Errorf("list unique index namespaces failed: %v", err)
 		return false
+	}
+	return len(nsList) != 0
+}
+
+// ListUniqueIndexNamespaces returns the namespaces whose indexes constrain more
+// than _id: the index is unique and its leading key field is not _id. It is the
+// "auto" shard key input, so an unreadable namespace is reported as an error
+// instead of being silently treated as safe.
+func (conn *MongoCommunityConn) ListUniqueIndexNamespaces(queryCondition bson.M) ([]string, error) {
+	checkNs := make([]NS, 0, 128)
+	databases, err := conn.Client.ListDatabaseNames(nil, bson.M{})
+	if err != nil {
+		return nil, fmt.Errorf("list databases: %v", err)
 	}
 
 	for _, db := range databases {
-		if db != "admin" && db != "local" && db != "config" {
-			coll, _ := conn.Client.Database(db).ListCollectionNames(nil, queryCondition)
-			for _, c := range coll {
-				if c != "system.profile" {
-					// push all collections
-					checkNs = append(checkNs, NS{Database: db, Collection: c})
-				}
+		if db == "admin" || db == "local" || db == "config" {
+			continue
+		}
+		collections, err := conn.Client.Database(db).ListCollectionNames(nil, queryCondition)
+		if err != nil {
+			return nil, fmt.Errorf("list collections of db[%s]: %v", db, err)
+		}
+		for _, collection := range collections {
+			if collection != "system.profile" {
+				checkNs = append(checkNs, NS{Database: db, Collection: collection})
 			}
 		}
 	}
-	l.Logger.Infof("HasUniqueIndex checkNs:%v", checkNs)
+	l.Logger.Infof("ListUniqueIndexNamespaces checkNs:%v", checkNs)
 
+	nsList := make([]string, 0, len(checkNs))
 	for _, ns := range checkNs {
-		cursor, _ := conn.Client.Database(ns.Database).Collection(ns.Collection).Indexes().List(nil)
-		for cursor.Next(nil) {
-
-			unique, uErr := cursor.Current.LookupErr("unique")
-			if uErr == nil && unique.Boolean() == true {
-				l.Logger.Infof("Found unique index %s on %s.%s in auto shard mode",
-					cursor.Current.Lookup("name").StringValue(), ns.Database, ns.Collection)
-				return true
-			}
+		unique, err := conn.hasUniqueIndexBesidesID(ns.Database, ns.Collection)
+		if err != nil {
+			return nil, err
+		}
+		if unique {
+			l.Logger.Infof("Found unique index besides _id on %s.%s in auto shard mode",
+				ns.Database, ns.Collection)
+			nsList = append(nsList, ns.Database+"."+ns.Collection)
 		}
 	}
 
+	sort.Strings(nsList)
+	return nsList, nil
+}
+
+// hasUniqueIndexBesidesID reports whether the collection carries a unique index
+// that _id based dispatch cannot honour. A unique index led by _id adds no
+// constraint beyond the primary key, so it is ignored. A collection dropped
+// while the scan runs is reported as not constraining: it cannot receive more
+// oplogs.
+func (conn *MongoCommunityConn) hasUniqueIndexBesidesID(db, collection string) (bool, error) {
+	cursor, err := conn.Client.Database(db).Collection(collection).Indexes().List(nil)
+	if err != nil {
+		if isIndexScanSkipError(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("list indexes of %s.%s: %v", db, collection, err)
+	}
+	defer cursor.Close(nil)
+
+	for cursor.Next(nil) {
+		uniqueValue, err := cursor.Current.LookupErr("unique")
+		if err != nil {
+			continue
+		}
+		if unique, ok := uniqueValue.BooleanOK(); !ok || !unique {
+			continue
+		}
+		keyValue, err := cursor.Current.LookupErr("key")
+		if err != nil {
+			continue
+		}
+		key, ok := keyValue.DocumentOK()
+		if !ok {
+			continue
+		}
+		leading, err := key.IndexErr(0)
+		if err != nil || leading.Key() == "_id" {
+			continue
+		}
+		return true, nil
+	}
+
+	if err := cursor.Err(); err != nil {
+		if isIndexScanSkipError(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("iterate indexes of %s.%s: %v", db, collection, err)
+	}
+	return false, nil
+}
+
+// isIndexScanSkipError reports the errors that mean the collection cannot carry
+// a unique index the dispatch has to honour: it was dropped between
+// listCollections and listIndexes (NamespaceNotFound), or the caller did not
+// exclude views and it is one (CommandNotSupportedOnView).
+func isIndexScanSkipError(err error) bool {
+	var commandErr mongo.CommandError
+	if errors.As(err, &commandErr) {
+		return commandErr.Code == 26 || commandErr.Code == 166
+	}
 	return false
 }
 

@@ -140,7 +140,8 @@ func NewOplogSyncer(
 	startPosition interface{},
 	fullSyncFinishPosition int64,
 	mongoUrl string,
-	gids []string) *OplogSyncer {
+	gids []string,
+	orderedNamespaces []string) *OplogSyncer {
 
 	reader, err := sourceReader.CreateReader(conf.Options.IncrSyncMongoFetchMethod, mongoUrl, replset)
 	if err != nil {
@@ -162,6 +163,8 @@ func NewOplogSyncer(
 
 	// concurrent level hasher
 	switch conf.Options.IncrSyncShardKey {
+	case oplog.ShardAutomatic:
+		syncer.hasher = oplog.NewUniqueIndexAwareHasher(orderedNamespaces)
 	case oplog.ShardByNamespace:
 		syncer.hasher = &oplog.TableHasher{}
 	case oplog.ShardByID:
@@ -223,6 +226,42 @@ func (sync *OplogSyncer) String() string {
 // Bind bind different worker
 func (sync *OplogSyncer) Bind(w *Worker) {
 	sync.batcher.workerGroup = append(sync.batcher.workerGroup, w)
+}
+
+// trackOrderedNamespace moves a namespace to ordered replay when the DDL that
+// is about to run as a barrier introduces a unique index. Only the auto shard
+// key tracks namespaces.
+func (sync *OplogSyncer) trackOrderedNamespace(log *oplog.PartialLog) {
+	hasher, ok := sync.hasher.(*oplog.UniqueIndexAwareHasher)
+	if !ok {
+		return
+	}
+	switched := hasher.MarkOrderedByDDL(log)
+	// the startup warning cannot cover a namespace that only becomes ordered
+	// later, and a worker still hands its batch to incr_sync.executor executors
+	if len(switched) != 0 && conf.Options.IncrSyncExecutor > 1 {
+		l.Logger.Criticalf("shard_key=auto: incr_sync.executor=%d splits the batch of one worker across "+
+			"executors by _id, which breaks the ordered replay these namespaces now need: %v. "+
+			"Set incr_sync.executor=1 to keep the guarantee", conf.Options.IncrSyncExecutor, switched)
+	}
+}
+
+// warnUnswitchableUniqueIndex reports a unique index created by an applyOps
+// inner op. Inner ops are dispatched without a barrier, so the namespace cannot
+// switch to ordered replay at this point.
+func (sync *OplogSyncer) warnUnswitchableUniqueIndex(log *oplog.PartialLog) {
+	hasher, ok := sync.hasher.(*oplog.UniqueIndexAwareHasher)
+	if !ok {
+		return
+	}
+	ns, ok := oplog.EnforcesUniqueIndex(log)
+	if !ok || hasher.IsOrdered(ns) {
+		return
+	}
+	l.Logger.Criticalf("shard_key=auto: unique index on [%s] is applied inside applyOps, which is not a "+
+		"barrier, so the namespace cannot switch to ordered replay. It keeps the _id dispatch and may "+
+		"already be inconsistent: verify the collection, then restart the collector or use "+
+		"shard_key=collection", ns)
 }
 
 func (sync *OplogSyncer) StartDiskApply() {

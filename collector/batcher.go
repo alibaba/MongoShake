@@ -445,12 +445,12 @@ func (batcher *Batcher) processMergeBatch(mergeBatch []*oplog.GenericOplog) int 
 				}
 
 				for _, ele := range deliveredOps {
+					inner := &oplog.PartialLog{ParsedLog: ele}
+					batcher.syncer.warnUnswitchableUniqueIndex(inner)
 					batcher.addIntoBatchGroup(&oplog.GenericOplog{
 						Raw:        nil,
 						SourceTime: genericLog.SourceTime,
-						Parsed: &oplog.PartialLog{
-							ParsedLog: ele,
-						},
+						Parsed:     inner,
 					}, false)
 				}
 				continue
@@ -461,6 +461,10 @@ func (batcher *Batcher) processMergeBatch(mergeBatch []*oplog.GenericOplog) int 
 		if ddlFilter.Filter(genericLog.Parsed) {
 
 			if conf.Options.FilterDDLEnable {
+				// the DDL runs as a barrier, so everything dispatched before it
+				// is applied before the new routing can take effect
+				batcher.syncer.trackOrderedNamespace(genericLog.Parsed)
+
 				// DDL is executed as a barrier: it is handed to worker[0] on its own round
 				batcher.barrierOplogs = append(batcher.barrierOplogs, genericLog)
 

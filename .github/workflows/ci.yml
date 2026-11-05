@@ -17,6 +17,19 @@ on:
     branches: [develop, master]
   pull_request:
 
+# Queue time dominates everything else here: the first run of this workflow sat
+# 1h52m36s waiting for a runner and then executed in 1m29s. Grouping per ref
+# keeps runs for the same branch or PR from piling up behind one another.
+#
+# cancel-in-progress is limited to pull_request on purpose. PR branches churn
+# through force-pushes, so superseding a queued run is pure gain. Pushes to
+# develop and master are rare and each one is worth a definitive result -- with a
+# queue this long, cancelling would mean some commits on the main branches never
+# get a green check at all.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -31,8 +44,17 @@ jobs:
           go-version-file: go.work
           cache: true
 
+      # ./... in workspace mode reaches only the main module's 24 packages.
+      # tools/ is a separate module (github.com/alibaba/MongoShake/tools) and its
+      # pre-split binary ships in the release tarball as pre_split.linux, so it is
+      # built here too -- otherwise a broken pre_split.go can reach a release
+      # unnoticed. Historically the tarball was assembled from
+      # tools/pre-split/pre_split.linux, a 13MB binary committed to the repo, so
+      # nothing ever compiled it from source.
       - name: Build
-        run: go build ./...
+        run: |
+          go build ./...
+          (cd tools && go build ./...)
 
       # git ls-files rather than gofmt -l . so the untracked mongo-shake-v*
       # release staging directories cannot contribute noise.

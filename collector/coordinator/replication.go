@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"sync"
 
 	nimo "github.com/gugemichael/nimo4go"
@@ -36,6 +37,10 @@ type ReplicationCoordinator struct {
 	// syncerGroup and workerGroup number is 1:N in ReplicaSet.
 	// 1:1 while replicated in shard cluster
 	syncerGroup []*collector.OplogSyncer
+
+	// namespaces that carry a unique index other than _id. shard_key=auto
+	// replays them in order on a single worker
+	orderedNamespaces []string
 }
 
 func (coordinator *ReplicationCoordinator) Run() error {
@@ -109,8 +114,15 @@ func (coordinator *ReplicationCoordinator) Run() error {
 func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	var conn *utils.MongoCommunityConn
 	var err error
-	var hasUniqIndex = false
 	rs := map[string]int{}
+
+	// the index metadata decides the routing for shard_key=auto and feeds the
+	// warning for shard_key=id, so it is scanned once before the syncers start
+	scanUniqueIndex := conf.Options.SyncMode != utils.VarSyncModeFull &&
+		(conf.Options.IncrSyncShardKey == oplog.ShardAutomatic ||
+			conf.Options.IncrSyncShardKey == oplog.ShardByID)
+	uniqueIndexNamespaces := make(map[string]struct{})
+	var scanUniqueIndexErr error
 
 	// try to connect CheckpointStorage
 	checkpointStorageUrl := conf.Options.CheckpointStorageUrl
@@ -177,20 +189,75 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 		src.ReplicaName = rsName
 
 		// look around if there has unique index
-		if !hasUniqIndex && conf.Options.IncrSyncShardKey == oplog.ShardAutomatic {
-			hasUniqIndex = conn.HasUniqueIndex(utils.GetListCollectionQueryCondition(conn))
+		if scanUniqueIndex && scanUniqueIndexErr == nil {
+			nsList, scanErr := conn.ListUniqueIndexNamespaces(utils.GetListCollectionQueryCondition(conn))
+			if scanErr != nil {
+				scanUniqueIndexErr = scanErr
+			}
+			for _, ns := range nsList {
+				uniqueIndexNamespaces[ns] = struct{}{}
+			}
 		}
 		// doesn't reuse current connection
 		conn.Close()
 	}
 
-	// we choose sharding by collection if there are unique index
-	// existing in collections
-	if conf.Options.IncrSyncShardKey == oplog.ShardAutomatic {
-		if hasUniqIndex {
-			conf.Options.IncrSyncShardKey = oplog.ShardByNamespace
+	// a mongos source (change stream on a sharded cluster) has no entry in
+	// MongoD, but its collection metadata is what decides the routing
+	if scanUniqueIndex && scanUniqueIndexErr == nil && coordinator.MongoS != nil &&
+		conf.Options.IncrSyncMongoFetchMethod != utils.VarIncrSyncMongoFetchMethodOplog {
+		conn, err = utils.NewMongoCommunityConn(coordinator.MongoS.URL, conf.Options.MongoConnectMode, true,
+			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
+		if err != nil || conn == nil || !conn.IsGood() {
+			if conn != nil {
+				conn.Close()
+			}
+			scanUniqueIndexErr = fmt.Errorf("connect mongos source[%v] failed: %v",
+				utils.BlockMongoUrlPassword(coordinator.MongoS.URL, "***"), err)
 		} else {
-			conf.Options.IncrSyncShardKey = oplog.ShardByID
+			nsList, scanErr := conn.ListUniqueIndexNamespaces(utils.GetListCollectionQueryCondition(conn))
+			conn.Close()
+			if scanErr != nil {
+				scanUniqueIndexErr = scanErr
+			}
+			for _, ns := range nsList {
+				uniqueIndexNamespaces[ns] = struct{}{}
+			}
+		}
+	}
+
+	switch conf.Options.IncrSyncShardKey {
+	case oplog.ShardAutomatic:
+		if scanUniqueIndexErr != nil {
+			// an unreadable namespace may carry a unique index, so replay
+			// everything in order instead of guessing
+			conf.Options.IncrSyncShardKey = oplog.ShardByNamespace
+			l.Logger.Criticalf("shard_key=auto: read source index metadata failed[%v], "+
+				"fall back to shard_key=collection so that every namespace replays in order", scanUniqueIndexErr)
+			break
+		}
+		coordinator.orderedNamespaces = sortedNamespaces(uniqueIndexNamespaces)
+		l.Logger.Infof("shard_key=auto: %d namespace(s) carry a unique index besides _id and replay in order: %v. "+
+			"Other namespaces hash by _id", len(coordinator.orderedNamespaces), coordinator.orderedNamespaces)
+		// a worker hands its batch to incr_sync.executor executors split by _id,
+		// which breaks the order across documents that ordered replay relies on
+		if len(coordinator.orderedNamespaces) != 0 && conf.Options.IncrSyncExecutor > 1 {
+			l.Logger.Criticalf("shard_key=auto: incr_sync.executor=%d splits the batch of one worker "+
+				"across executors by _id, which breaks the ordered replay these namespaces need: %v. "+
+				"Set incr_sync.executor=1 to keep the guarantee",
+				conf.Options.IncrSyncExecutor, coordinator.orderedNamespaces)
+		}
+	case oplog.ShardByID:
+		// shard_key=id keeps its meaning, but a silent data loss is not an option
+		if scanUniqueIndexErr != nil {
+			l.Logger.Errorf("shard_key=id: read source index metadata failed[%v], "+
+				"cannot tell whether a unique index makes the routing unsafe", scanUniqueIndexErr)
+			break
+		}
+		if nsList := sortedNamespaces(uniqueIndexNamespaces); len(nsList) != 0 {
+			l.Logger.Criticalf("shard_key=id: these namespaces carry a unique index besides _id and may lose "+
+				"documents when the replay order changes: %v. Use shard_key=auto or shard_key=collection, "+
+				"or drop the unique index", nsList)
 		}
 	}
 
@@ -200,6 +267,15 @@ func (coordinator *ReplicationCoordinator) sanitizeMongoDB() error {
 	}
 
 	return nil
+}
+
+func sortedNamespaces(namespaces map[string]struct{}) []string {
+	nsList := make([]string, 0, len(namespaces))
+	for ns := range namespaces {
+		nsList = append(nsList, ns)
+	}
+	sort.Strings(nsList)
+	return nsList
 }
 
 // run incr-sync after full-sync
