@@ -31,17 +31,38 @@ calc = ['logs']
 
 
 # read http response json
-def __get_json(host, port, spec):
-    try:
-        resp = urllib2.urlopen("http://%s:%s/%s" % (host, port, spec)).read()
-        return json.loads(resp)
-    except:
-        traceback.print_exc()
-        __crash("failed")
+def __get_json(host, port, spec, mark):
 
+    """
+    Add a mark(-l or --long option) control that the stat program exits because mongo-shake cannot be connected
+    """
 
-def get_json(spec):
-    return __get_json(host, port, spec)
+    while True :
+
+        try :
+
+            resp = urllib2.urlopen("http://%s:%s/%s" % (host, port, spec)).read()
+
+            return json.loads(resp)
+
+        except KeyboardInterrupt :
+
+            break
+
+        except Exception as err :
+
+            if mark == False :
+
+                traceback.print_exc()
+
+                __crash("failed")
+
+            print("{} - {}, trying to connect {} {}".format(str(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())),str(err),host,port))
+
+            time.sleep(10)
+
+def get_json(spec , mark = False):
+    return __get_json(host, port, spec, mark)
 
 
 def __crash(message):
@@ -55,9 +76,18 @@ def usage():
 
 
 if __name__ == "__main__":
-    opts, args = getopt.getopt(sys.argv[1:], "tqh:p:", ["tables","queue", "host=", "port=", "help"])
+
+    """
+    add 2023-12-28
+    Add a mark(-l or --long option) control that the stat program exits because mongo-shake cannot be connected
+    """
+    VERBOSE_LONG = False
+
+    opts, args = getopt.getopt(sys.argv[1:], "ltqh:p:", ["long", "tables","queue", "host=", "port=", "help"])
 
     for key, value in opts:
+        if key in ("-l", "--long"):
+            VERBOSE_LONG = True
         if key in ("-w", "--queue"):
             VERBOSE_QUEUE = True
         if key in ("-w", "--tables"):
@@ -72,7 +102,8 @@ if __name__ == "__main__":
     subpage = VERBOSE_QUEUE | VERBOSE_TABLE
 
     # decide collector or receiver we connect to
-    detail = get_json("repl")
+    detail = get_json("repl",VERBOSE_LONG)
+
     if not isinstance(detail, dict):
         detail = detail[0]
     if detail["tag"] is None:
@@ -121,7 +152,7 @@ if __name__ == "__main__":
                     print header
                     print banner
                     print header
-                details = get_json("repl")
+                details = get_json("repl", VERBOSE_LONG)
                 if isinstance(details, dict):
                     # TODO : only show the first syncer !
                     details = [details]
@@ -180,7 +211,7 @@ if __name__ == "__main__":
         #
         api = "worker" if module == MODULE_COLLECTOR else "replayer"
 
-        worker = get_json(api)
+        worker = get_json(api, VERBOSE_LONG)
         banner = ["%-11s" % ""]
         w = worker[0]
         keys = w.keys()
@@ -193,7 +224,7 @@ if __name__ == "__main__":
 
         try:
             while True:
-                refresh = get_json(api)
+                refresh = get_json(api, VERBOSE_LONG)
                 line = []
                 for w in refresh:
                     seq = w["worker_id"] if module == MODULE_COLLECTOR else w['id']
@@ -240,7 +271,7 @@ if __name__ == "__main__":
             banner.append("\n|%s|" % ("-" * 41))
             banner.append("%s|" % ("-" * 11))
             banner = "".join(banner)
-            before = get_json("tables")
+            before = get_json("tables", VERBOSE_LONG)
 
             try:
                 while True:
@@ -248,7 +279,7 @@ if __name__ == "__main__":
                     time.sleep(1)
                     os.system('clear')
                     print banner
-                    after = get_json("tables")
+                    after = get_json("tables", VERBOSE_LONG)
                     for t in after:
                         delta = after[t] - before[t]
                         #if delta > 0:
@@ -263,4 +294,3 @@ if __name__ == "__main__":
             except:
                 traceback.print_exc()
                 pass
-
