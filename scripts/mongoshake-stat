@@ -2,13 +2,19 @@
 
 # -*- coding:utf-8 -*-
 
+from __future__ import print_function
+
 import getopt
 import json
 import os
 
 import sys
 import traceback
-import urllib2
+
+try:
+    import urllib.request as urllib_request
+except ImportError:
+    import urllib2 as urllib_request
 
 import time
 
@@ -33,7 +39,7 @@ calc = ['logs']
 # read http response json
 def __get_json(host, port, spec):
     try:
-        resp = urllib2.urlopen("http://%s:%s/%s" % (host, port, spec)).read()
+        resp = urllib_request.urlopen("http://%s:%s/%s" % (host, port, spec)).read()
         return json.loads(resp)
     except:
         traceback.print_exc()
@@ -45,12 +51,12 @@ def get_json(spec):
 
 
 def __crash(message):
-    print message
+    print(message)
     exit(-1)
 
 
 def usage():
-    print "Usage: ./mongoshake-stat [--host=127.0.0.1] [--port=8080] [--tables] [--queue]"
+    print("Usage: ./mongoshake-stat [--host=127.0.0.1] [--port=8080] [--tables] [--queue]")
     exit(0)
 
 
@@ -93,10 +99,10 @@ if __name__ == "__main__":
         # |---------------|------------------|---------------------|
         header = ["|"]
         banner = ["|"]
-        keys = detail.keys()
+        keys = list(detail.keys())
         keys.sort()
         for k in keys:
-            if isinstance(detail[k], unicode):
+            if isinstance(detail[k], str):
                 if str(k) not in exclusive:
                     banner.append("%20s |" % k)
                     header.append(("-" * 21) + "|")
@@ -111,16 +117,15 @@ if __name__ == "__main__":
                         header.append(("-" * 21) + "|")
 
         banner = "".join(banner)
-        # header = "|" + "-" * (len(banner) - 2) + "|"
         header = "".join(header)
 
         try:
             accumulation = {}
             for i in range(0, 10000000):
                 if i % 20 == 0:
-                    print header
-                    print banner
-                    print header
+                    print(header)
+                    print(banner)
+                    print(header)
                 details = get_json("repl")
                 if isinstance(details, dict):
                     # TODO : only show the first syncer !
@@ -128,19 +133,19 @@ if __name__ == "__main__":
                 i = 0
                 for detail in details:
                     line = ["|"]
-                    keys = detail.keys()
+                    keys = list(detail.keys())
                     keys.sort()
                     for k in keys:
                         mk = k + str(i)
-                        if isinstance(detail[k], unicode):
+                        if isinstance(detail[k], str):
                             if str(k) not in exclusive:
                                 line.append("%20s |" % detail[k])
                         if isinstance(detail[k], int):
-                            if not accumulation.has_key(mk):
+                            if mk not in accumulation:
                                 accumulation[mk] = detail[k]
                                 line.append("%20s |" % "none")
                             else:
-                                previous = accumulation[mk] 
+                                previous = accumulation[mk]
                                 line.append("%20s |" % (detail[k] - previous))
                                 accumulation[mk] = detail[k]
                         elif isinstance(detail[k], dict):
@@ -150,11 +155,11 @@ if __name__ == "__main__":
                                     line.append("%20s |" % (str(sub[key])))
 
                     line = "".join(line)
-                    print line
+                    print(line)
                     i+=1
                 endline = ["|"]
                 for k in keys:
-                    if isinstance(detail[k], unicode):
+                    if isinstance(detail[k], str):
                         if str(k) not in exclusive:
                             endline.append("%s|" % ("-" * 21))
                     if isinstance(detail[k], int):
@@ -163,7 +168,7 @@ if __name__ == "__main__":
                         for key in sub:
                             if str(k) + "." + str(key) not in exclusive:
                                 endline.append("%s|" % ("-"*21))
-                print "".join(endline)
+                print("".join(endline))
                 time.sleep(1)
         except:
             traceback.print_exc()
@@ -183,7 +188,7 @@ if __name__ == "__main__":
         worker = get_json(api)
         banner = ["%-11s" % ""]
         w = worker[0]
-        keys = w.keys()
+        keys = list(w.keys())
         keys.sort()
         for col in keys:
             if str(col) not in queue_tag_exclusive:
@@ -198,7 +203,7 @@ if __name__ == "__main__":
                 for w in refresh:
                     seq = w["worker_id"] if module == MODULE_COLLECTOR else w['id']
                     line.append("%11s" % (api + "-" + str(seq)))
-                    keys = w.keys()
+                    keys = list(w.keys())
                     keys.sort()
                     for col in keys:
                         if str(col) not in queue_tag_exclusive:
@@ -206,9 +211,9 @@ if __name__ == "__main__":
                     line.append("\n")
 
                 os.system('clear')
-                print "\n\n"
-                print banner
-                print "".join(line)
+                print("\n\n")
+                print(banner)
+                print("".join(line))
 
                 time.sleep(1)
         except:
@@ -217,7 +222,7 @@ if __name__ == "__main__":
 
     elif VERBOSE_TABLE:
         if module != MODULE_RECEIVER:
-            print "Command `mongoshake-stat --tables` is not supported by collector" 
+            print("Command `mongoshake-stat --tables` is not supported by collector")
         else:
             # show tables operations
             #
@@ -247,7 +252,7 @@ if __name__ == "__main__":
                     line = []
                     time.sleep(1)
                     os.system('clear')
-                    print banner
+                    print(banner)
                     after = get_json("tables")
                     for t in after:
                         delta = after[t] - before[t]
@@ -257,10 +262,9 @@ if __name__ == "__main__":
                         line.append("\n|%s" % ("-" * 41))
                         line.append("|%s|\n" % ("-" * 11))
 
-                    print "".join(line)
+                    print("".join(line))
                     before = after
 
             except:
                 traceback.print_exc()
                 pass
-
