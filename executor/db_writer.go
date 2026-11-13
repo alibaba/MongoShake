@@ -63,6 +63,35 @@ func NewDbWriter(conn *utils.MongoCommunityConn, metadata bson.E, bulkInsert boo
 	return &BulkWriter{conn: conn, fullFinishTs: fullFinishTs} // bulk insertion enable
 }
 
+// nativeDDLName maps an oplog DDL op name to the command DocumentDB accepts.
+// Only dropIndexes is a real command: deleteIndex / deleteIndexes / dropIndex are
+// legacy oplog spellings that applyOps understood but a direct command rejects
+// with CommandNotFound (#1041).
+func nativeDDLName(operation string) string {
+	switch operation {
+	case "deleteIndex", "deleteIndexes", "dropIndex":
+		return "dropIndexes"
+	}
+	return operation
+}
+
+// nativeDDLCommand unwraps a namespace-scoped DDL oplog into the command itself,
+// dropping the envelope keys a direct command must not carry. Amazon DocumentDB
+// does not implement applyOps, so DDL has to be replayed this way (#1041).
+func nativeDDLCommand(log *oplog.PartialLog) bson.D {
+	cmd := bson.D{}
+	for _, ele := range log.Object {
+		if utils.ApplyOpsFilter(ele.Key) {
+			continue
+		}
+		cmd = append(cmd, ele)
+	}
+	if len(cmd) > 0 {
+		cmd[0].Key = nativeDDLName(cmd[0].Key)
+	}
+	return cmd
+}
+
 func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo.Client) error {
 	defer l.Logger.Debugf("RunCommand run DDL: %v", log.Dump(nil, true))
 	dbHandler := client.Database(database)
@@ -249,6 +278,24 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 	case "dropIndex":
 		fallthrough
 	case "dropIndexes":
+		if conf.Options.IsDocumentDBTarget() {
+			cmd := nativeDDLCommand(log)
+			l.Logger.Infof("run native %s on DocumentDB target: %v", operation, cmd)
+			err = dbHandler.RunCommand(nil, cmd).Err()
+			if err != nil && nativeDDLName(operation) == "dropIndexes" &&
+				dropIndexesByName(cmd) && isIndexNotFound(err) {
+				// applyOps accepts dropping an index that is already gone, the native
+				// command reports IndexNotFound. Replaying after a restart must not
+				// stall on it, so treat it as already applied.
+				l.Logger.Warnf("native %s on DocumentDB target: index is already absent, "+
+					"treating as applied: %v", operation, err)
+				err = nil
+			}
+			if err != nil {
+				l.Logger.Errorf("run native %s[%v] on DocumentDB target failed: %v", operation, cmd, err)
+			}
+			break
+		}
 		// using applyOps directly, refer to mongo-tools:HandleNonTxnOp
 		//
 		// The source collection uuid (log.UI) is deliberately left out. applyOps
@@ -323,6 +370,27 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 	}
 
 	return err
+}
+
+// dropIndexesByName reports whether the command drops one index by name. Only that
+// form is idempotent: DocumentDB also answers IndexNotFound for a mismatched key
+// pattern or a name list it applied only part of, and in those cases indexes
+// survive, so the error must not be swallowed.
+func dropIndexesByName(cmd bson.D) bool {
+	for _, ele := range cmd {
+		if ele.Key == "index" {
+			_, ok := ele.Value.(string)
+			return ok
+		}
+	}
+	return false
+}
+
+// isIndexNotFound reports the server's IndexNotFound (27), which a replayed
+// dropIndexes raises once the index is already gone.
+func isIndexNotFound(err error) bool {
+	er, ok := err.(mongo.ServerError)
+	return ok && er.HasErrorCode(27)
 }
 
 // IgnoreError return true if error can be ignored

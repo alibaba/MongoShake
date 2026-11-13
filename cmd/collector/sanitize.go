@@ -343,6 +343,16 @@ func checkDefaultValue() error {
 		conf.Options.IncrSyncReaderBufferTime = 1
 	}
 
+	// special.target.db.flag opts the destination out of the MongoDB-only commands
+	// DocumentDB rejects (#1041).
+	if conf.Options.SpecialTargetDBFlag != "" &&
+		conf.Options.SpecialTargetDBFlag != utils.VarSpecialTargetDBFlagDocumentDB {
+		return fmt.Errorf("special.target.db.flag should be empty or 'documentdb'")
+	}
+	if conf.Options.IsDocumentDBTarget() && conf.Options.Tunnel != utils.VarTunnelDirect {
+		return fmt.Errorf("special.target.db.flag = 'documentdb' requires tunnel = 'direct'")
+	}
+
 	/********************************/
 	// set utils
 
@@ -454,6 +464,10 @@ func checkConnection() error {
 		conn.Close()
 	}
 
+	// DocumentDB rejects retryable writes before engine 8.0.2. Normalize before the
+	// target is first contacted so every target connection sees the same URI.
+	disableDocumentDBRetryWrites()
+
 	// check tunnel address
 	// no need to check target connection when debug flag set.
 	if conf.Options.Tunnel == utils.VarTunnelDirect &&
@@ -497,6 +511,36 @@ func checkConnection() error {
 	}
 
 	return nil
+}
+
+// disableDocumentDBRetryWrites turns retryable writes off on every URI that points
+// at a DocumentDB target: the tunnel addresses, plus the checkpoint storage unless
+// it is spelled exactly like one of the source URLs. The driver enables retryable
+// writes by default and DocumentDB engines before 8.0.2 reject them with code 301
+// (#1041).
+//
+// The checkpoint URL is excluded by matching the sources rather than the targets,
+// so a target URI spelled differently from tunnel.address is still covered. A
+// source URL spelled differently is normalized too, which is harmless: MongoDB
+// accepts the option. An empty value is left alone because checkConflict defaults
+// it to a source cluster afterwards.
+func disableDocumentDBRetryWrites() {
+	if !conf.Options.IsDocumentDBTarget() {
+		return
+	}
+	for i, address := range conf.Options.TunnelAddress {
+		conf.Options.TunnelAddress[i] = utils.DisableRetryWrites(address)
+	}
+	ckpt := conf.Options.CheckpointStorageUrl
+	if ckpt == "" || ckpt == conf.Options.MongoSUrl {
+		return
+	}
+	for _, source := range conf.Options.MongoUrls {
+		if ckpt == source {
+			return
+		}
+	}
+	conf.Options.CheckpointStorageUrl = utils.DisableRetryWrites(ckpt)
 }
 
 func checkConflict() error {

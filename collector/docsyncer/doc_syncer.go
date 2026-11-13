@@ -67,6 +67,18 @@ func in(target string, strArray []string) bool {
 	return false
 }
 
+// destListCollectionFilter builds the listCollections filter used against the
+// target. DocumentDB rejects the "type" key in that filter outright (#1041). The
+// filter exists to keep views out of the *source* enumeration; here it only decides
+// whether to warn about a namespace that already exists, so listing every
+// collection is both accepted by DocumentDB and no less correct.
+func destListCollectionFilter(toConn *utils.MongoCommunityConn) bson.M {
+	if conf.Options.IsDocumentDBTarget() {
+		return bson.M{}
+	}
+	return utils.GetListCollectionQueryCondition(toConn)
+}
+
 func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoCommunityConn,
 	nsTrans *transform.NamespaceTransform) error {
 	if conf.Options.FullSyncExecutorDebug {
@@ -79,7 +91,7 @@ func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoCom
 		if !conf.Options.FullSyncCollectionDrop {
 			// do not drop
 			colNames, err := toConn.Client.Database(toNS.Database).ListCollectionNames(nil,
-				utils.GetListCollectionQueryCondition(toConn))
+				destListCollectionFilter(toConn))
 			if err != nil {
 				l.Logger.Criticalf("Get collection names of db %v of dest mongodb failed. %v", toNS.Database, err)
 				return err
@@ -477,7 +489,8 @@ func StartIndexSync(indexMap map[utils.NS][]bson.D, toUrl string,
 						{"createIndexes", toNS.Collection},
 						{"indexes", []bson.D{newIndex}},
 					}); out.Err() != nil {
-						l.Logger.Warnf("Create indexes for ns %v of dest mongodb failed. %v", ns, out.Err())
+						l.Logger.Warnf("Create index %v for ns %v of dest mongodb failed, this index is skipped. %v",
+							newIndex.Map()["name"], ns, out.Err())
 					}
 				}
 				l.Logger.Infof("Create indexes for ns %v of dest mongodb finish", toNS)

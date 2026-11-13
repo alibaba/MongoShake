@@ -365,3 +365,40 @@ func EncodeMongoURI(uri string) (string, error) {
 
 	return u.String(), nil
 }
+
+// DisableRetryWrites forces retryWrites=false on a MongoDB URI unless the caller
+// already picked a value. The driver enables retryable writes by default, and
+// Amazon DocumentDB rejects them before engine 8.0.2 with code 301 (#1041).
+func DisableRetryWrites(uri string) string {
+	// Only the part after the scheme is inspected: userinfo may itself contain
+	// '@', '/' or '?', and it ends at the last '@'.
+	rest := uri
+	if i := strings.Index(uri, "://"); i >= 0 {
+		rest = uri[i+3:]
+	}
+	authority := rest
+	if at := strings.LastIndex(rest, "@"); at >= 0 {
+		authority = rest[at+1:]
+	}
+
+	if q := strings.Index(authority, "?"); q >= 0 {
+		query := authority[q+1:]
+		for _, kv := range strings.Split(query, "&") {
+			key, _, _ := strings.Cut(kv, "=")
+			if strings.EqualFold(strings.TrimSpace(key), "retryWrites") {
+				return uri
+			}
+		}
+		if query == "" {
+			return uri + "retryWrites=false"
+		}
+		return uri + "&retryWrites=false"
+	}
+
+	// The driver requires a '/' between the hosts and the query string, so a bare
+	// "mongodb://host:port" needs one inserted or it fails to parse.
+	if !strings.Contains(authority, "/") {
+		return uri + "/?retryWrites=false"
+	}
+	return uri + "?retryWrites=false"
+}
