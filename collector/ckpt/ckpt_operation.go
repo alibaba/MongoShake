@@ -9,6 +9,7 @@ import (
 
 	"github.com/Masterminds/semver/v3"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
@@ -39,6 +40,69 @@ func (cc *CheckpointContext) String() string {
 		return err.Error()
 	} else {
 		return string(ret)
+	}
+}
+
+// UnmarshalBSON accepts both encodings of the two timestamp fields. Current builds
+// write int64, but the mgo-based releases typed ckpt and
+// oplog_disk_queue_apply_finish_ts as bson.MongoTimestamp, which mgo encodes as a
+// BSON timestamp (0x11), and the driver refuses to decode that into an integer.
+// Without this, a collector started over a checkpoint written by an older release
+// finishes full sync and then exits at the incremental handover with "cannot decode
+// timestamp into an integer type" followed by "current ckpt context is empty".
+//
+// Marshalling is deliberately left alone: the first update rewrites both fields as
+// int64, so the legacy encoding disappears once the collector has run.
+func (cc *CheckpointContext) UnmarshalBSON(data []byte) error {
+	var aux struct {
+		Name                   string        `bson:"name"`
+		Timestamp              bson.RawValue `bson:"ckpt"`
+		Version                int           `bson:"version"`
+		FetchMethod            string        `bson:"fetch_method"`
+		OplogDiskQueue         string        `bson:"oplog_disk_queue"`
+		OplogDiskQueueFinishTs bson.RawValue `bson:"oplog_disk_queue_apply_finish_ts"`
+	}
+	if err := bson.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	ts, err := decodeCheckpointTimestamp(aux.Timestamp)
+	if err != nil {
+		return fmt.Errorf("ckpt: %v", err)
+	}
+	finishTs, err := decodeCheckpointTimestamp(aux.OplogDiskQueueFinishTs)
+	if err != nil {
+		return fmt.Errorf("oplog_disk_queue_apply_finish_ts: %v", err)
+	}
+	*cc = CheckpointContext{
+		Name:                   aux.Name,
+		Timestamp:              ts,
+		Version:                aux.Version,
+		FetchMethod:            aux.FetchMethod,
+		OplogDiskQueue:         aux.OplogDiskQueue,
+		OplogDiskQueueFinishTs: finishTs,
+	}
+	return nil
+}
+
+// decodeCheckpointTimestamp reads ckpt from either encoding. An absent field keeps
+// the zero value; anything that cannot denote a timestamp is still an error rather
+// than a silent 0, which would restart replication from the beginning.
+func decodeCheckpointTimestamp(v bson.RawValue) (int64, error) {
+	if v.IsZero() { // field absent from the document
+		return 0, nil
+	}
+	switch v.Type {
+	case bson.TypeTimestamp:
+		t, i := v.Timestamp()
+		return utils.TimeStampToInt64(primitive.Timestamp{T: t, I: i}), nil
+	case bson.TypeInt64:
+		return v.Int64(), nil
+	case bson.TypeInt32:
+		return int64(v.Int32()), nil
+	case bson.TypeNull, bson.TypeUndefined:
+		return 0, nil
+	default:
+		return 0, fmt.Errorf("unsupported ckpt BSON type[%v]", v.Type)
 	}
 }
 
