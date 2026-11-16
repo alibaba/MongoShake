@@ -80,6 +80,7 @@ const (
 
 	// special
 	VarSpecialSourceDBFlagAliyunServerless = "aliyun_serverless"
+	VarSpecialTargetDBFlagDocumentDB       = "documentdb"
 
 	// mongo dbVersions
 	VarMongoVersion26  = "2.6.0"
