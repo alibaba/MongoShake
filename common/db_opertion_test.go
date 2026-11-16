@@ -190,7 +190,8 @@ func TestGetAllNamespace(t *testing.T) {
 			},
 		}
 
-		tsMap, biggestNew, smallestNew, biggestOld, smallestOld, err := GetAllTimestamp(mgoSources, "")
+		tsMap, biggestNew, smallestNew, biggestOld, smallestOld, err := GetAllTimestamp(mgoSources,
+			VarMongoConnectModeSecondaryPreferred, "")
 		assert.Equal(t, nil, err, "should be equal")
 		fmt.Printf("TestGetAllNamespace biggestNew:%v, smallestNew:%v, biggestOld:%v, smallestOld:%v,"+
 			", tsMap:%v\n",
