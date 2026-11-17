@@ -135,10 +135,10 @@ func GetOldestTimestampByConn(conn *MongoCommunityConn) (int64, error) {
 	return getOplogTimestamp(conn, 1)
 }
 
-func GetNewestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (int64, error) {
+func GetNewestTimestampByUrl(url string, fromMongoS bool, connectMode string, sslRootFile string) (int64, error) {
 	var conn *MongoCommunityConn
 	var err error
-	if conn, err = NewMongoCommunityConn(url, VarMongoConnectModeSecondaryPreferred, true,
+	if conn, err = NewMongoCommunityConn(url, connectMode, true,
 		ReadWriteConcernDefault, ReadWriteConcernDefault, sslRootFile); conn == nil || err != nil {
 		return 0, err
 	}
@@ -151,14 +151,14 @@ func GetNewestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (i
 	return GetNewestTimestampByConn(conn)
 }
 
-func GetOldestTimestampByUrl(url string, fromMongoS bool, sslRootFile string) (int64, error) {
+func GetOldestTimestampByUrl(url string, fromMongoS bool, connectMode string, sslRootFile string) (int64, error) {
 	if fromMongoS {
 		return 0, nil
 	}
 
 	var conn *MongoCommunityConn
 	var err error
-	if conn, err = NewMongoCommunityConn(url, VarMongoConnectModeSecondaryPreferred, true,
+	if conn, err = NewMongoCommunityConn(url, connectMode, true,
 		ReadWriteConcernDefault, ReadWriteConcernDefault, sslRootFile); conn == nil || err != nil {
 		return 0, err
 	}
@@ -174,7 +174,13 @@ type TimestampNode struct {
 }
 
 // GetAllTimestamp get all newest timestamp
-func GetAllTimestamp(sources []*MongoSource, sslRootFile string) (map[string]TimestampNode, int64,
+// connectMode must be the mode the incremental reader will fetch with: the oplog
+// window belongs to whichever member serves the read, so probing a secondary
+// while the reader is pinned to the primary (or the reverse) judges the
+// checkpoint against a window that will never be used (#1043). Under
+// secondaryPreferred/nearest the probe and the reader may still land on
+// different members, so this aligns the node class, not the exact node.
+func GetAllTimestamp(sources []*MongoSource, connectMode string, sslRootFile string) (map[string]TimestampNode, int64,
 	int64, int64, int64, error) {
 	smallestNew := int64(math.MaxInt64)
 	biggestNew := int64(0)
@@ -187,14 +193,14 @@ func GetAllTimestamp(sources []*MongoSource, sslRootFile string) (map[string]Tim
 		if src.ReplicaName == VarReplicaNameMongos {
 			fromMongos = true
 		}
-		newest, err := GetNewestTimestampByUrl(src.URL, fromMongos, sslRootFile)
+		newest, err := GetNewestTimestampByUrl(src.URL, fromMongos, connectMode, sslRootFile)
 		if err != nil {
 			return nil, 0, 0, 0, 0, err
 		} else if newest == 0 {
 			return nil, 0, 0, 0, 0, fmt.Errorf("illegal newest timestamp == 0")
 		}
 
-		oldest, err := GetOldestTimestampByUrl(src.URL, fromMongos, sslRootFile)
+		oldest, err := GetOldestTimestampByUrl(src.URL, fromMongos, connectMode, sslRootFile)
 		if err != nil {
 			return nil, 0, 0, 0, 0, err
 		}

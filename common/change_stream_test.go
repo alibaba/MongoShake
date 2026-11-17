@@ -44,7 +44,7 @@ func TestChangeStreamConn(t *testing.T) {
 		fmt.Printf("TestChangeStreamConn case %d.\n", nr)
 		nr++
 
-		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false, "")
+		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false, VarMongoConnectModePrimary, "")
 		tsStr := fmt.Sprintf("{%v %v}", ExtractMongoTimestamp(newest), ExtractMongoTimestampCounter(newest))
 
 		cs, err := NewChangeStreamConn(testMongoAddressCs, VarMongoConnectModePrimary,
@@ -69,7 +69,7 @@ func TestChangeStreamConn(t *testing.T) {
 		fmt.Printf("TestChangeStreamConn case %d.\n", nr)
 		nr++
 
-		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false, "")
+		newest, err := GetNewestTimestampByUrl(testMongoAddressCs, false, VarMongoConnectModePrimary, "")
 		tsStr := fmt.Sprintf("{%v %v}", ExtractMongoTimestamp(newest), ExtractMongoTimestampCounter(newest))
 
 		cs, err := NewChangeStreamConn(testMongoAddressCs, VarMongoConnectModePrimary,
