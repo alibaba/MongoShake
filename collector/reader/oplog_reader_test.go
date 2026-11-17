@@ -42,6 +42,20 @@ func newWindowTestReader(t *testing.T, ts int64) *OplogReader {
 	return or
 }
 
+// requireUsableOldest makes a broken fixture diagnose itself. getOldestTimestamp
+// discards the probe error, so a failed probe (or missing read permission on
+// local) yields oldest=0 and the window check is skipped entirely -- which would
+// otherwise surface as a confusing "position was accepted" failure.
+func requireUsableOldest(t *testing.T, or *OplogReader) {
+	t.Helper()
+	if or.conn == nil {
+		t.Fatal("no connection was established, cannot judge the oplog window")
+	}
+	if oldest := or.getOldestTimestamp(); oldest <= 0 {
+		t.Fatalf("oplog probe returned oldest=%v; the window check would be skipped", oldest)
+	}
+}
+
 // The first read used to only warn when the position had fallen out of the
 // serving member's oplog window and then continue from that member's oldest
 // entry, silently skipping the changes in between while the syncer reported
@@ -51,13 +65,28 @@ func TestOplogReaderFirstReadRejectsLostPosition(t *testing.T) {
 
 	err := or.EnsureNetwork()
 
+	requireUsableOldest(t, or)
 	if !errors.Is(err, CollectionCappedError) {
 		t.Fatalf("first read accepted a position outside the oplog window: err=%v, want CollectionCappedError", err)
 	}
 }
 
-// A sentinel position means "no checkpoint was ever given", which legitimately
-// starts from the earliest available oplog. Rejecting it would break
+// The exemption is bounded by the packed value, not by "looks old": the smallest
+// position above the sentinel range must already be rejected. Without this case
+// the threshold can be shifted (e.g. to 1<<33) with every other test still green.
+func TestOplogReaderFirstReadRejectsPositionJustAboveSentinel(t *testing.T) {
+	or := newWindowTestReader(t, 2<<32)
+
+	err := or.EnsureNetwork()
+
+	requireUsableOldest(t, or)
+	if !errors.Is(err, CollectionCappedError) {
+		t.Fatalf("first read accepted position 2<<32, just above the sentinel range: err=%v", err)
+	}
+}
+
+// A sentinel position means "no usable checkpoint", which legitimately starts
+// from the earliest available oplog. Rejecting it would break
 // sync_mode=incr without checkpoint.start_position.
 func TestOplogReaderFirstReadKeepsSentinelPosition(t *testing.T) {
 	for _, ts := range []int64{1, 1 << 32} {
@@ -65,6 +94,7 @@ func TestOplogReaderFirstReadKeepsSentinelPosition(t *testing.T) {
 
 		err := or.EnsureNetwork()
 
+		requireUsableOldest(t, or)
 		if err != nil {
 			t.Fatalf("sentinel position %v was rejected: %v", ts, err)
 		}
@@ -85,6 +115,7 @@ func TestOplogReaderLaterReadStillRejectsLostPosition(t *testing.T) {
 
 	err := or.EnsureNetwork()
 
+	requireUsableOldest(t, or)
 	if !errors.Is(err, CollectionCappedError) {
 		t.Fatalf("later read accepted a lost position: err=%v, want CollectionCappedError", err)
 	}
@@ -104,6 +135,7 @@ func TestOplogReaderLaterReadRejectsSentinelPosition(t *testing.T) {
 
 	err := or.EnsureNetwork()
 
+	requireUsableOldest(t, or)
 	if !errors.Is(err, CollectionCappedError) {
 		t.Fatalf("later read accepted a sentinel position: err=%v, want CollectionCappedError", err)
 	}
