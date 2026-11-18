@@ -223,6 +223,26 @@ func ffWaitDoc(t *testing.T, tgt *mongo.Client, id interface{},
 	return last, false
 }
 
+// ffNum normalizes a BSON numeric value to int64 so assertions do not depend on the
+// concrete numeric type the driver decodes (int32/int64/float64). Comparing a decoded
+// bson.M value directly against an untyped Go int (e.g. d["a"] == 99) is always false:
+// the interface dynamic types differ (int32 vs int), so the equality never holds even
+// when the field really is 99.
+func ffNum(v interface{}) int64 {
+	switch n := v.(type) {
+	case int32:
+		return int64(n)
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	case int:
+		return int64(n)
+	default:
+		return -1
+	}
+}
+
 func TestFieldFilterSync(t *testing.T) {
 	srcURL := ffEnvOr("MSHAKE_CS_SRC_URL", "mongodb://127.0.0.1:27030")
 	tgtURL := ffEnvOr("MSHAKE_TGT_URL", "mongodb://127.0.0.1:27019")
@@ -270,7 +290,7 @@ func TestFieldFilterSync(t *testing.T) {
 	if _, err := srcColl.UpdateOne(ctx, bson.M{"_id": 1}, bson.M{"$set": bson.M{"a": 99}}); err != nil {
 		t.Fatalf("update a: %v", err)
 	}
-	if _, ok := ffWaitDoc(t, tgt, 1, func(d bson.M) bool { return d["a"] == 99 }, ffTO); !ok {
+	if _, ok := ffWaitDoc(t, tgt, 1, func(d bson.M) bool { return ffNum(d["a"]) == 99 }, ffTO); !ok {
 		t.Fatalf("whitelisted field update did not propagate")
 	}
 
@@ -305,7 +325,7 @@ func TestFieldFilterSync(t *testing.T) {
 	}
 	if _, ok := ffWaitDoc(t, tgt, 2, func(d bson.M) bool {
 		_, hasSecret := d["secret"]
-		return d["a"] == 5 && !hasSecret
+		return ffNum(d["a"]) == 5 && !hasSecret
 	}, ffTO); !ok {
 		t.Fatalf("inserted doc not projected on target")
 	}
