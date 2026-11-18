@@ -260,14 +260,18 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 	oldestTs := or.getOldestTimestamp()
 	queryTs = or.getQueryTimestamp()
 	if oldestTs > queryTs {
-		if !or.firstRead {
+		// bugfix v2.8.10: a lost real position must fail on the first read too,
+		// not only on later ones. Only the "start from earliest" sentinel (no
+		// usable checkpoint) may continue here; a real position that fell out of
+		// this member's window would silently skip the changes in between and
+		// poison every later replay (#1046).
+		if !or.firstRead || queryTs > (1<<32) {
 			l.Logger.Errorf("oplog_reader queryTs[%v] is behind oldest oplog[%v], oplog may have been overwritten (CappedPositionLost)",
 				utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(oldestTs))
 			return CollectionCappedError
-		} else {
-			l.Logger.Warnf("oplog_reader current starting point[%v] is smaller than the oldest timestamp[%v]!",
-				utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(oldestTs))
 		}
+		l.Logger.Warnf("oplog_reader current starting point[%v] is smaller than the oldest timestamp[%v]!",
+			utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(oldestTs))
 	}
 	or.firstRead = false
 
