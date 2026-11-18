@@ -108,15 +108,10 @@ func handleDeprecateConf() error {
 	return nil
 }
 
-func checkDefaultValue() error {
-	// 1. global
-	if conf.Options.Id == "" {
-		conf.Options.Id = "mongoshake"
-	}
-	if conf.Options.SystemProfilePort <= 0 {
-		conf.Options.SystemProfilePort = 9200
-	}
-
+// sanitizeLogOptions defaults and validates the log options. It is split out of
+// checkDefaultValue so the caller can bring up the logger before the rest of
+// SanitizeOptions runs, making later configuration errors land in the log file.
+func sanitizeLogOptions() error {
 	if conf.Options.LogLevel == "" {
 		conf.Options.LogLevel = utils.VarLogLevelInfo
 	} else if conf.Options.LogLevel != utils.VarLogLevelDebug && conf.Options.LogLevel != utils.VarLogLevelInfo &&
@@ -134,6 +129,21 @@ func checkDefaultValue() error {
 	}
 	if conf.Options.LogMaxAge == 0 {
 		conf.Options.LogMaxAge = 7
+	}
+	return nil
+}
+
+func checkDefaultValue() error {
+	// 1. global
+	if conf.Options.Id == "" {
+		conf.Options.Id = "mongoshake"
+	}
+	if conf.Options.SystemProfilePort <= 0 {
+		conf.Options.SystemProfilePort = 9200
+	}
+
+	if err := sanitizeLogOptions(); err != nil {
+		return err
 	}
 	filterOpTypes, err := normalizeFilterOpTypes(conf.Options.FilterOpTypes)
 	if err != nil {
@@ -262,6 +272,18 @@ func checkDefaultValue() error {
 				" 'incr_sync.shard_key == collection'")
 		}
 	}
+	// normalize tunnel before the worker/write_thread checks: write_thread only applies to
+	// non-direct tunnels, so the effective tunnel (default direct) must be known here.
+	if conf.Options.Tunnel == "" {
+		conf.Options.Tunnel = utils.VarTunnelDirect
+	} else if conf.Options.Tunnel != utils.VarTunnelDirect &&
+		conf.Options.Tunnel != utils.VarTunnelRpc &&
+		conf.Options.Tunnel != utils.VarTunnelTcp &&
+		conf.Options.Tunnel != utils.VarTunnelFile &&
+		conf.Options.Tunnel != utils.VarTunnelKafka &&
+		conf.Options.Tunnel != utils.VarTunnelMock {
+		return fmt.Errorf("incr_sync.tunnel in {direct, rpc, tcp, file, kafka, mock}")
+	}
 	if conf.Options.IncrSyncWorker == 0 {
 		conf.Options.IncrSyncWorker = 8
 	} else if conf.Options.IncrSyncWorker <= 0 || conf.Options.IncrSyncWorker > 256 {
@@ -269,9 +291,16 @@ func checkDefaultValue() error {
 	}
 	if conf.Options.IncrSyncTunnelWriteThread == 0 {
 		conf.Options.IncrSyncTunnelWriteThread = conf.Options.IncrSyncWorker
-	} else if conf.Options.IncrSyncTunnelWriteThread%conf.Options.IncrSyncWorker != 0 {
-		return fmt.Errorf("incr_sync.tunnel.write_thread[%v] must be an interge multiple of"+
-			" incr_sync.worker[%v]", conf.Options.IncrSyncTunnelWriteThread, conf.Options.IncrSyncWorker)
+	} else if conf.Options.Tunnel != utils.VarTunnelDirect &&
+		(conf.Options.IncrSyncTunnelWriteThread < 0 ||
+			conf.Options.IncrSyncTunnelWriteThread%conf.Options.IncrSyncWorker != 0) {
+		// write_thread sizes the kafka encoder pool (write_thread/worker per worker); the
+		// direct tunnel never reads it, so only non-direct tunnels enforce the multiple.
+		return fmt.Errorf("incr_sync.tunnel.write_thread[%d] must be a positive integer multiple of "+
+			"incr_sync.worker[%d] when tunnel=%s; set incr_sync.tunnel.write_thread to %d (or another "+
+			"multiple of %d), or remove it to default to incr_sync.worker",
+			conf.Options.IncrSyncTunnelWriteThread, conf.Options.IncrSyncWorker, conf.Options.Tunnel,
+			conf.Options.IncrSyncWorker, conf.Options.IncrSyncWorker)
 	}
 	if conf.Options.IncrSyncWorkerOplogCompressor == "" {
 		conf.Options.IncrSyncWorkerOplogCompressor = utils.VarIncrSyncWorkerOplogCompressorNone
@@ -301,16 +330,6 @@ func checkDefaultValue() error {
 	}
 	if conf.Options.IncrSyncReaderFetchBatchSize <= 0 {
 		conf.Options.IncrSyncReaderFetchBatchSize = 1024
-	}
-	if conf.Options.Tunnel == "" {
-		conf.Options.Tunnel = utils.VarTunnelDirect
-	} else if conf.Options.Tunnel != utils.VarTunnelDirect &&
-		conf.Options.Tunnel != utils.VarTunnelRpc &&
-		conf.Options.Tunnel != utils.VarTunnelTcp &&
-		conf.Options.Tunnel != utils.VarTunnelFile &&
-		conf.Options.Tunnel != utils.VarTunnelKafka &&
-		conf.Options.Tunnel != utils.VarTunnelMock {
-		return fmt.Errorf("incr_sync.tunnel in {direct, rpc, tcp, file, kafka, mock}")
 	}
 	if conf.Options.TunnelMessage == "" {
 		conf.Options.TunnelMessage = utils.VarTunnelMessageRaw

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
@@ -139,6 +140,54 @@ func TestCheckDefaultValueAcceptMasterQuorumElectionID(t *testing.T) {
 	err := checkDefaultValue()
 	assert.NoError(t, err, "should be equal")
 	assert.Equal(t, utils.VarCheckpointStorageDatabase, conf.Options.CheckpointStorage, "should be equal")
+}
+
+func TestCheckDefaultValueWriteThread(t *testing.T) {
+	origin := conf.Options
+	defer func() {
+		conf.Options = origin
+	}()
+
+	cases := []struct {
+		name        string
+		tunnel      string
+		worker      int
+		writeThread int
+		wantErr     string // "" means no error
+		wantThread  int    // expected write_thread after sanitize when no error
+	}{
+		// write_thread is unused by the direct tunnel, so a non-multiple value must not
+		// block startup (the customer hit a silent exit raising worker 8 -> 16).
+		{"direct non-multiple allowed", utils.VarTunnelDirect, 16, 8, "", 8},
+		{"unset tunnel defaults direct, non-multiple allowed", "", 16, 8, "", 8},
+		{"direct multiple allowed", utils.VarTunnelDirect, 8, 16, "", 16},
+		{"kafka multiple allowed", utils.VarTunnelKafka, 8, 16, "", 16},
+		{"unset write_thread defaults to worker", utils.VarTunnelKafka, 16, 0, "", 16},
+		{"kafka non-multiple rejected", utils.VarTunnelKafka, 16, 8,
+			"must be a positive integer multiple of incr_sync.worker[16]", 0},
+		{"kafka negative rejected", utils.VarTunnelKafka, 16, -16,
+			"must be a positive integer multiple of incr_sync.worker[16]", 0},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			conf.Options = conf.Configuration{
+				Tunnel:                    c.tunnel,
+				MongoUrls:                 []string{"mongodb://source-a"},
+				IncrSyncWorker:            c.worker,
+				IncrSyncTunnelWriteThread: c.writeThread,
+			}
+			err := checkDefaultValue()
+			if c.wantErr == "" {
+				assert.NoError(t, err)
+				assert.Equal(t, c.wantThread, conf.Options.IncrSyncTunnelWriteThread)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), c.wantErr)
+				assert.Contains(t, err.Error(), "tunnel=kafka")
+			}
+		})
+	}
 }
 
 func TestCheckConflictRejectPrometheusHTTPPortConflict(t *testing.T) {
