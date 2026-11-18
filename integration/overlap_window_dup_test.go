@@ -34,6 +34,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -141,7 +142,11 @@ func overlapSeed(t *testing.T, src, tgt *mongo.Client, idBase, n int, srcVersion
 // would catch unrelated traffic; a no-op $set leaves no oplog entry but IS
 // profiled). Earlier entries are dropped so the count needs no time filter —
 // profile timestamps are millisecond-truncated and race with time.Now().
-func overlapStartProfiling(t *testing.T, tgt *mongo.Client) {
+// It returns a reset closure the caller must DEFER (after its client-close
+// defer, so LIFO runs the reset while the client is still open); a t.Cleanup
+// here would run after the close and leave profiling enabled on the shared
+// database (#1050 review M4).
+func overlapStartProfiling(t *testing.T, tgt *mongo.Client) func() {
 	t.Helper()
 	ctx := context.Background()
 	if err := tgt.Database(overlapDB).RunCommand(ctx, bson.D{{Key: "profile", Value: 0}}).Err(); err != nil {
@@ -151,9 +156,12 @@ func overlapStartProfiling(t *testing.T, tgt *mongo.Client) {
 	if err := tgt.Database(overlapDB).RunCommand(ctx, bson.D{{Key: "profile", Value: 2}}).Err(); err != nil {
 		t.Fatalf("enable profiling: %v", err)
 	}
-	t.Cleanup(func() {
-		_ = tgt.Database(overlapDB).RunCommand(context.Background(), bson.D{{Key: "profile", Value: 0}}).Err()
-	})
+	return func() {
+		if err := tgt.Database(overlapDB).RunCommand(context.Background(),
+			bson.D{{Key: "profile", Value: 0}}).Err(); err != nil {
+			t.Errorf("reset profiling: %v", err)
+		}
+	}
 }
 
 func overlapCountProfiledUpdates(t *testing.T, tgt *mongo.Client) int64 {
@@ -292,7 +300,7 @@ func TestOverlapWindowIncrRestartKeepsWindow(t *testing.T) {
 	stopHb := startHeartbeat(t, src.Database(overlapDB).Collection("hb"), runID)
 	t.Cleanup(stopHb)
 
-	overlapStartProfiling(t, tgt)
+	defer overlapStartProfiling(t, tgt)()
 
 	// Pause the target BEFORE the collector starts so the first run provably
 	// cannot ack anything: the SIGKILL below always lands mid-catch-up, on
@@ -315,7 +323,10 @@ func TestOverlapWindowIncrRestartKeepsWindow(t *testing.T) {
 		}
 	})
 
-	// the window value must be (re-)persisted at startup, before any traffic
+	// Sanity check only (#1050 review N5): the hand-written checkpoint already
+	// carries the field and $set never removes it, so these assertions also
+	// pass on develop. The real red anchor for startup persistence is
+	// TestOverlapWindowSerializePersistsBound.
 	deadline := time.Now().Add(startupTO)
 	for time.Now().Before(deadline) {
 		doc := overlapReadCkptDoc(t, src, overlapIncrCkptColl)
@@ -413,7 +424,7 @@ func TestOverlapWindowParallelDiskApply(t *testing.T) {
 	stopHb := startHeartbeat(t, src.Database(overlapDB).Collection("hb"), runID)
 	t.Cleanup(stopHb)
 
-	overlapStartProfiling(t, tgt)
+	defer overlapStartProfiling(t, tgt)()
 
 	proc := startCollector(t, confPath, logDir)
 	t.Cleanup(func() {
@@ -473,6 +484,30 @@ func TestOverlapWindowParallelDiskApply(t *testing.T) {
 	time.Sleep(3 * time.Second)
 
 	overlapAssertVersions(t, tgt, int64(overlapParallelSeedDocs+duringFull), 1)
+	// Positive control (#1050 review M5): prove overlap duplicates actually
+	// happened before asserting zero conversions — otherwise a burst that
+	// missed the scan would pass vacuously on develop too. The collector's
+	// aggregated dup log records every handled batch on this namespace.
+	dupHandled := 0
+	deadline = time.Now().Add(syncTO)
+	for time.Now().Before(deadline) {
+		data, err := os.ReadFile(filepath.Join(logDir, "collector-it.log"))
+		if err == nil {
+			dupHandled = 0
+			for _, m := range regexp.MustCompile(`dup key handled on ns\[`+overlapDB+`\.`+overlapColl+`\]: docs\[(\d+)\]`).FindAllStringSubmatch(string(data), -1) {
+				n, _ := strconv.Atoi(m[1])
+				dupHandled += n
+			}
+			if dupHandled > 0 {
+				break
+			}
+		}
+		time.Sleep(pollPeriod)
+	}
+	if dupHandled == 0 {
+		t.Fatalf("no overlap duplicates were handled on %s.%s; the zero-conversion assertion would be vacuous", overlapDB, overlapColl)
+	}
+	t.Logf("overlap duplicates handled: %d", dupHandled)
 	// the backfilled window must turn every overlap dup into a no-op: no
 	// conversion updates on the data collection (the workload is insert-only)
 	if n := overlapCountProfiledUpdates(t, tgt); n != 0 {
@@ -486,7 +521,9 @@ func TestOverlapWindowParallelDiskApply(t *testing.T) {
 			_ = cur.All(ctx, &entries)
 		}
 		for _, e := range entries {
-			t.Logf("converted update profile entry: query=%v update=%v ts=%v", e["query"], e["update"], e["ts"])
+			// profiler entries store the operation under "command", not
+			// "query"/"update" (#1050 review N6)
+			t.Logf("converted update profile entry: command=%v ts=%v", e["command"], e["ts"])
 		}
 		ck := overlapReadCkptDoc(t, src, overlapParallelCkptColl)
 		t.Logf("checkpoint full_finish_ts=%v ckpt=%v", ck["full_finish_ts"], ck["ckpt"])

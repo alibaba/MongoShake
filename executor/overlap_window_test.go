@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"math"
 	"testing"
 
@@ -213,6 +214,13 @@ func TestBulkWriterDupUpdateConvertsOnlyFailedSubset(t *testing.T) {
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
 	require.NoError(t, err)
 	defer conn.Close()
+	// registered AFTER conn.Close so LIFO runs the reset while the client is
+	// still open; t.Cleanup would run after the defer and hit a closed client,
+	// leaving profiling enabled on the shared database (#1050 review M4)
+	defer func() {
+		require.NoError(t, conn.Client.Database(testDb).RunCommand(context.Background(),
+			bson.D{{Key: "profile", Value: 0}}).Err())
+	}()
 
 	overlapSetup(t, conn, 9)
 	ctx := context.Background()
@@ -224,10 +232,6 @@ func TestBulkWriterDupUpdateConvertsOnlyFailedSubset(t *testing.T) {
 	_ = conn.Client.Database(testDb).Collection("system.profile").Drop(ctx)
 	require.NoError(t, conn.Client.Database(testDb).RunCommand(ctx,
 		bson.D{{Key: "profile", Value: 2}}).Err())
-	t.Cleanup(func() {
-		_ = conn.Client.Database(testDb).RunCommand(context.Background(),
-			bson.D{{Key: "profile", Value: 0}}).Err()
-	})
 	since := overlapNewestTs(t, conn)
 
 	bw := &BulkWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
@@ -372,4 +376,130 @@ func TestSingleWriterOverlapWindowIgnoresIDDup(t *testing.T) {
 
 	assert.Equal(t, int64(0), overlapNsOpCount(t, conn, "u", since))
 	assert.Equal(t, 9, overlapDocVersion(t, conn, 1))
+}
+
+// Port of the BulkWriter secondary-index guard test to SingleWriter: deleting
+// the _id_ check from the single-writer window shortcut must turn this red
+// (#1050 review M2 — the mutation previously left the whole package green).
+func TestSingleWriterWindowSecondaryUniqueDupStaysOnStrategy(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, false, utils.VarIncrSyncExecutorDupKeyStrategyError)
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	ctx := context.Background()
+	require.NoError(t, conn.Client.Database(testDb).Collection(overlapColl).Drop(ctx))
+	_, err = conn.Client.Database(testDb).Collection(overlapColl).InsertOne(ctx,
+		bson.D{{Key: "_id", Value: 1}, {Key: "u", Value: "shared"}, {Key: "v", Value: 9}})
+	require.NoError(t, err)
+	_, err = conn.Client.Database(testDb).Collection(overlapColl).Indexes().CreateOne(ctx,
+		mongo.IndexModel{Keys: bson.D{{Key: "u", Value: 1}}, Options: options.Index().SetUnique(true)})
+	require.NoError(t, err)
+
+	sw := &SingleWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
+	record := &OplogRecord{
+		original: &PartialLogWithCallback{
+			partialLog: &oplog.PartialLog{
+				ParsedLog: oplog.ParsedLog{
+					Operation: "i",
+					Namespace: testDb + "." + overlapColl,
+					Timestamp: overlapInWindowTs(),
+					Object: bson.D{
+						{Key: "_id", Value: 2},
+						{Key: "u", Value: "shared"},
+						{Key: "v", Value: 1},
+					},
+				},
+			},
+		},
+	}
+	err = sw.doInsert(testDb, overlapColl, bson.E{}, []*OplogRecord{record}, false)
+	require.Error(t, err, "secondary-index dup must not be acknowledged by the window shortcut")
+
+	var doc bson.M
+	require.NoError(t, conn.Client.Database(testDb).Collection(overlapColl).FindOne(ctx,
+		bson.M{"_id": 1}).Decode(&doc))
+	assert.EqualValues(t, 9, doc["v"], "the conflicting document must remain untouched")
+}
+
+// With conflict_write_to=db the window shortcut must dump ONLY the actual
+// duplicates, not the whole batch: the unordered bulk already inserted the
+// rest, and dumping them pollutes the conflict collection and amplifies
+// writes (#1050 review B3, regression against the skip path on develop).
+func TestBulkWriterWindowConflictDumpOnlyFailedDocs(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, false, utils.VarIncrSyncExecutorDupKeyStrategySkip)
+	conf.Options.IncrSyncConflictWriteTo = DumpConflictToDB
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	ctx := context.Background()
+	overlapSetup(t, conn, 9)
+	conflictColl := conn.Client.Database(utils.APPConflictDatabase).Collection(overlapColl)
+	require.NoError(t, conflictColl.Drop(ctx))
+
+	bw := &BulkWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
+	records := []*OplogRecord{overlapRecord(1, 1, overlapInWindowTs())} // the only dup
+	for id := 2; id <= 9; id++ {
+		records = append(records, overlapRecord(id, id, overlapInWindowTs()))
+	}
+	require.NoError(t, bw.doInsert(testDb, overlapColl, bson.E{}, records, false))
+
+	dumped, err := conflictColl.CountDocuments(ctx, bson.M{})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), dumped, "only the failed document may enter the conflict collection")
+	n, err := conn.Client.Database(testDb).Collection(overlapColl).CountDocuments(ctx, bson.M{})
+	require.NoError(t, err)
+	assert.Equal(t, int64(9), n, "the 8 non-conflicting documents must be inserted")
+}
+
+// DocumentDB reports E11000 as "Index '<name>'" instead of "index: <name>";
+// the parser must accept both, otherwise the window shortcut (and skip /
+// delete_and_retry) never fire on DocumentDB targets (#1050 review M3).
+func TestParseDupKeyIndexNameDocumentDBFormat(t *testing.T) {
+	mongoFormat := errors.New("E11000 duplicate key error collection: db.coll index: _id_ dup key: { _id: 1 }")
+	docdbFormat := errors.New("Duplicate key violation on the requested collection: Index '_id_'")
+	docdbSecondary := errors.New("Duplicate key violation on the requested collection: Index 'u_1'")
+
+	assert.Equal(t, "_id_", parseDupKeyIndexName(mongoFormat))
+	assert.Equal(t, "_id_", parseDupKeyIndexName(docdbFormat))
+	assert.Equal(t, "u_1", parseDupKeyIndexName(docdbSecondary))
+	assert.Equal(t, "", parseDupKeyIndexName(nil))
+	assert.Equal(t, "", parseDupKeyIndexName(errors.New("some other error")))
+}
+
+// failedInsertSubset must sort by model index (mongos can report write errors
+// out of order) and fall back to the whole batch on out-of-range indices
+// (#1050 review N4 — neither branch had a fixture).
+func TestFailedInsertSubsetOrderingAndFallback(t *testing.T) {
+	models := []*OplogRecord{
+		overlapRecord(10, 1, overlapInWindowTs()),
+		overlapRecord(11, 1, overlapInWindowTs()),
+		overlapRecord(12, 1, overlapInWindowTs()),
+		overlapRecord(13, 1, overlapInWindowTs()),
+	}
+	outOfOrder := mongo.BulkWriteException{WriteErrors: []mongo.BulkWriteError{
+		{WriteError: mongo.WriteError{Index: 3, Code: 11000}},
+		{WriteError: mongo.WriteError{Index: 1, Code: 11000}},
+	}}
+	subset := failedInsertSubset(models, outOfOrder)
+	require.Len(t, subset, 2)
+	assert.Equal(t, models[1], subset[0], "subset must follow model order, not error order")
+	assert.Equal(t, models[3], subset[1])
+
+	outOfRange := mongo.BulkWriteException{WriteErrors: []mongo.BulkWriteError{
+		{WriteError: mongo.WriteError{Index: 7, Code: 11000}},
+	}}
+	assert.Equal(t, models, failedInsertSubset(models, outOfRange),
+		"out-of-range index falls back to the whole batch")
+
+	empty := mongo.BulkWriteException{}
+	assert.Equal(t, models, failedInsertSubset(models, empty),
+		"no write errors falls back to the whole batch")
 }

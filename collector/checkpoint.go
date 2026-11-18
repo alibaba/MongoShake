@@ -3,6 +3,7 @@ package collector
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -41,11 +42,17 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 		sync.ckptManager.SetFetchMethod(conf.Options.IncrSyncMongoFetchMethod)
 	}
 
-	// Persist the overlap-window bound (#1047): serialize first run receives it
-	// from the coordinator, incr restart restores it from the checkpoint itself
-	// (re-persisting is idempotent). Flush at the current timestamp so the field
-	// survives a restart even without oplog traffic advancing the checkpoint.
-	if pos := utils.TimeStampToInt64(sync.fullSyncFinishPosition); pos > 0 {
+	// Persist the overlap-window bound (#1047). This runs on the serialize
+	// first run, where the coordinator passes the sampled full-finish ts.
+	// On incr restart the syncer position is deliberately 0 (the DDL guard
+	// keeps its legacy semantics) and the bound is already durable, restored
+	// to the workers by the coordinator — so nothing is re-persisted there.
+	// MaxInt64 ("always in window", serverless/mongos-only) stays in-memory
+	// and is not persisted (#1050 review M1).
+	// A flush failure is intentionally fatal: checkpoint I/O at the handover
+	// must not silently lose the window, consistent with Get() failures above
+	// (#1050 review N3).
+	if pos := utils.TimeStampToInt64(sync.fullSyncFinishPosition); pos > 0 && pos != math.MaxInt64 {
 		sync.ckptManager.SetFullFinishTs(pos)
 		if err := sync.ckptManager.FlushStaged(); err != nil {
 			return fmt.Errorf("persist full sync finish position failed[%v]", err)

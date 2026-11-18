@@ -85,13 +85,18 @@ func (manager *CheckpointManager) GetInMemory() *CheckpointContext {
 }
 
 // Update checkpoint update memory & persistence(db or file)
-// The lock covers the whole read-modify-write so a concurrent caller (e.g. the
-// parallel-mode full-finish backfill, #1047) cannot interleave with the
-// checkpoint routine.
+// The lock serializes concurrent checkpoint writers (the checkpoint routine
+// and the parallel-mode full-finish backfill, #1047). It does not make the
+// unlocked Get/GetInMemory readers race-free; those are sequenced by the
+// startup/handover protocol instead.
 func (manager *CheckpointManager) Update(ts int64) error {
 	manager.ctxRecLock.Lock()
 	defer manager.ctxRecLock.Unlock()
+	return manager.updateLocked(ts)
+}
 
+// updateLocked is Update's body; callers must hold ctxRecLock.
+func (manager *CheckpointManager) updateLocked(ts int64) error {
 	if manager.ctx == nil || len(manager.ctx.Name) == 0 {
 		// must run Get() first
 		return errors.New("current ckpt context is empty")
@@ -129,18 +134,26 @@ func (manager *CheckpointManager) Update(ts int64) error {
 	return nil
 }
 
-// FlushStaged persists staged fields at the current timestamp without advancing
-// it. Needed when no oplog traffic moves the checkpoint forward (e.g. full sync
-// just finished on an idle source) but the staged value must survive a restart.
+// FlushStaged persists staged fields without advancing the checkpoint past
+// what is already durable. Needed when no oplog traffic moves the checkpoint
+// forward (e.g. full sync just finished on an idle source) but the staged
+// value must survive a restart. Another writer (docsyncer.Checkpoint at the
+// full-sync handover) may have advanced the durable document beyond this
+// manager's in-memory view, so refresh from storage first and never write
+// backwards (#1050 review B2). The whole read-refresh-write runs under the
+// lock so a concurrent Update cannot interleave.
 func (manager *CheckpointManager) FlushStaged() error {
 	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
+
+	if fresh, exist := manager.delegate.Get(); exist && fresh != nil &&
+		(manager.ctx == nil || fresh.Timestamp > manager.ctx.Timestamp) {
+		manager.ctx = fresh
+	}
 	if manager.ctx == nil {
-		manager.ctxRecLock.Unlock()
 		return errors.New("current ckpt context is empty")
 	}
-	ts := manager.ctx.Timestamp
-	manager.ctxRecLock.Unlock()
-	return manager.Update(ts)
+	return manager.updateLocked(manager.ctx.Timestamp)
 }
 
 // SetOplogDiskFinishTs

@@ -13,10 +13,12 @@ import (
 // assert which fields actually reach persistence.
 type recordingCheckpointOperation struct {
 	inserted *CheckpointContext
+	getCtx   *CheckpointContext
+	getExist bool
 }
 
 func (s *recordingCheckpointOperation) Get() (*CheckpointContext, bool) {
-	return nil, false
+	return s.getCtx, s.getExist
 }
 
 func (s *recordingCheckpointOperation) Insert(ctx *CheckpointContext) error {
@@ -127,4 +129,36 @@ func TestCheckpointManagerUpdatePreservesFullFinishTs(t *testing.T) {
 	require.NoError(t, manager.Update(300))
 	require.NotNil(t, delegate.inserted)
 	assert.Equal(t, int64(999), delegate.inserted.FullFinishTs)
+}
+
+// Another writer (docsyncer.Checkpoint at the full-sync handover) may advance
+// the durable document beyond this manager's in-memory view. FlushStaged must
+// refresh from storage and never write the checkpoint backwards
+// (#1050 review B2).
+func TestCheckpointManagerFlushStagedNeverRegressesDurable(t *testing.T) {
+	delegate := &recordingCheckpointOperation{
+		getCtx: &CheckpointContext{
+			Name:      "rs-regress",
+			Timestamp: 500,
+			Version:   2,
+		},
+		getExist: true,
+	}
+	manager := &CheckpointManager{
+		ctx: &CheckpointContext{
+			Name:      "rs-regress",
+			Timestamp: 100, // stale in-memory view
+			Version:   2,
+		},
+		delegate: delegate,
+	}
+
+	manager.SetFullFinishTs(777)
+	require.NoError(t, manager.FlushStaged())
+	require.NotNil(t, delegate.inserted)
+	assert.Equal(t, int64(500), delegate.inserted.Timestamp,
+		"FlushStaged must adopt the newer durable timestamp, not rewrite the stale one")
+	assert.Equal(t, int64(777), delegate.inserted.FullFinishTs)
+	assert.Equal(t, int64(500), manager.GetInMemory().Timestamp,
+		"the in-memory view must be refreshed as well")
 }

@@ -3,6 +3,7 @@ package collector
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -89,6 +90,10 @@ type OplogSyncer struct {
 	fullSyncFinishPosition primitive.Timestamp
 
 	ckptManager *ckpt.CheckpointManager
+	// ckptReady is closed once Start() has created the checkpoint manager and
+	// loadCheckpoint has run Get(). The parallel-mode backfill waits on it so
+	// it never touches ckptManager concurrently with Start() (#1050 review B1).
+	ckptReady chan struct{}
 
 	// oplog hash strategy
 	hasher oplog.Hasher
@@ -163,6 +168,7 @@ func NewOplogSyncer(
 		qos:             utils.StartQoS(0, 1, &utils.IncrSentinelOptions.TPS), // default is 0 which means do not limit
 		fetcherState:    "normal",
 		workerAckNotify: make(chan struct{}, 1),
+		ckptReady:       make(chan struct{}),
 	}
 
 	// concurrent level hasher
@@ -274,18 +280,32 @@ func (sync *OplogSyncer) StartDiskApply() {
 
 // BackfillFullFinishTs propagates the full-sync finish timestamp to the workers
 // and persists it in the checkpoint (#1047). Used by the parallel-mode backfill
-// (before StartDiskApply, so workers have not read the value yet) and by incr
-// restart restoration. It does NOT touch syncer.fullSyncFinishPosition: the
-// batcher's DDL guard keeps its legacy semantics on these paths.
+// and by incr restart restoration. It does NOT touch syncer.fullSyncFinishPosition:
+// the batcher's DDL guard keeps its legacy semantics on these paths.
+//
+// Worker writes are plain int64 stores, safe because the backfill strictly
+// precedes StartDiskApply(): during the spool stage inject only buffers to
+// disk and retrieve waits for the atomic fetchStage flip, so no worker reads
+// FullFinishTs until the handoff that also publishes this write (#1050 N1).
+//
+// MaxInt64 (serverless / mongos-only "always in window") is deliberately NOT
+// persisted: it stays an in-memory semantic, and a restart restores 0 with
+// conversion active, matching the pre-#1047 behavior (#1050 review M1).
 func (sync *OplogSyncer) BackfillFullFinishTs(ts int64) error {
+	// Wait until Start() has initialized the checkpoint manager and loaded
+	// the durable context; docWg.Wait() alone does not synchronize with it.
+	<-sync.ckptReady
 	for _, w := range sync.batcher.workerGroup {
 		w.SetInitSyncFinishTs(ts)
 	}
-	if sync.ckptManager != nil {
-		sync.ckptManager.SetFullFinishTs(ts)
-		return sync.ckptManager.FlushStaged()
+	if ts == math.MaxInt64 {
+		return nil
 	}
-	return nil
+	if sync.ckptManager == nil {
+		return fmt.Errorf("checkpoint manager unavailable after readiness signal")
+	}
+	sync.ckptManager.SetFullFinishTs(ts)
+	return sync.ckptManager.FlushStaged()
 }
 
 // Start to polling oplog
@@ -314,6 +334,8 @@ func (sync *OplogSyncer) Start() {
 	if err := sync.loadCheckpoint(); err != nil {
 		l.Logger.Panicf("%v", err)
 	}
+	// publish checkpoint readiness to the parallel-mode backfill (#1050 B1)
+	close(sync.ckptReady)
 
 	// start deserializer: parse data from pending queue, and then push into logs queue.
 	sync.startDeserializer()

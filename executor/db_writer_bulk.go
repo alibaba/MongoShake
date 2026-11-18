@@ -110,7 +110,10 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 			// or per-document retry is needed. Secondary-index duplicates are
 			// real conflicts and stay on the configured strategy path below.
 			if overlapWindowSkipEnabled(bw.fullFinishTs, parseLastTimestamp(oplogs)) && allDupKeyErrorsOnIDIndex(bulkErr) {
-				RecordDuplicatedOplog(bw.conn, collection, oplogs)
+				// audit only the actual duplicates: the unordered bulk already
+				// inserted the rest, dumping them would pollute the conflict
+				// collection and amplify writes (#1050 review B3)
+				RecordDuplicatedOplog(bw.conn, collection, failedInsertSubset(modelOplogs, bulkErr))
 				return nil
 			}
 			// update on duplicated key occur
