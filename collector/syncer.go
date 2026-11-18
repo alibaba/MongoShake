@@ -324,18 +324,7 @@ func (sync *OplogSyncer) Start() {
 	// 1. create checkpoint manager
 	// 2. load existing ckpt from remote storage
 	// 3. start checkpoint persist routine
-	sync.newCheckpointManager(sync.Replset, sync.startPosition)
-	if _, ok := sync.startPosition.(int64); !ok {
-		// set resumeToken for aliyun_serverless
-		sync.reader.SetQueryTimestampOnEmpty(sync.startPosition)
-	}
-
-	// load checkpoint and set stage
-	if err := sync.loadCheckpoint(); err != nil {
-		l.Logger.Panicf("%v", err)
-	}
-	// publish checkpoint readiness to the parallel-mode backfill (#1050 B1)
-	close(sync.ckptReady)
+	sync.initCheckpoint()
 
 	// start deserializer: parse data from pending queue, and then push into logs queue.
 	sync.startDeserializer()

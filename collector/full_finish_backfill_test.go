@@ -2,13 +2,20 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"math"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
@@ -79,10 +86,15 @@ func TestBackfillMaxInt64NotPersisted(t *testing.T) {
 	var doc bson.M
 	err = conn.Client.Database("mongoshake").Collection("ckpt_fft_backfill_probe").
 		FindOne(ctx, bson.M{"name": "fft_backfill_probe"}).Decode(&doc)
-	if err == nil {
-		v, _ := doc["full_finish_ts"].(int64)
+	if err != nil {
+		// nothing written at all is the expected outcome; any OTHER read
+		// error must fail the test instead of masking a regression (#1050 R4)
+		require.True(t, errors.Is(err, mongo.ErrNoDocuments), "unexpected read error: %v", err)
+	} else {
+		v, ok := doc["full_finish_ts"].(int64)
+		require.True(t, ok, "full_finish_ts has unexpected BSON type: %T", doc["full_finish_ts"])
 		assert.Equal(t, int64(0), v, "MaxInt64 must not be persisted")
-	} // ErrNoDocuments is fine too: nothing was written at all
+	}
 
 	realTs := int64(1794904896)<<32 | 7
 	require.NoError(t, sync.BackfillFullFinishTs(realTs))
@@ -91,10 +103,12 @@ func TestBackfillMaxInt64NotPersisted(t *testing.T) {
 	assert.Equal(t, realTs, doc["full_finish_ts"], "a finite bound must be persisted")
 }
 
-// Faithful -race anchor for #1050 review B1: one goroutine runs Start()'s
-// checkpoint initialization sequence (newCheckpointManager + Get) while the
-// coordinator goroutine backfills. Before the readiness gate this pair was a
-// data race; the channel close must establish happens-before.
+// Faithful -race anchor for #1050 review B1: one goroutine runs initCheckpoint
+// — the EXACT sequence Start() runs — while the coordinator goroutine
+// backfills. Before the readiness gate this pair was a data race; the channel
+// close must establish happens-before. Calling the real helper (not a
+// hand-copied sequence) means moving the close earlier in initCheckpoint
+// reddens this test under -race (#1050 review R1).
 func TestBackfillRacesWithStartInitialization(t *testing.T) {
 	_ = utils.InitialLogger("", "", "error", true, 1)
 	original := conf.Options
@@ -103,20 +117,18 @@ func TestBackfillRacesWithStartInitialization(t *testing.T) {
 	conf.Options.CheckpointStorageUrl = unit_test_common.TestUrl
 	conf.Options.CheckpointStorageDb = "mongoshake"
 	conf.Options.CheckpointStorageCollection = "ckpt_fft_race_probe"
+	conf.Options.FullSyncReaderOplogStoreDisk = false
 
 	sync := &OplogSyncer{
-		Replset:   "fft_race_probe",
-		batcher:   &Batcher{},
-		ckptReady: make(chan struct{}),
+		Replset:       "fft_race_probe",
+		startPosition: int64(1),
+		batcher:       &Batcher{},
+		ckptReady:     make(chan struct{}),
 	}
+	sync.persister = NewPersister(sync.Replset, sync)
 
 	done := make(chan error, 1)
-	go func() {
-		// the exact sequence Start() runs before closing ckptReady
-		sync.newCheckpointManager(sync.Replset, int64(1))
-		_, _, _ = sync.ckptManager.Get()
-		close(sync.ckptReady)
-	}()
+	go func() { sync.initCheckpoint() }()
 	go func() { done <- sync.BackfillFullFinishTs(int64(1794904896)<<32 | 7) }()
 
 	select {
@@ -125,4 +137,60 @@ func TestBackfillRacesWithStartInitialization(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("backfill deadlocked against Start initialization")
 	}
+}
+
+// The serialize-path gate in loadCheckpoint must ALSO refuse to persist
+// MaxInt64 (#1050 review R2: the Backfill gate alone had coverage, this one
+// had none). Uses an httptest API checkpoint — no real server needed.
+func TestLoadCheckpointMaxInt64NotPersisted(t *testing.T) {
+	_ = utils.InitialLogger("", "", "error", true, 1)
+	var posts int64
+	var lastPost map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			// UseNumber: float64 would lose precision on packed timestamps
+			dec := json.NewDecoder(r.Body)
+			dec.UseNumber()
+			_ = dec.Decode(&lastPost)
+			atomic.AddInt64(&posts, 1)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"name": "fft_lc_probe", "ckpt": 100, "version": 2, "fetch_method": "oplog",
+		})
+	}))
+	defer srv.Close()
+
+	original := conf.Options
+	t.Cleanup(func() { conf.Options = original })
+	conf.Options.CheckpointStorage = utils.VarCheckpointStorageApi
+	conf.Options.CheckpointStorageCollection = srv.URL
+	conf.Options.FullSyncReaderOplogStoreDisk = false
+
+	newSyncer := func(pos int64) *OplogSyncer {
+		s := &OplogSyncer{
+			Replset:                "fft_lc_probe",
+			startPosition:          int64(100),
+			fullSyncFinishPosition: utils.Int64ToTimestamp(pos),
+			batcher:                &Batcher{},
+			ckptReady:              make(chan struct{}),
+		}
+		s.persister = NewPersister(s.Replset, s)
+		s.ckptManager = ckpt.NewCheckpointManager(s.Replset, 100)
+		return s
+	}
+
+	// Must go through Int64ToTimestamp: primitive.Timestamp{MaxUint32,
+	// MaxUint32} converts to -1, not MaxInt64.
+	require.NoError(t, newSyncer(math.MaxInt64).loadCheckpoint())
+	assert.Equal(t, int64(0), atomic.LoadInt64(&posts),
+		"MaxInt64 must not be persisted on the serialize path")
+
+	realTs := int64(1794904896)<<32 | 7
+	require.NoError(t, newSyncer(realTs).loadCheckpoint())
+	assert.Equal(t, int64(1), atomic.LoadInt64(&posts),
+		"a finite bound must be persisted")
+	require.NotNil(t, lastPost["full_finish_ts"])
+	assert.Equal(t, strconv.FormatInt(realTs, 10), lastPost["full_finish_ts"].(json.Number).String())
 }

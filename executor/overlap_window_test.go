@@ -443,10 +443,18 @@ func TestBulkWriterWindowConflictDumpOnlyFailedDocs(t *testing.T) {
 	overlapSetup(t, conn, 9)
 	conflictColl := conn.Client.Database(utils.APPConflictDatabase).Collection(overlapColl)
 	require.NoError(t, conflictColl.Drop(ctx))
+	// leave no residue on the shared conflict database (#1050 review R6)
+	defer func() { _ = conflictColl.Drop(context.Background()) }()
 
 	bw := &BulkWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
-	records := []*OplogRecord{overlapRecord(1, 1, overlapInWindowTs())} // the only dup
-	for id := 2; id <= 9; id++ {
+	// the dup sits at a NON-zero index so dumping the wrong documents with
+	// the right count cannot pass (#1050 review R5)
+	records := []*OplogRecord{
+		overlapRecord(2, 2, overlapInWindowTs()),
+		overlapRecord(3, 3, overlapInWindowTs()),
+		overlapRecord(1, 1, overlapInWindowTs()), // the only dup, index 2
+	}
+	for id := 4; id <= 9; id++ {
 		records = append(records, overlapRecord(id, id, overlapInWindowTs()))
 	}
 	require.NoError(t, bw.doInsert(testDb, overlapColl, bson.E{}, records, false))
@@ -454,6 +462,9 @@ func TestBulkWriterWindowConflictDumpOnlyFailedDocs(t *testing.T) {
 	dumped, err := conflictColl.CountDocuments(ctx, bson.M{})
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), dumped, "only the failed document may enter the conflict collection")
+	var conflictDoc bson.M
+	require.NoError(t, conflictColl.FindOne(ctx, bson.M{}).Decode(&conflictDoc))
+	assert.EqualValues(t, 1, conflictDoc["_id"], "the dumped document must be the actual duplicate")
 	n, err := conn.Client.Database(testDb).Collection(overlapColl).CountDocuments(ctx, bson.M{})
 	require.NoError(t, err)
 	assert.Equal(t, int64(9), n, "the 8 non-conflicting documents must be inserted")

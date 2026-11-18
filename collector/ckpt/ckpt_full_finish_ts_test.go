@@ -95,7 +95,10 @@ func TestCheckpointManagerStagesFullFinishTs(t *testing.T) {
 // field would never be persisted. FlushStaged forces a write at the current
 // timestamp (no advancement) so the window survives a restart.
 func TestCheckpointManagerFlushStagedPersistsWithoutAdvancing(t *testing.T) {
-	delegate := &recordingCheckpointOperation{}
+	delegate := &recordingCheckpointOperation{
+		getCtx:   &CheckpointContext{Name: "rs-flush", Timestamp: 100, Version: 2},
+		getExist: true,
+	}
 	manager := &CheckpointManager{
 		ctx: &CheckpointContext{
 			Name:      "rs-flush",
@@ -161,4 +164,24 @@ func TestCheckpointManagerFlushStagedNeverRegressesDurable(t *testing.T) {
 	assert.Equal(t, int64(777), delegate.inserted.FullFinishTs)
 	assert.Equal(t, int64(500), manager.GetInMemory().Timestamp,
 		"the in-memory view must be refreshed as well")
+}
+
+// A failed refresh read (nil context — the shape both Mongo and HTTP
+// delegates return on error) must surface as an error, never silently write
+// the stale in-memory timestamp over a newer durable value (#1050 review R3).
+func TestCheckpointManagerFlushStagedReadFailureIsLoud(t *testing.T) {
+	delegate := &recordingCheckpointOperation{} // Get returns nil,false: read failure
+	manager := &CheckpointManager{
+		ctx: &CheckpointContext{
+			Name:      "rs-readfail",
+			Timestamp: 100,
+			Version:   2,
+		},
+		delegate: delegate,
+	}
+
+	manager.SetFullFinishTs(777)
+	err := manager.FlushStaged()
+	require.Error(t, err, "a failed refresh read must not degrade silently")
+	assert.Nil(t, delegate.inserted, "nothing may be written when the refresh read failed")
 }

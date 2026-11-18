@@ -146,8 +146,15 @@ func (manager *CheckpointManager) FlushStaged() error {
 	manager.ctxRecLock.Lock()
 	defer manager.ctxRecLock.Unlock()
 
-	if fresh, exist := manager.delegate.Get(); exist && fresh != nil &&
-		(manager.ctx == nil || fresh.Timestamp > manager.ctx.Timestamp) {
+	fresh, exist := manager.delegate.Get()
+	if fresh == nil {
+		// A nil context means the READ failed (both Mongo and HTTP delegates
+		// return nil,false on error, but a non-nil regenerated context with
+		// exist=false when no document exists). Writing the stale in-memory
+		// ts here would silently reintroduce the backwards write (#1050 R3).
+		return errors.New("checkpoint refresh read failed")
+	}
+	if exist && (manager.ctx == nil || fresh.Timestamp > manager.ctx.Timestamp) {
 		manager.ctx = fresh
 	}
 	if manager.ctx == nil {

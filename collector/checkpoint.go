@@ -28,6 +28,27 @@ func (sync *OplogSyncer) newCheckpointManager(name string, startPosition interfa
 }
 
 /*
+ * initCheckpoint is the checkpoint-init segment of Start(): create the
+ * manager, load the durable context, then publish readiness to the parallel
+ * backfill. Extracted so the backfill race anchor exercises this exact
+ * sequence — moving the close earlier must redden the anchor (#1050 R1).
+ */
+func (sync *OplogSyncer) initCheckpoint() {
+	sync.newCheckpointManager(sync.Replset, sync.startPosition)
+	if _, ok := sync.startPosition.(int64); !ok {
+		// set resumeToken for aliyun_serverless
+		sync.reader.SetQueryTimestampOnEmpty(sync.startPosition)
+	}
+
+	// load checkpoint and set stage
+	if err := sync.loadCheckpoint(); err != nil {
+		l.Logger.Panicf("%v", err)
+	}
+	// publish checkpoint readiness to the parallel-mode backfill (#1050 B1)
+	close(sync.ckptReady)
+}
+
+/*
  * load checkpoint and do some checks
  */
 func (sync *OplogSyncer) loadCheckpoint() error {
