@@ -2,7 +2,7 @@ module github.com/alibaba/MongoShake/v2
 
 go 1.21
 
-toolchain go1.24.5
+toolchain go1.27.3
 
 require (
 	github.com/Masterminds/semver/v3 v3.4.0

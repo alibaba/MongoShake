@@ -50,7 +50,7 @@ func getTimestampMap(sources []*utils.MongoSource, sslRootFile string) (map[stri
 	var ckptMap map[string]utils.TimestampNode
 	var err error
 
-	ckptMap, _, _, _, _, err = utils.GetAllTimestamp(sources, sslRootFile)
+	ckptMap, _, _, _, _, err = utils.GetAllTimestamp(sources, conf.Options.MongoConnectMode, sslRootFile)
 	if err != nil {
 		return nil, fmt.Errorf("fetch source all timestamp failed: %v", err)
 	}
@@ -59,6 +59,7 @@ func getTimestampMap(sources []*utils.MongoSource, sslRootFile string) (map[stri
 }
 
 func (coordinator *ReplicationCoordinator) startDocumentReplication() (err error) {
+	defer utils.GlobalDupKeyLog.Flush()
 	utils.SetMongoShakeSyncStage(conf.Options.Id, utils.TypeFull)
 	utils.SetMongoShakeSyncState(conf.Options.Id, utils.TypeFull, utils.SyncStateRunning)
 	defer func() {
@@ -134,6 +135,14 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() (err error
 
 	// drop target collection if possible
 	if err := docsyncer.StartDropDestCollection(nsSet, toConn, trans); err != nil {
+		return err
+	}
+
+	// recreate time-series and capped collections with the source's options before
+	// index sync or any data write, both of which would otherwise implicitly
+	// create an ordinary collection on the target (#993, #995)
+	if err := docsyncer.StartCreateDestSpecialCollections(coordinator.RealSourceFullSync, nsSet,
+		toConn, trans, conf.Options.MongoSslRootCaFile); err != nil {
 		return err
 	}
 

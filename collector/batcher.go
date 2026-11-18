@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"sync"
 	"time"
 
 	nimo "github.com/gugemichael/nimo4go"
@@ -54,6 +55,13 @@ func getExitPoint() primitive.Timestamp {
 	return utils.Int64ToTimestamp(utils.IncrSentinelOptions.ExitPoint)
 }
 
+// incrOrderingGuarantee reports whether the DDL/DML ordering guarantee is in force: a direct
+// tunnel, which applies oplogs itself, plus incr_sync.barrier.ordering_enable.
+func incrOrderingGuarantee() bool {
+	return conf.Options.Tunnel == utils.VarTunnelDirect &&
+		conf.Options.IncrSyncBarrierOrderingEnable
+}
+
 // Batcher is used to batch oplog before sending in order to improve performance.
 type Batcher struct {
 	// related oplog syncer. not owned
@@ -85,6 +93,14 @@ type Batcher struct {
 	// transaction buffer
 	txnBuffer *oplog.TxnBuffer
 
+	// txnPins holds, for every transaction whose data is not yet acked by
+	// workers, the packed timestamp of its first buffered oplog entry. The
+	// persisted checkpoint must stay below the oldest pin: the buffered
+	// entries only live in memory, so a restart must be able to re-fetch
+	// them from the source oplog.
+	txnPinsMu sync.Mutex
+	txnPins   map[oplog.TxnID]*txnPin
+
 	// for ut only
 	utBatchesDelay struct {
 		flag        bool                  // ut enable?
@@ -103,7 +119,58 @@ func NewBatcher(syncer *OplogSyncer, filterList filter.OplogFilterChain,
 		lastOplog:       fakeOplog,
 		lastFilterOplog: fakeOplog.Parsed,
 		txnBuffer:       oplog.NewBuffer(),
+		txnPins:         make(map[oplog.TxnID]*txnPin),
 	}
+}
+
+// txnPin tracks the crash-safety window of one buffered transaction.
+type txnPin struct {
+	startTs   int64 // packed ts of the first buffered entry
+	releaseTs int64 // 0 while buffering; commit ts once inner ops are handed over
+}
+
+func (batcher *Batcher) pinTxn(id oplog.TxnID, startTs int64) {
+	batcher.txnPinsMu.Lock()
+	defer batcher.txnPinsMu.Unlock()
+	if _, ok := batcher.txnPins[id]; !ok {
+		batcher.txnPins[id] = &txnPin{startTs: startTs}
+	}
+}
+
+func (batcher *Batcher) unpinTxn(id oplog.TxnID) {
+	batcher.txnPinsMu.Lock()
+	defer batcher.txnPinsMu.Unlock()
+	delete(batcher.txnPins, id)
+}
+
+// stageTxnPinRelease marks that the transaction's inner ops (whose largest
+// timestamp is releaseTs) have been handed over for dispatch. The pin is
+// dropped once worker acks reach releaseTs.
+func (batcher *Batcher) stageTxnPinRelease(id oplog.TxnID, releaseTs int64) {
+	batcher.txnPinsMu.Lock()
+	defer batcher.txnPinsMu.Unlock()
+	if pin, ok := batcher.txnPins[id]; ok {
+		pin.releaseTs = releaseTs
+	}
+}
+
+// OldestUnackedTxnPinTs releases every pin whose inner ops are fully acked
+// (ackedTs >= releaseTs) and returns the packed start timestamp of the oldest
+// remaining pinned transaction, or 0 when nothing is pinned.
+func (batcher *Batcher) OldestUnackedTxnPinTs(ackedTs int64) int64 {
+	batcher.txnPinsMu.Lock()
+	defer batcher.txnPinsMu.Unlock()
+	var oldest int64
+	for id, pin := range batcher.txnPins {
+		if pin.releaseTs > 0 && ackedTs >= pin.releaseTs {
+			delete(batcher.txnPins, id)
+			continue
+		}
+		if oldest == 0 || pin.startTs < oldest {
+			oldest = pin.startTs
+		}
+	}
+	return oldest
 }
 
 func (batcher *Batcher) Fini() {
@@ -300,6 +367,7 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		}
 		batcher.barrierOplogs = nil
 
+		// no guard here: the barrier oplogs have already been moved into batchGroup
 		return batcher.batchGroup, true, batcher.setLastOplog(), false
 	}
 
@@ -310,6 +378,31 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		return batcher.batchGroup, false, batcher.setLastOplog(), exit
 	}
 
+	stopAt := batcher.processMergeBatch(mergeBatch)
+	if stopAt >= 0 {
+		// the oplogs behind the barrier wait for it to be done
+		batcher.remainLogs = mergeBatch[stopAt+1:]
+
+		if !incrOrderingGuarantee() {
+			return batcher.batchGroup, true, batcher.setLastOplog(), false
+		}
+
+		// advance lastOplog past the oplogs that processMergeBatch put in batchGroup
+		batcher.setLastOplog()
+
+		// Always report allEmpty=false: when the barrier is mergeBatch[0], or everything
+		// before it was filtered, batchGroup is empty and setLastOplog() would report true,
+		// which makes startBatcher's `!allEmpty` guard skip the barrier wait and the forced
+		// checkpoint, letting the DDL overtake the DML already dispatched.
+		return batcher.batchGroup, true, false, false
+	}
+
+	return batcher.batchGroup, false, batcher.setLastOplog(), exit
+}
+
+// processMergeBatch filters mergeBatch and distributes it into batcher.batchGroup. It returns
+// the index of the barrier oplog that must run separately, or -1 when mergeBatch holds none.
+func (batcher *Batcher) processMergeBatch(mergeBatch []*oplog.GenericOplog) int {
 	for i, genericLog := range mergeBatch {
 		// filter oplog such like Noop or with gid
 		// PAY ATTENTION: we can't handle the oplog in transaction that has been filtered
@@ -330,11 +423,9 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 			if mustIndividual {
 				batcher.barrierOplogs = deliveredOps
 
-				batcher.remainLogs = mergeBatch[i+1:]
-
 				allEmpty := batcher.setLastOplog()
 				nimo.AssertTrue(allEmpty == true, "batcher.batchGroup don't be empty")
-				return batcher.batchGroup, true, allEmpty, false
+				return i
 			} else {
 				for _, ele := range deliveredOps {
 					batcher.addIntoBatchGroup(ele, false)
@@ -354,12 +445,12 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 				}
 
 				for _, ele := range deliveredOps {
+					inner := &oplog.PartialLog{ParsedLog: ele}
+					batcher.syncer.warnUnswitchableUniqueIndex(inner)
 					batcher.addIntoBatchGroup(&oplog.GenericOplog{
 						Raw:        nil,
 						SourceTime: genericLog.SourceTime,
-						Parsed: &oplog.PartialLog{
-							ParsedLog: ele,
-						},
+						Parsed:     inner,
 					}, false)
 				}
 				continue
@@ -370,11 +461,14 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		if ddlFilter.Filter(genericLog.Parsed) {
 
 			if conf.Options.FilterDDLEnable {
+				// the DDL runs as a barrier, so everything dispatched before it
+				// is applied before the new routing can take effect
+				batcher.syncer.trackOrderedNamespace(genericLog.Parsed)
+
+				// DDL is executed as a barrier: it is handed to worker[0] on its own round
 				batcher.barrierOplogs = append(batcher.barrierOplogs, genericLog)
 
-				batcher.remainLogs = mergeBatch[i+1:]
-
-				return batcher.batchGroup, true, batcher.setLastOplog(), false
+				return i
 			} else {
 				// filter
 				batcher.syncer.replMetric.AddFilter(1)
@@ -388,7 +482,7 @@ func (batcher *Batcher) BatchMore() (genericOplogs [][]*oplog.GenericOplog, barr
 		batcher.addIntoBatchGroup(genericLog, false)
 	}
 
-	return batcher.batchGroup, false, batcher.setLastOplog(), exit
+	return -1
 }
 
 func (batcher *Batcher) setLastOplog() bool {
@@ -451,6 +545,9 @@ func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta,
 		l.Logger.Panicf("%s add oplog to txnbuffer failed, err[%v] oplog[%v]",
 			batcher.syncer, err, genericLog.Parsed.ParsedLog)
 	}
+	// the buffered entries only live in memory: hold the persisted checkpoint
+	// below this transaction until its inner ops are acked by workers
+	batcher.pinTxn(txnMeta.ID(), utils.TimeStampToInt64(genericLog.Parsed.Timestamp))
 
 	// distributed transaction is abort, ignore these Oplogs and clear buffer
 	if txnMeta.IsAbort() {
@@ -459,6 +556,7 @@ func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta,
 			l.Logger.Panicf("%s cleaning up txnBuffer failed, err[%v] oplog[%v]",
 				batcher.syncer, err, genericLog.Parsed.ParsedLog)
 		}
+		batcher.unpinTxn(txnMeta.ID())
 
 		batcher.syncer.replMetric.AddFilter(1)
 		batcher.lastFilterOplog = genericLog.Parsed
@@ -474,24 +572,19 @@ func (batcher *Batcher) handleTransaction(txnMeta oplog.TxnMeta,
 	mustIndividual = true
 	// transaction can be commit now
 	ops, errs := batcher.txnBuffer.GetTxnStream(txnMeta)
-Loop:
-	for {
-		select {
-		case o, ok := <-ops:
-			if !ok {
-				break Loop
-			}
-			if o.Parsed.Operation == "c" {
-				haveCommandInTransaction = true
-			}
+	for o := range ops {
+		if o.Parsed.Operation == "c" {
+			haveCommandInTransaction = true
+		}
 
-			// Raw will be filling in Send->LogEntryEncode
-			deliveredOps = append(deliveredOps, o)
-		case err := <-errs:
-			if err != nil {
-				l.Logger.Panicf("error replaying transaction, err[%v]", err)
-			}
-			break Loop
+		// Raw will be filled in Send->LogEntryEncode.
+		deliveredOps = append(deliveredOps, o)
+	}
+	// The data channel also closes on failure. Always consume the terminal
+	// error instead of letting a select choose the closed data channel first.
+	for err := range errs {
+		if err != nil {
+			l.Logger.Panicf("error replaying transaction, err[%v]", err)
 		}
 	}
 
@@ -509,6 +602,17 @@ Loop:
 	if err != nil {
 		l.Logger.Panicf("error cleaning up transaction buffer, err[%v]", err)
 	}
+	if len(deliveredOps) == 0 {
+		// A validated empty/fully filtered transaction has no worker operations
+		// to ACK. Complete its lifecycle here, keeping all other pins intact.
+		batcher.unpinTxn(txnMeta.ID())
+		batcher.syncer.replMetric.AddFilter(1)
+		batcher.lastFilterOplog = genericLog.Parsed
+		return false, false, nil
+	}
+	// inner ops carry timestamps up to the commit ts (see ExtractInnerOps);
+	// keep the pin until workers ack them
+	batcher.stageTxnPinRelease(txnMeta.ID(), utils.TimeStampToInt64(genericLog.Parsed.Timestamp))
 
 	return true, mustIndividual, deliveredOps
 }

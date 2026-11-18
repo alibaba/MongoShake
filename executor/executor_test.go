@@ -665,7 +665,7 @@ func TestCalculateTop3(t *testing.T) {
 
 		var mp sync.Map
 
-		ret := calculateTop3(mp)
+		ret := calculateTop3(&mp)
 		assert.Equal(t, 0, len(ret), "should be equal")
 	}
 
@@ -677,7 +677,7 @@ func TestCalculateTop3(t *testing.T) {
 		val1 := uint64(10)
 		mp.Store("test1", &val1)
 
-		ret := calculateTop3(mp)
+		ret := calculateTop3(&mp)
 		assert.Equal(t, []Item{
 			{
 				Key: "test1",
@@ -696,7 +696,7 @@ func TestCalculateTop3(t *testing.T) {
 		mp.Store("test1", &val1)
 		mp.Store("test2", &val2)
 
-		ret := calculateTop3(mp)
+		ret := calculateTop3(&mp)
 		assert.Equal(t, []Item{
 			{
 				Key: "test1",
@@ -723,7 +723,7 @@ func TestCalculateTop3(t *testing.T) {
 		mp.Store("test4", &val4)
 		mp.Store("test5", &val5)
 
-		ret := calculateTop3(mp)
+		ret := calculateTop3(&mp)
 		assert.Equal(t, []Item{
 			{
 				Key: "test5",

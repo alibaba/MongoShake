@@ -30,6 +30,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 	// prepare all syncer. only one syncer while source is ReplicaSet or mongos
 	// otherwise one syncer connects to one shard
 	l.Logger.Infof("start incr replication")
+	warnChangeStreamCannotSyncTimeSeries(coordinator.RealSourceIncrSync)
 	for i, src := range coordinator.RealSourceIncrSync {
 		var syncerTs interface{}
 
@@ -58,7 +59,7 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 
 		l.Logger.Infof("RealSourceIncrSync[%d]: %s, startTimestamp[%v]", i, src, syncerTs)
 		syncer := collector.NewOplogSyncer(src.ReplicaName, syncerTs, fullSyncFinishPosition, src.URL,
-			src.Gids)
+			src.Gids, coordinator.orderedNamespaces)
 		// syncerGroup http api registry
 		syncer.Init()
 		coordinator.syncerGroup = append(coordinator.syncerGroup, syncer)

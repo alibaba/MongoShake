@@ -28,6 +28,10 @@ func (exec *Executor) ensureConnection() bool {
 			writeConcern = utils.ReadWriteConcernMajority
 		}
 
+		if exec.conn != nil {
+			exec.dropConnection()
+		}
+
 		if conn, err := utils.NewMongoCommunityConn(exec.MongoUrl, utils.VarMongoConnectModePrimary, true,
 			utils.ReadWriteConcernDefault, writeConcern,
 			conf.Options.TunnelMongoSslRootCaFile); err != nil {
@@ -132,7 +136,10 @@ func (exec *Executor) execute(group *OplogsGroup) error {
 				" error[%v], logs number[%d], firstLog: %s",
 				exec.batchExecutor.ReplayerId, exec.id, group.ns, group.op, reflect.TypeOf(err), err.Error(), count,
 				group.oplogRecords[0].original.partialLog)
-			exec.dropConnection()
+			// only rebuild the client on connection-level errors, server errors keep it
+			if mongo.IsNetworkError(err) || mongo.IsTimeout(err) {
+				exec.dropConnection()
+			}
 			atomic.AddUint64(&exec.metricError, uint64(len(group.oplogRecords)))
 			exec.addOperationMetric("error", uint64(len(group.oplogRecords)))
 			exec.addNsMapMetric(group.ns, "e", len(group.oplogRecords))
@@ -164,6 +171,36 @@ func (exec *Executor) addOperationMetric(op string, count uint64) {
 func (exec *Executor) errorIgnore(err error, ns, op string) bool {
 	if err == nil {
 		return false
+	}
+
+	// HasErrorCode matches any cause in a write exception. Ignore the batch
+	// only when every write error is individually acceptable and durability
+	// has been confirmed; one known error must not hide another failure.
+	switch e := err.(type) {
+	case mongo.BulkWriteException:
+		if e.WriteConcernError != nil || len(e.WriteErrors) == 0 {
+			return false
+		}
+		for _, writeError := range e.WriteErrors {
+			if !exec.errorIgnore(writeError.WriteError, ns, op) {
+				return false
+			}
+		}
+		return true
+	case *mongo.BulkWriteException:
+		return e != nil && exec.errorIgnore(*e, ns, op)
+	case mongo.WriteException:
+		if e.WriteConcernError != nil || len(e.WriteErrors) == 0 {
+			return false
+		}
+		for _, writeError := range e.WriteErrors {
+			if !exec.errorIgnore(writeError, ns, op) {
+				return false
+			}
+		}
+		return true
+	case *mongo.WriteException:
+		return e != nil && exec.errorIgnore(*e, ns, op)
 	}
 
 	er, ok := err.(mongo.ServerError)

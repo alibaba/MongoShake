@@ -29,7 +29,6 @@ type Configuration struct {
 	MongoCsUrl                             string   `config:"mongo_cs_url"`
 	MongoSUrl                              string   `config:"mongo_s_url"`
 	MongoSslRootCaFile                     string   `config:"mongo_ssl_root_ca_file"` // add v2.6.2
-	MongoSslClientCaFile                   string   `config:"mongo_ssl_root_ca_file"`
 	MongoConnectMode                       string   `config:"mongo_connect_mode"`
 	Tunnel                                 string   `config:"tunnel"`
 	TunnelAddress                          []string `config:"tunnel.address"`
@@ -56,6 +55,7 @@ type Configuration struct {
 	CheckpointStartPosition                int64    `config:"checkpoint.start_position" type:"date"`
 	TransformNamespace                     []string `config:"transform.namespace"`
 	SpecialSourceDBFlag                    string   `config:"special.source.db.flag" type:"string"` // add v2.4.20
+	SpecialTargetDBFlag                    string   `config:"special.target.db.flag" type:"string"` // add v2.8.10
 	SkipNSShareKeyVerify                   []string `config:"skip.nsshardkey.verify"`               // add v2.8.2
 
 	// 2. full sync
@@ -92,6 +92,7 @@ type Configuration struct {
 	IncrSyncAdaptiveBatchingMaxSize           int      `config:"incr_sync.adaptive.batching_max_size"`
 	IncrSyncFetcherBufferCapacity             int      `config:"incr_sync.fetcher.buffer_capacity"`
 	IncrSyncFetcherBufferSizeThresholdInKB    int      `config:"incr_sync.fetcher.buffer_size_threshold_in_kb"` // add v2.8.6
+	IncrSyncBarrierOrderingEnable             bool     `config:"incr_sync.barrier.ordering_enable"`             // add v2.8.9
 	IncrSyncExecutorUpsert                    bool     `config:"incr_sync.executor.upsert"`
 	IncrSyncExecutorInsertOnDupUpdate         bool     `config:"incr_sync.executor.insert_on_dup_update"`
 	IncrSyncExecutorDupKeyStrategy            string   `config:"incr_sync.executor.dup_key_strategy"`             // add v2.8.9
@@ -140,6 +141,14 @@ type Configuration struct {
 
 func (configuration *Configuration) IsShardCluster() bool {
 	return len(configuration.MongoUrls) > 1
+}
+
+// IsDocumentDBTarget reports whether the destination is Amazon DocumentDB rather
+// than MongoDB. DocumentDB only emulates the MongoDB API and rejects applyOps,
+// the listCollections "type" filter and retryable writes, so the target-side
+// paths have to avoid them (#1041).
+func (configuration *Configuration) IsDocumentDBTarget() bool {
+	return configuration.SpecialTargetDBFlag == utils.VarSpecialTargetDBFlagDocumentDB
 }
 
 // Seed defaults before ConfigLoader.Load so an explicit false remains false.

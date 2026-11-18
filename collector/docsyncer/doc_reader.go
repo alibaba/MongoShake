@@ -27,6 +27,7 @@ type DocumentSplitter struct {
 	pieceByteSize uint64               // each piece max byte size
 	count         uint64               // total document number
 	pieceNumber   int                  // how many piece
+	isTimeSeries  bool                 // ns is a time-series collection, which cannot be split
 }
 
 // SplitVectorResult is the result of splitVector cmd, contains multi split points.
@@ -54,9 +55,10 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 
 	// get total count
 	var res struct {
-		Count       int64   `bson:"count"`
-		Size        float64 `bson:"size"`
-		StorageSize float64 `bson:"storageSize"`
+		Count       int64     `bson:"count"`
+		Size        float64   `bson:"size"`
+		StorageSize float64   `bson:"storageSize"`
+		TimeSeries  *bson.Raw `bson:"timeseries"`
 	}
 	if err := ds.client.Client.Database(ds.ns.Database).RunCommand(nil,
 		bson.D{{"collStats", ds.ns.Collection}}).Decode(&res); err != nil {
@@ -66,6 +68,7 @@ func NewDocumentSplitter(src, sslRootCaFile string, ns utils.NS) *DocumentSplitt
 		return nil
 	}
 	ds.count = uint64(res.Count)
+	ds.isTimeSeries = res.TimeSeries != nil
 	// max pieceByteSize should be limited by maxChunkSize of splitVector cmd
 	ds.pieceByteSize = uint64(res.Size / float64(conf.Options.FullSyncReaderParallelThread))
 	if ds.pieceByteSize > 1024*utils.MB {
@@ -106,6 +109,17 @@ func (ds *DocumentSplitter) Run() error {
 	// disable split
 	if conf.Options.FullSyncReaderParallelThread <= 1 {
 		l.Logger.Infof("splitter[%s] disable split or no need", ds)
+		ds.readerChan <- NewDocumentReader(0, ds.src, ds.ns, "", nil, nil, ds.sslRootCaFile)
+		l.Logger.Infof("splitter[%s] exits", ds)
+		return nil
+	}
+
+	// A time-series logical view has no _id index, so neither the min/max probe
+	// below nor splitVector can be served from one: both end up as a blocking sort
+	// over every unpacked measurement, which spills to disk and can exhaust the
+	// source's free space (#993). Read the whole collection as a single piece.
+	if ds.isTimeSeries {
+		l.Logger.Infof("splitter[%s] is a time-series collection, give up parallel fetching", ds)
 		ds.readerChan <- NewDocumentReader(0, ds.src, ds.ns, "", nil, nil, ds.sslRootCaFile)
 		l.Logger.Infof("splitter[%s] exits", ds)
 		return nil
@@ -308,6 +322,13 @@ type DocumentReader struct {
 	query bson.M
 	key   string
 	id    int
+
+	// lastReadID tracks the _id of the last document successfully read
+	// from the cursor. Used to resume from the correct position when
+	// the cursor is rebuilt after a transient error (e.g. QueryPlanKilled).
+	// RawValue owns a copy of the BSON value because Cursor.Current is reused
+	// by the MongoDB driver on the next call to Next.
+	lastReadID bson.RawValue
 }
 
 // NewDocumentReader creates reader with mongodb url
@@ -367,7 +388,51 @@ func (reader *DocumentReader) NextDoc() (doc bson.Raw, err error) {
 		}
 	}
 
-	return reader.docCursor.Current, err
+	doc = reader.docCursor.Current
+	reader.setLastReadID(doc)
+	// A successful read breaks a sequence of rebuild failures. Keep the
+	// rebuild limit for consecutive connection/cursor failures only.
+	reader.rebuild = 0
+
+	return doc, nil
+}
+
+func (reader *DocumentReader) setLastReadID(doc bson.Raw) {
+	id := doc.Lookup("_id")
+	if id.Type == 0 {
+		l.Logger.Warnf("reader[%s] read document without _id; cannot advance cursor resume point", reader)
+		return
+	}
+
+	value := make([]byte, len(id.Value))
+	copy(value, id.Value)
+	reader.lastReadID = bson.RawValue{Type: id.Type, Value: value}
+}
+
+// resumeQuery preserves the piece range in query and, after a cursor rebuild,
+// adds an _id lower bound. Readers are always sorted by _id, even when the
+// piece itself is split by a shard key, so the continuation must use _id too.
+func (reader *DocumentReader) resumeQuery() bson.M {
+	resumeQuery := make(bson.M, len(reader.query)+1)
+	for key, value := range reader.query {
+		resumeQuery[key] = value
+	}
+	if reader.lastReadID.Type == 0 {
+		return resumeQuery
+	}
+
+	// Do not mutate reader.query: its _id condition can be used again if a
+	// reader is reused or a later rebuild needs to retain its upper boundary.
+	idCondition := make(bson.M)
+	if original, ok := resumeQuery["_id"].(bson.M); ok {
+		for operator, value := range original {
+			idCondition[operator] = value
+		}
+	}
+	idCondition["$gt"] = reader.lastReadID
+	resumeQuery["_id"] = idCondition
+
+	return resumeQuery
 }
 
 // ensureNetwork establish the mongodb connection at first
@@ -387,27 +452,30 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	}
 
 	reader.rebuild += 1
-	if reader.rebuild > 1 {
-		return fmt.Errorf("reader[%s] rebuild illegal", reader.String())
+	if reader.rebuild > 10 {
+		return fmt.Errorf("reader[%s] rebuild too many times(%d)", reader.String(), reader.rebuild)
 	}
+
+	resumeQuery := reader.resumeQuery()
 
 	findOptions := new(options.FindOptions)
-	findOptions.SetSort(map[string]interface{}{
-		"_id": 1,
-	})
 	findOptions.SetBatchSize(int32(conf.Options.FullSyncReaderFetchBatchSize)) // set big for test
-	findOptions.SetHint(map[string]interface{}{
-		"_id": 1,
-	})
 
-	// enable noCursorTimeout anyway! #451 #784
-	if reader.client.IsTimeSeriesCollection(reader.ns.Database, reader.ns.Collection) == false {
+	// A time-series logical view has no _id index, so an _id hint is rejected
+	// outright (#897) and an _id sort becomes a blocking sort over every unpacked
+	// measurement — that spills to disk and can exhaust the source's free space on
+	// large collections (#993). Full sync does not depend on _id order, so
+	// time-series collections are scanned in natural order with neither sort nor
+	// hint. noCursorTimeout is unsupported on them as well (#784).
+	if !reader.client.IsTimeSeriesCollection(reader.ns.Database, reader.ns.Collection) {
+		findOptions.SetSort(map[string]interface{}{
+			"_id": 1,
+		})
+		// enable noCursorTimeout anyway! #451
 		findOptions.SetNoCursorTimeout(true)
-		// timeseries collections can't use hint since they do not have _id index, #897
-		findOptions.SetHint(nil)
 	}
-	findOptions.SetComment(fmt.Sprintf("mongo-shake full sync: ns[%v] query[%v] rebuid-times[%v]",
-		reader.ns, reader.query, reader.rebuild))
+	findOptions.SetComment(fmt.Sprintf("mongo-shake full sync: ns[%v] query[%v] rebuild-times[%v]",
+		reader.ns, resumeQuery, reader.rebuild))
 
 	// field-level whitelist: server-side inclusion projection (top-level fields)
 	if fields := conf.Options.FullSyncFieldWhitelistMap[reader.ns.Str()]; len(fields) > 0 {
@@ -415,12 +483,12 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	}
 
 	reader.docCursor, err = reader.client.Client.Database(reader.ns.Database).Collection(reader.ns.Collection, nil).
-		Find(nil, reader.query, findOptions)
+		Find(nil, resumeQuery, findOptions)
 	if err != nil {
-		return fmt.Errorf("run find failed: %v", err)
+		return fmt.Errorf("run find failed: %w", err)
 	}
 
-	l.Logger.Infof("reader[%s] generates new cursor", reader.String())
+	l.Logger.Infof("reader[%s] generates new cursor with resume query[%v]", reader.String(), resumeQuery)
 
 	return nil
 }

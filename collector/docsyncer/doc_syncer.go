@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,6 +67,18 @@ func in(target string, strArray []string) bool {
 	return false
 }
 
+// destListCollectionFilter builds the listCollections filter used against the
+// target. DocumentDB rejects the "type" key in that filter outright (#1041). The
+// filter exists to keep views out of the *source* enumeration; here it only decides
+// whether to warn about a namespace that already exists, so listing every
+// collection is both accepted by DocumentDB and no less correct.
+func destListCollectionFilter(toConn *utils.MongoCommunityConn) bson.M {
+	if conf.Options.IsDocumentDBTarget() {
+		return bson.M{}
+	}
+	return utils.GetListCollectionQueryCondition(toConn)
+}
+
 func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoCommunityConn,
 	nsTrans *transform.NamespaceTransform) error {
 	if conf.Options.FullSyncExecutorDebug {
@@ -78,7 +91,7 @@ func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoCom
 		if !conf.Options.FullSyncCollectionDrop {
 			// do not drop
 			colNames, err := toConn.Client.Database(toNS.Database).ListCollectionNames(nil,
-				utils.GetListCollectionQueryCondition(toConn))
+				destListCollectionFilter(toConn))
 			if err != nil {
 				l.Logger.Criticalf("Get collection names of db %v of dest mongodb failed. %v", toNS.Database, err)
 				return err
@@ -100,6 +113,197 @@ func StartDropDestCollection(nsSet map[utils.NS]struct{}, toConn *utils.MongoCom
 			}
 		}
 	}
+	return nil
+}
+
+// specialCollectionKind labels the collection kinds whose creation options full
+// sync has to replay on the target. Both are invisible to the write path: an
+// implicitly created collection is an ordinary one, so the source's properties
+// are lost without any error being raised.
+type specialCollectionKind string
+
+const (
+	kindTimeSeries specialCollectionKind = "time-series"
+	kindCapped     specialCollectionKind = "capped"
+)
+
+// destCollectionSpec carries one collection's creation options exactly as the
+// source reports them, so they can be replayed on the target verbatim.
+type destCollectionSpec struct {
+	name    string
+	kind    specialCollectionKind
+	options bson.M
+}
+
+// matchesTarget reports whether an existing target collection already has the
+// properties this spec stands for, and so must be left alone.
+func (spec destCollectionSpec) matchesTarget(docType string, docOptions bson.M) bool {
+	if spec.kind == kindTimeSeries {
+		return docType == "timeseries"
+	}
+	if capped, ok := docOptions["capped"].(bool); ok {
+		return capped
+	}
+	return false
+}
+
+// mismatchMessage explains why an existing target collection cannot be given the
+// source's properties. Neither kind can be added in place, and dropping the
+// user's data here would be destructive, so both are reported rather than fixed.
+func (spec destCollectionSpec) mismatchMessage(toNS utils.NS, docType string) string {
+	if spec.kind == kindTimeSeries {
+		return fmt.Sprintf("collection %v already exists in dest mongodb as type[%v] while the source is "+
+			"a time-series collection. Its time-series properties cannot be added in place, so it keeps "+
+			"an _id_ unique index the source does not have and reruns will fail with E11000. Drop it and "+
+			"rerun, or set full_sync.collection_exist_drop = true", toNS, docType)
+	}
+	// collMod's convertToCapped is gone from the server: MongoDB 7.0 rejects it
+	// with "BSON field 'collMod.convertToCapped' is an unknown field"
+	return fmt.Sprintf("collection %v already exists in dest mongodb as type[%v] while the source is "+
+		"a capped collection. Capped properties cannot be added to an existing collection, so the "+
+		"target will keep growing where the source wraps around. Drop it and rerun, or set "+
+		"full_sync.collection_exist_drop = true", toNS, docType)
+}
+
+// StartCreateDestSpecialCollections creates the target's time-series (#993) and
+// capped (#995) collections before anything else touches them.
+//
+// Ordering matters: createIndex on a missing collection implicitly creates an
+// ordinary one, and so does the first inserted document. Either silently drops
+// the source's properties. For a time-series collection that leaves the target
+// with an _id_ unique index the source does not have, so every rerun then fails
+// with E11000. For a capped collection it leaves an unbounded target: the source
+// wraps around at size/max while the target keeps every document forever, which
+// fills the disk and is what makes the two sides report different counts. This
+// must therefore run after the optional drop and before index sync and data sync.
+func StartCreateDestSpecialCollections(sources []*utils.MongoSource, nsSet map[utils.NS]struct{},
+	toConn *utils.MongoCommunityConn, nsTrans *transform.NamespaceTransform, sslRootFile string) error {
+	if conf.Options.FullSyncExecutorDebug {
+		l.Logger.Infof("full_sync.executor.debug set, no need to create time-series or capped collections")
+		return nil
+	}
+	if toConn == nil || len(nsSet) == 0 {
+		return nil
+	}
+
+	// only ask the source about databases that hold a namespace we are syncing
+	dbs := make(map[string]struct{})
+	for ns := range nsSet {
+		dbs[ns.Database] = struct{}{}
+	}
+
+	handled := make(map[string]struct{}, len(nsSet))
+	for _, src := range sources {
+		fromConn, err := utils.NewMongoCommunityConn(src.URL, utils.VarMongoConnectModePrimary, true,
+			utils.ReadWriteConcernLocal, utils.ReadWriteConcernDefault, sslRootFile)
+		if err != nil {
+			return fmt.Errorf("connect to source mongodb[%s] for time-series and capped collections failed: %v",
+				utils.BlockMongoUrlPassword(src.URL, "***"), err)
+		}
+
+		for db := range dbs {
+			specs, err := listSpecialCollectionSpecs(fromConn, db)
+			if err != nil {
+				fromConn.Close()
+				return fmt.Errorf("list time-series and capped collections of source db[%v] failed: %v", db, err)
+			}
+			for _, spec := range specs {
+				ns := utils.NS{Database: db, Collection: spec.name}
+				if _, ok := nsSet[ns]; !ok {
+					continue
+				}
+				toNS := utils.NewNS(nsTrans.Transform(ns.Str()))
+				if _, done := handled[toNS.Str()]; done {
+					continue
+				}
+				handled[toNS.Str()] = struct{}{}
+				if err := createSpecialCollection(toConn, toNS, spec); err != nil {
+					fromConn.Close()
+					return err
+				}
+			}
+		}
+		fromConn.Close()
+	}
+	return nil
+}
+
+func listSpecialCollectionSpecs(conn *utils.MongoCommunityConn, db string) ([]destCollectionSpec, error) {
+	// one pass covers both kinds, which are disjoint: a time-series collection
+	// reports type "timeseries", a capped one is an ordinary "collection" carrying
+	// options.capped
+	cur, err := conn.Client.Database(db).ListCollections(nil, bson.M{
+		"$or": bson.A{
+			bson.M{"type": "timeseries"},
+			bson.M{"options.capped": true},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(nil)
+
+	var specs []destCollectionSpec
+	for cur.Next(nil) {
+		var doc struct {
+			Name    string `bson:"name"`
+			Type    string `bson:"type"`
+			Options bson.M `bson:"options"`
+		}
+		if err := bson.Unmarshal(cur.Current, &doc); err != nil {
+			return nil, err
+		}
+		kind := kindCapped
+		if doc.Type == "timeseries" {
+			kind = kindTimeSeries
+		}
+		specs = append(specs, destCollectionSpec{name: doc.Name, kind: kind, options: doc.Options})
+	}
+	return specs, cur.Err()
+}
+
+func createSpecialCollection(toConn *utils.MongoCommunityConn, toNS utils.NS, spec destCollectionSpec) error {
+	cur, err := toConn.Client.Database(toNS.Database).ListCollections(nil, bson.M{"name": toNS.Collection})
+	if err != nil {
+		return fmt.Errorf("list collection %v of dest mongodb failed: %v", toNS, err)
+	}
+	defer cur.Close(nil)
+	for cur.Next(nil) {
+		var doc struct {
+			Type    string `bson:"type"`
+			Options bson.M `bson:"options"`
+		}
+		if err := bson.Unmarshal(cur.Current, &doc); err != nil {
+			return fmt.Errorf("parse collection info of %v on the target failed: %v", toNS, err)
+		}
+		if spec.matchesTarget(doc.Type, doc.Options) {
+			l.Logger.Infof("%v collection %v already exists in dest mongodb, keep it", spec.kind, toNS)
+			return nil
+		}
+		l.Logger.Errorf("%v", spec.mismatchMessage(toNS, doc.Type))
+		return nil
+	}
+	if err := cur.Err(); err != nil {
+		return fmt.Errorf("list collection %v of dest mongodb failed: %v", toNS, err)
+	}
+
+	// pass the source's options through verbatim. For a capped collection they are
+	// {capped, size, max} — listCollections reports uuid under info, not options,
+	// so nothing unsettable leaks in. For a time-series collection they carry
+	// timeField, metaField, granularity, the derived bucket span and
+	// expireAfterSeconds. A target older than the source may reject a field it does
+	// not know, which is a real incompatibility worth failing on rather than
+	// papering over.
+	cmd := bson.D{{"create", toNS.Collection}}
+	for k, v := range spec.options {
+		cmd = append(cmd, bson.E{Key: k, Value: v})
+	}
+	if err := toConn.Client.Database(toNS.Database).RunCommand(nil, cmd).Err(); err != nil {
+		return fmt.Errorf("create %v collection %v of dest mongodb with options %v failed: %v",
+			spec.kind, toNS, spec.options, err)
+	}
+	l.Logger.Infof("create %v collection %v of dest mongodb with options %v succeed",
+		spec.kind, toNS, spec.options)
 	return nil
 }
 
@@ -245,6 +449,7 @@ func StartIndexSync(indexMap map[utils.NS][]bson.D, toUrl string,
 	wg.Add(collExecutorParallel)
 	for i := 0; i < collExecutorParallel; i++ {
 		nimo.GoRoutine(func() {
+			defer wg.Done()
 			var conn *utils.MongoCommunityConn
 			var err error
 			conn, err = utils.NewMongoCommunityConn(toUrl, utils.VarMongoConnectModePrimary, true,
@@ -254,7 +459,6 @@ func StartIndexSync(indexMap map[utils.NS][]bson.D, toUrl string,
 				return
 			}
 			defer conn.Close()
-			defer wg.Done()
 
 			for {
 				indexNs, ok := <-namespaces
@@ -293,7 +497,8 @@ func StartIndexSync(indexMap map[utils.NS][]bson.D, toUrl string,
 						{"createIndexes", toNS.Collection},
 						{"indexes", []bson.D{newIndex}},
 					}); out.Err() != nil {
-						l.Logger.Warnf("Create indexes for ns %v of dest mongodb failed. %v", ns, out.Err())
+						l.Logger.Warnf("Create index %v for ns %v of dest mongodb failed, this index is skipped. %v",
+							newIndex.Map()["name"], ns, out.Err())
 					}
 				}
 				l.Logger.Infof("Create indexes for ns %v of dest mongodb finish", toNS)
@@ -525,6 +730,24 @@ func (syncer *DBSyncer) collectionSync(collExecutorId int, ns utils.NS, toNS uti
 	 */
 	// fetch index
 
+	// Verify that the number of documents actually read roughly matches
+	// the expected total from collStats. A large discrepancy can expose a
+	// failed cursor resume, although collStats can also include orphaned
+	// documents or documents deleted while the sync is running.
+	totalCount := atomic.LoadUint64(&collectionMetric.TotalCount)
+	finishCount := atomic.LoadUint64(&collectionMetric.FinishCount)
+	if totalCount > 0 {
+		ratio := collectionMetric.ProgressRatio()
+		if ratio < 0.9 {
+			l.Logger.Warnf("collection[%v] sync completed with finishCount[%v] below totalCount[%v] (%.1f%%). "+
+				"Investigate if unexpected: source collStats may include orphaned documents or concurrent deletes.",
+				ns, finishCount, totalCount, ratio*100)
+		} else {
+			l.Logger.Infof("collection[%v] sync verification: finishCount[%v]/totalCount[%v] = %.1f%%",
+				ns, finishCount, totalCount, ratio*100)
+		}
+	}
+
 	// set collection finish
 	syncer.markCollectionFinished(ns, collectionMetric)
 
@@ -537,12 +760,39 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 	buffer := make([]*bson.Raw, 0, bufferSize)
 	bufferByteSize := 0
 
+	const maxConsecutiveRetries = 10
+	const initialRetryDelay = 5 * time.Second
+	const maxRetryDelay = 20 * time.Second
+	consecutiveRetries := 0
+	retryDelay := initialRetryDelay
+
 	for {
 		doc, err := reader.NextDoc()
-		// doc, err := reader.NextDocMgo()
 		if err != nil {
+			// Retry transient source-side errors that are safe to continue
+			// after cursor rebuild (e.g. QueryPlanKilled from orphan cleanup,
+			// cursor timeouts, network resets). The cursor will be rebuilt
+			// from lastReadID via ensureNetwork() so no data is lost.
+			if isTransientReadError(err) && consecutiveRetries < maxConsecutiveRetries {
+				consecutiveRetries++
+				l.Logger.Warnf("splitter reader[%v] hit transient error, retrying (%d left) from lastReadID[%v]: %v",
+					reader, maxConsecutiveRetries-consecutiveRetries, reader.lastReadID, err)
+				reader.releaseCursor()
+				time.Sleep(retryDelay)
+				retryDelay *= 2
+				if retryDelay > maxRetryDelay {
+					retryDelay = maxRetryDelay
+				}
+				continue
+			}
 			return fmt.Errorf("splitter reader[%v] get next document failed: %v", reader, err)
-		} else if doc == nil {
+		}
+
+		// Retry limits apply only to consecutive failures. A reader can run for
+		// hours and survive isolated cursor kills without exhausting its budget.
+		consecutiveRetries = 0
+		retryDelay = initialRetryDelay
+		if doc == nil {
 			syncer.addCollectionFinishedDocs(reader.ns, collectionMetric, uint64(len(buffer)))
 			colExecutor.Sync(buffer)
 			syncer.replMetric.AddSuccess(uint64(len(buffer))) // only used to calculate the tps which is extract from "success"
@@ -582,6 +832,49 @@ func (syncer *DBSyncer) splitSync(reader *DocumentReader, colExecutor *Collectio
 	reader.Close()
 	// reader.CloseMgo()
 	return nil
+}
+
+// isTransientReadError checks whether a cursor read error is transient and safe
+// to retry by rebuilding the cursor from lastReadID. These errors are caused by
+// ephemeral server-side events (orphan range cleanup killing cursors, cursor
+// timeouts on idle shards, network resets) and typically resolve on their own.
+func isTransientReadError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var commandError mongo.CommandError
+	if errors.As(err, &commandError) {
+		switch commandError.Code {
+		case 43, 175, 237: // CursorNotFound, QueryPlanKilled, CursorKilled
+			return true
+		}
+		switch commandError.Name {
+		case "CursorNotFound", "QueryPlanKilled", "CursorKilled":
+			return true
+		}
+	}
+
+	// Also match by message substring for cases where the driver doesn't
+	// expose the code properly (nested "caused by" chains from mongos)
+	msg := strings.ToLower(err.Error())
+	transientPatterns := []string{
+		"queryplankilled",
+		"cursornotfound",
+		"cursorkilled",
+		"orphan range cleanup",
+		"read has been terminated",
+		"cursor not found",
+		"cursor id invalid",
+	}
+	for _, p := range transientPatterns {
+		if strings.Contains(msg, p) {
+			return true
+		}
+	}
+	if strings.Contains(msg, "cursor id ") && strings.Contains(msg, " not found") {
+		return true
+	}
+	return false
 }
 
 // RestAPI restful api

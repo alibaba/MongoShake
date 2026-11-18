@@ -10,6 +10,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
 	l "github.com/alibaba/MongoShake/v2/pkg/log"
@@ -60,6 +61,35 @@ func NewDbWriter(conn *utils.MongoCommunityConn, metadata bson.E, bulkInsert boo
 	}
 	// l.Logger.Infof("db writer create: BulkWriter")
 	return &BulkWriter{conn: conn, fullFinishTs: fullFinishTs} // bulk insertion enable
+}
+
+// nativeDDLName maps an oplog DDL op name to the command DocumentDB accepts.
+// Only dropIndexes is a real command: deleteIndex / deleteIndexes / dropIndex are
+// legacy oplog spellings that applyOps understood but a direct command rejects
+// with CommandNotFound (#1041).
+func nativeDDLName(operation string) string {
+	switch operation {
+	case "deleteIndex", "deleteIndexes", "dropIndex":
+		return "dropIndexes"
+	}
+	return operation
+}
+
+// nativeDDLCommand unwraps a namespace-scoped DDL oplog into the command itself,
+// dropping the envelope keys a direct command must not carry. Amazon DocumentDB
+// does not implement applyOps, so DDL has to be replayed this way (#1041).
+func nativeDDLCommand(log *oplog.PartialLog) bson.D {
+	cmd := bson.D{}
+	for _, ele := range log.Object {
+		if utils.ApplyOpsFilter(ele.Key) {
+			continue
+		}
+		cmd = append(cmd, ele)
+	}
+	if len(cmd) > 0 {
+		cmd[0].Key = nativeDDLName(cmd[0].Key)
+	}
+	return cmd
 }
 
 func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo.Client) error {
@@ -248,8 +278,33 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 	case "dropIndex":
 		fallthrough
 	case "dropIndexes":
+		if conf.Options.IsDocumentDBTarget() {
+			cmd := nativeDDLCommand(log)
+			l.Logger.Infof("run native %s on DocumentDB target: %v", operation, cmd)
+			err = dbHandler.RunCommand(nil, cmd).Err()
+			if err != nil && nativeDDLName(operation) == "dropIndexes" &&
+				dropIndexesByName(cmd) && isIndexNotFound(err) {
+				// applyOps accepts dropping an index that is already gone, the native
+				// command reports IndexNotFound. Replaying after a restart must not
+				// stall on it, so treat it as already applied.
+				l.Logger.Warnf("native %s on DocumentDB target: index is already absent, "+
+					"treating as applied: %v", operation, err)
+				err = nil
+			}
+			if err != nil {
+				l.Logger.Errorf("run native %s[%v] on DocumentDB target failed: %v", operation, cmd, err)
+			}
+			break
+		}
 		// using applyOps directly, refer to mongo-tools:HandleNonTxnOp
-		// ensure every shard collection's uuid is same
+		//
+		// The source collection uuid (log.UI) is deliberately left out. applyOps
+		// resolves a command by uuid when one is supplied, and the target owns
+		// its own collection uuids: a source uuid that names nothing there makes
+		// drop / collMod / dropIndex(es) a silent no-op, and makes create rename
+		// the existing target collection to tmp<rand>.create before building a
+		// new empty one in its place (#1039). A replay is namespace-scoped, so
+		// the command is sent without it.
 		doc := bson.M{}
 		doc["ts"] = log.Timestamp
 		if log.Version > 0 {
@@ -265,10 +320,6 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 		}
 		if log.Query != nil && len(log.Query) > 0 {
 			doc["o2"] = log.Query
-		}
-		// uuid BinDataType == 3 or 4, see "BinDataType" in src/mongo/bson/bsontypes.h
-		if log.UI != nil && (log.UI.Subtype == 3 || log.UI.Subtype == 4) {
-			doc["ui"] = log.UI
 		}
 		l.Logger.Infof("run applyOps for %s: %v", operation, doc)
 		err = client.Database("admin").RunCommand(context.Background(),
@@ -319,6 +370,27 @@ func RunCommand(database, operation string, log *oplog.PartialLog, client *mongo
 	}
 
 	return err
+}
+
+// dropIndexesByName reports whether the command drops one index by name. Only that
+// form is idempotent: DocumentDB also answers IndexNotFound for a mismatched key
+// pattern or a name list it applied only part of, and in those cases indexes
+// survive, so the error must not be swallowed.
+func dropIndexesByName(cmd bson.D) bool {
+	for _, ele := range cmd {
+		if ele.Key == "index" {
+			_, ok := ele.Value.(string)
+			return ok
+		}
+	}
+	return false
+}
+
+// isIndexNotFound reports the server's IndexNotFound (27), which a replayed
+// dropIndexes raises once the index is already gone.
+func isIndexNotFound(err error) bool {
+	er, ok := err.(mongo.ServerError)
+	return ok && er.HasErrorCode(27)
 }
 
 // IgnoreError return true if error can be ignored
@@ -433,20 +505,67 @@ func extractOriginalSpecs(obj bson.D) bson.A {
 	return result
 }
 
+// bypassDocumentValidationFor reports whether bypassDocumentValidation may be sent for
+// this collection.
+//
+// Whether the server tolerates it on a time-series bucket namespace depends on the patch
+// release. Inserting one real bucket into system.buckets.<ts collection>:
+//
+//	7.0.37   omitted / false / true   all accepted
+//	7.0.43   omitted / false accepted, true rejected with code 2
+//	         "bypassDocumentValidation is not permitted on timeseries collections"
+//	8.0.4    omitted / false / true   all accepted
+//	8.2.12   omitted / false / true   all accepted
+//
+// Honouring incr_sync.executor.bypass_document_validation there would make the same
+// replay succeed or fail depending on the target's patch level, so the option is omitted
+// for bucket namespaces; omitting it is accepted everywhere, and explicitly sending false
+// is too, which is what the command writer's else branch already does.
+//
+// The prefix is matched rather than calling IsTimeSeriesCollection, which would issue a
+// listCollections per write. Bucket namespaces always carry the prefix.
+func bypassDocumentValidationFor(collection string) bool {
+	return conf.Options.IncrSyncBypassDocumentValidation &&
+		!strings.HasPrefix(collection, utils.VarSystemBucketsPrefix)
+}
+
+// applyOpsDoc renders one oplog entry as an applyOps input document.
+//
+// ui is deliberately left out. applyOps requires it to name the same collection
+// as ns, and this is the source's uuid for a collection the target created
+// independently, so forwarding it fails every replay with Location3318200
+// "Namespace ... and UUID ... point to different collections". The other applyOps
+// paths in this file strip it the same way, through utils.ApplyOpsFilter and
+// oplog.RemoveFiled(doc, uuidMark).
+//
+// Only the fields an op actually carries are emitted. PartialLog.Dump is not
+// usable here: it serialises every tagged field, including empty bson.Raw ones
+// such as lsid and prevOpTime, which the driver rejects with "cannot marshal
+// type primitive.D to a BSON Document: couldn't read length from src".
+func applyOpsDoc(pLog *oplog.PartialLog) bson.D {
+	doc := bson.D{
+		{Key: "op", Value: pLog.Operation},
+		{Key: "ns", Value: pLog.Namespace},
+		{Key: "o", Value: pLog.ObjectValue()},
+	}
+	switch query := pLog.QueryValue().(type) {
+	case bson.D:
+		if len(query) > 0 {
+			doc = append(doc, bson.E{Key: "o2", Value: query})
+		}
+	case bson.Raw:
+		if len(query) > 0 {
+			doc = append(doc, bson.E{Key: "o2", Value: query})
+		}
+	}
+	return doc
+}
+
 // replayUpdateViaApplyOps replays an update oplog directly via applyOps command,
 // preserving the original $v:2 diff format. This is used for time-series bucket
 // updates that contain column-store binary diffs which cannot be converted to
 // standard $set/$unset operations.
 func replayUpdateViaApplyOps(client *mongo.Client, pLog *oplog.PartialLog) error {
-	doc := bson.D{
-		{Key: "op", Value: pLog.Operation},
-		{Key: "ns", Value: pLog.Namespace},
-		{Key: "o", Value: pLog.ObjectValue()},
-		{Key: "o2", Value: pLog.QueryValue()},
-	}
-	if pLog.UI != nil {
-		doc = append(doc, bson.E{Key: "ui", Value: pLog.UI})
-	}
 	return client.Database("admin").RunCommand(context.Background(),
-		bson.D{{Key: "applyOps", Value: []interface{}{doc}}}).Err()
+		bson.D{{Key: "applyOps", Value: []interface{}{applyOpsDoc(pLog)}}}).Err()
 }

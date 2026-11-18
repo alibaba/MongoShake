@@ -1,0 +1,91 @@
+name: ci
+
+# The MongoDB-backed suite (go test -p 1 ./...) is deliberately NOT run here: it
+# needs a replica set, a config server and a sharded cluster, and a single
+# service container cannot provide all three. The release gate stays a local run
+# until that is solved. See issue #1026.
+#
+# go vet is also deliberately absent. It exits 1 on this tree with 946
+# "struct literal uses unkeyed fields" findings, nearly all on
+# bson/primitive.E{...} positional literals, which are idiomatic in MongoDB
+# code. A permanently red gate teaches people to ignore gates. #1023 and #1024
+# cleared the two findings that were real (copylocks and a shift by the operand
+# width); reconsider vet once the unkeyed-fields noise is dealt with.
+
+on:
+  push:
+    branches: [develop, master]
+  pull_request:
+
+# Queue time dominates everything else here: the first run of this workflow sat
+# 1h52m36s waiting for a runner and then executed in 1m29s. Grouping per ref
+# keeps runs for the same branch or PR from piling up behind one another.
+#
+# cancel-in-progress is limited to pull_request on purpose. PR branches churn
+# through force-pushes, so superseding a queued run is pure gain. Pushes to
+# develop and master are rare and each one is worth a definitive result -- with a
+# queue this long, cancelling would mean some commits on the main branches never
+# get a green check at all.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # go.work, not go.mod: go.work is tracked and declares go 1.24.5, so
+      # installing go.mod's 1.21 would make the toolchain reject the workspace
+      # file before it built anything. This matches what a local build does.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.work
+          cache: true
+
+      # ./... in workspace mode reaches only the main module's 24 packages.
+      # tools/ is a separate module (github.com/alibaba/MongoShake/tools) and its
+      # pre-split binary ships in the release tarball as pre_split.linux, so it is
+      # built here too -- otherwise a broken pre_split.go can reach a release
+      # unnoticed. Historically the tarball was assembled from
+      # tools/pre-split/pre_split.linux, a 13MB binary committed to the repo, so
+      # nothing ever compiled it from source.
+      - name: Build
+        run: |
+          go build ./...
+          (cd tools && go build ./...)
+
+      # git ls-files rather than gofmt -l . so the untracked mongo-shake-v*
+      # release staging directories cannot contribute noise.
+      - name: gofmt
+        run: |
+          unformatted=$(git ls-files -z '*.go' | xargs -0 gofmt -l)
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      # Packages verified to pass with every MONGOSHAKE_TEST_URL* unset.
+      # ./common is excluded on purpose: it dials a real server.
+      - name: Tests that need no MongoDB
+        run: |
+          go test -count=1 -p 1 \
+            ./collector/configure \
+            ./collector/filter \
+            ./collector/transform \
+            ./collector/spool
+
+      # TLS chain verification regressions build certificates in memory and
+      # need no MongoDB; ./common is otherwise excluded from this job.
+      - name: TLS configuration regressions
+        run: go test ./common -run '^TestNewChainVerifyingTLSConfig' -count=1
+
+      # ACK/barrier unit regressions use loopback HTTP stores or mocks and
+      # need no MongoDB. Live MongoDB suites remain a separate release gate.
+      - name: ACK and barrier race regressions
+        run: |
+          go test -race ./collector \
+            -run '^(TestBarrier.*|TestCheckCheckpointUpdate.*|TestWorkerACKNotifications.*|TestWorkerProbeInterval.*|TestCalculateWorkerLowestCheckpoint|TestDispatchBatches)$' \
+            -count=3 -shuffle=on -timeout=10m

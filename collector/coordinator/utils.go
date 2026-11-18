@@ -34,7 +34,8 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 		tsMap, _, smallestNew, _, _, err = utils.GetAllTimestampInUT()
 	case false:
 		// smallestNew is the smallest of the all newest timestamp
-		tsMap, _, smallestNew, _, _, err = utils.GetAllTimestamp(coordinator.MongoD, conf.Options.MongoSslRootCaFile)
+		tsMap, _, smallestNew, _, _, err = utils.GetAllTimestamp(coordinator.MongoD,
+			conf.Options.MongoConnectMode, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return 0, nil, false, fmt.Errorf("get all timestamp failed: %v", err)
 		}

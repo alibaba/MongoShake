@@ -2,13 +2,25 @@ package oplog
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
+
+// ErrEmptyChangeStreamUpdate is returned when a change stream update event
+// carries a genuinely empty updateDescription — updatedFields, removedFields and
+// truncatedArrays all absent or empty. The caller should log and skip this event
+// rather than replay it, because an empty update object would be interpreted as
+// a full-document replacement by the executor.
+//
+// An event that MongoShake cannot faithfully represent is a different matter and
+// is returned as a plain error, so the caller fails loudly instead of skipping.
+var ErrEmptyChangeStreamUpdate = errors.New("change_stream update event produced empty update object")
 
 const (
 	// fields in oplog
@@ -92,6 +104,89 @@ func (e *Event) String() string {
 	} else {
 		return string(ret)
 	}
+}
+
+// buildTruncatedArrayPush converts updateDescription.truncatedArrays into the
+// $push modifier document {$push: {<field>: {$each: [], $slice: <newSize>}}}.
+//
+// $push with an empty $each and $slice is a plain update operator (MongoDB
+// 2.6+). A $slice aggregation expression inside $set is not: a document-mode
+// update writes it through as a literal nested document, silently corrupting the
+// field on targets that never parse it as a pipeline.
+//
+// A single event can both modify and truncate the same array — the $v:2 delta
+// carries u<N> and l side by side, surfaced as updatedFields {"arr.0": ...} plus
+// truncatedArrays {field: "arr"}. MongoDB rejects $set and $push on overlapping
+// paths, and the executor retries a failed write forever, stalling every
+// namespace queued behind it. Such a truncation is therefore dropped with a
+// warning: the target array keeps its pre-truncation length, which is the
+// divergence the unpatched conversion already produced, but sync stays alive.
+// See docs/fix-changestream-truncated-arrays.md.
+func buildTruncatedArrayPush(event *Event, updatedFields bson.M, namespace string) (bson.D, error) {
+	raw, ok := event.UpdateDescription["truncatedArrays"]
+	if !ok {
+		return nil, nil
+	}
+	entries, ok := raw.(primitive.A)
+	if !ok {
+		return nil, fmt.Errorf("change_stream truncatedArrays of unexpected type %T: documentKey=%v ns=%s",
+			raw, event.DocumentKey, namespace)
+	}
+
+	var push bson.D
+	for _, entry := range entries {
+		m, ok := entry.(bson.M)
+		if !ok {
+			return nil, fmt.Errorf("change_stream truncatedArrays entry of unexpected type %T: documentKey=%v ns=%s",
+				entry, event.DocumentKey, namespace)
+		}
+		field, _ := m["field"].(string)
+		newSize, valid := truncatedArrayNewSize(m["newSize"])
+		if field == "" || !valid {
+			// Skipping quietly here would drop a truncation the source really applied.
+			return nil, fmt.Errorf("change_stream truncatedArrays entry without usable field/newSize %v: documentKey=%v ns=%s",
+				entry, event.DocumentKey, namespace)
+		}
+		if conflict, overlaps := overlappingUpdatedField(updatedFields, field); overlaps {
+			l.Logger.Warnf("change_stream update on %s drops truncatedArrays for field [%s] (newSize=%v): "+
+				"$set on updatedFields path [%s] and $push on [%s] address overlapping paths, which MongoDB "+
+				"rejects and the executor would retry forever. The target array keeps its pre-truncation "+
+				"length. documentKey=%v", namespace, field, newSize, conflict, field, event.DocumentKey)
+			continue
+		}
+		push = append(push, primitive.E{
+			Key: field,
+			Value: bson.D{
+				{Key: "$each", Value: primitive.A{}},
+				{Key: "$slice", Value: newSize},
+			},
+		})
+	}
+	return push, nil
+}
+
+// truncatedArrayNewSize validates newSize as a non-negative BSON integer, the
+// only form in which $push.$slice keeps the leading elements of an array.
+func truncatedArrayNewSize(v interface{}) (interface{}, bool) {
+	switch n := v.(type) {
+	case int32:
+		return n, n >= 0
+	case int64:
+		return n, n >= 0
+	}
+	return nil, false
+}
+
+// overlappingUpdatedField returns an updatedFields path addressing the same value
+// as field, or containing / contained by it. Comparison is per path component, so
+// "arr" overlaps "arr.0" but not "arrayish".
+func overlappingUpdatedField(updatedFields bson.M, field string) (string, bool) {
+	for path := range updatedFields {
+		if path == field || strings.HasPrefix(path, field+".") || strings.HasPrefix(field, path+".") {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 func ConvertEvent2Oplog(input []byte, fullDoc bool) (*PartialLog, error) {
@@ -303,22 +398,53 @@ func ConvertEvent2Oplog(input []byte, fullDoc bool) (*PartialLog, error) {
 		if fullDoc && event.FullDocument != nil && len(event.FullDocument) > 0 {
 			oplog.Object = event.FullDocument
 		} else {
-			oplog.Object = make(bson.D, 0, 2)
-			if updatedFields, ok := event.UpdateDescription["updatedFields"]; ok && len(updatedFields.(bson.M)) > 0 {
+			oplog.Object = make(bson.D, 0, 3)
+
+			var updatedFields bson.M
+			if raw, ok := event.UpdateDescription["updatedFields"]; ok {
+				updatedFields, _ = raw.(bson.M)
+			}
+			if len(updatedFields) > 0 {
 				oplog.Object = append(oplog.Object, primitive.E{
 					Key:   "$set",
 					Value: updatedFields,
 				})
 			}
-			if removedFields, ok := event.UpdateDescription["removedFields"]; ok && len(removedFields.(primitive.A)) > 0 {
-				removedFieldsMap := make(bson.M)
-				for _, ele := range removedFields.(primitive.A) {
-					removedFieldsMap[ele.(string)] = 1
-				}
+
+			truncatedPush, truncErr := buildTruncatedArrayPush(event, updatedFields, oplog.Namespace)
+			if truncErr != nil {
+				return nil, truncErr
+			}
+			if len(truncatedPush) > 0 {
 				oplog.Object = append(oplog.Object, primitive.E{
-					Key:   "$unset",
-					Value: removedFieldsMap,
+					Key:   "$push",
+					Value: truncatedPush,
 				})
+			}
+
+			if raw, ok := event.UpdateDescription["removedFields"]; ok {
+				if arr, ok := raw.(primitive.A); ok && len(arr) > 0 {
+					removedFieldsMap := make(bson.M)
+					for _, ele := range arr {
+						if s, ok := ele.(string); ok {
+							removedFieldsMap[s] = 1
+						}
+					}
+					oplog.Object = append(oplog.Object, primitive.E{
+						Key:   "$unset",
+						Value: removedFieldsMap,
+					})
+				}
+			}
+
+			// An empty update object would be replayed as a full-document
+			// replacement, wiping the target document. Only a genuinely empty
+			// updateDescription can reach this point: an entry MongoShake cannot
+			// represent is returned as an error above, and a truncation dropped for
+			// overlapping updatedFields always leaves the corresponding $set behind.
+			if len(oplog.Object) == 0 {
+				return nil, fmt.Errorf("%w: documentKey=%v ns=%s",
+					ErrEmptyChangeStreamUpdate, event.DocumentKey, oplog.Namespace)
 			}
 		}
 

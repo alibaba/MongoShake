@@ -183,6 +183,21 @@ func TestEncodeMongoURI(t *testing.T) {
 			err:      "",
 		},
 		{
+			input:    "mongodb://user:pass@h1:27017,h2:27017/admin?replicaSet=rs0&authSource=admin",
+			expected: "mongodb://user:pass@h1:27017,h2:27017/admin?replicaSet=rs0&authSource=admin",
+			err:      "",
+		},
+		{
+			input:    "mongodb://user:p@ss?@localhost:27017/?directConnection=true",
+			expected: "mongodb://user:p%40ss%3F@localhost:27017/?directConnection=true",
+			err:      "",
+		},
+		{
+			input:    "mongodb://user:pass@localhost:27017?directConnection=true",
+			expected: "mongodb://user:pass@localhost:27017?directConnection=true",
+			err:      "",
+		},
+		{
 			input: "invalid://user:pass@host/db",
 			err:   "unsupported scheme: invalid",
 		},

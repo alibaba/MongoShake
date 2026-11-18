@@ -45,6 +45,7 @@ func main() {
 	var err error
 	defer handleExit()
 	defer func() {
+		utils.GlobalDupKeyLog.Flush()
 		if l.Logger != nil {
 			_ = l.Logger.Close()
 		}
@@ -96,6 +97,11 @@ func main() {
 	l.Logger.Infof("log init succeed. log.dir[%v] log.name[%v] log.level[%v]",
 		conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel)
 	l.Logger.Infof("MongoDB Version Source[%v] Target[%v]", conf.Options.SourceDBVersion, conf.Options.TargetDBVersion)
+
+	// accepted but ineffective options, logged here: SanitizeOptions runs before the logger
+	for _, warning := range checkIneffectiveOptions() {
+		l.Logger.Warnf("%s", warning)
+	}
 
 	conf.Options.Version = utils.BRANCH
 

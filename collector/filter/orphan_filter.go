@@ -20,17 +20,17 @@ const (
 	// type, but we split int64 out so OrphanFilter can compare hashed
 	// shard bounds (which are full-range int64) without losing precision
 	// through float64. Mixed int64/float64 comparison promotes to float64.
-	BsonInvalid     = -1
-	BsonMinKey      = 0
-	BsonTypeNumber  = 10
-	BsonTypeInt64   = 11
-	BsonTypeString  = 15
-	BsonTypeOid     = 35
-	BsonTypeBool    = 40
-	BsonTypeDate    = 45
-	BsonTypeTstamp  = 47
-	BsonTypeNull    = 5
-	BsonMaxKey      = 100
+	BsonInvalid    = -1
+	BsonMinKey     = 0
+	BsonTypeNumber = 10
+	BsonTypeInt64  = 11
+	BsonTypeString = 15
+	BsonTypeOid    = 35
+	BsonTypeBool   = 40
+	BsonTypeDate   = 45
+	BsonTypeTstamp = 47
+	BsonTypeNull   = 5
+	BsonMaxKey     = 100
 )
 
 type OrphanFilter struct {

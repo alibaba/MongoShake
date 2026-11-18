@@ -471,17 +471,17 @@ func (exec *Executor) RestAPI() {
 			DDL:        exec.metricDDL,
 			Unknown:    exec.metricUnknown,
 			Error:      exec.metricError,
-			InsertMap:  calculateTop3(exec.metricInsertMap),
-			UpdateMap:  calculateTop3(exec.metricUpdateMap),
-			DeleteMap:  calculateTop3(exec.metricDeleteMap),
-			DDLMap:     calculateTop3(exec.metricDDLMap),
-			UnknownMap: calculateTop3(exec.metricUnknownMap),
-			ErrorMap:   calculateTop3(exec.metricErrorMap),
+			InsertMap:  calculateTop3(&exec.metricInsertMap),
+			UpdateMap:  calculateTop3(&exec.metricUpdateMap),
+			DeleteMap:  calculateTop3(&exec.metricDeleteMap),
+			DDLMap:     calculateTop3(&exec.metricDDLMap),
+			UnknownMap: calculateTop3(&exec.metricUnknownMap),
+			ErrorMap:   calculateTop3(&exec.metricErrorMap),
 		}
 	})
 }
 
-func calculateTop3(inputMap sync.Map) []Item {
+func calculateTop3(inputMap *sync.Map) []Item {
 	/*
 	 * TODO, modify to priority queue.
 	 * the contain/heap package is too complicated to used in golang than C++.

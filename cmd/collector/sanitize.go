@@ -58,6 +58,31 @@ func SanitizeOptions() error {
 	return checkConflict()
 }
 
+// checkIneffectiveOptions returns warnings for option combinations that are accepted but have no
+// effect. The caller logs them after the logger is initialized.
+func checkIneffectiveOptions() []string {
+	var warnings []string
+
+	if !conf.Options.IncrSyncBarrierOrderingEnable {
+		return warnings
+	}
+	// the guarantee needs a direct tunnel, every other tunnel hands ordering to its own receiver
+	if conf.Options.Tunnel != utils.VarTunnelDirect {
+		warnings = append(warnings, fmt.Sprintf("incr_sync.barrier.ordering_enable is set but "+
+			"incr_sync.tunnel[%v] != '%v': this tunnel hands ordering to its own receiver, so the "+
+			"DDL/DML ordering guarantee is not supported and the switch has no effect",
+			conf.Options.Tunnel, utils.VarTunnelDirect))
+	}
+	// the barrier is per-syncer, and a shard cluster runs one syncer per shard
+	if conf.Options.IsShardCluster() {
+		warnings = append(warnings, "incr_sync.barrier.ordering_enable is set but the source is a "+
+			"shard cluster, where every shard has its own syncer: DDL/DML ordering across shards is "+
+			"not guaranteed")
+	}
+
+	return warnings
+}
+
 func handleDeprecateConf() error {
 	// IncrSyncTunnel has deprecated since v2.4.1
 	if conf.Options.Tunnel == "" && conf.Options.IncrSyncTunnel != "" {
@@ -319,6 +344,16 @@ func checkDefaultValue() error {
 		conf.Options.IncrSyncReaderBufferTime = 1
 	}
 
+	// special.target.db.flag opts the destination out of the MongoDB-only commands
+	// DocumentDB rejects (#1041).
+	if conf.Options.SpecialTargetDBFlag != "" &&
+		conf.Options.SpecialTargetDBFlag != utils.VarSpecialTargetDBFlagDocumentDB {
+		return fmt.Errorf("special.target.db.flag should be empty or 'documentdb'")
+	}
+	if conf.Options.IsDocumentDBTarget() && conf.Options.Tunnel != utils.VarTunnelDirect {
+		return fmt.Errorf("special.target.db.flag = 'documentdb' requires tunnel = 'direct'")
+	}
+
 	/********************************/
 	// set utils
 
@@ -524,23 +559,29 @@ func normalizeFilterOpTypes(opTypes []string) ([]string, error) {
 func checkConnection() error {
 	// check mongo_urls
 	for _, mongo := range conf.Options.MongoUrls {
-		_, err := utils.NewMongoCommunityConn(mongo, conf.Options.MongoConnectMode, true,
+		conn, err := utils.NewMongoCommunityConn(mongo, conf.Options.MongoConnectMode, true,
 			utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return fmt.Errorf("connect source mongodb[%v] failed[%v]",
 				utils.BlockMongoUrlPassword(mongo, "***"), err)
 		}
+		conn.Close()
 	}
 
 	// check mongo_cs_url
 	if conf.Options.MongoCsUrl != "" {
-		_, err := utils.NewMongoCommunityConn(conf.Options.MongoCsUrl, utils.VarMongoConnectModeSecondaryPreferred,
+		conn, err := utils.NewMongoCommunityConn(conf.Options.MongoCsUrl, utils.VarMongoConnectModeSecondaryPreferred,
 			true, utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
 		if err != nil {
 			return fmt.Errorf("connect config-server[%v] failed[%v]",
 				utils.BlockMongoUrlPassword(conf.Options.MongoCsUrl, "***"), err)
 		}
+		conn.Close()
 	}
+
+	// DocumentDB rejects retryable writes before engine 8.0.2. Normalize before the
+	// target is first contacted so every target connection sees the same URI.
+	disableDocumentDBRetryWrites()
 
 	// check tunnel address
 	// no need to check target connection when debug flag set.
@@ -559,6 +600,7 @@ func checkConnection() error {
 			if i == 0 {
 				conf.Options.TargetDBVersion, _ = utils.GetDBVersion(targetConn)
 			}
+			targetConn.Close()
 		}
 	}
 
@@ -568,8 +610,12 @@ func checkConnection() error {
 		return err
 	}
 
-	sourceConn, _ := utils.NewMongoCommunityConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
+	sourceConn, err := utils.NewMongoCommunityConn(source, utils.VarMongoConnectModeSecondaryPreferred, true,
 		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, conf.Options.MongoSslRootCaFile)
+	if err != nil {
+		return fmt.Errorf("connect source mongodb[%v] failed[%v]", utils.BlockMongoUrlPassword(source, "***"), err)
+	}
+	defer sourceConn.Close()
 	// ignore error
 	conf.Options.SourceDBVersion, _ = utils.GetDBVersion(sourceConn)
 	if ok, err := utils.GetAndCompareVersion(sourceConn, utils.VarMongoVersion26,
@@ -580,6 +626,36 @@ func checkConnection() error {
 	}
 
 	return nil
+}
+
+// disableDocumentDBRetryWrites turns retryable writes off on every URI that points
+// at a DocumentDB target: the tunnel addresses, plus the checkpoint storage unless
+// it is spelled exactly like one of the source URLs. The driver enables retryable
+// writes by default and DocumentDB engines before 8.0.2 reject them with code 301
+// (#1041).
+//
+// The checkpoint URL is excluded by matching the sources rather than the targets,
+// so a target URI spelled differently from tunnel.address is still covered. A
+// source URL spelled differently is normalized too, which is harmless: MongoDB
+// accepts the option. An empty value is left alone because checkConflict defaults
+// it to a source cluster afterwards.
+func disableDocumentDBRetryWrites() {
+	if !conf.Options.IsDocumentDBTarget() {
+		return
+	}
+	for i, address := range conf.Options.TunnelAddress {
+		conf.Options.TunnelAddress[i] = utils.DisableRetryWrites(address)
+	}
+	ckpt := conf.Options.CheckpointStorageUrl
+	if ckpt == "" || ckpt == conf.Options.MongoSUrl {
+		return
+	}
+	for _, source := range conf.Options.MongoUrls {
+		if ckpt == source {
+			return
+		}
+	}
+	conf.Options.CheckpointStorageUrl = utils.DisableRetryWrites(ckpt)
 }
 
 func checkConflict() error {
@@ -708,6 +784,7 @@ func checkConflict() error {
 			return fmt.Errorf("connect source[%v] failed[%v]",
 				utils.BlockMongoUrlPassword(source, "***"), err)
 		}
+		defer conn.Close()
 		if isOk, err := utils.GetAndCompareVersion(conn, utils.VarMongoVersion401, conf.Options.SourceDBVersion); err != nil {
 			return fmt.Errorf("compare source[%v] to %s failed[%v]", source, utils.VarMongoVersion401, err)
 		} else if !isOk {
