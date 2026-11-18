@@ -41,6 +41,17 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 		sync.ckptManager.SetFetchMethod(conf.Options.IncrSyncMongoFetchMethod)
 	}
 
+	// Persist the overlap-window bound (#1047): serialize first run receives it
+	// from the coordinator, incr restart restores it from the checkpoint itself
+	// (re-persisting is idempotent). Flush at the current timestamp so the field
+	// survives a restart even without oplog traffic advancing the checkpoint.
+	if pos := utils.TimeStampToInt64(sync.fullSyncFinishPosition); pos > 0 {
+		sync.ckptManager.SetFullFinishTs(pos)
+		if err := sync.ckptManager.FlushStaged(); err != nil {
+			return fmt.Errorf("persist full sync finish position failed[%v]", err)
+		}
+	}
+
 	// not enable oplog persist?
 	if !conf.Options.FullSyncReaderOplogStoreDisk {
 		sync.persister.SetFetchStage(utils.FetchStageStoreMemoryApply)

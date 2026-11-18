@@ -66,7 +66,7 @@ func (coordinator *ReplicationCoordinator) Run() error {
 	coordinator.incrSentinel = utils.NewSentinel(utils.TypeIncr)
 	coordinator.incrSentinel.Register()
 
-	syncMode, startTsMap, fullBeginTs, err := coordinator.selectSyncMode(conf.Options.SyncMode)
+	syncMode, startTsMap, fullBeginTs, restoredFullFinishTs, err := coordinator.selectSyncMode(conf.Options.SyncMode)
 	if err != nil {
 		return fmt.Errorf("select sync mode failed: %v", err)
 	}
@@ -100,7 +100,9 @@ func (coordinator *ReplicationCoordinator) Run() error {
 			return err
 		}
 	case utils.VarSyncModeIncr:
-		if err := coordinator.startOplogReplication(int64(0), int64(0), startTsMap); err != nil {
+		// restoredFullFinishTs recovers the overlap window persisted at full-sync
+		// completion (#1047); 0 (legacy checkpoint) keeps window handling off.
+		if err := coordinator.startOplogReplication(int64(0), restoredFullFinishTs, startTsMap); err != nil {
 			return err
 		}
 	default:
@@ -322,7 +324,6 @@ func (coordinator *ReplicationCoordinator) serializeDocumentOplog(fullBeginTs in
 	return coordinator.startOplogReplication(fullBeginTs, fullFinishTs, nil)
 }
 
-// TODO, set initSyncFinishTs into worker
 // run full-sync and incr-sync in parallel
 func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs interface{}) error {
 	var docError error
@@ -348,6 +349,27 @@ func (coordinator *ReplicationCoordinator) parallelDocumentOplog(fullBeginTs int
 	if docError != nil {
 		return docError
 	}
+
+	// Backfill the full-sync finish timestamp before disk apply starts (#1047):
+	// workers only read FullFinishTs once the disk-apply stage feeds them, so
+	// setting it here is both race-free and in time for the overlap window.
+	var fullFinishTs int64
+	if conf.Options.SpecialSourceDBFlag != utils.VarSpecialSourceDBFlagAliyunServerless && len(coordinator.MongoD) > 0 {
+		var err error
+		_, fullFinishTs, _, _, _, err = utils.GetAllTimestamp(coordinator.MongoD,
+			conf.Options.MongoConnectMode, conf.Options.MongoSslRootCaFile)
+		if err != nil {
+			return fmt.Errorf("get full sync finish timestamp failed[%v]", err)
+		}
+	} else {
+		fullFinishTs = int64(math.MaxInt64)
+	}
+	for _, syncer := range coordinator.syncerGroup {
+		if err := syncer.BackfillFullFinishTs(fullFinishTs); err != nil {
+			return fmt.Errorf("backfill full sync finish position failed[%v]", err)
+		}
+	}
+
 	l.Logger.Infof("finish document replication, change oplog replication to %v",
 		utils.LogFetchStage(utils.FetchStageStoreDiskApply))
 	for _, syncer := range coordinator.syncerGroup {

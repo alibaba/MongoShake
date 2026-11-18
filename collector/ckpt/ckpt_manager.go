@@ -22,6 +22,7 @@ type CheckpointManager struct {
 	finishSet  bool
 	queueSet   bool
 	fetchSet   bool
+	fullFinSet bool
 	delegate   CheckpointOperation
 }
 
@@ -84,7 +85,13 @@ func (manager *CheckpointManager) GetInMemory() *CheckpointContext {
 }
 
 // Update checkpoint update memory & persistence(db or file)
+// The lock covers the whole read-modify-write so a concurrent caller (e.g. the
+// parallel-mode full-finish backfill, #1047) cannot interleave with the
+// checkpoint routine.
 func (manager *CheckpointManager) Update(ts int64) error {
+	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
+
 	if manager.ctx == nil || len(manager.ctx.Name) == 0 {
 		// must run Get() first
 		return errors.New("current ckpt context is empty")
@@ -95,8 +102,6 @@ func (manager *CheckpointManager) Update(ts int64) error {
 	candidate.Version = utils.FcvCheckpoint.CurrentVersion
 
 	// update OplogDiskQueueFinishTs if set
-	manager.ctxRecLock.Lock()
-	defer manager.ctxRecLock.Unlock()
 	if manager.ctxRec != nil {
 		if manager.finishSet {
 			candidate.OplogDiskQueueFinishTs = manager.ctxRec.OplogDiskQueueFinishTs
@@ -106,6 +111,9 @@ func (manager *CheckpointManager) Update(ts int64) error {
 		}
 		if manager.fetchSet {
 			candidate.FetchMethod = manager.ctxRec.FetchMethod
+		}
+		if manager.fullFinSet {
+			candidate.FullFinishTs = manager.ctxRec.FullFinishTs
 		}
 	}
 
@@ -117,7 +125,22 @@ func (manager *CheckpointManager) Update(ts int64) error {
 	manager.finishSet = false
 	manager.queueSet = false
 	manager.fetchSet = false
+	manager.fullFinSet = false
 	return nil
+}
+
+// FlushStaged persists staged fields at the current timestamp without advancing
+// it. Needed when no oplog traffic moves the checkpoint forward (e.g. full sync
+// just finished on an idle source) but the staged value must survive a restart.
+func (manager *CheckpointManager) FlushStaged() error {
+	manager.ctxRecLock.Lock()
+	if manager.ctx == nil {
+		manager.ctxRecLock.Unlock()
+		return errors.New("current ckpt context is empty")
+	}
+	ts := manager.ctx.Timestamp
+	manager.ctxRecLock.Unlock()
+	return manager.Update(ts)
 }
 
 // SetOplogDiskFinishTs
@@ -150,4 +173,16 @@ func (manager *CheckpointManager) SetFetchMethod(method string) {
 	}
 	manager.ctxRec.FetchMethod = method
 	manager.fetchSet = true
+}
+
+// SetFullFinishTs stages the full-sync finish timestamp (#1047); it is written
+// on the next Update call, like the other staged fields.
+func (manager *CheckpointManager) SetFullFinishTs(ts int64) {
+	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
+	if manager.ctxRec == nil {
+		manager.ctxRec = new(CheckpointContext)
+	}
+	manager.ctxRec.FullFinishTs = ts
+	manager.fullFinSet = true
 }

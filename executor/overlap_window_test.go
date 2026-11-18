@@ -1,0 +1,375 @@
+package executor
+
+import (
+	"context"
+	"math"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+
+	conf "github.com/alibaba/MongoShake/v2/collector/configure"
+	utils "github.com/alibaba/MongoShake/v2/common"
+	"github.com/alibaba/MongoShake/v2/oplog"
+)
+
+// #1047: inside the full/incr overlap window (oplog ts <= fullFinishTs) an
+// insert hitting an _id duplicate is expected — the full scan already carried
+// the document (at a version >= the insert oplog). Acknowledge it without the
+// whole-batch $set conversion or the per-document single-writer fallback.
+//
+// Writes are measured through ns-filtered oplog counts on the test replica set
+// so concurrent traffic on other namespaces cannot pollute the deltas.
+
+const overlapColl = "overlap_window_1047"
+
+// window boundary far from wall clock: only the packed comparison matters
+var overlapWindowTs = primitive.Timestamp{T: 2000000000, I: 0}
+
+func overlapRecord(id interface{}, version int, ts primitive.Timestamp) *OplogRecord {
+	return &OplogRecord{
+		original: &PartialLogWithCallback{
+			partialLog: &oplog.PartialLog{
+				ParsedLog: oplog.ParsedLog{
+					Operation: "i",
+					Namespace: testDb + "." + overlapColl,
+					Timestamp: ts,
+					Object: bson.D{
+						{Key: "_id", Value: id},
+						{Key: "v", Value: version},
+					},
+				},
+			},
+		},
+	}
+}
+
+func overlapInWindowTs() primitive.Timestamp {
+	return primitive.Timestamp{T: overlapWindowTs.T - 1, I: 1}
+}
+
+func overlapOutWindowTs() primitive.Timestamp {
+	return primitive.Timestamp{T: overlapWindowTs.T + 1, I: 1}
+}
+
+func overlapSetup(t *testing.T, conn *utils.MongoCommunityConn, seedVersion int) {
+	t.Helper()
+	ctx := context.Background()
+	require.NoError(t, conn.Client.Database(testDb).Collection(overlapColl).Drop(ctx))
+	_, err := conn.Client.Database(testDb).Collection(overlapColl).InsertOne(ctx,
+		bson.D{{Key: "_id", Value: 1}, {Key: "v", Value: seedVersion}})
+	require.NoError(t, err)
+}
+
+func overlapNewestTs(t *testing.T, conn *utils.MongoCommunityConn) primitive.Timestamp {
+	t.Helper()
+	var doc struct {
+		Ts primitive.Timestamp `bson:"ts"`
+	}
+	err := conn.Client.Database("local").Collection("oplog.rs").FindOne(context.Background(),
+		bson.M{}, options.FindOne().SetSort(bson.D{{Key: "$natural", Value: -1}})).Decode(&doc)
+	require.NoError(t, err)
+	return doc.Ts
+}
+
+func overlapNsOpCount(t *testing.T, conn *utils.MongoCommunityConn, op string, since primitive.Timestamp) int64 {
+	t.Helper()
+	n, err := conn.Client.Database("local").Collection("oplog.rs").CountDocuments(context.Background(),
+		bson.M{"ns": testDb + "." + overlapColl, "op": op, "ts": bson.M{"$gt": since}})
+	require.NoError(t, err)
+	return n
+}
+
+func overlapDocVersion(t *testing.T, conn *utils.MongoCommunityConn, id interface{}) int {
+	t.Helper()
+	var doc struct {
+		V int `bson:"v"`
+	}
+	err := conn.Client.Database(testDb).Collection(overlapColl).FindOne(context.Background(),
+		bson.M{"_id": id}).Decode(&doc)
+	require.NoError(t, err)
+	return doc.V
+}
+
+func withOverlapOptions(t *testing.T, dupUpdate bool, strategy string) {
+	t.Helper()
+	original := conf.Options
+	t.Cleanup(func() { conf.Options = original })
+	conf.Options.IncrSyncExecutorInsertOnDupUpdate = dupUpdate
+	conf.Options.IncrSyncExecutorDupKeyStrategy = strategy
+	conf.Options.IncrSyncConflictWriteTo = NoDumpConflict
+}
+
+// In-window _id dups must be acknowledged with ZERO follow-up writes, even
+// with insert_on_dup_update=true (which previously converted the whole batch).
+// The scanned newer version must not be regressed to the oplog's older one.
+func TestBulkWriterOverlapWindowIgnoresIDDup(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, true, utils.VarIncrSyncExecutorDupKeyStrategyIgnore)
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	overlapSetup(t, conn, 9)
+	since := overlapNewestTs(t, conn)
+
+	bw := &BulkWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
+	records := []*OplogRecord{
+		overlapRecord(1, 1, overlapInWindowTs()),
+		overlapRecord(1, 1, overlapInWindowTs()),
+	}
+	require.NoError(t, bw.doInsert(testDb, overlapColl, bson.E{}, records, true))
+
+	assert.Equal(t, int64(0), overlapNsOpCount(t, conn, "u", since),
+		"in-window _id dups must not trigger any update")
+	assert.Equal(t, 9, overlapDocVersion(t, conn, 1),
+		"the scanned newer version must not be regressed")
+}
+
+// Sentinel guard: fullFinishTs=0 (legacy checkpoint / parallel before backfill)
+// disables the window, so the configured conversion still applies.
+func TestBulkWriterOverlapWindowDisabledWhenZero(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, true, utils.VarIncrSyncExecutorDupKeyStrategyIgnore)
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	overlapSetup(t, conn, 9)
+	since := overlapNewestTs(t, conn)
+
+	bw := &BulkWriter{conn: conn, fullFinishTs: 0}
+	records := []*OplogRecord{overlapRecord(1, 1, overlapInWindowTs())}
+	require.NoError(t, bw.doInsert(testDb, overlapColl, bson.E{}, records, true))
+
+	assert.Greater(t, overlapNsOpCount(t, conn, "u", since), int64(0),
+		"without window info the conversion must still run")
+	assert.Equal(t, 1, overlapDocVersion(t, conn, 1))
+}
+
+// MaxInt64 sentinel (serverless / mongos-only sources): the window is always
+// open, matching the existing IgnoreError semantics — even oplogs far beyond
+// any real full-sync finish are treated as in-window.
+func TestBulkWriterOverlapWindowMaxInt64AlwaysOpen(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, true, utils.VarIncrSyncExecutorDupKeyStrategyIgnore)
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	overlapSetup(t, conn, 9)
+	since := overlapNewestTs(t, conn)
+
+	bw := &BulkWriter{conn: conn, fullFinishTs: math.MaxInt64}
+	records := []*OplogRecord{overlapRecord(1, 1, overlapOutWindowTs())}
+	require.NoError(t, bw.doInsert(testDb, overlapColl, bson.E{}, records, true))
+
+	assert.Equal(t, int64(0), overlapNsOpCount(t, conn, "u", since),
+		"MaxInt64 keeps the window open for any oplog timestamp")
+	assert.Equal(t, 9, overlapDocVersion(t, conn, 1))
+}
+
+// Out of window the existing conversion semantics stay untouched.
+func TestBulkWriterOutOfWindowStillConverts(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, true, utils.VarIncrSyncExecutorDupKeyStrategyIgnore)
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	overlapSetup(t, conn, 9)
+	since := overlapNewestTs(t, conn)
+
+	bw := &BulkWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
+	records := []*OplogRecord{overlapRecord(1, 1, overlapOutWindowTs())}
+	require.NoError(t, bw.doInsert(testDb, overlapColl, bson.E{}, records, true))
+
+	assert.Greater(t, overlapNsOpCount(t, conn, "u", since), int64(0))
+	assert.Equal(t, 1, overlapDocVersion(t, conn, 1),
+		"out-of-window dup keeps the convert-to-update semantics")
+}
+
+// The conversion must only rewrite the FAILED subset: documents that the
+// unordered insert already applied must not be $set a second time. A no-op
+// $set leaves no oplog entry, so updates are counted through the profiler,
+// which records every update attempt including no-ops.
+func TestBulkWriterDupUpdateConvertsOnlyFailedSubset(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, true, utils.VarIncrSyncExecutorDupKeyStrategyIgnore)
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	overlapSetup(t, conn, 9)
+	ctx := context.Background()
+	// fresh profiler: drop any earlier entries so the count needs no time
+	// filter (profile timestamps are millisecond-truncated and race with
+	// time.Now() at sub-millisecond boundaries)
+	require.NoError(t, conn.Client.Database(testDb).RunCommand(ctx,
+		bson.D{{Key: "profile", Value: 0}}).Err())
+	_ = conn.Client.Database(testDb).Collection("system.profile").Drop(ctx)
+	require.NoError(t, conn.Client.Database(testDb).RunCommand(ctx,
+		bson.D{{Key: "profile", Value: 2}}).Err())
+	t.Cleanup(func() {
+		_ = conn.Client.Database(testDb).RunCommand(context.Background(),
+			bson.D{{Key: "profile", Value: 0}}).Err()
+	})
+	since := overlapNewestTs(t, conn)
+
+	bw := &BulkWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
+	records := []*OplogRecord{
+		overlapRecord(1, 1, overlapOutWindowTs()), // dup against seed v9
+		overlapRecord(2, 2, overlapOutWindowTs()), // new
+		overlapRecord(3, 3, overlapOutWindowTs()), // new
+	}
+	require.NoError(t, bw.doInsert(testDb, overlapColl, bson.E{}, records, true))
+
+	updates, err := conn.Client.Database(testDb).Collection("system.profile").CountDocuments(ctx,
+		bson.M{"ns": testDb + "." + overlapColl, "op": "update"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), updates,
+		"only the failed document may be converted, not the whole batch")
+	assert.Equal(t, int64(2), overlapNsOpCount(t, conn, "i", since))
+	assert.Equal(t, 1, overlapDocVersion(t, conn, 1))
+	assert.Equal(t, 2, overlapDocVersion(t, conn, 2))
+	assert.Equal(t, 3, overlapDocVersion(t, conn, 3))
+}
+
+// A secondary unique-index duplicate is a real conflict even inside the
+// window: it must stay on the configured strategy path, not be swallowed by
+// the window shortcut. With strategy=error the batch must keep failing; a
+// window branch that ignores all-dup batches regardless of index would
+// wrongly acknowledge it.
+func TestBulkWriterWindowSecondaryUniqueDupStaysOnStrategy(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, false, utils.VarIncrSyncExecutorDupKeyStrategyError)
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	ctx := context.Background()
+	require.NoError(t, conn.Client.Database(testDb).Collection(overlapColl).Drop(ctx))
+	_, err = conn.Client.Database(testDb).Collection(overlapColl).InsertOne(ctx,
+		bson.D{{Key: "_id", Value: 1}, {Key: "u", Value: "shared"}, {Key: "v", Value: 9}})
+	require.NoError(t, err)
+	_, err = conn.Client.Database(testDb).Collection(overlapColl).Indexes().CreateOne(ctx,
+		mongo.IndexModel{Keys: bson.D{{Key: "u", Value: 1}}, Options: options.Index().SetUnique(true)})
+	require.NoError(t, err)
+
+	bw := &BulkWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
+	record := &OplogRecord{
+		original: &PartialLogWithCallback{
+			partialLog: &oplog.PartialLog{
+				ParsedLog: oplog.ParsedLog{
+					Operation: "i",
+					Namespace: testDb + "." + overlapColl,
+					Timestamp: overlapInWindowTs(),
+					Object: bson.D{
+						{Key: "_id", Value: 2},
+						{Key: "u", Value: "shared"},
+						{Key: "v", Value: 1},
+					},
+				},
+			},
+		},
+	}
+	err = bw.doInsert(testDb, overlapColl, bson.E{}, []*OplogRecord{record}, false)
+	require.Error(t, err, "secondary-index dup must not be acknowledged by the window shortcut")
+
+	var doc bson.M
+	require.NoError(t, conn.Client.Database(testDb).Collection(overlapColl).FindOne(ctx,
+		bson.M{"_id": 1}).Decode(&doc))
+	assert.EqualValues(t, 9, doc["v"], "the conflicting document must remain untouched")
+}
+
+// Review B1 regression anchor: with filter.op_types=d the delete between
+// insert(v1) and insert(v2) of the same _id is dropped, so both inserts land
+// in one batch. The window shortcut must stay OFF — skipping the duplicate
+// v2 would strand the target at v1 while the source holds v2. The conversion
+// path (ordered $set of the failed subset) must run instead.
+func TestBulkWriterWindowDisabledWhenDeletesFiltered(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, true, utils.VarIncrSyncExecutorDupKeyStrategyIgnore)
+	conf.Options.FilterOpTypes = []string{"d"}
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	ctx := context.Background()
+	require.NoError(t, conn.Client.Database(testDb).Collection(overlapColl).Drop(ctx))
+	since := overlapNewestTs(t, conn)
+
+	bw := &BulkWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
+	records := []*OplogRecord{
+		overlapRecord(1, 1, overlapInWindowTs()),
+		overlapRecord(1, 2, overlapInWindowTs()),
+	}
+	require.NoError(t, bw.doInsert(testDb, overlapColl, bson.E{}, records, true))
+
+	assert.Equal(t, 2, overlapDocVersion(t, conn, 1),
+		"with deletes filtered the target must converge to the newest insert")
+	assert.Greater(t, overlapNsOpCount(t, conn, "u", since), int64(0),
+		"the conversion must run when the window shortcut is unsafe")
+}
+
+func TestSingleWriterWindowDisabledWhenDeletesFiltered(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, true, utils.VarIncrSyncExecutorDupKeyStrategyIgnore)
+	conf.Options.FilterOpTypes = []string{"d"}
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	ctx := context.Background()
+	require.NoError(t, conn.Client.Database(testDb).Collection(overlapColl).Drop(ctx))
+
+	sw := &SingleWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
+	records := []*OplogRecord{
+		overlapRecord(1, 1, overlapInWindowTs()),
+		overlapRecord(1, 2, overlapInWindowTs()),
+	}
+	require.NoError(t, sw.doInsert(testDb, overlapColl, bson.E{}, records, true))
+
+	assert.Equal(t, 2, overlapDocVersion(t, conn, 1))
+}
+
+// SingleWriter gets the same window shortcut, per document.
+func TestSingleWriterOverlapWindowIgnoresIDDup(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, true, utils.VarIncrSyncExecutorDupKeyStrategyIgnore)
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	overlapSetup(t, conn, 9)
+	since := overlapNewestTs(t, conn)
+
+	sw := &SingleWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
+	records := []*OplogRecord{overlapRecord(1, 1, overlapInWindowTs())}
+	require.NoError(t, sw.doInsert(testDb, overlapColl, bson.E{}, records, true))
+
+	assert.Equal(t, int64(0), overlapNsOpCount(t, conn, "u", since))
+	assert.Equal(t, 9, overlapDocVersion(t, conn, 1))
+}

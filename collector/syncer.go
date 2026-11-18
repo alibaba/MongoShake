@@ -81,7 +81,11 @@ type OplogSyncer struct {
 	Replset string
 	// oplog start position of source mongodb
 	startPosition interface{}
-	// full sync finish position, used to check DDL between full sync and incr sync
+	// full sync finish position, used to check DDL between full sync and incr sync.
+	// Deliberately NOT updated by the parallel/restart window backfill (#1047):
+	// activating the batcher's DDL-before-fullFinish panic guard on those paths
+	// would crash deployments whose full sync overlapped DDL oplogs. The writer
+	// overlap window is plumbed separately via Worker.SetInitSyncFinishTs.
 	fullSyncFinishPosition primitive.Timestamp
 
 	ckptManager *ckpt.CheckpointManager
@@ -266,6 +270,22 @@ func (sync *OplogSyncer) warnUnswitchableUniqueIndex(log *oplog.PartialLog) {
 
 func (sync *OplogSyncer) StartDiskApply() {
 	sync.persister.SetFetchStage(utils.FetchStageStoreDiskApply)
+}
+
+// BackfillFullFinishTs propagates the full-sync finish timestamp to the workers
+// and persists it in the checkpoint (#1047). Used by the parallel-mode backfill
+// (before StartDiskApply, so workers have not read the value yet) and by incr
+// restart restoration. It does NOT touch syncer.fullSyncFinishPosition: the
+// batcher's DDL guard keeps its legacy semantics on these paths.
+func (sync *OplogSyncer) BackfillFullFinishTs(ts int64) error {
+	for _, w := range sync.batcher.workerGroup {
+		w.SetInitSyncFinishTs(ts)
+	}
+	if sync.ckptManager != nil {
+		sync.ckptManager.SetFullFinishTs(ts)
+		return sync.ckptManager.FlushStaged()
+	}
+	return nil
 }
 
 // Start to polling oplog

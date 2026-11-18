@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -64,6 +65,7 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 		// path succeeds. Skip still validates every error code and index below;
 		// rejected batches retain their full warning detail.
 		handledByConfig := dupUpdate ||
+			overlapWindowSkipEnabled(bw.fullFinishTs, parseLastTimestamp(oplogs)) ||
 			conf.Options.IncrSyncExecutorDupKeyStrategy == "" ||
 			conf.Options.IncrSyncExecutorDupKeyStrategy == utils.VarIncrSyncExecutorDupKeyStrategyIgnore ||
 			conf.Options.IncrSyncExecutorDupKeyStrategy == utils.VarIncrSyncExecutorDupKeyStrategySkip
@@ -101,11 +103,25 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 					len(models), database, collection, bulkErr)
 				return err
 			}
+			// Inside the full/incr overlap window an _id duplicate is expected:
+			// the full scan already carried the document at a version >= this
+			// insert oplog, so acknowledging it converges (#1047). The unordered
+			// bulk already applied every non-conflicting document; no conversion
+			// or per-document retry is needed. Secondary-index duplicates are
+			// real conflicts and stay on the configured strategy path below.
+			if overlapWindowSkipEnabled(bw.fullFinishTs, parseLastTimestamp(oplogs)) && allDupKeyErrorsOnIDIndex(bulkErr) {
+				RecordDuplicatedOplog(bw.conn, collection, oplogs)
+				return nil
+			}
 			// update on duplicated key occur
 			if dupUpdate {
 				RecordDuplicatedOplog(bw.conn, collection, oplogs)
 				l.Logger.Debugf("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
-				return bw.doUpdateOnInsert(database, collection, metadata, oplogs, conf.Options.IncrSyncExecutorUpsert)
+				// Only the failed documents need conversion; the unordered bulk
+				// already inserted the rest, and rewriting them would double-write
+				// every document in the batch (#1047).
+				return bw.doUpdateOnInsert(database, collection, metadata, failedInsertSubset(modelOplogs, bulkErr),
+					conf.Options.IncrSyncExecutorUpsert)
 			}
 			switch conf.Options.IncrSyncExecutorDupKeyStrategy {
 			case "", utils.VarIncrSyncExecutorDupKeyStrategyIgnore:
@@ -123,6 +139,69 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 		return err
 	}
 	return nil
+}
+
+// overlapWindowSkipEnabled reports whether the benign-dup shortcut may apply
+// for a batch whose last oplog timestamp is lastTs (#1047). Filtering out
+// delete ops breaks the convergence premise: with filter.op_types=d the
+// sequence insert(v1)/delete/insert(v2) of one _id collapses into a single
+// insert batch, and skipping the duplicate second insert would strand the
+// target at v1 while the source holds v2.
+func overlapWindowSkipEnabled(fullFinishTs, lastTs int64) bool {
+	if fullFinishTs <= 0 || lastTs > fullFinishTs {
+		return false
+	}
+	for _, op := range conf.Options.FilterOpTypes {
+		if op == "d" {
+			return false
+		}
+	}
+	return true
+}
+
+// allDupKeyErrorsOnIDIndex reports whether every write error is an E11000 on
+// the _id index. Only those are the benign overlap-window duplicates (#1047);
+// a secondary unique-index conflict (different _id) must keep the configured
+// strategy. E11000 may name a secondary index even when _id also conflicts,
+// so such batches conservatively stay on the existing path.
+func allDupKeyErrorsOnIDIndex(bulkErr mongo.BulkWriteException) bool {
+	if len(bulkErr.WriteErrors) == 0 {
+		return false
+	}
+	for _, writeErr := range bulkErr.WriteErrors {
+		if !writeErr.HasErrorCode(11000) {
+			return false
+		}
+		if parseDupKeyIndexName(fmt.Errorf("%s", writeErr.Message)) != "_id_" {
+			return false
+		}
+	}
+	return true
+}
+
+// failedInsertSubset extracts the documents rejected by the unordered bulk,
+// ordered by their model index so the relative application order is preserved
+// even when the server reports write errors out of order (e.g. via mongos).
+// Indices map onto the models actually sent (modelOplogs), not the raw oplogs:
+// system.views inserts are handled via applyOps and never enter the bulk. An
+// out-of-range index falls back to the whole batch, the pre-#1047 behavior.
+func failedInsertSubset(modelOplogs []*OplogRecord, bulkErr mongo.BulkWriteException) []*OplogRecord {
+	indexes := make([]int, 0, len(bulkErr.WriteErrors))
+	for _, writeErr := range bulkErr.WriteErrors {
+		if writeErr.Index < 0 || writeErr.Index >= len(modelOplogs) {
+			return modelOplogs
+		}
+		indexes = append(indexes, writeErr.Index)
+	}
+	if len(indexes) == 0 {
+		return modelOplogs
+	}
+	sort.Ints(indexes)
+	subset := make([]*OplogRecord, 0, len(indexes))
+	for _, idx := range indexes {
+		subset = append(subset, modelOplogs[idx])
+	}
+	return subset
 }
 
 func (bw *BulkWriter) handleBulkInsertDupKeySkip(database, collection string, oplogs []*OplogRecord, err error) error {

@@ -33,6 +33,11 @@ type CheckpointContext struct {
 	FetchMethod            string `bson:"fetch_method" json:"fetch_method"`
 	OplogDiskQueue         string `bson:"oplog_disk_queue" json:"oplog_disk_queue"`
 	OplogDiskQueueFinishTs int64  `bson:"oplog_disk_queue_apply_finish_ts" json:"oplog_disk_queue_apply_finish_ts"`
+	// FullFinishTs is the source newest timestamp sampled when full sync
+	// finished (#1047). It bounds the full/incr overlap window so the writer
+	// can treat _id duplicate keys inside it as expected. 0 means unknown
+	// (legacy checkpoint or no full sync): window-based handling stays off.
+	FullFinishTs int64 `bson:"full_finish_ts" json:"full_finish_ts"`
 }
 
 func (cc *CheckpointContext) String() string {
@@ -61,6 +66,7 @@ func (cc *CheckpointContext) UnmarshalBSON(data []byte) error {
 		FetchMethod            string        `bson:"fetch_method"`
 		OplogDiskQueue         string        `bson:"oplog_disk_queue"`
 		OplogDiskQueueFinishTs bson.RawValue `bson:"oplog_disk_queue_apply_finish_ts"`
+		FullFinishTs           bson.RawValue `bson:"full_finish_ts"`
 	}
 	if err := bson.Unmarshal(data, &aux); err != nil {
 		return err
@@ -73,6 +79,10 @@ func (cc *CheckpointContext) UnmarshalBSON(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("oplog_disk_queue_apply_finish_ts: %v", err)
 	}
+	fullFinishTs, err := decodeCheckpointTimestamp(aux.FullFinishTs)
+	if err != nil {
+		return fmt.Errorf("full_finish_ts: %v", err)
+	}
 	*cc = CheckpointContext{
 		Name:                   aux.Name,
 		Timestamp:              ts,
@@ -80,6 +90,7 @@ func (cc *CheckpointContext) UnmarshalBSON(data []byte) error {
 		FetchMethod:            aux.FetchMethod,
 		OplogDiskQueue:         aux.OplogDiskQueue,
 		OplogDiskQueueFinishTs: finishTs,
+		FullFinishTs:           fullFinishTs,
 	}
 	return nil
 }
@@ -202,6 +213,7 @@ func (ckpt *MongoCheckpoint) Get() (*CheckpointContext, bool) {
 		value.Version = ckpt.Version
 		value.OplogDiskQueue = ckpt.OplogDiskQueue
 		value.OplogDiskQueueFinishTs = ckpt.OplogDiskQueueFinishTs
+		value.FullFinishTs = ckpt.FullFinishTs
 		l.Logger.Infof("%s Regenerate checkpoint but won't persist. content: %s", ckpt.Name, value)
 		return value, false
 	}
@@ -268,6 +280,7 @@ func (ckpt *HttpApiCheckpoint) Get() (*CheckpointContext, bool) {
 		value.Name = ckpt.Name
 		value.OplogDiskQueueFinishTs = ckpt.OplogDiskQueueFinishTs
 		value.OplogDiskQueue = ckpt.OplogDiskQueue
+		value.FullFinishTs = ckpt.FullFinishTs
 		return value, false
 	}
 	return value, true

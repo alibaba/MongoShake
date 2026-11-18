@@ -58,7 +58,16 @@ func (coordinator *ReplicationCoordinator) startOplogReplication(oplogStartPosit
 		}
 
 		l.Logger.Infof("RealSourceIncrSync[%d]: %s, startTimestamp[%v]", i, src, syncerTs)
-		syncer := collector.NewOplogSyncer(src.ReplicaName, syncerTs, fullSyncFinishPosition, src.URL,
+		// On incr restart (oplogStartPosition == 0) the restored full-finish
+		// timestamp goes to the workers only (#1047). The syncer's DDL guard
+		// position keeps its legacy value 0: activating it over a restored
+		// window would panic on DDL oplogs that predate the checkpoint, which
+		// older releases replayed (or filtered) without crashing.
+		syncerFinishPosition := fullSyncFinishPosition
+		if val, ok := oplogStartPosition.(int64); ok && val == 0 {
+			syncerFinishPosition = 0
+		}
+		syncer := collector.NewOplogSyncer(src.ReplicaName, syncerTs, syncerFinishPosition, src.URL,
 			src.Gids, coordinator.orderedNamespaces)
 		// syncerGroup http api registry
 		syncer.Init()
