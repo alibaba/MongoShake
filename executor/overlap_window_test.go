@@ -103,6 +103,9 @@ func withOverlapOptions(t *testing.T, dupUpdate bool, strategy string) {
 	conf.Options.IncrSyncExecutorInsertOnDupUpdate = dupUpdate
 	conf.Options.IncrSyncExecutorDupKeyStrategy = strategy
 	conf.Options.IncrSyncConflictWriteTo = NoDumpConflict
+	// the shortcut requires DDL replay (F4 guard); tests exercising it must
+	// hold that premise, the DDL-filtered case has its own tests below
+	conf.Options.FilterDDLEnable = true
 }
 
 // In-window _id dups must be acknowledged with ZERO follow-up writes, even
@@ -516,4 +519,99 @@ func TestFailedInsertSubsetOrderingAndFallback(t *testing.T) {
 	empty := mongo.BulkWriteException{}
 	assert.Equal(t, models, failedInsertSubset(models, empty),
 		"no write errors falls back to the whole batch")
+}
+
+// F4 symmetry anchor: filter.ddl_enable=false (factory default) drops
+// drop/create inside the window, so the target can keep an OLD incarnation
+// and the new incarnation's insert dups on _id. The shortcut must stay OFF
+// and the conversion must run, exactly like the delete-filter guard.
+func TestBulkWriterWindowDisabledWhenDDLFiltered(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, true, utils.VarIncrSyncExecutorDupKeyStrategyIgnore)
+	conf.Options.FilterDDLEnable = false
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	overlapSetup(t, conn, 9) // old incarnation carried by the scan
+	since := overlapNewestTs(t, conn)
+
+	bw := &BulkWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
+	records := []*OplogRecord{overlapRecord(1, 1, overlapInWindowTs())} // new incarnation
+	require.NoError(t, bw.doInsert(testDb, overlapColl, bson.E{}, records, true))
+
+	assert.Greater(t, overlapNsOpCount(t, conn, "u", since), int64(0),
+		"with DDL filtered the conversion must run, not the shortcut")
+	assert.Equal(t, 1, overlapDocVersion(t, conn, 1),
+		"the new incarnation's content must converge")
+}
+
+func TestSingleWriterWindowDisabledWhenDDLFiltered(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, true, utils.VarIncrSyncExecutorDupKeyStrategyIgnore)
+	conf.Options.FilterDDLEnable = false
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	overlapSetup(t, conn, 9)
+	since := overlapNewestTs(t, conn)
+
+	sw := &SingleWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
+	records := []*OplogRecord{overlapRecord(1, 1, overlapInWindowTs())}
+	require.NoError(t, sw.doInsert(testDb, overlapColl, bson.E{}, records, true))
+
+	assert.Greater(t, overlapNsOpCount(t, conn, "u", since), int64(0))
+	assert.Equal(t, 1, overlapDocVersion(t, conn, 1))
+}
+
+// F6: the plumbing activates IgnoreError's u/ui window tolerance on the
+// parallel/restart paths (previously dead code there because fullFinishTs=0).
+// Pin the semantics: an in-window PathNotViable update is tolerated (the scan
+// can only have carried a newer shape, making the old update redundant);
+// out of window the same error must surface.
+func TestBulkWriterWindowUpdateTolerance(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, false, utils.VarIncrSyncExecutorDupKeyStrategyIgnore)
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	ctx := context.Background()
+	require.NoError(t, conn.Client.Database(testDb).Collection(overlapColl).Drop(ctx))
+	_, err = conn.Client.Database(testDb).Collection(overlapColl).InsertOne(ctx,
+		bson.D{{Key: "_id", Value: 1}, {Key: "a", Value: 5}})
+	require.NoError(t, err)
+
+	// $set on a.b against a scalar a is necessarily PathNotViable (code 28)
+	updateRecord := func(ts primitive.Timestamp) *OplogRecord {
+		return &OplogRecord{
+			original: &PartialLogWithCallback{
+				partialLog: &oplog.PartialLog{
+					ParsedLog: oplog.ParsedLog{
+						Operation: "u",
+						Namespace: testDb + "." + overlapColl,
+						Timestamp: ts,
+						Object:    bson.D{{Key: "$set", Value: bson.D{{Key: "a.b", Value: 1}}}},
+						Query:     bson.D{{Key: "_id", Value: 1}},
+					},
+				},
+			},
+		}
+	}
+
+	bw := &BulkWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
+	require.NoError(t, bw.doUpdate(testDb, overlapColl, bson.E{},
+		[]*OplogRecord{updateRecord(overlapInWindowTs())}, false),
+		"in-window PathNotViable must be tolerated")
+
+	err = bw.doUpdate(testDb, overlapColl, bson.E{},
+		[]*OplogRecord{updateRecord(overlapOutWindowTs())}, false)
+	require.Error(t, err, "out-of-window PathNotViable must surface")
 }

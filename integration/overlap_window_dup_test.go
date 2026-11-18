@@ -78,6 +78,9 @@ func overlapWriteConf(t *testing.T, srcURL, tgtURL, logDir, mode, ckptColl strin
 	set("incr_sync.mongo_fetch_method", "oplog")
 	set("incr_sync.executor.insert_on_dup_update", "true")
 	set("incr_sync.executor.dup_key_strategy", "ignore")
+	// the overlap-window insert shortcut requires DDL replay (F4 guard);
+	// replica-set sources allow ddl_enable=true (sharded+oplog would not)
+	set("filter.ddl_enable", "true")
 	set("incr_sync.worker", "1")
 	set("checkpoint.storage.url", srcURL)
 	set("checkpoint.storage.collection", ckptColl)

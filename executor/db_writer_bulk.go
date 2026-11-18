@@ -168,6 +168,16 @@ func overlapWindowSkipEnabled(fullFinishTs, lastTs int64) bool {
 			return false
 		}
 	}
+	// DDL filtering breaks the same premise isomorphically: with
+	// filter.ddl_enable=false (the factory default, forced for sharded+oplog
+	// sources) a drop+recreate inside the window is dropped, the target keeps
+	// the OLD incarnation, and the new incarnation's insert hits an _id dup
+	// that must NOT be acknowledged as "scan carried a newer version"
+	// (#1050 review F4). With DDL replayed the drop clears the target and the
+	// insert never dups, so the shortcut is safe there.
+	if !conf.Options.FilterDDLEnable {
+		return false
+	}
 	return true
 }
 
