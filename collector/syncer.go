@@ -291,6 +291,14 @@ func (sync *OplogSyncer) StartDiskApply() {
 // MaxInt64 (serverless / mongos-only "always in window") is deliberately NOT
 // persisted: it stays an in-memory semantic, and a restart restores 0 with
 // conversion active, matching the pre-#1047 behavior (#1050 review M1).
+//
+// A flush failure here is NOT fatal (#1050 review F1): the workers already
+// hold the window, so this run is unaffected, and losing persistence only
+// means a restart falls back to the pre-#1047 conversion behavior. The staged
+// value rides along on the next successful checkpoint Update, so persistence
+// self-heals. Aborting a completed tens-of-hours full sync over an optional
+// optimization would be a bad trade. The serialize handover in loadCheckpoint
+// keeps fatal semantics, consistent with its Get() failure.
 func (sync *OplogSyncer) BackfillFullFinishTs(ts int64) error {
 	// Wait until Start() has initialized the checkpoint manager and loaded
 	// the durable context; docWg.Wait() alone does not synchronize with it.
@@ -305,7 +313,11 @@ func (sync *OplogSyncer) BackfillFullFinishTs(ts int64) error {
 		return fmt.Errorf("checkpoint manager unavailable after readiness signal")
 	}
 	sync.ckptManager.SetFullFinishTs(ts)
-	return sync.ckptManager.FlushStaged()
+	if err := sync.ckptManager.FlushStaged(); err != nil {
+		l.Logger.Warnf("%s persist full finish ts failed[%v]; window active in memory, "+
+			"staged value will ride the next checkpoint update", sync, err)
+	}
+	return nil
 }
 
 // Start to polling oplog

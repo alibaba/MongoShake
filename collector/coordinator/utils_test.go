@@ -790,3 +790,63 @@ func TestFetchIndexes(t *testing.T) {
 		fmt.Println(out)
 	}
 }
+
+// #1050 review F3: selectSyncMode must restore the persisted full-finish
+// bound, both on the replica-set path and on the mongos-only accumulation
+// branch (empty tsMap), which integration leg 1 does not cover.
+func TestSelectSyncModeRestoresFullFinishTs(t *testing.T) {
+	utils.InitialLogger("", "", "info", true, 1)
+	prevMock := testSelectSyncMode
+	testSelectSyncMode = true
+	t.Cleanup(func() { testSelectSyncMode = prevMock })
+
+	prevOpts := conf.Options
+	t.Cleanup(func() { conf.Options = prevOpts })
+	conf.Options.Tunnel = utils.VarTunnelDirect
+	conf.Options.CheckpointStorageUrl = testUrl
+	conf.Options.CheckpointStorageDb = testDb
+	conf.Options.CheckpointStorageCollection = testCollection
+	conf.Options.CheckpointStorage = utils.VarCheckpointStorageDatabase
+
+	conn, err := utils.NewMongoCommunityConn(testUrl, "primary", true, "", "", "")
+	assert.Equal(t, nil, err, "should be equal")
+	defer conn.Close()
+	conn.Client.Database(testDb).Collection(testCollection).Drop(nil)
+
+	writeCkpt := func(name string, ts, fullFinish int64) {
+		m := ckpt.NewCheckpointManager(name, 0)
+		m.Get()
+		m.SetFullFinishTs(fullFinish)
+		assert.Equal(t, nil, m.Update(ts), "should be equal")
+	}
+
+	// case 1: replica-set path
+	utils.GetAllTimestampInUTInput = map[string]utils.Pair{
+		"fftRestoreRs": {First: int64(10 << 32), Second: int64(100 << 32)},
+	}
+	writeCkpt("fftRestoreRs", int64(15<<32), int64(90<<32))
+	coordinator := &ReplicationCoordinator{
+		MongoD: []*utils.MongoSource{{URL: "1.1.1.1", ReplicaName: "fftRestoreRs"}},
+	}
+	mode, _, _, restored, err := coordinator.selectSyncMode(utils.VarSyncModeIncr)
+	assert.Equal(t, nil, err, "should be equal")
+	assert.Equal(t, utils.VarSyncModeIncr, mode, "should be equal")
+	assert.Equal(t, int64(90<<32), restored, "replica-set path must restore full_finish_ts")
+
+	// case 2: mongos-only path — empty tsMap, the bound comes solely from
+	// the mongos checkpoint accumulation branch
+	conn.Client.Database(testDb).Collection(testCollection).Drop(nil)
+	utils.GetAllTimestampInUTInput = map[string]utils.Pair{}
+	conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodChangeStream
+	conf.Options.MongoSUrl = "mongodb://1.1.1.1"
+	conf.Options.MongoCsUrl = ""
+	conf.Options.MongoUrls = nil
+	writeCkpt("fftRestoreMongos", int64(15<<32), int64(95<<32))
+	coordinator = &ReplicationCoordinator{
+		MongoS: &utils.MongoSource{URL: "1.1.1.1", ReplicaName: "fftRestoreMongos"},
+	}
+	mode, _, _, restored, err = coordinator.selectSyncMode(utils.VarSyncModeIncr)
+	assert.Equal(t, nil, err, "should be equal")
+	assert.Equal(t, utils.VarSyncModeIncr, mode, "should be equal")
+	assert.Equal(t, int64(95<<32), restored, "mongos-only path must restore full_finish_ts")
+}

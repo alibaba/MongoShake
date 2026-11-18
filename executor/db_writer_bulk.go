@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -152,6 +153,14 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 // target at v1 while the source holds v2.
 func overlapWindowSkipEnabled(fullFinishTs, lastTs int64) bool {
 	if fullFinishTs <= 0 || lastTs > fullFinishTs {
+		return false
+	}
+	// MaxInt64 means "no finite overlap bound" (serverless / mongos-only).
+	// IgnoreError keeps its always-in-window u/ui semantics there, but the
+	// insert shortcut is new behavior and its convergence premise (empty or
+	// dedicated target) is not guaranteed for a plain mongos-only config, so
+	// it stays off and inserts keep the pre-#1047 conversion path (#1050 F2).
+	if fullFinishTs == math.MaxInt64 {
 		return false
 	}
 	for _, op := range conf.Options.FilterOpTypes {

@@ -121,6 +121,11 @@ type CheckpointOperation interface {
 	// Get read checkpoint from remote storage. and encapsulation
 	// with CheckpointContext struct
 	// bool means whether exists on remote
+	//
+	// Contract relied on by CheckpointManager.FlushStaged (#1050 R3):
+	// a nil context means the READ FAILED; a non-nil context with
+	// exist=false means no durable document exists (regenerated context).
+	// Implementations must preserve this distinction.
 	Get() (*CheckpointContext, bool)
 
 	// Insert save checkpoint

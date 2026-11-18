@@ -156,10 +156,12 @@ func TestBulkWriterOverlapWindowDisabledWhenZero(t *testing.T) {
 	assert.Equal(t, 1, overlapDocVersion(t, conn, 1))
 }
 
-// MaxInt64 sentinel (serverless / mongos-only sources): the window is always
-// open, matching the existing IgnoreError semantics — even oplogs far beyond
-// any real full-sync finish are treated as in-window.
-func TestBulkWriterOverlapWindowMaxInt64AlwaysOpen(t *testing.T) {
+// MaxInt64 means "no finite overlap bound" (serverless / mongos-only). The
+// insert shortcut must stay OFF there: its convergence premise (empty or
+// dedicated target) is not guaranteed for a plain mongos-only config, so
+// inserts keep the pre-#1047 conversion path (#1050 review F2). IgnoreError's
+// always-in-window u/ui semantics are unaffected by this gate.
+func TestBulkWriterOverlapWindowMaxInt64DisablesShortcut(t *testing.T) {
 	_ = utils.InitialLogger("", "", "debug", true, 1)
 	withOverlapOptions(t, true, utils.VarIncrSyncExecutorDupKeyStrategyIgnore)
 
@@ -175,9 +177,10 @@ func TestBulkWriterOverlapWindowMaxInt64AlwaysOpen(t *testing.T) {
 	records := []*OplogRecord{overlapRecord(1, 1, overlapOutWindowTs())}
 	require.NoError(t, bw.doInsert(testDb, overlapColl, bson.E{}, records, true))
 
-	assert.Equal(t, int64(0), overlapNsOpCount(t, conn, "u", since),
-		"MaxInt64 keeps the window open for any oplog timestamp")
-	assert.Equal(t, 9, overlapDocVersion(t, conn, 1))
+	assert.Greater(t, overlapNsOpCount(t, conn, "u", since), int64(0),
+		"with no finite bound the conversion must still run")
+	assert.Equal(t, 1, overlapDocVersion(t, conn, 1),
+		"conversion semantics apply, not the window shortcut")
 }
 
 // Out of window the existing conversion semantics stay untouched.

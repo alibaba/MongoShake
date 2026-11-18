@@ -194,3 +194,60 @@ func TestLoadCheckpointMaxInt64NotPersisted(t *testing.T) {
 	require.NotNil(t, lastPost["full_finish_ts"])
 	assert.Equal(t, strconv.FormatInt(realTs, 10), lastPost["full_finish_ts"].(json.Number).String())
 }
+
+// A flush failure on the parallel backfill path must NOT abort the completed
+// full sync (#1050 review F1): the workers already hold the window, and the
+// staged value must ride along on the next successful checkpoint update.
+func TestBackfillFlushFailureIsNotFatalAndSelfHeals(t *testing.T) {
+	_ = utils.InitialLogger("", "", "error", true, 1)
+	var postFail atomic.Bool
+	var posts int64
+	var lastPost map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			if postFail.Load() {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			dec := json.NewDecoder(r.Body)
+			dec.UseNumber()
+			_ = dec.Decode(&lastPost)
+			atomic.AddInt64(&posts, 1)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"name": "fft_flushfail_probe", "ckpt": 100, "version": 2, "fetch_method": "oplog",
+		})
+	}))
+	defer srv.Close()
+
+	original := conf.Options
+	t.Cleanup(func() { conf.Options = original })
+	conf.Options.CheckpointStorage = utils.VarCheckpointStorageApi
+	conf.Options.CheckpointStorageCollection = srv.URL
+	conf.Options.FullSyncReaderOplogStoreDisk = false
+
+	sync := &OplogSyncer{
+		Replset:       "fft_flushfail_probe",
+		startPosition: int64(100),
+		batcher:       &Batcher{},
+		ckptReady:     make(chan struct{}),
+	}
+	sync.persister = NewPersister(sync.Replset, sync)
+	sync.ckptManager = ckpt.NewCheckpointManager(sync.Replset, 100)
+	close(sync.ckptReady)
+
+	realTs := int64(1794904896)<<32 | 7
+	postFail.Store(true)
+	require.NoError(t, sync.BackfillFullFinishTs(realTs),
+		"a flush failure must not abort the completed full sync")
+	assert.Equal(t, int64(0), atomic.LoadInt64(&posts))
+
+	// the staged value self-heals on the next successful checkpoint update
+	postFail.Store(false)
+	require.NoError(t, sync.ckptManager.Update(200))
+	assert.Equal(t, int64(1), atomic.LoadInt64(&posts))
+	require.NotNil(t, lastPost["full_finish_ts"])
+	assert.Equal(t, strconv.FormatInt(realTs, 10), lastPost["full_finish_ts"].(json.Number).String())
+}

@@ -539,7 +539,8 @@ func TestOverlapWindowParallelDiskApply(t *testing.T) {
 // Leg 3: serialize first run must persist the window bound at the incremental
 // handover even when the source goes idle afterwards — the checkpoint never
 // advances again, so only the explicit flush at loadCheckpoint writes the
-// field. Deleting that flush block makes this test time out (red anchor).
+// field. Deleting that flush block makes this test fail after its 30s poll
+// (red anchor), not a go-test timeout.
 func TestOverlapWindowSerializePersistsBound(t *testing.T) {
 	srcURL := envOr("MSHAKE_CS_URL", "mongodb://127.0.0.1:27030")
 	tgtURL := envOr("MSHAKE_TGT_URL", "mongodb://127.0.0.1:27019")
