@@ -1,6 +1,7 @@
 package docsyncer
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -645,4 +646,51 @@ func TestCheckIndexKeyTypeConsistency(t *testing.T) {
 
 	// cleanup
 	conn.Client.Database(db).Collection(coll).Drop(nil)
+}
+
+func TestStartIndexSyncFieldWhitelist(t *testing.T) {
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, utils.VarMongoConnectModeStandalone, true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	if err != nil {
+		t.Skipf("no live mongo at %s: %v", testMongoAddress, err)
+	}
+	defer conn.Close()
+
+	const db, coll = "ff_idx_test", "c1"
+	ctx := context.Background()
+	c := conn.Client.Database(db).Collection(coll)
+	_ = c.Drop(ctx)
+	defer func() { _ = c.Drop(ctx) }()
+
+	origin := conf.Options
+	defer func() { conf.Options = origin }()
+	conf.Options.FullSyncReaderCollectionParallel = 2
+	conf.Options.FullSyncFieldWhitelistMap = map[string]map[string]struct{}{
+		"ff_idx_test.c1": {"a": {}},
+	}
+
+	indexMap := map[utils.NS][]bson.D{
+		{Database: db, Collection: coll}: {
+			{{Key: "v", Value: 2}, {Key: "key", Value: bson.D{{Key: "_id", Value: 1}}}, {Key: "name", Value: "_id_"}},
+			{{Key: "v", Value: 2}, {Key: "key", Value: bson.D{{Key: "a", Value: 1}}}, {Key: "name", Value: "a_1"}},
+			{{Key: "v", Value: 2}, {Key: "key", Value: bson.D{{Key: "secret", Value: 1}}}, {Key: "name", Value: "secret_1"}},
+			{{Key: "v", Value: 2}, {Key: "key", Value: bson.D{{Key: "a", Value: 1}, {Key: "secret", Value: 1}}}, {Key: "name", Value: "a_1_secret_1"}},
+		},
+	}
+
+	assert.NoError(t, StartIndexSync(indexMap, testMongoAddress, nil, false))
+
+	names := map[string]bool{}
+	cur, err := c.Indexes().List(ctx)
+	assert.NoError(t, err)
+	var specs []bson.M
+	assert.NoError(t, cur.All(ctx, &specs))
+	for _, s := range specs {
+		if n, ok := s["name"].(string); ok {
+			names[n] = true
+		}
+	}
+	assert.True(t, names["a_1"], "covered index should be created")
+	assert.False(t, names["secret_1"], "non-covered single index should be skipped")
+	assert.False(t, names["a_1_secret_1"], "compound with non-covered field should be skipped")
 }

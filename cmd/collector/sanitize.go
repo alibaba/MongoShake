@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -107,15 +108,10 @@ func handleDeprecateConf() error {
 	return nil
 }
 
-func checkDefaultValue() error {
-	// 1. global
-	if conf.Options.Id == "" {
-		conf.Options.Id = "mongoshake"
-	}
-	if conf.Options.SystemProfilePort <= 0 {
-		conf.Options.SystemProfilePort = 9200
-	}
-
+// sanitizeLogOptions defaults and validates the log options. It is split out of
+// checkDefaultValue so the caller can bring up the logger before the rest of
+// SanitizeOptions runs, making later configuration errors land in the log file.
+func sanitizeLogOptions() error {
 	if conf.Options.LogLevel == "" {
 		conf.Options.LogLevel = utils.VarLogLevelInfo
 	} else if conf.Options.LogLevel != utils.VarLogLevelDebug && conf.Options.LogLevel != utils.VarLogLevelInfo &&
@@ -133,6 +129,21 @@ func checkDefaultValue() error {
 	}
 	if conf.Options.LogMaxAge == 0 {
 		conf.Options.LogMaxAge = 7
+	}
+	return nil
+}
+
+func checkDefaultValue() error {
+	// 1. global
+	if conf.Options.Id == "" {
+		conf.Options.Id = "mongoshake"
+	}
+	if conf.Options.SystemProfilePort <= 0 {
+		conf.Options.SystemProfilePort = 9200
+	}
+
+	if err := sanitizeLogOptions(); err != nil {
+		return err
 	}
 	filterOpTypes, err := normalizeFilterOpTypes(conf.Options.FilterOpTypes)
 	if err != nil {
@@ -261,6 +272,18 @@ func checkDefaultValue() error {
 				" 'incr_sync.shard_key == collection'")
 		}
 	}
+	// normalize tunnel before the worker/write_thread checks: write_thread only applies to
+	// non-direct tunnels, so the effective tunnel (default direct) must be known here.
+	if conf.Options.Tunnel == "" {
+		conf.Options.Tunnel = utils.VarTunnelDirect
+	} else if conf.Options.Tunnel != utils.VarTunnelDirect &&
+		conf.Options.Tunnel != utils.VarTunnelRpc &&
+		conf.Options.Tunnel != utils.VarTunnelTcp &&
+		conf.Options.Tunnel != utils.VarTunnelFile &&
+		conf.Options.Tunnel != utils.VarTunnelKafka &&
+		conf.Options.Tunnel != utils.VarTunnelMock {
+		return fmt.Errorf("incr_sync.tunnel in {direct, rpc, tcp, file, kafka, mock}")
+	}
 	if conf.Options.IncrSyncWorker == 0 {
 		conf.Options.IncrSyncWorker = 8
 	} else if conf.Options.IncrSyncWorker <= 0 || conf.Options.IncrSyncWorker > 256 {
@@ -268,9 +291,16 @@ func checkDefaultValue() error {
 	}
 	if conf.Options.IncrSyncTunnelWriteThread == 0 {
 		conf.Options.IncrSyncTunnelWriteThread = conf.Options.IncrSyncWorker
-	} else if conf.Options.IncrSyncTunnelWriteThread%conf.Options.IncrSyncWorker != 0 {
-		return fmt.Errorf("incr_sync.tunnel.write_thread[%v] must be an interge multiple of"+
-			" incr_sync.worker[%v]", conf.Options.IncrSyncTunnelWriteThread, conf.Options.IncrSyncWorker)
+	} else if conf.Options.Tunnel != utils.VarTunnelDirect &&
+		(conf.Options.IncrSyncTunnelWriteThread < 0 ||
+			conf.Options.IncrSyncTunnelWriteThread%conf.Options.IncrSyncWorker != 0) {
+		// write_thread sizes the kafka encoder pool (write_thread/worker per worker); the
+		// direct tunnel never reads it, so only non-direct tunnels enforce the multiple.
+		return fmt.Errorf("incr_sync.tunnel.write_thread[%d] must be a positive integer multiple of "+
+			"incr_sync.worker[%d] when tunnel=%s; set incr_sync.tunnel.write_thread to %d (or another "+
+			"multiple of %d), or remove it to default to incr_sync.worker",
+			conf.Options.IncrSyncTunnelWriteThread, conf.Options.IncrSyncWorker, conf.Options.Tunnel,
+			conf.Options.IncrSyncWorker, conf.Options.IncrSyncWorker)
 	}
 	if conf.Options.IncrSyncWorkerOplogCompressor == "" {
 		conf.Options.IncrSyncWorkerOplogCompressor = utils.VarIncrSyncWorkerOplogCompressorNone
@@ -300,16 +330,6 @@ func checkDefaultValue() error {
 	}
 	if conf.Options.IncrSyncReaderFetchBatchSize <= 0 {
 		conf.Options.IncrSyncReaderFetchBatchSize = 1024
-	}
-	if conf.Options.Tunnel == "" {
-		conf.Options.Tunnel = utils.VarTunnelDirect
-	} else if conf.Options.Tunnel != utils.VarTunnelDirect &&
-		conf.Options.Tunnel != utils.VarTunnelRpc &&
-		conf.Options.Tunnel != utils.VarTunnelTcp &&
-		conf.Options.Tunnel != utils.VarTunnelFile &&
-		conf.Options.Tunnel != utils.VarTunnelKafka &&
-		conf.Options.Tunnel != utils.VarTunnelMock {
-		return fmt.Errorf("incr_sync.tunnel in {direct, rpc, tcp, file, kafka, mock}")
 	}
 	if conf.Options.TunnelMessage == "" {
 		conf.Options.TunnelMessage = utils.VarTunnelMessageRaw
@@ -405,6 +425,120 @@ func parseDupKeySkipRules() error {
 
 	conf.Options.IncrSyncExecutorDupKeySkipRulesMap = ruleMap
 	return nil
+}
+
+// parseFieldWhitelists parses full_sync.field.whitelist / incr_sync.field.whitelist
+// (format: db.coll:f1,f2;db2.coll2:g1), validates them against filter.namespace.white
+// and each other, then populates the generated maps on conf.Options.
+func parseFieldWhitelists() error {
+	fullMap, err := parseFieldWhitelistRules(conf.Options.FullSyncFieldWhitelist, "full_sync.field.whitelist")
+	if err != nil {
+		return err
+	}
+	incrMap, err := parseFieldWhitelistRules(conf.Options.IncrSyncFieldWhitelist, "incr_sync.field.whitelist")
+	if err != nil {
+		return err
+	}
+
+	if len(fullMap) == 0 && len(incrMap) == 0 {
+		conf.Options.FullSyncFieldWhitelistMap = fullMap
+		conf.Options.IncrSyncFieldWhitelistMap = incrMap
+		return nil
+	}
+
+	if len(incrMap) != 0 &&
+		conf.Options.IncrSyncMongoFetchMethod != utils.VarIncrSyncMongoFetchMethodChangeStream {
+		return fmt.Errorf("incr_sync.field.whitelist requires incr_sync.mongo_fetch_method = %s",
+			utils.VarIncrSyncMongoFetchMethodChangeStream)
+	}
+
+	if len(conf.Options.FilterNamespaceWhite) == 0 {
+		return fmt.Errorf("field whitelist requires filter.namespace.white to be set")
+	}
+	nsFilter := filter.NewNamespaceFilter(conf.Options.FilterNamespaceWhite, nil)
+	notCovered := make([]string, 0)
+	for ns := range fullMap {
+		if nsFilter.FilterNs(ns) {
+			notCovered = append(notCovered, ns)
+		}
+	}
+	for ns := range incrMap {
+		if nsFilter.FilterNs(ns) {
+			notCovered = append(notCovered, ns)
+		}
+	}
+	if len(notCovered) != 0 {
+		sort.Strings(notCovered)
+		return fmt.Errorf("field whitelist namespace(s) %v not covered by filter.namespace.white", notCovered)
+	}
+
+	for ns, fullFields := range fullMap {
+		incrFields, ok := incrMap[ns]
+		if !ok {
+			continue
+		}
+		if !fieldSetEqual(fullFields, incrFields) {
+			return fmt.Errorf("field whitelist mismatch for ns[%s]: full_sync=%v, incr_sync=%v",
+				ns, sortedFieldSet(fullFields), sortedFieldSet(incrFields))
+		}
+	}
+
+	conf.Options.FullSyncFieldWhitelistMap = fullMap
+	conf.Options.IncrSyncFieldWhitelistMap = incrMap
+	return nil
+}
+
+func parseFieldWhitelistRules(rules []string, confName string) (map[string]map[string]struct{}, error) {
+	out := make(map[string]map[string]struct{})
+	for _, rule := range rules {
+		rule = strings.TrimSpace(rule)
+		if rule == "" {
+			continue
+		}
+		parts := strings.SplitN(rule, ":", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("%s should be db.collection:field1,field2; got [%s]", confName, rule)
+		}
+		ns := strings.TrimSpace(parts[0])
+		if ns == "" || !strings.Contains(ns, ".") {
+			return nil, fmt.Errorf("%s namespace should be db.collection; got [%s]", confName, rule)
+		}
+		if _, ok := out[ns]; !ok {
+			out[ns] = make(map[string]struct{})
+		}
+		for _, field := range strings.Split(parts[1], ",") {
+			field = strings.TrimSpace(field)
+			if field == "" {
+				return nil, fmt.Errorf("%s contains empty field for [%s]", confName, rule)
+			}
+			if strings.Contains(field, ".") {
+				return nil, fmt.Errorf("%s does not support nested/dotted field [%s] in v1", confName, field)
+			}
+			out[ns][field] = struct{}{}
+		}
+	}
+	return out, nil
+}
+
+func fieldSetEqual(a, b map[string]struct{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if _, ok := b[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func sortedFieldSet(m map[string]struct{}) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func checkMasterQuorumOptions() error {
@@ -600,6 +734,10 @@ func checkConflict() error {
 	if len(conf.Options.FilterPassSpecialDb) != 0 {
 		// init ns
 		filter.InitNs(conf.Options.FilterPassSpecialDb)
+	}
+	// field-level whitelist (parse + validate against filter.namespace.white)
+	if err := parseFieldWhitelists(); err != nil {
+		return err
 	}
 	// special variable
 	if conf.Options.SpecialSourceDBFlag != "" &&
