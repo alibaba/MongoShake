@@ -246,10 +246,16 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 		// check whether the starting fetching timestamp is less than the newest timestamp exist in the oplog
 		newestTs := or.getNewestTimestamp()
 		queryTs = or.getQueryTimestamp()
-		if newestTs < queryTs {
-			l.Logger.Warnf("oplog_reader current starting point[%v] is bigger than the newest timestamp[%v]!",
+		if newestTs <= 0 {
+			l.Logger.Warnf("%s newest oplog probe failed on first read, a future starting point would not be clamped", or.String())
+		}
+		if clamped := clampFuturePosition(queryTs, newestTs); clamped != queryTs {
+			l.Logger.Warnf("oplog_reader current starting point[%v] is bigger than the newest timestamp[%v], adjust the starting point to the newest",
 				utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(newestTs))
-			queryTs = newestTs
+			// write back so the Find below and any later cursor rebuild use the
+			// adjusted anchor; waiting at the future point would silently skip
+			// every change between newest and it (#1049).
+			or.UpdateQueryTimestamp(clamped)
 		}
 	}
 
@@ -286,6 +292,16 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 	l.Logger.Infof("%s generates new cursor query[%v]", or.String(), or.query)
 
 	return
+}
+
+// clampFuturePosition pulls a starting point that is ahead of the newest oplog
+// back to newest. newestTs <= 0 means the probe failed or the oplog is empty;
+// clamping to it would rewind the start to zero and replay the whole oplog.
+func clampFuturePosition(queryTs, newestTs int64) int64 {
+	if newestTs > 0 && newestTs < queryTs {
+		return newestTs
+	}
+	return queryTs
 }
 
 // get newest oplog
