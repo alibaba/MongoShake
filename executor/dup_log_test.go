@@ -167,7 +167,7 @@ func TestBulkInsertDupKeyLogCountsAndDebugDetail(t *testing.T) {
 					if event.CommandName == "update" {
 						values, err := event.Command.Lookup("updates").Array().Values()
 						require.NoError(mt, err)
-						require.Len(mt, values, 128, "logging must not change bulk conversion's whole-batch replay")
+						require.Len(mt, values, 2, "#1047: conversion replays only the failed subset, not the whole batch")
 						updates++
 					}
 				}

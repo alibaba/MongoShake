@@ -14,6 +14,12 @@ import (
 )
 
 var dupKeyIndexRegex = regexp.MustCompile(`index:\s+(\S+)`)
+
+// DocumentDB reports duplicates as "Duplicate key violation on the requested
+// collection: Index '_id_'" instead of MongoDB's "index: _id_ dup key: ..."
+// (#1050 review M3). Without this fallback the overlap-window shortcut, skip
+// and delete_and_retry all misclassify DocumentDB duplicates.
+var dupKeyIndexDocDBRegex = regexp.MustCompile(`Index\s+'([^']+)'`)
 var dupKeyContentRegex = regexp.MustCompile(`dup key:\s*\{\s*(.*?)\s*\}`)
 var dupKeyFieldRegex = regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_.]*)\s*:`)
 
@@ -23,6 +29,9 @@ func parseDupKeyIndexName(err error) string {
 	}
 	matches := dupKeyIndexRegex.FindStringSubmatch(err.Error())
 	if len(matches) >= 2 {
+		return matches[1]
+	}
+	if matches = dupKeyIndexDocDBRegex.FindStringSubmatch(err.Error()); len(matches) >= 2 {
 		return matches[1]
 	}
 	return ""

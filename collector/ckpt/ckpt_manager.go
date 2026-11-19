@@ -22,6 +22,7 @@ type CheckpointManager struct {
 	finishSet  bool
 	queueSet   bool
 	fetchSet   bool
+	fullFinSet bool
 	delegate   CheckpointOperation
 }
 
@@ -84,7 +85,18 @@ func (manager *CheckpointManager) GetInMemory() *CheckpointContext {
 }
 
 // Update checkpoint update memory & persistence(db or file)
+// The lock serializes concurrent checkpoint writers (the checkpoint routine
+// and the parallel-mode full-finish backfill, #1047). It does not make the
+// unlocked Get/GetInMemory readers race-free; those are sequenced by the
+// startup/handover protocol instead.
 func (manager *CheckpointManager) Update(ts int64) error {
+	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
+	return manager.updateLocked(ts)
+}
+
+// updateLocked is Update's body; callers must hold ctxRecLock.
+func (manager *CheckpointManager) updateLocked(ts int64) error {
 	if manager.ctx == nil || len(manager.ctx.Name) == 0 {
 		// must run Get() first
 		return errors.New("current ckpt context is empty")
@@ -95,8 +107,6 @@ func (manager *CheckpointManager) Update(ts int64) error {
 	candidate.Version = utils.FcvCheckpoint.CurrentVersion
 
 	// update OplogDiskQueueFinishTs if set
-	manager.ctxRecLock.Lock()
-	defer manager.ctxRecLock.Unlock()
 	if manager.ctxRec != nil {
 		if manager.finishSet {
 			candidate.OplogDiskQueueFinishTs = manager.ctxRec.OplogDiskQueueFinishTs
@@ -106,6 +116,9 @@ func (manager *CheckpointManager) Update(ts int64) error {
 		}
 		if manager.fetchSet {
 			candidate.FetchMethod = manager.ctxRec.FetchMethod
+		}
+		if manager.fullFinSet {
+			candidate.FullFinishTs = manager.ctxRec.FullFinishTs
 		}
 	}
 
@@ -117,7 +130,37 @@ func (manager *CheckpointManager) Update(ts int64) error {
 	manager.finishSet = false
 	manager.queueSet = false
 	manager.fetchSet = false
+	manager.fullFinSet = false
 	return nil
+}
+
+// FlushStaged persists staged fields without advancing the checkpoint past
+// what is already durable. Needed when no oplog traffic moves the checkpoint
+// forward (e.g. full sync just finished on an idle source) but the staged
+// value must survive a restart. Another writer (docsyncer.Checkpoint at the
+// full-sync handover) may have advanced the durable document beyond this
+// manager's in-memory view, so refresh from storage first and never write
+// backwards (#1050 review B2). The whole read-refresh-write runs under the
+// lock so a concurrent Update cannot interleave.
+func (manager *CheckpointManager) FlushStaged() error {
+	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
+
+	fresh, exist := manager.delegate.Get()
+	if fresh == nil {
+		// A nil context means the READ failed (both Mongo and HTTP delegates
+		// return nil,false on error, but a non-nil regenerated context with
+		// exist=false when no document exists). Writing the stale in-memory
+		// ts here would silently reintroduce the backwards write (#1050 R3).
+		return errors.New("checkpoint refresh read failed")
+	}
+	if exist && (manager.ctx == nil || fresh.Timestamp > manager.ctx.Timestamp) {
+		manager.ctx = fresh
+	}
+	if manager.ctx == nil {
+		return errors.New("current ckpt context is empty")
+	}
+	return manager.updateLocked(manager.ctx.Timestamp)
 }
 
 // SetOplogDiskFinishTs
@@ -150,4 +193,16 @@ func (manager *CheckpointManager) SetFetchMethod(method string) {
 	}
 	manager.ctxRec.FetchMethod = method
 	manager.fetchSet = true
+}
+
+// SetFullFinishTs stages the full-sync finish timestamp (#1047); it is written
+// on the next Update call, like the other staged fields.
+func (manager *CheckpointManager) SetFullFinishTs(ts int64) {
+	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
+	if manager.ctxRec == nil {
+		manager.ctxRec = new(CheckpointContext)
+	}
+	manager.ctxRec.FullFinishTs = ts
+	manager.fullFinSet = true
 }

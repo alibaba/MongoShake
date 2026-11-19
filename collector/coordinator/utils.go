@@ -17,15 +17,22 @@ import (
  * compare current checkpoint and database timestamp
  * @return:
  *     int64: the smallest newest timestamp of all mongod
+ *     map[string]int64: replica-set name => incremental start timestamp
  *     bool: can run incremental sync directly?
+ *     int64: full-sync finish timestamp restored from checkpoints (#1047), 0 if absent
  *     error: error
  */
-func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll bool) (int64, map[string]int64, bool, error) {
+func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll bool) (int64, map[string]int64, bool, int64, error) {
 	var (
 		tsMap       map[string]utils.TimestampNode
 		startTsMap  map[string]int64 // replica-set name => timestamp
 		smallestNew int64
 		err         error
+		// restoredFullFinishTs recovers the persisted full-sync finish
+		// timestamp (#1047) so the overlap-window handling survives a
+		// restart. Max across sources mirrors the global biggestNew
+		// semantics used at full-sync completion; 0 keeps it disabled.
+		restoredFullFinishTs int64
 	)
 
 	switch testSelectSyncMode {
@@ -37,7 +44,7 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 		tsMap, _, smallestNew, _, _, err = utils.GetAllTimestamp(coordinator.MongoD,
 			conf.Options.MongoConnectMode, conf.Options.MongoSslRootCaFile)
 		if err != nil {
-			return 0, nil, false, fmt.Errorf("get all timestamp failed: %v", err)
+			return 0, nil, false, 0, fmt.Errorf("get all timestamp failed: %v", err)
 		}
 	}
 
@@ -56,10 +63,10 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 		ckptManager := ckpt.NewCheckpointManager(coordinator.MongoS.ReplicaName, 0)
 		ckptVar, exist, err := ckptManager.Get()
 		if err != nil {
-			return 0, nil, false, fmt.Errorf("get mongos[%v] checkpoint failed: %v",
+			return 0, nil, false, 0, fmt.Errorf("get mongos[%v] checkpoint failed: %v",
 				coordinator.MongoS.ReplicaName, err)
 		} else if ckptVar == nil {
-			return 0, nil, false, fmt.Errorf("get mongos[%v] checkpoint empty", coordinator.MongoS.ReplicaName)
+			return 0, nil, false, 0, fmt.Errorf("get mongos[%v] checkpoint empty", coordinator.MongoS.ReplicaName)
 		} else if !exist || ckptVar.Timestamp <= 1 { // empty
 			mongosCkpt = nil
 			// mongosCkpt = ckptVar // still use checkpoint
@@ -67,6 +74,11 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 		} else {
 			mongosCkpt = ckptVar
 			startTsMap[coordinator.MongoS.ReplicaName] = int64(ckptVar.Timestamp) // use old checkpoint
+			// mongos-only sources have an empty tsMap below, so the restored
+			// window must be accumulated here as well (#1047).
+			if ckptVar.FullFinishTs > restoredFullFinishTs {
+				restoredFullFinishTs = ckptVar.FullFinishTs
+			}
 		}
 	}
 
@@ -76,7 +88,7 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 			ckptManager := ckpt.NewCheckpointManager(replName, 0)
 			ckptVar, exist, err := ckptManager.Get()
 			if err != nil {
-				return 0, nil, false, fmt.Errorf("get mongod[%v] checkpoint failed: %v", replName, err)
+				return 0, nil, false, 0, fmt.Errorf("get mongod[%v] checkpoint failed: %v", replName, err)
 			} else if !exist || ckptVar.Timestamp <= 1 { // empty
 				// set nil to make code more clear
 				ckptRemote = nil
@@ -95,7 +107,7 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 			if syncModeAll || confTsMongoTs > (1<<32) && ts.Oldest >= confTsMongoTs {
 				l.Logger.Infof("%s syncModeAll[%v] ts.Oldest[%v], confTsMongoTs[%v]", replName, syncModeAll, ts.Oldest,
 					confTsMongoTs)
-				return smallestNew, nil, false, nil
+				return smallestNew, nil, false, 0, nil
 			}
 			startTsMap[replName] = confTsMongoTs
 		} else {
@@ -106,46 +118,49 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 					ts.Oldest, ckptRemote.Timestamp)
 
 				// can't run incr sync directly
-				return smallestNew, nil, false, nil
+				return smallestNew, nil, false, 0, nil
 			}
 			startTsMap[replName] = int64(ckptRemote.Timestamp)
+			if ckptRemote.FullFinishTs > restoredFullFinishTs {
+				restoredFullFinishTs = ckptRemote.FullFinishTs
+			}
 		}
 	}
 
-	return smallestNew, startTsMap, true, nil
+	return smallestNew, startTsMap, true, restoredFullFinishTs, nil
 }
 
-func (coordinator *ReplicationCoordinator) isCheckpointExist() (bool, interface{}, error) {
+func (coordinator *ReplicationCoordinator) isCheckpointExist() (bool, interface{}, int64, error) {
 	ckptManager := ckpt.NewCheckpointManager(coordinator.RealSourceFullSync[0].ReplicaName, 0)
 	ckptVar, exist, err := ckptManager.Get()
 	l.Logger.Infof("isCheckpointExist? %v %v %v", ckptVar, exist, err)
 	if err != nil {
-		return false, 0, fmt.Errorf("get mongod[%v] checkpoint failed: %v", coordinator.RealSourceFullSync[0].ReplicaName, err)
+		return false, 0, 0, fmt.Errorf("get mongod[%v] checkpoint failed: %v", coordinator.RealSourceFullSync[0].ReplicaName, err)
 	} else if !exist {
 		// send changeStream
 		reader, err := sourceReader.CreateReader(utils.VarIncrSyncMongoFetchMethodChangeStream,
 			coordinator.RealSourceFullSync[0].URL,
 			coordinator.RealSourceFullSync[0].ReplicaName)
 		if err != nil {
-			return false, 0, fmt.Errorf("create reader failed: %v", err)
+			return false, 0, 0, fmt.Errorf("create reader failed: %v", err)
 		}
 
 		resumeToken, err := reader.FetchNewestTimestamp()
 		if err != nil {
-			return false, 0, fmt.Errorf("fetch PBRT fail: %v", err)
+			return false, 0, 0, fmt.Errorf("fetch PBRT fail: %v", err)
 		}
 
 		l.Logger.Infof("isCheckpointExist change stream resumeToken: %v", resumeToken)
-		return false, resumeToken, nil
+		return false, resumeToken, 0, nil
 	}
-	return true, ckptVar.Timestamp, nil
+	return true, ckptVar.Timestamp, ckptVar.FullFinishTs, nil
 }
 
 // if the oplog of checkpoint timestamp exist in all source db, then only do oplog replication instead of document replication
 func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (string, map[string]int64,
-	interface{}, error) {
+	interface{}, int64, error) {
 	if syncMode != utils.VarSyncModeAll && syncMode != utils.VarSyncModeIncr {
-		return syncMode, nil, int64(0), nil
+		return syncMode, nil, int64(0), 0, nil
 	}
 
 	// special case, I hate it.
@@ -155,40 +170,40 @@ func (coordinator *ReplicationCoordinator) selectSyncMode(syncMode string) (stri
 		// for only mongo_s_url address exists
 		if syncMode == utils.VarSyncModeIncr {
 
-			_, startTsMapTmp, _, _ := coordinator.compareCheckpointAndDbTs(syncMode == utils.VarSyncModeAll)
+			_, startTsMapTmp, _, restoredFullFinishTs, _ := coordinator.compareCheckpointAndDbTs(syncMode == utils.VarSyncModeAll)
 			l.Logger.Infof("for only mongo_s_url address exists startTsMap[%v]", startTsMapTmp)
 
-			return syncMode, startTsMapTmp, int64(0), nil
+			return syncMode, startTsMapTmp, int64(0), restoredFullFinishTs, nil
 		}
 
-		ok, token, err := coordinator.isCheckpointExist()
+		ok, token, fullFinishTs, err := coordinator.isCheckpointExist()
 		if err != nil {
-			return "", nil, int64(0), fmt.Errorf("check isCheckpointExist failed: %v", err)
+			return "", nil, int64(0), 0, fmt.Errorf("check isCheckpointExist failed: %v", err)
 		}
 		if !ok {
-			return utils.VarSyncModeAll, nil, token, nil
+			return utils.VarSyncModeAll, nil, token, 0, nil
 		}
 
 		startTsMap := map[string]int64{
 			coordinator.RealSourceIncrSync[0].ReplicaName: token.(int64),
 		}
-		return utils.VarSyncModeIncr, startTsMap, token, nil
+		return utils.VarSyncModeIncr, startTsMap, token, fullFinishTs, nil
 	}
 
-	smallestNewTs, startTsMap, canIncrSync, err := coordinator.compareCheckpointAndDbTs(syncMode == utils.VarSyncModeAll)
+	smallestNewTs, startTsMap, canIncrSync, restoredFullFinishTs, err := coordinator.compareCheckpointAndDbTs(syncMode == utils.VarSyncModeAll)
 	if err != nil {
-		return "", nil, int64(0), err
+		return "", nil, int64(0), 0, err
 	}
 
 	if canIncrSync {
 		l.Logger.Infof("sync mode run %v", utils.VarSyncModeIncr)
-		return utils.VarSyncModeIncr, startTsMap, int64(0), nil
+		return utils.VarSyncModeIncr, startTsMap, int64(0), restoredFullFinishTs, nil
 	} else if syncMode == utils.VarSyncModeIncr || conf.Options.Tunnel != utils.VarTunnelDirect {
 		// bugfix v2.4.11: if can not run incr sync directly, return error when sync_mode == "incr"
 		// bugfix v2.4.12: return error when tunnel != "direct"
-		return "", nil, int64(0), fmt.Errorf("start time illegal, can't run incr sync")
+		return "", nil, int64(0), 0, fmt.Errorf("start time illegal, can't run incr sync")
 	} else {
-		return utils.VarSyncModeAll, nil, smallestNewTs, nil
+		return utils.VarSyncModeAll, nil, smallestNewTs, 0, nil
 	}
 }
 

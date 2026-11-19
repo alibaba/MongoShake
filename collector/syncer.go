@@ -3,6 +3,7 @@ package collector
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -81,10 +82,18 @@ type OplogSyncer struct {
 	Replset string
 	// oplog start position of source mongodb
 	startPosition interface{}
-	// full sync finish position, used to check DDL between full sync and incr sync
+	// full sync finish position, used to check DDL between full sync and incr sync.
+	// Deliberately NOT updated by the parallel/restart window backfill (#1047):
+	// activating the batcher's DDL-before-fullFinish panic guard on those paths
+	// would crash deployments whose full sync overlapped DDL oplogs. The writer
+	// overlap window is plumbed separately via Worker.SetInitSyncFinishTs.
 	fullSyncFinishPosition primitive.Timestamp
 
 	ckptManager *ckpt.CheckpointManager
+	// ckptReady is closed once Start() has created the checkpoint manager and
+	// loadCheckpoint has run Get(). The parallel-mode backfill waits on it so
+	// it never touches ckptManager concurrently with Start() (#1050 review B1).
+	ckptReady chan struct{}
 
 	// oplog hash strategy
 	hasher oplog.Hasher
@@ -159,6 +168,7 @@ func NewOplogSyncer(
 		qos:             utils.StartQoS(0, 1, &utils.IncrSentinelOptions.TPS), // default is 0 which means do not limit
 		fetcherState:    "normal",
 		workerAckNotify: make(chan struct{}, 1),
+		ckptReady:       make(chan struct{}),
 	}
 
 	// concurrent level hasher
@@ -273,6 +283,48 @@ func (sync *OplogSyncer) StartDiskApply() {
 	sync.persister.SetFetchStage(utils.FetchStageStoreDiskApply)
 }
 
+// BackfillFullFinishTs propagates the full-sync finish timestamp to the workers
+// and persists it in the checkpoint (#1047). Used by the parallel-mode backfill
+// and by incr restart restoration. It does NOT touch syncer.fullSyncFinishPosition:
+// the batcher's DDL guard keeps its legacy semantics on these paths.
+//
+// Worker writes are plain int64 stores, safe because the backfill strictly
+// precedes StartDiskApply(): during the spool stage inject only buffers to
+// disk and retrieve waits for the atomic fetchStage flip, so no worker reads
+// FullFinishTs until the handoff that also publishes this write (#1050 N1).
+//
+// MaxInt64 (serverless / mongos-only "always in window") is deliberately NOT
+// persisted: it stays an in-memory semantic, and a restart restores 0 with
+// conversion active, matching the pre-#1047 behavior (#1050 review M1).
+//
+// A flush failure here is NOT fatal (#1050 review F1): the workers already
+// hold the window, so this run is unaffected, and losing persistence only
+// means a restart falls back to the pre-#1047 conversion behavior. The staged
+// value rides along on the next successful checkpoint Update, so persistence
+// self-heals. Aborting a completed tens-of-hours full sync over an optional
+// optimization would be a bad trade. The serialize handover in loadCheckpoint
+// keeps fatal semantics, consistent with its Get() failure.
+func (sync *OplogSyncer) BackfillFullFinishTs(ts int64) error {
+	// Wait until Start() has initialized the checkpoint manager and loaded
+	// the durable context; docWg.Wait() alone does not synchronize with it.
+	<-sync.ckptReady
+	for _, w := range sync.batcher.workerGroup {
+		w.SetInitSyncFinishTs(ts)
+	}
+	if ts == math.MaxInt64 {
+		return nil
+	}
+	if sync.ckptManager == nil {
+		return fmt.Errorf("checkpoint manager unavailable after readiness signal")
+	}
+	sync.ckptManager.SetFullFinishTs(ts)
+	if err := sync.ckptManager.FlushStaged(); err != nil {
+		l.Logger.Warnf("%s persist full finish ts failed[%v]; window active in memory, "+
+			"staged value will ride the next checkpoint update", sync, err)
+	}
+	return nil
+}
+
 // Start to polling oplog
 func (sync *OplogSyncer) Start() {
 	l.Logger.Infof("%s poll oplog syncer start. ckpt_interval[%dms], gid[%s], shard_key[%s]",
@@ -289,16 +341,7 @@ func (sync *OplogSyncer) Start() {
 	// 1. create checkpoint manager
 	// 2. load existing ckpt from remote storage
 	// 3. start checkpoint persist routine
-	sync.newCheckpointManager(sync.Replset, sync.startPosition)
-	if _, ok := sync.startPosition.(int64); !ok {
-		// set resumeToken for aliyun_serverless
-		sync.reader.SetQueryTimestampOnEmpty(sync.startPosition)
-	}
-
-	// load checkpoint and set stage
-	if err := sync.loadCheckpoint(); err != nil {
-		l.Logger.Panicf("%v", err)
-	}
+	sync.initCheckpoint()
 
 	// start deserializer: parse data from pending queue, and then push into logs queue.
 	sync.startDeserializer()

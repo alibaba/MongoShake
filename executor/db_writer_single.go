@@ -69,6 +69,15 @@ func (sw *SingleWriter) doInsert(database, collection string, metadata bson.E, o
 		if _, err := collectionHandle.InsertOne(context.Background(), log.original.partialLog.ObjectValue(), opts); err != nil {
 
 			if utils.DuplicateKey(err) {
+				// Overlap-window _id duplicates are expected (#1047): the full
+				// scan already carried the document at a version >= this insert
+				// oplog. Skip without conversion; secondary-index conflicts keep
+				// the configured strategy below.
+				if overlapWindowSkipEnabled(sw.fullFinishTs, utils.TimeStampToInt64(log.original.partialLog.Timestamp)) &&
+					parseDupKeyIndexName(err) == "_id_" {
+					RecordDuplicatedOplog(sw.conn, collection, []*OplogRecord{log})
+					continue
+				}
 				if dupUpdate {
 					upserts = append(upserts, log)
 					continue
