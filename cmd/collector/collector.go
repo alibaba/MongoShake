@@ -99,6 +99,8 @@ func main() {
 	l.Logger.Infof("log init succeed. log.dir[%v] log.name[%v] log.level[%v]",
 		conf.Options.LogDirectory, conf.Options.LogFileName, conf.Options.LogLevel)
 
+	utils.StartCoverageFlush()
+
 	// verify collector options and revise
 	if err = SanitizeOptions(); err != nil {
 		// the deferred Logger.Close() flushes this to the log file during panic unwinding
