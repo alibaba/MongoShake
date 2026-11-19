@@ -571,9 +571,14 @@ func TestSingleWriterWindowDisabledWhenDDLFiltered(t *testing.T) {
 
 // F6: the plumbing activates IgnoreError's u/ui window tolerance on the
 // parallel/restart paths (previously dead code there because fullFinishTs=0).
-// Pin the semantics: an in-window PathNotViable update is tolerated (the scan
-// can only have carried a newer shape, making the old update redundant);
-// out of window the same error must surface.
+// Pin the semantics: an in-window PathNotViable update is tolerated, while
+// out of window the same error must surface. Safety argument (the old update
+// is NOT "redundant" — it would revert the shape): every oplog entry was legal
+// against the source's own state, and any shape-restoring operation is itself
+// in the oplog and replays in order; skipping the failing old update still
+// converges because all later operations replay. A hand-fed sequence that
+// strands divergence is unrealizable — its second update would fail on the
+// SOURCE too and could never enter the oplog (round-5 counter-evidence).
 func TestBulkWriterWindowUpdateTolerance(t *testing.T) {
 	_ = utils.InitialLogger("", "", "debug", true, 1)
 	withOverlapOptions(t, false, utils.VarIncrSyncExecutorDupKeyStrategyIgnore)
@@ -614,4 +619,79 @@ func TestBulkWriterWindowUpdateTolerance(t *testing.T) {
 	err = bw.doUpdate(testDb, overlapColl, bson.E{},
 		[]*OplogRecord{updateRecord(overlapOutWindowTs())}, false)
 	require.Error(t, err, "out-of-window PathNotViable must surface")
+}
+
+// M1 (author-decided option 2): dup_key_strategy=error is an explicit intent
+// to stop on ANY duplicate; the window shortcut must not silently override it.
+func TestBulkWriterWindowErrorStrategyNotOverridden(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, false, utils.VarIncrSyncExecutorDupKeyStrategyError)
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	overlapSetup(t, conn, 9)
+	bw := &BulkWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
+	records := []*OplogRecord{overlapRecord(1, 1, overlapInWindowTs())}
+	err = bw.doInsert(testDb, overlapColl, bson.E{}, records, false)
+	require.Error(t, err, "strategy=error must stop even on in-window _id dups")
+	assert.Equal(t, 9, overlapDocVersion(t, conn, 1))
+}
+
+func TestSingleWriterWindowErrorStrategyNotOverridden(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, false, utils.VarIncrSyncExecutorDupKeyStrategyError)
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	overlapSetup(t, conn, 9)
+	sw := &SingleWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
+	records := []*OplogRecord{overlapRecord(1, 1, overlapInWindowTs())}
+	err = sw.doInsert(testDb, overlapColl, bson.E{}, records, false)
+	require.Error(t, err, "strategy=error must stop even on in-window _id dups")
+	assert.Equal(t, 9, overlapDocVersion(t, conn, 1))
+}
+
+// M3: with the shortcut guarded off (default DDL config), the dupUpdate
+// branch is the main path — its conflict dump must also be the failed subset,
+// not the whole raw batch.
+func TestBulkWriterDupUpdateConflictDumpOnlyFailedDocs(t *testing.T) {
+	_ = utils.InitialLogger("", "", "debug", true, 1)
+	withOverlapOptions(t, true, utils.VarIncrSyncExecutorDupKeyStrategyIgnore)
+	conf.Options.FilterDDLEnable = false // shortcut off -> dupUpdate branch is the path
+	conf.Options.IncrSyncConflictWriteTo = DumpConflictToDB
+
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, "primary", true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	defer conn.Close()
+
+	ctx := context.Background()
+	overlapSetup(t, conn, 9)
+	conflictColl := conn.Client.Database(utils.APPConflictDatabase).Collection(overlapColl)
+	require.NoError(t, conflictColl.Drop(ctx))
+	defer func() { _ = conflictColl.Drop(context.Background()) }()
+
+	bw := &BulkWriter{conn: conn, fullFinishTs: utils.TimeStampToInt64(overlapWindowTs)}
+	records := []*OplogRecord{
+		overlapRecord(2, 2, overlapInWindowTs()),
+		overlapRecord(3, 3, overlapInWindowTs()),
+		overlapRecord(1, 1, overlapInWindowTs()), // the only dup, index 2
+	}
+	for id := 4; id <= 9; id++ {
+		records = append(records, overlapRecord(id, id, overlapInWindowTs()))
+	}
+	require.NoError(t, bw.doInsert(testDb, overlapColl, bson.E{}, records, true))
+
+	dumped, err := conflictColl.CountDocuments(ctx, bson.M{})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), dumped, "dupUpdate branch must dump only the failed document")
+	var conflictDoc bson.M
+	require.NoError(t, conflictColl.FindOne(ctx, bson.M{}).Decode(&conflictDoc))
+	assert.EqualValues(t, 1, conflictDoc["_id"])
 }

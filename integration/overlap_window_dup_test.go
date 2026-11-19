@@ -624,3 +624,100 @@ func TestOverlapWindowSerializePersistsBound(t *testing.T) {
 	}
 	t.Fatalf("serialize first run never persisted full_finish_ts on an idle source")
 }
+
+// Leg 4 (#1050 review M4): the FACTORY-DEFAULT path end to end —
+// ddl_enable=false turns the shortcut off, so dupUpdate=true must convert
+// only the FAILED subset (not the whole batch) and converge. Hand-written
+// checkpoint like leg 1; red on develop, which converts the whole batch.
+func TestOverlapWindowDefaultConfigSubsetConversion(t *testing.T) {
+	srcURL := envOr("MSHAKE_CS_URL", "mongodb://127.0.0.1:27030")
+	tgtURL := envOr("MSHAKE_TGT_URL", "mongodb://127.0.0.1:27019")
+	ckptColl := "ckpt_overlap1047_default_it"
+
+	src := dial(t, srcURL)
+	tgt := dial(t, tgtURL)
+	ctx := context.Background()
+	defer func() {
+		_ = src.Disconnect(context.Background())
+		_ = tgt.Disconnect(context.Background())
+	}()
+
+	for _, c := range []struct {
+		client *mongo.Client
+		db     string
+		coll   string
+	}{
+		{src, overlapDB, overlapColl}, {src, overlapDB, "hb"},
+		{tgt, overlapDB, overlapColl}, {src, ckptDB, ckptColl},
+	} {
+		if err := c.client.Database(c.db).Collection(c.coll).Drop(ctx); err != nil {
+			t.Fatalf("drop %s.%s: %v", c.db, c.coll, err)
+		}
+	}
+	for _, client := range []*mongo.Client{src, tgt} {
+		if err := client.Database(overlapDB).CreateCollection(ctx, overlapColl); err != nil {
+			t.Fatalf("create collection: %v", err)
+		}
+	}
+	if err := src.Database(overlapDB).CreateCollection(ctx, "hb"); err != nil {
+		t.Fatalf("create hb: %v", err)
+	}
+
+	const dupDocs, newDocs = 200, 100
+	start := packed(latestOplogTs(t, src))
+	// dups: source v1, target already holds the scanned v9
+	overlapSeed(t, src, tgt, 0, dupDocs, 1, 9)
+	// new: source only
+	newOnly := make([]interface{}, 0, newDocs)
+	for i := 0; i < newDocs; i++ {
+		newOnly = append(newOnly, bson.D{{Key: "_id", Value: dupDocs + i}, {Key: "v", Value: 1}})
+	}
+	if _, err := src.Database(overlapDB).Collection(overlapColl).InsertMany(ctx, newOnly); err != nil {
+		t.Fatalf("seed new docs: %v", err)
+	}
+	fence := packed(latestOplogTs(t, src))
+
+	ckptDoc := bson.M{
+		"name":           overlapReplsetName(t, src),
+		"ckpt":           start,
+		"version":        2,
+		"fetch_method":   "oplog",
+		"full_finish_ts": fence,
+	}
+	if _, err := src.Database(ckptDB).Collection(ckptColl).InsertOne(ctx, ckptDoc); err != nil {
+		t.Fatalf("write checkpoint: %v", err)
+	}
+
+	runID := fmt.Sprintf("%d", time.Now().UnixNano()%100000000)
+	logDir := t.TempDir()
+	confPath := overlapWriteConf(t, srcURL, tgtURL, logDir, "incr", ckptColl, map[string]string{
+		"filter.ddl_enable": "false", // factory default: shortcut off
+	})
+
+	stopHb := startHeartbeat(t, src.Database(overlapDB).Collection("hb"), runID)
+	t.Cleanup(stopHb)
+	defer overlapStartProfiling(t, tgt)()
+
+	proc := startCollector(t, confPath, logDir)
+	t.Cleanup(func() {
+		proc.kill()
+		proc.dumpLog(t)
+		if data, err := os.ReadFile(filepath.Join(logDir, "collector-it.log")); err == nil {
+			lines := strings.Split(string(data), "\n")
+			if len(lines) > 40 {
+				lines = lines[len(lines)-40:]
+			}
+			t.Logf("collector-it.log tail:\n%s", strings.Join(lines, "\n"))
+		}
+	})
+
+	overlapWaitCkptAtLeast(t, src, ckptColl, fence, syncTO)
+	time.Sleep(3 * time.Second)
+
+	overlapAssertVersions(t, tgt, dupDocs+newDocs, 1)
+	// subset conversion: exactly the dupDocs failed documents are rewritten,
+	// NOT the whole batch (develop converts dupDocs+newDocs -> red)
+	if n := overlapCountProfiledUpdates(t, tgt); n != dupDocs {
+		t.Fatalf("expected exactly %d subset-conversion updates, got %d", dupDocs, n)
+	}
+}

@@ -119,7 +119,11 @@ func (bw *BulkWriter) doInsert(database, collection string, metadata bson.E, opl
 			}
 			// update on duplicated key occur
 			if dupUpdate {
-				RecordDuplicatedOplog(bw.conn, collection, oplogs)
+				// audit only the failed subset here too: with the shortcut
+				// guarded off (default DDL config) this is the main path, and
+				// dumping successfully inserted documents would pollute the
+				// conflict collection (#1050 review M3)
+				RecordDuplicatedOplog(bw.conn, collection, failedInsertSubset(modelOplogs, bulkErr))
 				l.Logger.Debugf("Duplicated document found. reinsert or update to [%s] [%s]", database, collection)
 				// Only the failed documents need conversion; the unordered bulk
 				// already inserted the rest, and rewriting them would double-write
@@ -169,13 +173,20 @@ func overlapWindowSkipEnabled(fullFinishTs, lastTs int64) bool {
 		}
 	}
 	// DDL filtering breaks the same premise isomorphically: with
-	// filter.ddl_enable=false (the factory default, forced for sharded+oplog
-	// sources) a drop+recreate inside the window is dropped, the target keeps
-	// the OLD incarnation, and the new incarnation's insert hits an _id dup
-	// that must NOT be acknowledged as "scan carried a newer version"
-	// (#1050 review F4). With DDL replayed the drop clears the target and the
-	// insert never dups, so the shortcut is safe there.
+	// filter.ddl_enable=false (the factory default; sharded+oplog sources
+	// cannot enable it — sanitize rejects the combination with an error) a
+	// drop+recreate inside the window is dropped, the target keeps the OLD
+	// incarnation, and the new incarnation's insert hits an _id dup that must
+	// NOT be acknowledged as "scan carried a newer version" (#1050 review F4).
+	// With DDL replayed the drop clears the target and the insert never dups,
+	// so the shortcut is safe there.
 	if !conf.Options.FilterDDLEnable {
+		return false
+	}
+	// dup_key_strategy=error is an explicit user intent to stop on ANY
+	// duplicate; the shortcut must not silently override it (#1050 review M1,
+	// author-decided option 2). Such users keep the pre-#1047 behavior.
+	if conf.Options.IncrSyncExecutorDupKeyStrategy == utils.VarIncrSyncExecutorDupKeyStrategyError {
 		return false
 	}
 	return true
