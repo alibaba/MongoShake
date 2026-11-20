@@ -209,6 +209,9 @@ func checkDefaultValue() error {
 	}
 
 	// 2. full sync
+	if conf.Options.FullSyncTPS < 0 {
+		return fmt.Errorf("full_sync.tps must be >= 0")
+	}
 	if conf.Options.FullSyncReaderCollectionParallel <= 0 {
 		conf.Options.FullSyncReaderCollectionParallel = 6
 	}
