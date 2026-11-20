@@ -365,3 +365,18 @@ func TestCheckIneffectiveOptionsBarrierOrdering(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckDefaultValueFullSyncTPS(t *testing.T) {
+	original := conf.Options
+	t.Cleanup(func() { conf.Options = original })
+	for _, rate := range []int64{-1, 0, 10, 1000} {
+		conf.Options = conf.Configuration{MongoUrls: []string{"mongodb://source-a"}, SyncMode: utils.VarSyncModeFull, FullSyncTPS: rate}
+		err := checkDefaultValue()
+		if rate < 0 {
+			assert.ErrorContains(t, err, "full_sync.tps")
+		} else {
+			assert.NoError(t, err)
+			assert.Equal(t, rate, conf.Options.FullSyncTPS)
+		}
+	}
+}
