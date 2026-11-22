@@ -11,6 +11,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/event"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
@@ -28,6 +29,11 @@ type MongoCommunityConn struct {
 
 func NewMongoCommunityConn(url string, connectMode string, timeout bool, readConcern,
 	writeConcern string, sslRootFile string) (*MongoCommunityConn, error) {
+	return newMongoCommunityConnWithMonitor(url, connectMode, timeout, readConcern, writeConcern, sslRootFile, nil)
+}
+
+func newMongoCommunityConnWithMonitor(url string, connectMode string, timeout bool, readConcern,
+	writeConcern string, sslRootFile string, monitor *event.CommandMonitor) (*MongoCommunityConn, error) {
 
 	// URL encoding at first
 	encodedURL, err := EncodeMongoURI(url)
@@ -37,6 +43,7 @@ func NewMongoCommunityConn(url string, connectMode string, timeout bool, readCon
 	l.Logger.Debugf("encodedURL:[%v]", encodedURL)
 
 	clientOps := options.Client().ApplyURI(encodedURL)
+	clientOps.SetMonitor(monitor)
 	//clientOps := options.Client().ApplyURI(url)
 
 	// tls tlsInsecure + tlsCaFile
