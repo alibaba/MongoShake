@@ -171,6 +171,15 @@ func NewOplogSyncer(
 		ckptReady:       make(chan struct{}),
 	}
 
+	// A future starting point may only be clamped once the adjusted anchor is
+	// durable; otherwise a restart reloads the future checkpoint, clamps to a
+	// later newest and skips the gap (#1052 review P1).
+	if oplogReader, ok := reader.(*sourceReader.OplogReader); ok {
+		oplogReader.SetAnchorPersistHook(func(ts int64) error {
+			return syncer.ckptManager.Update(ts)
+		})
+	}
+
 	// concurrent level hasher
 	switch conf.Options.IncrSyncShardKey {
 	case oplog.ShardAutomatic:

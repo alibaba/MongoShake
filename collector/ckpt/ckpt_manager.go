@@ -62,6 +62,11 @@ func NewCheckpointManager(name string, startPosition int64) *CheckpointManager {
 
 // Get return persistent checkpoint
 func (manager *CheckpointManager) Get() (*CheckpointContext, bool, error) {
+	// Serialize with Update: the reader's anchor-persist hook writes from the
+	// fetcher goroutine (#1052), so an unlocked reload could restore a stale
+	// future timestamp over a just-persisted adjusted anchor.
+	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
 	var exist bool
 	manager.ctx, exist = manager.delegate.Get()
 	if manager.ctx == nil {
@@ -86,9 +91,9 @@ func (manager *CheckpointManager) GetInMemory() *CheckpointContext {
 
 // Update checkpoint update memory & persistence(db or file)
 // The lock serializes concurrent checkpoint writers (the checkpoint routine
-// and the parallel-mode full-finish backfill, #1047). It does not make the
-// unlocked Get/GetInMemory readers race-free; those are sequenced by the
-// startup/handover protocol instead.
+// and the parallel-mode full-finish backfill, #1047) and the reload in Get.
+// It does not make the unlocked GetInMemory readers race-free; those are
+// sequenced by the startup/handover protocol instead.
 func (manager *CheckpointManager) Update(ts int64) error {
 	manager.ctxRecLock.Lock()
 	defer manager.ctxRecLock.Unlock()
