@@ -196,14 +196,14 @@ func calculateSignature(object interface{}) (sign float64) {
 }
 
 func ExactlyMatch(first, second interface{}) bool {
+	// both of them are null is accept. This has to come first: reflect.TypeOf(nil)
+	// is a nil reflect.Type, so calling Kind() on it below would panic.
+	if first == nil && second == nil {
+		return true
+	}
 	if (first != nil && second == nil) || (first == nil && second != nil) ||
 		reflect.TypeOf(first).Kind() != reflect.TypeOf(second).Kind() {
 		return false
-	}
-
-	// both of them are null is accept
-	if first == nil && second == nil {
-		return true
 	}
 
 	switch o := first.(type) {
