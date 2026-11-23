@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"sort"
 	"testing"
 
@@ -362,6 +363,21 @@ func TestCheckIneffectiveOptionsBarrierOrdering(t *testing.T) {
 		assert.Len(t, warnings, c.want, c.desc)
 		for _, warning := range warnings {
 			assert.Contains(t, warning, "incr_sync.barrier.ordering_enable", c.desc)
+		}
+	}
+}
+
+func TestCheckDefaultValueFullSyncTPS(t *testing.T) {
+	original := conf.Options
+	t.Cleanup(func() { conf.Options = original })
+	for _, rate := range []int64{-1, 0, 10, 1000, 1_000_000, 1_000_001, math.MaxInt64} {
+		conf.Options = conf.Configuration{MongoUrls: []string{"mongodb://source-a"}, SyncMode: utils.VarSyncModeFull, FullSyncTPS: rate}
+		err := checkDefaultValue()
+		if rate < 0 || rate > 1_000_000 {
+			assert.ErrorContains(t, err, "full_sync.tps")
+		} else {
+			assert.NoError(t, err)
+			assert.Equal(t, rate, conf.Options.FullSyncTPS)
 		}
 	}
 }

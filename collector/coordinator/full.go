@@ -183,7 +183,8 @@ func (coordinator *ReplicationCoordinator) startDocumentReplication() (err error
 	}
 
 	// global qps limit, all dbSyncer share only 1 Qos
-	qos := utils.StartQoS(0, int64(conf.Options.FullSyncReaderDocumentBatchSize), &utils.FullSentinelOptions.TPS)
+	utils.FullSentinelOptions.TPS = conf.Options.FullSyncTPS
+	qos := utils.StartQoS(conf.Options.FullSyncTPS, int64(conf.Options.FullSyncReaderDocumentBatchSize), &utils.FullSentinelOptions.TPS)
 
 	// start sync each db
 	var wg sync.WaitGroup

@@ -59,6 +59,7 @@ type Configuration struct {
 	SkipNSShareKeyVerify                   []string `config:"skip.nsshardkey.verify"`               // add v2.8.2
 
 	// 2. full sync
+	FullSyncTPS                               int64    `config:"full_sync.tps"` // add v2.8.10
 	FullSyncReaderCollectionParallel          int      `config:"full_sync.reader.collection_parallel"`
 	FullSyncReaderWriteDocumentParallel       int      `config:"full_sync.reader.write_document_parallel"`
 	FullSyncReaderDocumentBatchSize           int      `config:"full_sync.reader.document_batch_size"`
