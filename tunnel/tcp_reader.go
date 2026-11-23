@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"sync/atomic"
 
 	nimo "github.com/gugemichael/nimo4go"
 
@@ -108,7 +109,7 @@ func (reader *TCPReader) recvTransfer(socket *net.TCPConn) {
 		if message.Shard >= uint32(len(reader.replayer)) {
 			message.Shard %= uint32(len(reader.replayer))
 		}
-		reader.ack = reader.replayer[message.Shard].Sync(message, nil)
+		atomic.StoreInt64(&reader.ack, reader.replayer[message.Shard].Sync(message, nil))
 	}
 }
 
@@ -133,7 +134,7 @@ func (reader *TCPReader) recvGetAck(socket *net.TCPConn) {
 
 		// write back ack
 		buffer := &bytes.Buffer{}
-		binary.Write(buffer, binary.BigEndian, reader.ack)
+		binary.Write(buffer, binary.BigEndian, atomic.LoadInt64(&reader.ack))
 		packet = NewPacketV1(PacketReturnACK, buffer.Bytes())
 		if _, err := socket.Write(packet.encode()); err != nil {
 			if err, ok := err.(net.Error); ok && err.Timeout() {
