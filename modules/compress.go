@@ -162,7 +162,10 @@ func (Gzip *GZip) Compress(chunk []byte) ([]byte, error) {
 }
 
 func (Gzip *GZip) Decompress(compressed []byte) ([]byte, error) {
-	r, _ := gzip.NewReader(bytes.NewBuffer(compressed))
+	r, err := gzip.NewReader(bytes.NewBuffer(compressed))
+	if err != nil {
+		return nil, err
+	}
 	if uncompress, err := ioutil.ReadAll(r); err == nil {
 		return uncompress, nil
 	}
@@ -224,7 +227,10 @@ func (ZLIB *Zlib) Compress(chunk []byte) ([]byte, error) {
 }
 
 func (ZLIB *Zlib) Decompress(compressed []byte) ([]byte, error) {
-	r, _ := zlib.NewReader(bytes.NewBuffer(compressed))
+	r, err := zlib.NewReader(bytes.NewBuffer(compressed))
+	if err != nil {
+		return nil, err
+	}
 	if uncompress, err := ioutil.ReadAll(r); err == nil {
 		return uncompress, nil
 	}
