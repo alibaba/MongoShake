@@ -215,10 +215,10 @@ func TestSyncFlushesBufferedWriteSyncer(t *testing.T) {
 func TestDefaultLoggerIsSafeBeforeInitialization(t *testing.T) {
 	t.Helper()
 
-	previous := Logger
-	Logger = &ZapLogger{logger: zap.NewNop().Sugar()}
+	previous := Logger.logger.Load()
+	Logger.logger.Store(zap.NewNop().Sugar())
 	t.Cleanup(func() {
-		Logger = previous
+		Logger.logger.Store(previous)
 	})
 
 	Logger.Debugf("debug %d", 1)

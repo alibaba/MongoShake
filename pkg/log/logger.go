@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -23,7 +24,13 @@ const (
 
 const criticalLevel zapcore.Level = zapcore.FatalLevel + 1
 
-var Logger = &ZapLogger{logger: zap.NewNop().Sugar()}
+var Logger = newNopLogger()
+
+func newNopLogger() *ZapLogger {
+	l := &ZapLogger{}
+	l.logger.Store(zap.NewNop().Sugar())
+	return l
+}
 
 var logLevelMap = map[string]zapcore.Level{
 	"all":     zapcore.DebugLevel,
@@ -34,10 +41,25 @@ var logLevelMap = map[string]zapcore.Level{
 	"error":   zapcore.ErrorLevel,
 }
 
+// ZapLogger is installed once in the package-level Logger and never replaced.
+// Re-initialisation swaps the inner fields atomically instead, so goroutines
+// that are already logging cannot race with a later InitialLogger call.
 type ZapLogger struct {
-	logger              *zap.SugaredLogger
-	stopBufferedWriters []func() error
-	stopOnce            sync.Once
+	logger  atomic.Pointer[zap.SugaredLogger]
+	closers atomic.Pointer[closeState]
+}
+
+type closeState struct {
+	stop []func() error
+	once sync.Once
+}
+
+// sugared returns nil for a nil receiver or an uninitialised logger.
+func (l *ZapLogger) sugared() *zap.SugaredLogger {
+	if l == nil {
+		return nil
+	}
+	return l.logger.Load()
 }
 
 func New(logLevel, logDir, logFile string,
@@ -97,10 +119,8 @@ func New(logLevel, logDir, logFile string,
 	}
 
 	baseLogger := zap.New(zapcore.NewTee(cores...)).Sugar()
-	Logger = &ZapLogger{
-		logger:              baseLogger,
-		stopBufferedWriters: stopBufferedWriters,
-	}
+	Logger.logger.Store(baseLogger)
+	Logger.closers.Store(&closeState{stop: stopBufferedWriters})
 	return nil
 }
 
@@ -170,10 +190,9 @@ func formatArgs(args ...any) string {
 }
 
 func (l *ZapLogger) log(level zapcore.Level, message string) {
-	if l == nil || l.logger == nil {
-		return
+	if lg := l.sugared(); lg != nil {
+		lg.Desugar().Log(level, message)
 	}
-	l.logger.Desugar().Log(level, message)
 }
 
 func (l *ZapLogger) Printf(format string, args ...any) {
@@ -189,31 +208,27 @@ func (l *ZapLogger) Println(args ...any) {
 }
 
 func (l *ZapLogger) Debugf(format string, args ...any) {
-	if l == nil || l.logger == nil {
-		return
+	if lg := l.sugared(); lg != nil {
+		lg.Debugf(format, args...)
 	}
-	l.logger.Debugf(format, args...)
 }
 
 func (l *ZapLogger) Infof(format string, args ...any) {
-	if l == nil || l.logger == nil {
-		return
+	if lg := l.sugared(); lg != nil {
+		lg.Infof(format, args...)
 	}
-	l.logger.Infof(format, args...)
 }
 
 func (l *ZapLogger) Warnf(format string, args ...any) {
-	if l == nil || l.logger == nil {
-		return
+	if lg := l.sugared(); lg != nil {
+		lg.Warnf(format, args...)
 	}
-	l.logger.Warnf(format, args...)
 }
 
 func (l *ZapLogger) Errorf(format string, args ...any) {
-	if l == nil || l.logger == nil {
-		return
+	if lg := l.sugared(); lg != nil {
+		lg.Errorf(format, args...)
 	}
-	l.logger.Errorf(format, args...)
 }
 
 func (l *ZapLogger) Criticalf(format string, args ...any) {
@@ -278,10 +293,10 @@ func (l *ZapLogger) Crash(args ...any) {
 }
 
 func (l *ZapLogger) Sync() error {
-	if l == nil || l.logger == nil {
-		return nil
+	if lg := l.sugared(); lg != nil {
+		return lg.Sync()
 	}
-	return l.logger.Sync()
+	return nil
 }
 
 func (l *ZapLogger) Close() error {
@@ -290,12 +305,14 @@ func (l *ZapLogger) Close() error {
 	}
 
 	syncErr := l.Sync()
-	l.stopOnce.Do(func() {
-		for _, stop := range l.stopBufferedWriters {
-			if stopErr := stop(); syncErr == nil && stopErr != nil {
-				syncErr = stopErr
+	if cs := l.closers.Load(); cs != nil {
+		cs.once.Do(func() {
+			for _, stop := range cs.stop {
+				if stopErr := stop(); syncErr == nil && stopErr != nil {
+					syncErr = stopErr
+				}
 			}
-		}
-	})
+		})
+	}
 	return syncErr
 }
