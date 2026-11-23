@@ -209,6 +209,11 @@ func checkDefaultValue() error {
 	}
 
 	// 2. full sync
+	// Bound refill work even when document_batch_size is 1. Use 0 to disable
+	// throttling instead of approximating unlimited throughput with a huge TPS.
+	if conf.Options.FullSyncTPS < 0 || conf.Options.FullSyncTPS > 1_000_000 {
+		return fmt.Errorf("full_sync.tps must be between 0 and 1000000 (0 disables throttling)")
+	}
 	if conf.Options.FullSyncReaderCollectionParallel <= 0 {
 		conf.Options.FullSyncReaderCollectionParallel = 6
 	}

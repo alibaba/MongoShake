@@ -3,14 +3,12 @@ package utils
 import (
 	"time"
 
-	"math"
-
 	l "github.com/alibaba/MongoShake/v2/pkg/log"
 )
 
 type Qos struct {
-	Limit  int64 // qps, <= 0 means disable limit
-	Ticket int64 // one tick size, default is 1
+	Limit  int64 // batch allowances per second; <= 0 disables throttling
+	Ticket int64 // configured operations/documents per batch; incremental sync uses 1
 
 	bucket    chan struct{} // bucket channel
 	addr      *int64        // periodically check whether the address value is equal to Limit, and update if not.
@@ -19,19 +17,38 @@ type Qos struct {
 }
 
 func StartQoS(limit, ticket int64, addr *int64) *Qos {
+	q := newQoS(limit, ticket, addr)
+	if q != nil {
+		go q.timer()
+	}
+	return q
+}
+
+// newQoS initializes the limiter before any writer can use it. limit is in
+// documents/operations per second; each bucket token admits one ticket-sized batch.
+// Start empty so the first batch also waits for a rate-limited tick.
+func newQoS(limit, ticket int64, addr *int64) *Qos {
 	if ticket <= 0 {
 		// illegal
 		return nil
 	}
 
 	q := new(Qos)
-	q.Limit = limit
+	q.Limit = qosBatchLimit(limit, ticket)
+	q.prevLimit = limit
 	q.Ticket = ticket
 	q.addr = addr
-	q.bucket = make(chan struct{}, limit)
+	q.bucket = make(chan struct{}, q.Limit)
 
-	go q.timer()
 	return q
+}
+
+func qosBatchLimit(limit, ticket int64) int64 {
+	if limit <= 0 {
+		return 0
+	}
+	// Integer ceiling avoids both floating-point rounding and addition overflow.
+	return 1 + (limit-1)/ticket
 }
 
 func (q *Qos) FetchBucket() {
@@ -62,29 +79,32 @@ FOR:
 }
 
 func (q *Qos) timer() {
-	var i int64
 	for range time.NewTicker(1 * time.Second).C {
 		if q.close {
 			return
 		}
+		q.refill()
+	}
+}
 
-		if *q.addr != q.prevLimit {
-			l.Logger.Infof("try to resize bucket channel from %v to %v, bucket size[%v], ticket[%v]",
-				q.prevLimit, *q.addr, q.Limit, q.Ticket)
-			q.prevLimit = *q.addr
-			// 0 is ok
-			q.Limit = int64(math.Ceil(float64(*q.addr) / float64(q.Ticket)))
-			q.resizeLimit()
-		}
+// refill is also used by tests to exercise rate changes without wall-clock sleeps.
+func (q *Qos) refill() {
+	if *q.addr != q.prevLimit {
+		l.Logger.Infof("try to resize bucket channel from %v to %v, bucket size[%v], ticket[%v]",
+			q.prevLimit, *q.addr, q.Limit, q.Ticket)
+		q.prevLimit = *q.addr
+		// 0 is ok
+		q.Limit = qosBatchLimit(*q.addr, q.Ticket)
+		q.resizeLimit()
+	}
 
-	INJECT:
-		for i = 0; i < q.Limit; i++ {
-			select {
-			case q.bucket <- struct{}{}:
-			default:
-				// break if bucket if full
-				break INJECT
-			}
+INJECT:
+	for i := int64(0); i < q.Limit; i++ {
+		select {
+		case q.bucket <- struct{}{}:
+		default:
+			// break if bucket if full
+			break INJECT
 		}
 	}
 }
