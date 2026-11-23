@@ -6,7 +6,6 @@ import (
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
-	l "github.com/alibaba/MongoShake/v2/pkg/log"
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -15,9 +14,8 @@ import (
 
 // Exercise execute, including its outer ignore policy, rather than only the writer.
 func TestExecutorMixed61DoesNotComplete(t *testing.T) {
-	oldOptions, oldLogger := conf.Options, l.Logger
-	require.NoError(t, l.New("info", t.TempDir(), "outer61.log", true, 20, 7, 0))
-	defer func() { _ = l.Logger.Close(); conf.Options, l.Logger = oldOptions, oldLogger }()
+	oldOptions := conf.Options
+	defer func() { conf.Options = oldOptions }()
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 	for _, kind := range []string{"validation", "unauthorized", "duplicate", "concern", "concern61_validation", "pure61"} {
 		mt.Run(kind, func(mt *mtest.T) {

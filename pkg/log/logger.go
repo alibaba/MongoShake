@@ -28,7 +28,7 @@ var Logger = newNopLogger()
 
 func newNopLogger() *ZapLogger {
 	l := &ZapLogger{}
-	l.logger.Store(zap.NewNop().Sugar())
+	l.state.Store(&loggerState{sugared: zap.NewNop().Sugar()})
 	return l
 }
 
@@ -42,11 +42,16 @@ var logLevelMap = map[string]zapcore.Level{
 }
 
 // ZapLogger is installed once in the package-level Logger and never replaced.
-// Re-initialisation swaps the inner fields atomically instead, so goroutines
-// that are already logging cannot race with a later InitialLogger call.
+// Re-initialisation swaps one immutable state value atomically, so goroutines
+// that are already logging cannot race with a later InitialLogger call, and a
+// concurrent Close can never see a new logger paired with the previous closers.
 type ZapLogger struct {
-	logger  atomic.Pointer[zap.SugaredLogger]
-	closers atomic.Pointer[closeState]
+	state atomic.Pointer[loggerState]
+}
+
+type loggerState struct {
+	sugared *zap.SugaredLogger
+	closers *closeState
 }
 
 type closeState struct {
@@ -54,12 +59,21 @@ type closeState struct {
 	once sync.Once
 }
 
+// generation counts successful New calls. The Logger pointer is stable by
+// design, so tests that need to detect re-initialisation compare this instead.
+var generation atomic.Uint64
+
+func Generation() uint64 { return generation.Load() }
+
 // sugared returns nil for a nil receiver or an uninitialised logger.
 func (l *ZapLogger) sugared() *zap.SugaredLogger {
 	if l == nil {
 		return nil
 	}
-	return l.logger.Load()
+	if s := l.state.Load(); s != nil {
+		return s.sugared
+	}
+	return nil
 }
 
 func New(logLevel, logDir, logFile string,
@@ -119,8 +133,11 @@ func New(logLevel, logDir, logFile string,
 	}
 
 	baseLogger := zap.New(zapcore.NewTee(cores...)).Sugar()
-	Logger.logger.Store(baseLogger)
-	Logger.closers.Store(&closeState{stop: stopBufferedWriters})
+	Logger.state.Store(&loggerState{
+		sugared: baseLogger,
+		closers: &closeState{stop: stopBufferedWriters},
+	})
+	generation.Add(1)
 	return nil
 }
 
@@ -305,9 +322,9 @@ func (l *ZapLogger) Close() error {
 	}
 
 	syncErr := l.Sync()
-	if cs := l.closers.Load(); cs != nil {
-		cs.once.Do(func() {
-			for _, stop := range cs.stop {
+	if s := l.state.Load(); s != nil && s.closers != nil {
+		s.closers.once.Do(func() {
+			for _, stop := range s.closers.stop {
 				if stopErr := stop(); syncErr == nil && stopErr != nil {
 					syncErr = stopErr
 				}
