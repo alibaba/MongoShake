@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -76,29 +77,39 @@ func TestFileHeaderRoundTrip(t *testing.T) {
 var (
 	oplogFileOnce sync.Once
 	oplogFilePath string
+	oplogFileErr  error
 	oplogFileLogs = [][]byte{[]byte("abc"), []byte("de")}
 	// 32-byte file header + 24-byte block header + (4+3) + (4+2) payload
 	oplogFileSize = int64(32 + 24 + 7 + 6)
 )
 
+// ensureOplogFile records failures instead of calling t.Fatal inside once.Do:
+// a Fatal there would consume the Once and leave every later caller with an
+// empty path, turning one real failure into a cascade of misleading ones.
+// The temp dir is intentionally not removed -- SyncToDisk outlives the test.
 func ensureOplogFile(t *testing.T) string {
 	t.Helper()
 	oplogFileOnce.Do(func() {
+		// Prepare only initialises when the CAS fires; a prior test may have
+		// left it at 1, which matters under -shuffle=on.
 		globalInitializer = 0
 		dir, err := os.MkdirTemp("", "mshake-file-tunnel")
 		if err != nil {
-			t.Fatal(err)
+			oplogFileErr = err
+			return
 		}
-		oplogFilePath = filepath.Join(dir, "oplog")
-		w := &FileWriter{Local: oplogFilePath}
+		path := filepath.Join(dir, "oplog")
+		w := &FileWriter{Local: path}
 		if !w.Prepare() {
-			t.Fatal("FileWriter.Prepare failed")
+			oplogFileErr = fmt.Errorf("FileWriter.Prepare failed for %s", path)
+			return
 		}
 		// probe messages must not be persisted
 		w.Send(&WMessage{TMessage: &TMessage{RawLogs: [][]byte{{1}}, Tag: MsgProbe}})
 		time.Sleep(300 * time.Millisecond)
-		if info, err := os.Stat(oplogFilePath); err != nil || info.Size() != 32 {
-			t.Fatalf("probe message was persisted: %v", err)
+		if info, err := os.Stat(path); err != nil || info.Size() != 32 {
+			oplogFileErr = fmt.Errorf("probe message was persisted: %v", err)
+			return
 		}
 		w.Send(&WMessage{TMessage: &TMessage{
 			RawLogs: oplogFileLogs, Checksum: 7, Shard: 3, Compress: 1,
@@ -107,13 +118,17 @@ func ensureOplogFile(t *testing.T) string {
 		// waiting for "grew past 32" could observe a half-written block.
 		deadline := time.Now().Add(5 * time.Second)
 		for time.Now().Before(deadline) {
-			if info, err := os.Stat(oplogFilePath); err == nil && info.Size() >= oplogFileSize {
+			if info, err := os.Stat(path); err == nil && info.Size() >= oplogFileSize {
+				oplogFilePath = path
 				return
 			}
 			time.Sleep(50 * time.Millisecond)
 		}
-		t.Fatal("SyncToDisk never wrote the complete block")
+		oplogFileErr = fmt.Errorf("SyncToDisk never wrote the complete block to %s", path)
 	})
+	if oplogFileErr != nil {
+		t.Fatal(oplogFileErr)
+	}
 	return oplogFilePath
 }
 
