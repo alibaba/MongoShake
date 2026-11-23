@@ -17,7 +17,8 @@ const coverageFlushInterval = 5 * time.Second
 //
 // A no-op unless GOCOVERDIR is set, so production runs pay nothing. Requires a
 // binary built with -cover -covermode=atomic (the runtime rejects set mode
-// because counters are read while the program runs) and Go 1.22 or newer.
+// because counters are read while the program runs) and a toolchain providing
+// runtime/coverage.
 func StartCoverageFlush() {
 	dir := os.Getenv("GOCOVERDIR")
 	if dir == "" {
