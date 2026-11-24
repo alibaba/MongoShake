@@ -56,3 +56,49 @@ func TestDocumentReaderFieldProjection(t *testing.T) {
 	assert.Equal(t, "hz", profile["city"]) // whole sub-tree retained
 	assert.Equal(t, "1", profile["phone"])
 }
+
+func TestDocumentReaderFieldExclusion(t *testing.T) {
+	conn, err := utils.NewMongoCommunityConn(testMongoAddress, utils.VarMongoConnectModeStandalone, true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	if err != nil {
+		t.Skipf("no live mongo at %s: %v", testMongoAddress, err)
+	}
+	defer conn.Close()
+
+	const db, coll = "fb_full_test", "c1"
+	ns := utils.NS{Database: db, Collection: coll}
+	ctx := context.Background()
+	c := conn.Client.Database(db).Collection(coll)
+	_ = c.Drop(ctx)
+	defer func() { _ = c.Drop(ctx) }()
+
+	_, err = c.InsertOne(ctx, bson.M{"_id": 1, "a": 10, "big": "huge",
+		"profile": bson.M{"city": "hz", "phone": "1"}})
+	assert.NoError(t, err)
+
+	origin := conf.Options
+	defer func() { conf.Options = origin }()
+	conf.Options.MongoConnectMode = utils.VarMongoConnectModeStandalone
+	conf.Options.FullSyncReaderFetchBatchSize = 16
+	conf.Options.FullSyncFieldBlacklistMap = map[string]map[string]struct{}{
+		"fb_full_test.c1": {"big": {}},
+	}
+
+	reader := NewDocumentReader(0, testMongoAddress, ns, "", nil, nil, "")
+	defer reader.Close()
+
+	doc, err := reader.NextDoc()
+	assert.NoError(t, err)
+	assert.NotNil(t, doc)
+
+	var got bson.M
+	assert.NoError(t, bson.Unmarshal(doc, &got))
+	assert.Equal(t, int32(1), got["_id"])
+	assert.Equal(t, int32(10), got["a"]) // non-blacklisted scalar kept
+	_, hasBig := got["big"]
+	assert.False(t, hasBig, "big should be projected out")
+	profile, ok := got["profile"].(bson.M)
+	assert.True(t, ok)
+	assert.Equal(t, "hz", profile["city"]) // non-blacklisted object kept whole
+	assert.Equal(t, "1", profile["phone"])
+}

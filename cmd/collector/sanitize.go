@@ -432,68 +432,96 @@ func parseDupKeySkipRules() error {
 	return nil
 }
 
-// parseFieldWhitelists parses full_sync.field.whitelist / incr_sync.field.whitelist
-// (format: db.coll:f1,f2;db2.coll2:g1), validates them against filter.namespace.white
-// and each other, then populates the generated maps on conf.Options.
-func parseFieldWhitelists() error {
-	fullMap, err := parseFieldWhitelistRules(conf.Options.FullSyncFieldWhitelist, "full_sync.field.whitelist")
+// parseFieldLists parses full/incr field whitelist and blacklist (format:
+// db.coll:f1,f2;db2.coll2:g1), validates them against filter.namespace.white and
+// each other (per-ns whitelist/blacklist mutual exclusion, cross-phase mode
+// consistency, full/incr field-set equality), then populates the generated maps.
+func parseFieldLists() error {
+	fullWL, err := parseFieldRules(conf.Options.FullSyncFieldWhitelist, "full_sync.field.whitelist", false)
 	if err != nil {
 		return err
 	}
-	incrMap, err := parseFieldWhitelistRules(conf.Options.IncrSyncFieldWhitelist, "incr_sync.field.whitelist")
+	incrWL, err := parseFieldRules(conf.Options.IncrSyncFieldWhitelist, "incr_sync.field.whitelist", false)
+	if err != nil {
+		return err
+	}
+	fullBL, err := parseFieldRules(conf.Options.FullSyncFieldBlacklist, "full_sync.field.blacklist", true)
+	if err != nil {
+		return err
+	}
+	incrBL, err := parseFieldRules(conf.Options.IncrSyncFieldBlacklist, "incr_sync.field.blacklist", true)
 	if err != nil {
 		return err
 	}
 
-	if len(fullMap) == 0 && len(incrMap) == 0 {
-		conf.Options.FullSyncFieldWhitelistMap = fullMap
-		conf.Options.IncrSyncFieldWhitelistMap = incrMap
+	conf.Options.FullSyncFieldWhitelistMap = fullWL
+	conf.Options.IncrSyncFieldWhitelistMap = incrWL
+	conf.Options.FullSyncFieldBlacklistMap = fullBL
+	conf.Options.IncrSyncFieldBlacklistMap = incrBL
+
+	if len(fullWL) == 0 && len(incrWL) == 0 && len(fullBL) == 0 && len(incrBL) == 0 {
 		return nil
 	}
 
-	if len(incrMap) != 0 &&
+	if (len(incrWL) != 0 || len(incrBL) != 0) &&
 		conf.Options.IncrSyncMongoFetchMethod != utils.VarIncrSyncMongoFetchMethodChangeStream {
-		return fmt.Errorf("incr_sync.field.whitelist requires incr_sync.mongo_fetch_method = %s",
+		return fmt.Errorf("incr_sync.field.whitelist/blacklist requires incr_sync.mongo_fetch_method = %s",
 			utils.VarIncrSyncMongoFetchMethodChangeStream)
 	}
 
 	if len(conf.Options.FilterNamespaceWhite) == 0 {
-		return fmt.Errorf("field whitelist requires filter.namespace.white to be set")
+		return fmt.Errorf("field whitelist/blacklist requires filter.namespace.white to be set")
 	}
 	nsFilter := filter.NewNamespaceFilter(conf.Options.FilterNamespaceWhite, nil)
 	notCovered := make([]string, 0)
-	for ns := range fullMap {
-		if nsFilter.FilterNs(ns) {
-			notCovered = append(notCovered, ns)
-		}
-	}
-	for ns := range incrMap {
-		if nsFilter.FilterNs(ns) {
-			notCovered = append(notCovered, ns)
+	for _, m := range []map[string]map[string]struct{}{fullWL, incrWL, fullBL, incrBL} {
+		for ns := range m {
+			if nsFilter.FilterNs(ns) {
+				notCovered = append(notCovered, ns)
+			}
 		}
 	}
 	if len(notCovered) != 0 {
 		sort.Strings(notCovered)
-		return fmt.Errorf("field whitelist namespace(s) %v not covered by filter.namespace.white", notCovered)
+		return fmt.Errorf("field whitelist/blacklist namespace(s) %v not covered by filter.namespace.white", notCovered)
 	}
 
-	for ns, fullFields := range fullMap {
-		incrFields, ok := incrMap[ns]
-		if !ok {
-			continue
+	// per-ns mode resolution: whitelist and blacklist are mutually exclusive, and
+	// the full/incr phases must agree on the mode for a given ns.
+	allNs := make(map[string]struct{})
+	for _, m := range []map[string]map[string]struct{}{fullWL, incrWL, fullBL, incrBL} {
+		for ns := range m {
+			allNs[ns] = struct{}{}
 		}
-		if !fieldSetEqual(fullFields, incrFields) {
+	}
+	for ns := range allNs {
+		_, fwl := fullWL[ns]
+		_, fbl := fullBL[ns]
+		_, iwl := incrWL[ns]
+		_, ibl := incrBL[ns]
+		switch {
+		case fwl && fbl:
+			return fmt.Errorf("ns[%s] set in both full_sync.field.whitelist and full_sync.field.blacklist", ns)
+		case iwl && ibl:
+			return fmt.Errorf("ns[%s] set in both incr_sync.field.whitelist and incr_sync.field.blacklist", ns)
+		case fwl && ibl:
+			return fmt.Errorf("ns[%s] mode conflict: full_sync.field.whitelist vs incr_sync.field.blacklist", ns)
+		case fbl && iwl:
+			return fmt.Errorf("ns[%s] mode conflict: full_sync.field.blacklist vs incr_sync.field.whitelist", ns)
+		}
+		if fwl && iwl && !fieldSetEqual(fullWL[ns], incrWL[ns]) {
 			return fmt.Errorf("field whitelist mismatch for ns[%s]: full_sync=%v, incr_sync=%v",
-				ns, sortedFieldSet(fullFields), sortedFieldSet(incrFields))
+				ns, sortedFieldSet(fullWL[ns]), sortedFieldSet(incrWL[ns]))
+		}
+		if fbl && ibl && !fieldSetEqual(fullBL[ns], incrBL[ns]) {
+			return fmt.Errorf("field blacklist mismatch for ns[%s]: full_sync=%v, incr_sync=%v",
+				ns, sortedFieldSet(fullBL[ns]), sortedFieldSet(incrBL[ns]))
 		}
 	}
-
-	conf.Options.FullSyncFieldWhitelistMap = fullMap
-	conf.Options.IncrSyncFieldWhitelistMap = incrMap
 	return nil
 }
 
-func parseFieldWhitelistRules(rules []string, confName string) (map[string]map[string]struct{}, error) {
+func parseFieldRules(rules []string, confName string, rejectId bool) (map[string]map[string]struct{}, error) {
 	out := make(map[string]map[string]struct{})
 	for _, rule := range rules {
 		rule = strings.TrimSpace(rule)
@@ -518,6 +546,9 @@ func parseFieldWhitelistRules(rules []string, confName string) (map[string]map[s
 			}
 			if strings.Contains(field, ".") {
 				return nil, fmt.Errorf("%s does not support nested/dotted field [%s] in v1", confName, field)
+			}
+			if rejectId && field == "_id" {
+				return nil, fmt.Errorf("%s cannot exclude _id (it is always kept); got [%s]", confName, rule)
 			}
 			out[ns][field] = struct{}{}
 		}
@@ -741,7 +772,7 @@ func checkConflict() error {
 		filter.InitNs(conf.Options.FilterPassSpecialDb)
 	}
 	// field-level whitelist (parse + validate against filter.namespace.white)
-	if err := parseFieldWhitelists(); err != nil {
+	if err := parseFieldLists(); err != nil {
 		return err
 	}
 	// special variable

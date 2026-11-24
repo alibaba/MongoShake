@@ -77,6 +77,7 @@ type Configuration struct {
 	FullSyncDoNotShardDest                    bool     `config:"full_sync.do_not_shard_destination"`              // add v2.8.6
 	FullSyncExecutorImmutableShardKeyFallback bool     `config:"full_sync.executor.immutable_shard_key_fallback"` // add v2.8.9
 	FullSyncFieldWhitelist                    []string `config:"full_sync.field.whitelist"`                       // add field-level sync
+	FullSyncFieldBlacklist                    []string `config:"full_sync.field.blacklist"`                       // add field-level blacklist
 
 	// 3. incr sync
 	IncrSyncLazyOplogParse                    bool     `config:"incr_sync.lazy_oplog_parse"` // add v2.8.9
@@ -103,6 +104,7 @@ type Configuration struct {
 	IncrSyncExecutorMajorityEnable            bool     `config:"incr_sync.executor.majority_enable"`
 	IncrSyncBypassDocumentValidation          bool     `config:"incr_sync.executor.bypass_document_validation"` // add v2.8.7
 	IncrSyncFieldWhitelist                    []string `config:"incr_sync.field.whitelist"`                     // add field-level sync
+	IncrSyncFieldBlacklist                    []string `config:"incr_sync.field.blacklist"`                     // add field-level blacklist
 
 	/*---------------------------------------------------------*/
 	// inner variables, not open to user
@@ -126,6 +128,8 @@ type Configuration struct {
 	IncrSyncExecutorDupKeySkipRulesMap map[string]map[string]struct{}
 	FullSyncFieldWhitelistMap          map[string]map[string]struct{} // ns -> top-level field set
 	IncrSyncFieldWhitelistMap          map[string]map[string]struct{} // ns -> top-level field set
+	FullSyncFieldBlacklistMap          map[string]map[string]struct{} // ns -> top-level field set to exclude
+	IncrSyncFieldBlacklistMap          map[string]map[string]struct{} // ns -> top-level field set to exclude
 
 	/*---------------------------------------------------------*/
 	// deprecate variables

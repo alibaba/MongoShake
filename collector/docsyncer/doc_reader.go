@@ -480,6 +480,9 @@ func (reader *DocumentReader) ensureNetwork() (err error) {
 	// field-level whitelist: server-side inclusion projection (top-level fields)
 	if fields := conf.Options.FullSyncFieldWhitelistMap[reader.ns.Str()]; len(fields) > 0 {
 		findOptions.SetProjection(filter.BuildInclusionProjection(fields))
+	} else if fields := conf.Options.FullSyncFieldBlacklistMap[reader.ns.Str()]; len(fields) > 0 {
+		// field-level blacklist: server-side exclusion projection (drop top-level fields)
+		findOptions.SetProjection(filter.BuildExclusionProjection(fields))
 	}
 
 	reader.docCursor, err = reader.client.Client.Database(reader.ns.Database).Collection(reader.ns.Collection, nil).
