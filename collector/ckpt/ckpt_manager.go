@@ -220,14 +220,28 @@ func (manager *CheckpointManager) SetFullFinishTs(ts int64) {
 	manager.fullFinSet = true
 }
 
+// Delegate returns the storage delegate (fault-injection tests).
+func (manager *CheckpointManager) Delegate() CheckpointOperation {
+	return manager.delegate
+}
+
+// SetDelegate replaces the storage delegate (fault-injection tests only).
+func (manager *CheckpointManager) SetDelegate(op CheckpointOperation) {
+	manager.delegate = op
+}
+
 // PrecheckAnchorGuard verifies the covering unique index at HA startup so a
 // misconfigured store fails fast (exit-and-restart) instead of blocking the
 // first read. The lazy non-HA path uses ensureAnchorGuard directly and self-heals.
+// It takes ctxRecLock so the guard's delegate access shares the same client
+// lifecycle as Get/Update/FlushStaged (lock order: ctxRecLock -> guardLock).
 func (manager *CheckpointManager) PrecheckAnchorGuard() error {
 	store, ok := manager.delegate.(ConditionalAnchorStore)
 	if !ok {
 		return fmt.Errorf("checkpoint delegate lacks conditional anchor capability")
 	}
+	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
 	return manager.ensureAnchorGuard(store)
 }
 
@@ -235,6 +249,9 @@ func (manager *CheckpointManager) PrecheckAnchorGuard() error {
 // failure leaves it un-ready so the next call re-verifies (operator fix self-heals).
 // HA startup preflight may still exit-and-restart; the lazy non-HA path honors
 // self-heal. Online index/collection drop requires a restart re-check.
+// Callers MUST hold ctxRecLock: the guard dereferences the delegate client, which
+// Get's error path closes/nils; without the manager lock a concurrent Get could
+// nil-deref the guard (#1052 review P1). Lock order is ctxRecLock -> guardLock.
 func (manager *CheckpointManager) ensureAnchorGuard(store ConditionalAnchorStore) error {
 	manager.guardLock.Lock()
 	defer manager.guardLock.Unlock()
@@ -251,6 +268,8 @@ func (manager *CheckpointManager) ensureAnchorGuard(store ConditionalAnchorStore
 // AdjustAnchor conditionally moves the durable anchor from expected to clamped
 // for the pending-initial protocol (#1052 HA P1). It runs under ctxRecLock and
 // talks to the delegate directly (never the public Get/Update, which re-lock).
+// The guard check is inside the same lock so the whole EnsureAnchorGuard -> Get
+// -> CAS/Create -> mirror-commit lifecycle shares one client lifecycle.
 // The confirmed in-memory ctx is the post-storage mirror, not the stale base, so
 // a later normal full-field Update cannot roll back another writer's metadata.
 // Conflict / WriteUncertain / ReadFailed never commit nor clear staged flags.
@@ -259,12 +278,11 @@ func (manager *CheckpointManager) AdjustAnchor(expected, clamped int64) (AnchorA
 	if !ok {
 		return AnchorGuardFailed, fmt.Errorf("checkpoint delegate lacks conditional anchor capability")
 	}
+	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
 	if err := manager.ensureAnchorGuard(store); err != nil {
 		return AnchorGuardFailed, err
 	}
-
-	manager.ctxRecLock.Lock()
-	defer manager.ctxRecLock.Unlock()
 
 	base, exist := manager.delegate.Get()
 	if base == nil {

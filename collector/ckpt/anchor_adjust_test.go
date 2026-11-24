@@ -3,6 +3,7 @@ package ckpt
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,8 +144,16 @@ func (s advancingCreateStore) CreateIfAbsent(doc bson.M) (*CheckpointContext, bo
 	if err != nil || !created {
 		return mirror, created, err
 	}
-	_, _ = s.conn.Client.Database(s.db).Collection("checkpoint").UpdateOne(context.Background(),
+	// Advance via the SAME majority-confirmed collection the production writer
+	// uses (mc.client is configured with majority write concern), and check the
+	// write result, so the advanced anchor is in the majority read view before the
+	// mirror read (default-write-concern + ignored error let 4.4 read the stale N1
+	// mirror and falsely report Adjusted).
+	res, werr := s.coll().UpdateOne(context.Background(),
 		bson.M{"name": "rs0"}, bson.M{"$set": bson.M{"ckpt": s.advanceTo}})
+	if werr != nil || res.MatchedCount != 1 {
+		return nil, true, fmt.Errorf("advance write not confirmed: matched=%d err=%v", res.MatchedCount, werr)
+	}
 	advanced, rerr := s.MongoCheckpoint.readMirror()
 	return advanced, true, rerr
 }
@@ -252,6 +261,33 @@ func TestAnchorGuardRetryableSelfHeal(t *testing.T) {
 	res, err := m.AdjustAnchor(InitCheckpoint, int64(1700000000)<<32)
 	require.NoError(t, err, "guard must re-verify and self-heal after fix")
 	require.Equal(t, AnchorAdjusted, res)
+}
+
+// P1 regression: the guard dereferences the delegate client that Get's error
+// path closes/nils. AdjustAnchor must run the guard under ctxRecLock so concurrent
+// Get/Update share one client lifecycle (no nil-deref panic). Run with -race.
+func TestAdjustAnchorConcurrentWithGetNoPanic(t *testing.T) {
+	mc, conn, db := newAnchorTestStore(t)
+	T := int64(1700000000) << 32
+	seedAnchor(t, conn, db, bson.M{"name": "rs0", "ckpt": T, "version": 2})
+	m := newAnchorTestManager(t, mc, db)
+	var wg sync.WaitGroup
+	for i := 0; i < 6; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 30; j++ {
+				_, _, _ = m.Get()
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 30; j++ {
+				_, _ = m.AdjustAnchor(T, T+int64(j)+1)
+			}
+		}()
+	}
+	wg.Wait() // must complete without panic or race
 }
 
 func createIdx(t *testing.T, mc *MongoCheckpoint, model mongo.IndexModel) {

@@ -87,3 +87,59 @@ func TestKeepQuorumSessionCloseIsRetrySignal(t *testing.T) {
 	err = keepQuorum(context.Background(), conn, fmt.Sprintf("ut_quorum_sc_%d", time.Now().UnixNano()))
 	require.ErrorIs(t, err, errSessionClose, "session close must signal retry, not return nil success")
 }
+
+// Cancel during active election I/O (master heartbeat updates), join, then prove
+// the heartbeat content freezes — counting documents alone cannot detect an
+// update to the same election doc (#1052 review P2).
+func TestBecomeMasterWithContextCancelDuringElectionIO(t *testing.T) {
+	isolateQuorumGlobals(t)
+	url := unit_test_common.TestUrl
+	db := fmt.Sprintf("ut_quorum_io_%d", time.Now().UnixNano())
+	conn, err := utils.NewMongoCommunityConn(url, utils.VarMongoConnectModePrimary, true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = conn.Client.Database(db).Drop(context.Background())
+		conn.Close()
+	})
+	coll := conn.Client.Database(db).Collection(QUORUM_COLLECTION)
+	heartbeat := func() int64 {
+		var doc bson.M
+		if err := coll.FindOne(context.Background(), bson.M{"_id": electionObjectId}).Decode(&doc); err != nil {
+			return 0
+		}
+		hb, _ := doc["heartbeat"].(int64)
+		return hb
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- BecomeMasterWithContext(ctx, url, db) }()
+	// wait until the heartbeat actually advances (election I/O is active)
+	var firstHB int64
+	deadline := time.Now().Add(25 * time.Second)
+	for time.Now().Before(deadline) {
+		hb := heartbeat()
+		if hb != 0 {
+			if firstHB == 0 {
+				firstHB = hb
+			} else if hb != firstHB {
+				break
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	require.NotZero(t, firstHB, "election never reached active heartbeat I/O")
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(20 * time.Second):
+		t.Fatal("did not return after cancel during election I/O")
+	}
+	// joined: heartbeat content must freeze (no further election writes)
+	hb1 := heartbeat()
+	time.Sleep(HeartBeatPeriod + 500*time.Millisecond)
+	hb2 := heartbeat()
+	require.Equal(t, hb1, hb2, "heartbeat kept updating after cancellation")
+}

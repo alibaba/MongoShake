@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
+	"github.com/alibaba/MongoShake/v2/collector/ckpt"
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	sourceReader "github.com/alibaba/MongoShake/v2/collector/reader"
 	utils "github.com/alibaba/MongoShake/v2/common"
@@ -148,4 +150,56 @@ func TestHADemotedFormerLeaderDoesNotWrite(t *testing.T) {
 	_ = r.EnsureNetwork()
 	require.Equal(t, future, durableCkpt(t, conn, db), "demoted leader must not write the shared checkpoint")
 	require.False(t, r.HasOpenCursor(), "demoted leader must not open the initial stream")
+}
+
+// commitThenFailStore commits the conditional write then reports a lost response,
+// injecting the "written but reply failed" fault at the storage boundary while
+// the production hook and first-read path run unchanged.
+type commitThenFailStore struct {
+	*ckpt.MongoCheckpoint
+	calls int
+}
+
+func (s *commitThenFailStore) AdjustFrom(expected int64, patch bson.M) (*ckpt.CheckpointContext, bool, error) {
+	mirror, adjusted, err := s.MongoCheckpoint.AdjustFrom(expected, patch)
+	s.calls++
+	if err != nil {
+		return mirror, adjusted, err
+	}
+	return mirror, adjusted, errors.New("injected: write committed but response lost")
+}
+
+func (s *commitThenFailStore) CreateIfAbsent(doc bson.M) (*ckpt.CheckpointContext, bool, error) {
+	return s.MongoCheckpoint.CreateIfAbsent(doc)
+}
+
+func (s *commitThenFailStore) EnsureAnchorGuard() error {
+	return s.MongoCheckpoint.EnsureAnchorGuard()
+}
+
+// T4: a committed-but-reply-failed adjustment must converge to the committed
+// durable anchor and continue, without re-persisting (#1052 v4 acceptance).
+func TestHACommittedButResponseFailedConverges(t *testing.T) {
+	quorum.AlwaysMaster()
+	future := (time.Now().Unix() + 3600) << 32
+	s, conn, db := newHAAnchorSyncer(t, future, false)
+	mc := s.ckptManager.Delegate().(*ckpt.MongoCheckpoint)
+	wrapper := &commitThenFailStore{MongoCheckpoint: mc}
+	s.ckptManager.SetDelegate(wrapper)
+	r := s.reader.(*sourceReader.OplogReader)
+	r.SetQueryTimestampOnEmpty(future)
+
+	// first attempt commits clamped then fails -> reader converges to durable
+	_ = r.EnsureNetwork()
+	clamped := durableCkpt(t, conn, db)
+	require.Greater(t, clamped, int64(0))
+	require.Less(t, clamped, future)
+	require.Equal(t, clamped, r.CurrentQueryTimestamp(), "must converge to the committed durable anchor")
+	require.Equal(t, 1, wrapper.calls)
+
+	// second attempt streams from the confirmed anchor, no re-persist
+	require.NoError(t, r.EnsureNetwork())
+	require.True(t, r.HasOpenCursor())
+	require.Equal(t, clamped, r.CurrentQueryTimestamp())
+	require.Equal(t, 1, wrapper.calls, "confirmed anchor must not be re-persisted")
 }
