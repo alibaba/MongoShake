@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
@@ -137,4 +139,27 @@ func TestCommandWriterDoCommandDDL(t *testing.T) {
 		names = append(names, idx["name"].(string))
 	}
 	assert.Contains(t, names, "x_1")
+}
+
+func TestCommandWriterUpdateOnInsertSecondaryDupDeleteAndRetry(t *testing.T) {
+	conn := cwConn(t)
+	db := cwColl(t, conn, "uoidup")
+	cw := &CommandWriter{conn: conn}
+	ctx := context.Background()
+
+	// unique secondary index so an upsert with a new _id but same x conflicts
+	_, err := conn.Client.Database(db).Collection("uoidup").Indexes().CreateOne(ctx,
+		mongo.IndexModel{Keys: bson.D{primitive.E{Key: "x", Value: 1}},
+			Options: options.Index().SetUnique(true).SetName("x_1")})
+	require.NoError(t, err)
+	require.NoError(t, cw.doInsert(db, "uoidup", bson.E{}, []*OplogRecord{mockOplogRecord(1, 1, 0)}, false))
+
+	saved := conf.Options.IncrSyncExecutorDupKeyStrategy
+	conf.Options.IncrSyncExecutorDupKeyStrategy = utils.VarIncrSyncExecutorDupKeyStrategyDeleteAndRetry
+	t.Cleanup(func() { conf.Options.IncrSyncExecutorDupKeyStrategy = saved })
+
+	// new _id=2 with x=1 conflicts on x_1; delete_and_retry removes _id=1 then upserts
+	require.NoError(t, cw.doUpdateOnInsert(db, "uoidup", bson.E{}, []*OplogRecord{mockOplogRecord(2, 1, 0)}, true))
+	assert.Equal(t, int64(1), count(t, conn, db, "uoidup", bson.M{"_id": 2}))
+	assert.Equal(t, int64(0), count(t, conn, db, "uoidup", bson.M{"_id": 1}))
 }
