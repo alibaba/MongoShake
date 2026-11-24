@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/x/mongo/driver/connstring"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
@@ -38,7 +40,9 @@ func newWindowTestReader(t *testing.T, ts int64) *OplogReader {
 	conf.Options.MongoConnectMode = utils.VarMongoConnectModePrimary
 	or := NewOplogReader(unit_test_common.TestUrl, "ut_oplog_window")
 	or.UpdateQueryTimestamp(ts)
-	or.SetAnchorPersistHook(func(int64) error { return nil })
+	or.initialTs = ts
+	or.SetAnchorPersistHook(func(int64, int64) (AnchorPersistOutcome, error) { return PersistOK, nil })
+	or.SetInitialProtocolInjections(nil, func() (int64, bool, error) { return ts, true, nil }, ts)
 	t.Cleanup(func() {
 		or.releaseCursor()
 		if or.conn != nil {
@@ -187,7 +191,7 @@ func TestOplogReaderFirstReadClampsFuturePosition(t *testing.T) {
 	future := (time.Now().Unix() + 3600) << 32
 	or := newWindowTestReader(t, future)
 	var persisted int64
-	or.SetAnchorPersistHook(func(ts int64) error { persisted = ts; return nil })
+	or.SetAnchorPersistHook(func(_, clamped int64) (AnchorPersistOutcome, error) { persisted = clamped; return PersistOK, nil })
 
 	if err := or.EnsureNetwork(); err != nil {
 		t.Fatalf("first read with a future position failed: %v", err)
@@ -289,7 +293,9 @@ func TestOplogReaderLaterReadDoesNotClampFuturePosition(t *testing.T) {
 func TestOplogReaderFirstReadClampBlocksOnPersistFailure(t *testing.T) {
 	future := (time.Now().Unix() + 3600) << 32
 	or := newWindowTestReader(t, future)
-	or.SetAnchorPersistHook(func(int64) error { return errors.New("checkpoint storage unavailable") })
+	or.SetAnchorPersistHook(func(int64, int64) (AnchorPersistOutcome, error) {
+		return PersistUncertain, errors.New("checkpoint storage unavailable")
+	})
 
 	err := or.EnsureNetwork()
 	if err == nil {
@@ -306,7 +312,7 @@ func TestOplogReaderFirstReadClampBlocksOnPersistFailure(t *testing.T) {
 	}
 
 	var persisted int64
-	or.SetAnchorPersistHook(func(ts int64) error { persisted = ts; return nil })
+	or.SetAnchorPersistHook(func(_, clamped int64) (AnchorPersistOutcome, error) { persisted = clamped; return PersistOK, nil })
 	if err := or.EnsureNetwork(); err != nil {
 		t.Fatalf("retry after persistence recovery failed: %v", err)
 	}
@@ -335,14 +341,16 @@ func TestOplogReaderFirstReadNoHookKeepsFuturePosition(t *testing.T) {
 	}
 }
 
-func newDecisionTestReader(t *testing.T, query int64, hook func(int64) error) *OplogReader {
+func newDecisionTestReader(t *testing.T, query int64, hook func(int64, int64) (AnchorPersistOutcome, error)) *OplogReader {
 	t.Helper()
 	if l.Logger == nil {
 		assert.NoError(t, utils.InitialLogger("", "", "error", true, 2))
 	}
 	or := NewOplogReader("mongodb://127.0.0.1:1", "ut_decision")
 	or.UpdateQueryTimestamp(query)
+	or.initialTs = query
 	or.SetAnchorPersistHook(hook)
+	or.SetInitialProtocolInjections(nil, func() (int64, bool, error) { return query, true, nil }, query)
 	return or
 }
 
@@ -374,12 +382,12 @@ func TestApplyFuturePositionDecision(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var persisted int64
-			hook := func(ts int64) error {
+			hook := func(_, clamped int64) (AnchorPersistOutcome, error) {
 				if c.hookFails {
-					return errors.New("storage unavailable")
+					return PersistUncertain, errors.New("storage unavailable")
 				}
-				persisted = ts
-				return nil
+				persisted = clamped
+				return PersistOK, nil
 			}
 			if c.noHook {
 				hook = nil
@@ -418,7 +426,7 @@ func TestAdjustFutureStartPositionUsesPrimaryProbe(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var persisted int64
-			or := newDecisionTestReader(t, c.query, func(ts int64) error { persisted = ts; return nil })
+			or := newDecisionTestReader(t, c.query, func(_, clamped int64) (AnchorPersistOutcome, error) { persisted = clamped; return PersistOK, nil })
 			or.servingProbe = func() int64 { return serving }
 			or.primaryProbe = func() int64 { return c.primary }
 			err := or.adjustFutureStartPosition()
@@ -500,5 +508,182 @@ func TestPrimaryProbeURLPreservesCredentials(t *testing.T) {
 				t.Fatalf("authMechanism lost: %q, want %q", cs.AuthMechanism, c.wantMech)
 			}
 		})
+	}
+}
+
+// Conflict converges to the current durable anchor (fetcher-executed), not a
+// blind retry with the stale query (#1052 v3 review P1-3).
+func TestConvergeConflictToDurable(t *testing.T) {
+	serving := int64(1700000000) << 32
+	primary := serving + 50
+	T := primary + 100
+	N1 := serving + 10
+	or := newDecisionTestReader(t, T, func(int64, int64) (AnchorPersistOutcome, error) { return PersistConflict, nil })
+	or.durableRead = func() (int64, bool, error) { return N1, true, nil }
+	err := or.applyFuturePositionDecision(T, serving, primary)
+	if err == nil {
+		t.Fatal("conflict must end the current initialization attempt")
+	}
+	if again := or.getQueryTimestamp(); again != N1 {
+		t.Fatalf("conflict did not converge to durable: %v != %v", again, N1)
+	}
+	if !or.firstRead || or.initState != stateInitializing {
+		t.Fatalf("convergence must rebuild initial state: firstRead=%v state=%v", or.firstRead, or.initState)
+	}
+}
+
+// Ownership gates the S1 entry before any probe; regaining ownership re-reads
+// durable instead of streaming from a stale valid query (#1052 v3 review P1-2).
+func TestOwnerGateBlocksAndRecovers(t *testing.T) {
+	serving := int64(1700000000) << 32
+	T := serving + 300
+	N1 := serving + 10
+	or := newDecisionTestReader(t, T, func(int64, int64) (AnchorPersistOutcome, error) { return PersistOK, nil })
+	owner := false
+	or.ownerCheck = func() bool { return owner }
+	probeCalls := 0
+	or.servingProbe = func() int64 { probeCalls++; return serving }
+	or.primaryProbe = func() int64 { return serving + 200 }
+	or.durableRead = func() (int64, bool, error) { return N1, true, nil }
+	if err := or.adjustFutureStartPosition(); err == nil {
+		t.Fatal("non-owner must not initialize the anchor")
+	}
+	if probeCalls != 0 {
+		t.Fatalf("serving probe must not run while not the owner: calls=%d", probeCalls)
+	}
+	if or.initState != stateAwaitOwner {
+		t.Fatalf("expected AwaitOwner, got %v", or.initState)
+	}
+	owner = true
+	if err := or.adjustFutureStartPosition(); err != nil {
+		t.Fatalf("regained owner should initialize from durable: %v", err)
+	}
+	if again := or.getQueryTimestamp(); again != N1 {
+		t.Fatalf("regained owner must rebuild from durable N1: %v != %v", again, N1)
+	}
+}
+
+// T6a: a generation bump during the probes aborts before any conditional write.
+func TestGenPreCancelIssuesNoWrite(t *testing.T) {
+	serving := int64(1700000000) << 32
+	T := serving + 300
+	hookCalled := false
+	or := newDecisionTestReader(t, T, func(int64, int64) (AnchorPersistOutcome, error) { hookCalled = true; return PersistOK, nil })
+	or.servingProbe = func() int64 { return serving }
+	or.primaryProbe = func() int64 { or.bumpGen(); return serving + 200 }
+	or.durableRead = func() (int64, bool, error) { return serving + 10, true, nil }
+	if err := or.adjustFutureStartPosition(); err == nil {
+		t.Fatal("pre-cancel must end the attempt")
+	}
+	if hookCalled {
+		t.Fatal("pre-cancel must not issue the conditional write")
+	}
+	if again := or.getQueryTimestamp(); again != serving+10 {
+		t.Fatalf("pre-cancel must converge to durable: %v", again)
+	}
+}
+
+// T6b: a generation bump after the hook returned cannot promise "no write"; the
+// outcome is treated as uncertain and the stale decision must not open the stream.
+func TestGenPostCancelConverges(t *testing.T) {
+	serving := int64(1700000000) << 32
+	T := serving + 300
+	or := newDecisionTestReader(t, T, nil)
+	or.SetAnchorPersistHook(func(int64, int64) (AnchorPersistOutcome, error) { or.bumpGen(); return PersistOK, nil })
+	or.servingProbe = func() int64 { return serving }
+	or.primaryProbe = func() int64 { return serving + 200 }
+	or.durableRead = func() (int64, bool, error) { return serving + 10, true, nil }
+	if err := or.adjustFutureStartPosition(); err == nil {
+		t.Fatal("post-cancel must converge, not confirm the stale clamp")
+	}
+	if again := or.getQueryTimestamp(); again != serving+10 {
+		t.Fatalf("post-cancel must re-read durable, not keep clamped=%v: got %v", serving, again)
+	}
+}
+
+// T11 (branch 1): a Find failure leaves the reader in S1; the retry keeps the
+// confirmed anchor and does not persist a second time (#1052 v3 review P2-3).
+func TestFindFailureRetryKeepsConfirmedAnchor(t *testing.T) {
+	future := (time.Now().Unix() + 3600) << 32
+	or := newWindowTestReader(t, future)
+	persistCount := 0
+	or.SetAnchorPersistHook(func(_, clamped int64) (AnchorPersistOutcome, error) { persistCount++; return PersistOK, nil })
+	failOnce := true
+	or.findOverride = func(ctx context.Context, q bson.M, opts *options.FindOptions) (*mongo.Cursor, error) {
+		if failOnce {
+			failOnce = false
+			return nil, errors.New("injected Find failure")
+		}
+		return or.conn.Client.Database(localDB).Collection(utils.OplogNS).Find(ctx, q, opts)
+	}
+	if err := or.EnsureNetwork(); err == nil {
+		t.Fatal("injected Find failure must abort the attempt")
+	}
+	if !or.firstRead || or.oplogsCursor != nil {
+		t.Fatal("Find failure must leave S1 (firstRead=true, no cursor)")
+	}
+	clamped := or.getQueryTimestamp()
+	if clamped >= future {
+		t.Fatalf("anchor was not clamped before Find: %v", clamped)
+	}
+	if err := or.EnsureNetwork(); err != nil {
+		t.Fatalf("retry after Find failure failed: %v", err)
+	}
+	if or.firstRead {
+		t.Fatal("Find success must enter S2")
+	}
+	if persistCount != 1 {
+		t.Fatalf("confirmed anchor must not persist again on retry: count=%d", persistCount)
+	}
+	if again := or.getQueryTimestamp(); again != clamped {
+		t.Fatalf("retry re-clamped the confirmed anchor: %v != %v", again, clamped)
+	}
+}
+
+// T11 (branch 2): the retry may reconnect to a MORE lagging serving member
+// (serving newest < N1 <= primary newest); the valid anchor N1 is kept, no
+// second clamp/persist (#1052 v4 review addition 2).
+func TestFindFailureRetryLaggingServingKeepsAnchor(t *testing.T) {
+	future := (time.Now().Unix() + 3600) << 32
+	or := newWindowTestReader(t, future)
+	persistCount := 0
+	or.SetAnchorPersistHook(func(_, clamped int64) (AnchorPersistOutcome, error) { persistCount++; return PersistOK, nil })
+	failOnce := true
+	or.findOverride = func(ctx context.Context, q bson.M, opts *options.FindOptions) (*mongo.Cursor, error) {
+		if failOnce {
+			failOnce = false
+			return nil, errors.New("injected Find failure")
+		}
+		return or.conn.Client.Database(localDB).Collection(utils.OplogNS).Find(ctx, q, opts)
+	}
+	if err := or.EnsureNetwork(); err == nil {
+		t.Fatal("injected Find failure must abort the attempt")
+	}
+	clamped := or.getQueryTimestamp()
+	// reconnect to a lagging serving member: serving newest < N1 <= primary newest
+	or.servingProbe = func() int64 { return clamped - 100 }
+	or.primaryProbe = func() int64 { return clamped + 100 }
+	if err := or.EnsureNetwork(); err != nil {
+		t.Fatalf("retry against lagging serving failed: %v", err)
+	}
+	if again := or.getQueryTimestamp(); again != clamped {
+		t.Fatalf("lagging serving must keep valid anchor N1: %v != %v", again, clamped)
+	}
+	if persistCount != 1 {
+		t.Fatalf("valid anchor ahead of lagging serving must not re-persist: count=%d", persistCount)
+	}
+}
+
+// T12: S2 begins at Find success, not at first payload delivery.
+func TestS2BoundaryIsFindSuccessNotDelivery(t *testing.T) {
+	or := newWindowTestReader(t, 1<<32)
+	if err := or.EnsureNetwork(); err != nil {
+		t.Fatalf("first read failed: %v", err)
+	}
+	if or.firstRead {
+		t.Fatal("Find success must enter S2 (firstRead=false)")
+	}
+	if or.delivered.Load() {
+		t.Fatal("no payload delivered yet (no fetcher); S2 must not depend on delivery")
 	}
 }

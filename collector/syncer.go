@@ -173,11 +173,38 @@ func NewOplogSyncer(
 
 	// A future starting point may only be clamped once the adjusted anchor is
 	// durable; otherwise a restart reloads the future checkpoint, clamps to a
-	// later newest and skips the gap (#1052 review P1).
+	// later newest and skips the gap (#1052 review P1). The hook fences stale
+	// decisions with a conditional write and refuses to write once leadership is
+	// lost; non-OK outcomes converge the reader to the current durable anchor
+	// (#1052 HA P1).
 	if oplogReader, ok := reader.(*sourceReader.OplogReader); ok {
-		oplogReader.SetAnchorPersistHook(func(ts int64) error {
-			return syncer.ckptManager.Update(ts)
+		oplogReader.SetAnchorPersistHook(func(originalTs, clampedTs int64) (sourceReader.AnchorPersistOutcome, error) {
+			if !quorum.IsMaster() {
+				return sourceReader.PersistNotOwner, nil
+			}
+			res, err := syncer.ckptManager.AdjustAnchor(originalTs, clampedTs)
+			switch res {
+			case ckpt.AnchorAdjusted:
+				return sourceReader.PersistOK, nil
+			case ckpt.AnchorConflict:
+				return sourceReader.PersistConflict, nil
+			case ckpt.AnchorGuardFailed:
+				return sourceReader.PersistGuardFailed, err
+			default: // AnchorReadFailed / AnchorWriteUncertain -> converge via re-read
+				return sourceReader.PersistUncertain, err
+			}
 		})
+		var initTs int64
+		if v, ok := startPosition.(int64); ok {
+			initTs = v
+		}
+		oplogReader.SetInitialProtocolInjections(quorum.IsMaster, func() (int64, bool, error) {
+			c, exist, err := syncer.ckptManager.Get()
+			if err != nil || c == nil {
+				return 0, false, err
+			}
+			return c.Timestamp, exist, nil
+		}, initTs)
 	}
 
 	// concurrent level hasher

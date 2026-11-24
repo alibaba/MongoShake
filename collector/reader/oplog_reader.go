@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -39,6 +40,29 @@ var TimeoutError = errors.New("read next log timeout, It shouldn't be happen")
 var CollectionCappedError = errors.New("collection capped error")
 var CollectionCappedFatalError = errors.New("collection capped error persists after max retries, fatal")
 
+// AnchorPersistOutcome is the result of the durable anchor hook. Conflict /
+// NotOwner / Uncertain / GuardFailed are NOT success: the reader discards the
+// pending decision and converges to the current durable anchor (#1052 HA P1).
+type AnchorPersistOutcome int
+
+const (
+	PersistOK AnchorPersistOutcome = iota
+	PersistConflict
+	PersistNotOwner
+	PersistUncertain
+	PersistGuardFailed
+)
+
+// initSubState tracks the pending-initial protocol (S1). S2 (normal cursor)
+// begins at Find success, not at first payload (#1052 v3 review P2-3).
+type initSubState int
+
+const (
+	stateInitializing initSubState = iota
+	stateNeedDurableReload
+	stateAwaitOwner
+)
+
 // OplogReader represents stream reader from mongodb that specified
 // by an url. And with query options. user can iterate oplogs.
 type OplogReader struct {
@@ -65,13 +89,36 @@ type OplogReader struct {
 
 	// anchorPersist durably records an adjusted starting point before the
 	// clamped stream flows. Without it a restart would forget the adjustment
-	// and skip the gap (#1052 review P1), so no hook means no clamp.
-	anchorPersist func(int64) error
+	// and skip the gap (#1052 review P1), so no hook means no clamp. It carries
+	// the original anchor the decision was based on so the storage layer can
+	// fence stale decisions with a conditional write.
+	anchorPersist func(originalTs, clampedTs int64) (AnchorPersistOutcome, error)
+
+	// pending-initial protocol injections (#1052 HA P1). ownerCheck gates the
+	// S1 entry on leadership; durableRead re-reads the durable anchor for
+	// convergence; initialTs is the configured start for the no-record case.
+	ownerCheck  func() bool
+	durableRead func() (ts int64, exist bool, err error)
+	initialTs   int64
+	initState   initSubState
+
+	// initGen is a local cancellation token for the in-flight initial attempt.
+	// It is NOT a cross-process epoch (storage CAS/unique index fences owners).
+	genLock sync.Mutex
+	initGen uint64
+
+	// delivered observes the first real oplog payload (assertions only; the S2
+	// boundary is Find success, not delivery).
+	delivered atomic.Bool
 
 	// probe overrides for tests; nil means the real probes. The serving !=
 	// primary semantics cannot be exercised on single-node fixtures otherwise.
 	servingProbe func() int64
 	primaryProbe func() int64
+
+	// findOverride injects the Find boundary for tests (e.g. a one-shot failure);
+	// nil means the real oplog Find.
+	findOverride func(ctx context.Context, query bson.M, opts *options.FindOptions) (*mongo.Cursor, error)
 }
 
 // NewOplogReader creates reader with mongodb url
@@ -100,6 +147,7 @@ func (or *OplogReader) SetQueryTimestampOnEmpty(ts interface{}) {
 	tsB := ts.(int64)
 	if _, exist := or.query[QueryTs]; !exist {
 		l.Logger.Infof("set query timestamp: %v", utils.ExtractTimestampForLog(tsB))
+		or.initialTs = tsB
 		or.UpdateQueryTimestamp(tsB)
 	}
 }
@@ -112,14 +160,46 @@ func (or *OplogReader) UpdateQueryTimestamp(ts int64) {
 }
 
 // SetAnchorPersistHook installs the durable writer for an adjusted starting
-// point. The syncer wires it to the checkpoint manager; the hook must persist
-// synchronously and return an error when persistence fails.
-func (or *OplogReader) SetAnchorPersistHook(hook func(int64) error) {
+// point. The syncer wires it to the checkpoint manager's conditional AdjustAnchor;
+// the hook reports Conflict/NotOwner/Uncertain/GuardFailed so the reader converges
+// to the current durable anchor instead of streaming from a stale decision.
+func (or *OplogReader) SetAnchorPersistHook(hook func(originalTs, clampedTs int64) (AnchorPersistOutcome, error)) {
 	or.anchorPersist = hook
+}
+
+// SetInitialProtocolInjections wires the pending-initial protocol dependencies.
+// ownerCheck nil means always-owner (non-quorum); durableRead nil disables
+// convergence (the reader then blocks on any non-OK hook outcome).
+func (or *OplogReader) SetInitialProtocolInjections(ownerCheck func() bool, durableRead func() (int64, bool, error), initialTs int64) {
+	or.ownerCheck = ownerCheck
+	or.durableRead = durableRead
+	or.initialTs = initialTs
+}
+
+func (or *OplogReader) currentGen() uint64 {
+	or.genLock.Lock()
+	defer or.genLock.Unlock()
+	return or.initGen
+}
+
+func (or *OplogReader) bumpGen() {
+	or.genLock.Lock()
+	or.initGen++
+	or.genLock.Unlock()
 }
 
 func (or *OplogReader) getQueryTimestamp() int64 {
 	return utils.TimeStampToInt64(or.query[QueryTs].(bson.M)[QueryOpGT].(primitive.Timestamp))
+}
+
+// CurrentQueryTimestamp reports the active query anchor (observability / tests).
+func (or *OplogReader) CurrentQueryTimestamp() int64 {
+	return or.getQueryTimestamp()
+}
+
+// HasOpenCursor reports whether a cursor is currently open (observability / tests).
+func (or *OplogReader) HasOpenCursor() bool {
+	return or.oplogsCursor != nil
 }
 
 // Next returns an oplog by raw bytes which is []byte
@@ -221,6 +301,7 @@ func (or *OplogReader) fetcher() {
 
 		// successfully read data, reset capped error counter
 		or.cappedErrorCount = 0
+		or.delivered.Store(true)
 		or.oplogChan <- &retOplog{cloneOplogRaw(or.oplogsCursor.Current), nil}
 	}
 }
@@ -287,15 +368,23 @@ func (or *OplogReader) EnsureNetwork() (err error) {
 		l.Logger.Warnf("oplog_reader current starting point[%v] is smaller than the oldest timestamp[%v]!",
 			utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(oldestTs))
 	}
-	or.firstRead = false
 
-	or.oplogsCursor, err = or.conn.Client.Database(localDB).Collection(utils.OplogNS).Find(context.Background(),
-		or.query, findOptions)
+	if or.findOverride != nil {
+		or.oplogsCursor, err = or.findOverride(context.Background(), or.query, findOptions)
+	} else {
+		or.oplogsCursor, err = or.conn.Client.Database(localDB).Collection(utils.OplogNS).Find(context.Background(),
+			or.query, findOptions)
+	}
 	if or.oplogsCursor == nil || err != nil {
 		err = fmt.Errorf("oplog_reader Find mongo instance [%s] error. %s", or.src, err.Error())
 		l.Logger.Warnf("oplog_reader failed err[%v] or.query[%v]", err, or.query)
 		return err
 	}
+	// S2 begins at Find success (initial protocol confirmed), NOT at first
+	// payload. Flipping firstRead only here means a Find failure leaves the
+	// reader in S1, so a retry re-runs the initial gate without re-clamping a
+	// confirmed anchor (#1052 v3 review P2-3).
+	or.firstRead = false
 
 	l.Logger.Infof("%s generates new cursor query[%v]", or.String(), or.query)
 
@@ -314,11 +403,36 @@ func clampFuturePosition(queryTs, servingNewest, primaryNewest int64) int64 {
 	return queryTs
 }
 
-// adjustFutureStartPosition runs on the first read only. When the starting
+// adjustFutureStartPosition runs on the first read only (S1). When the starting
 // point is genuinely future, it persists the adjusted anchor BEFORE any oplog
 // flows: a volatile-only clamp is forgotten on restart, which then clamps to a
-// later newest and skips everything in between (#1049, #1052 review P1).
+// later newest and skips everything in between (#1049, #1052 review P1). The
+// pending-initial protocol gates on ownership and converges stale decisions to
+// the current durable anchor (#1052 HA P1).
 func (or *OplogReader) adjustFutureStartPosition() error {
+	// S1 entry gate: ownership before any probe/Find. A non-owner must not enter
+	// Streaming just because its query happens to be valid (#1052 v3 review P1-2).
+	if or.ownerCheck != nil && !or.ownerCheck() {
+		or.initState = stateAwaitOwner
+		return fmt.Errorf("oplog_reader not the quorum leader, awaiting ownership before initializing the anchor")
+	}
+	if or.initState == stateAwaitOwner {
+		or.initState = stateNeedDurableReload // regained ownership: re-read durable first
+	}
+	if or.initState == stateNeedDurableReload {
+		ts, exist, err := or.readDurable()
+		if err != nil {
+			return fmt.Errorf("oplog_reader durable reload pending, no probe/write this attempt: %w", err)
+		}
+		if exist {
+			or.UpdateQueryTimestamp(ts)
+		} else {
+			or.UpdateQueryTimestamp(or.initialTs)
+		}
+		or.initState = stateInitializing
+	}
+
+	genAtStart := or.currentGen()
 	newestTs := or.getNewestTimestamp()
 	queryTs := or.getQueryTimestamp()
 	if newestTs <= 0 {
@@ -341,6 +455,11 @@ func (or *OplogReader) adjustFutureStartPosition() error {
 		// DNS, auth and TLS failures apart (review M2).
 		return fmt.Errorf("oplog_reader primary newest probe failed, starting point[%v] ahead of serving newest[%v]: %w — retry",
 			utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(newestTs), probeErr)
+	}
+	// pre-cancel: a local generation bump during the probes aborts before any
+	// conditional write is issued (#1052 v4 review T6a).
+	if or.currentGen() != genAtStart {
+		return or.discardAndRebuildInitialAnchor(PersistUncertain, nil)
 	}
 	return or.applyFuturePositionDecision(queryTs, newestTs, primaryTs)
 }
@@ -373,17 +492,55 @@ func (or *OplogReader) applyFuturePositionDecision(queryTs, servingNewest, prima
 			or.String(), utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(servingNewest))
 		return nil
 	}
-	if err := or.anchorPersist(clamped); err != nil {
-		return fmt.Errorf("oplog_reader persist adjusted starting point[%v] failed: %w",
-			utils.ExtractTimestampForLog(clamped), err)
+	genAtDecision := or.currentGen()
+	outcome, err := or.anchorPersist(queryTs, clamped)
+	// post-cancel: the write may already have committed, so this cannot promise
+	// "no write"; treat as uncertain, forbid opening the stream from the stale
+	// decision, and re-read durable to confirm (#1052 v4 review T6b).
+	if or.currentGen() != genAtDecision {
+		outcome = PersistUncertain
 	}
-	l.Logger.Warnf("oplog_reader current starting point[%v] is bigger than the newest timestamp[%v], adjust the starting point to the newest and persist it",
-		utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(servingNewest))
-	// write back so the Find below and any later cursor rebuild use the
-	// adjusted anchor; waiting at the future point would silently skip
-	// every change between newest and it (#1049).
-	or.UpdateQueryTimestamp(clamped)
-	return nil
+	if outcome == PersistOK && err == nil {
+		l.Logger.Warnf("oplog_reader current starting point[%v] is bigger than the newest timestamp[%v], adjust the starting point to the newest and persist it",
+			utils.ExtractTimestampForLog(queryTs), utils.ExtractTimestampForLog(servingNewest))
+		// write back so the Find below and any later cursor rebuild use the
+		// adjusted anchor; waiting at the future point would silently skip
+		// every change between newest and it (#1049).
+		or.UpdateQueryTimestamp(clamped)
+		return nil
+	}
+	return or.discardAndRebuildInitialAnchor(outcome, err)
+}
+
+// discardAndRebuildInitialAnchor is the convergence transition executed by the
+// fetcher itself on any non-OK hook outcome: discard the pending decision,
+// re-read the durable anchor, and rebuild the initial start. It does NOT depend
+// on poll re-entry, and never re-issues a conditional write with the stale query
+// (#1052 v3 review P1-3). A failed re-read leaves NeedDurableReload so the next
+// attempt only re-reads.
+func (or *OplogReader) discardAndRebuildInitialAnchor(outcome AnchorPersistOutcome, cause error) error {
+	or.bumpGen()
+	or.releaseCursor()
+	or.initState = stateNeedDurableReload
+	ts, exist, err := or.readDurable()
+	if err != nil {
+		return fmt.Errorf("oplog_reader initial anchor discarded (outcome=%d), durable reload failed: %w", outcome, err)
+	}
+	if exist {
+		or.UpdateQueryTimestamp(ts)
+	} else {
+		or.UpdateQueryTimestamp(or.initialTs)
+	}
+	or.firstRead = true
+	or.initState = stateInitializing
+	return fmt.Errorf("oplog_reader initial anchor discarded (outcome=%d), rebuilt from durable=%d exist=%v: %v", outcome, ts, exist, cause)
+}
+
+func (or *OplogReader) readDurable() (int64, bool, error) {
+	if or.durableRead == nil {
+		return 0, false, errors.New("no durable reader injected for convergence")
+	}
+	return or.durableRead()
 }
 
 // get newest oplog

@@ -44,6 +44,13 @@ func (sync *OplogSyncer) initCheckpoint() {
 	if err := sync.loadCheckpoint(); err != nil {
 		l.Logger.Panicf("%v", err)
 	}
+	// HA startup preflight: the conditional anchor path requires a covering
+	// unique index; fail fast on a misconfigured store (#1052 HA P1, O2).
+	if conf.Options.MasterQuorum {
+		if err := sync.ckptManager.PrecheckAnchorGuard(); err != nil {
+			l.Logger.Panicf("HA anchor guard preflight failed: %v", err)
+		}
+	}
 	// publish checkpoint readiness to the parallel-mode backfill (#1050 B1)
 	close(sync.ckptReady)
 }
