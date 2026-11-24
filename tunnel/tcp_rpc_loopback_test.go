@@ -60,13 +60,10 @@ func TestTCPLoopbackRoundTrip(t *testing.T) {
 	rep := &captureReplayer{reply: ReplyOK}
 	reader := &TCPReader{listenAddress: fmt.Sprintf("127.0.0.1:%d", port)}
 	require.NoError(t, reader.Link([]Replayer{rep}))
-	t.Cleanup(func() {
-		for _, ch := range reader.channel {
-			if ch != nil && ch.listener != nil {
-				_ = ch.listener.Close()
-			}
-		}
-	})
+	// Do NOT close the listeners in cleanup: Link's acceptors run in
+	// nimo.GoRoutineInLoop (a for{} with no backoff), so a closed listener makes
+	// AcceptTCP fail instantly and the loop hot-spins, flooding the log. Leaving
+	// them open blocks in Accept instead; the test binary's exit reclaims them.
 
 	writer := &TCPWriter{RemoteAddr: fmt.Sprintf("127.0.0.1:%d", port)}
 	require.True(t, writer.Prepare())

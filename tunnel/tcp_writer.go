@@ -193,7 +193,12 @@ func (writer *TCPWriter) pollRemoteAckValue() {
 		nimo.AssertTrue(result.length == uint32(len(result.payload)) && len(result.payload) != 0,
 			"acker receive bad payload queryAck")
 		var ack int64
-		binary.Read(bytes.NewBuffer(result.payload), binary.BigEndian, &ack)
+		if err := binary.Read(bytes.NewBuffer(result.payload), binary.BigEndian, &ack); err != nil {
+			// malformed/short ack payload: keep the previous value rather than
+			// storing a partial zero (0 == ReplyOK would reset the ack LSN)
+			tcpErrorAndRelease(tcp, err.Error())
+			return
+		}
 		atomic.StoreInt64(&writer.ack, ack)
 	})
 }

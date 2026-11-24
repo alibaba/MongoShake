@@ -19,6 +19,11 @@ const coverageFlushInterval = 5 * time.Second
 // binary built with -cover -covermode=atomic (the runtime rejects set mode
 // because counters are read while the program runs) and a toolchain providing
 // runtime/coverage.
+//
+// Each WriteCountersDir call emits a NEW timestamped file, so a long-lived
+// process with GOCOVERDIR set accumulates one file per interval without bound.
+// That is acceptable for test runs (the directory is a per-run temp dir) but is
+// why this must stay off in production.
 func StartCoverageFlush() {
 	dir := os.Getenv("GOCOVERDIR")
 	if dir == "" {

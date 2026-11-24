@@ -75,9 +75,13 @@ func TestPromotionAndNetAddr(t *testing.T) {
 	require.True(t, ok)
 	assert.InDelta(t, time.Now().Unix(), hb, 5)
 
+	// getNetAddr returns a non-loopback IPv4 or "error" on a loopback-only host;
+	// don't pin the host's NIC layout, just exercise the path.
 	addr := getNetAddr()
-	assert.NotEqual(t, "error", addr, "host has a non-loopback IPv4")
-	assert.NotContains(t, addr, "127.0.0.1")
+	assert.NotEmpty(t, addr)
+	if addr != "error" {
+		assert.NotContains(t, addr, "127.0.0.1")
+	}
 }
 
 func TestMakeSessionBadURIFailsFast(t *testing.T) {

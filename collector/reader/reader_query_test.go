@@ -20,7 +20,6 @@ func TestOplogReaderNameAndString(t *testing.T) {
 
 func TestOplogReaderQueryTimestamp(t *testing.T) {
 	or := &OplogReader{query: bson.M{}}
-	ts := utils.Int64ToTimestamp(1234567890)
 	or.SetQueryTimestampOnEmpty(int64(1234567890))
 	assert.Equal(t, int64(1234567890), or.getQueryTimestamp())
 
@@ -32,7 +31,6 @@ func TestOplogReaderQueryTimestamp(t *testing.T) {
 	or.UpdateQueryTimestamp(42)
 	assert.Equal(t, int64(42), or.getQueryTimestamp())
 	assert.Equal(t, bson.M{QueryOpGT: utils.Int64ToTimestamp(42)}, or.query[QueryTs])
-	_ = ts
 }
 
 func TestOplogReaderFetchNewestTimestampNotImplemented(t *testing.T) {

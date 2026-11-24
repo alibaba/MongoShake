@@ -75,8 +75,10 @@ func TestFileReaderRoundTrip(t *testing.T) {
 }
 
 func TestFileReaderReplayerRejections(t *testing.T) {
-	// every rejection arm must be survivable: the reader logs and keeps going
-	// instead of crashing or silently dropping the block.
+	// Verifies the block is still delivered when the replayer rejects it (the
+	// reader must not crash or drop it). The per-code logging arms themselves are
+	// not asserted: a rejection makes recvTransfer retry forever, so observing a
+	// second delivery would hot-spin; delivery-once is the safe observable.
 	for _, reply := range []int64{ReplyChecksumInvalid, ReplyRetransmission,
 		ReplyCompressorNotSupported, ReplyNetworkOpFail, ReplyError, ReplyServerFault} {
 		path := copyOplogFile(t)

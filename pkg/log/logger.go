@@ -321,8 +321,15 @@ func (l *ZapLogger) Close() error {
 		return nil
 	}
 
-	syncErr := l.Sync()
-	if s := l.state.Load(); s != nil && s.closers != nil {
+	// Load once so Sync and the closer stop act on the same generation; two
+	// loads could Sync generation N but stop generation N+1's closers if a New
+	// lands between them.
+	s := l.state.Load()
+	var syncErr error
+	if s != nil && s.sugared != nil {
+		syncErr = s.sugared.Sync()
+	}
+	if s != nil && s.closers != nil {
 		s.closers.once.Do(func() {
 			for _, stop := range s.closers.stop {
 				if stopErr := stop(); syncErr == nil && stopErr != nil {
