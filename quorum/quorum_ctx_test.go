@@ -3,6 +3,7 @@ package quorum
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"testing"
 	"time"
 
@@ -142,4 +143,78 @@ func TestBecomeMasterWithContextCancelDuringElectionIO(t *testing.T) {
 	time.Sleep(HeartBeatPeriod + 500*time.Millisecond)
 	hb2 := heartbeat()
 	require.Equal(t, hb1, hb2, "heartbeat kept updating after cancellation")
+}
+
+// Cancel while a real election Mongo operation is blocked in flight (private view
+// with a slow JS projection; currentOp is the barrier). Passing Background instead
+// of ctx to the Mongo ops would ignore cancellation and fail this test (#1052 P2).
+func TestBecomeMasterWithContextCancelDuringBlockedIO(t *testing.T) {
+	isolateQuorumGlobals(t)
+	dbName := fmt.Sprintf("ut_quorum_blocked_%d", time.Now().UnixNano())
+	conn, err := utils.NewMongoCommunityConn(unit_test_common.TestUrl, utils.VarMongoConnectModePrimary, true,
+		utils.ReadWriteConcernDefault, utils.ReadWriteConcernDefault, "")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = conn.Client.Database(dbName).Drop(context.Background())
+		conn.Close()
+	})
+	_, err = conn.Client.Database(dbName).Collection("backing").InsertOne(context.Background(),
+		bson.M{"_id": electionObjectId, "pid": int64(-1), "host": "blocked_fixture", "heartbeat": time.Now().Unix() + 600})
+	require.NoError(t, err)
+	err = conn.Client.Database(dbName).RunCommand(context.Background(), bson.D{
+		{Key: "create", Value: QUORUM_COLLECTION}, {Key: "viewOn", Value: "backing"},
+		{Key: "pipeline", Value: bson.A{bson.M{"$addFields": bson.M{"delay": bson.M{"$function": bson.M{
+			"body": "function() { sleep(6000); return 1; }", "args": bson.A{}, "lang": "js"}}}}}},
+	}).Err()
+	require.NoError(t, err)
+	u, err := url.Parse(unit_test_common.TestUrl)
+	require.NoError(t, err)
+	if u.Path == "" {
+		u.Path = "/"
+	}
+	app := fmt.Sprintf("ut1052io%d", time.Now().UnixNano())
+	q := u.Query()
+	q.Set("appName", app)
+	u.RawQuery = q.Encode()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var electionErr error
+	go func() { electionErr = BecomeMasterWithContext(ctx, u.String(), dbName); close(done) }()
+	var opID interface{}
+	t.Cleanup(func() {
+		cancel()
+		if opID != nil {
+			_ = conn.Client.Database("admin").RunCommand(context.Background(),
+				bson.D{{Key: "killOp", Value: 1}, {Key: "op", Value: opID}}).Err()
+		}
+		select {
+		case <-done:
+		case <-time.After(15 * time.Second):
+			t.Error("election goroutine was not joined")
+		}
+	})
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var resp bson.M
+		err = conn.Client.Database("admin").RunCommand(context.Background(), bson.D{
+			{Key: "currentOp", Value: 1}, {Key: "active", Value: true},
+			{Key: "clientMetadata.application.name", Value: app}, {Key: "command.$db", Value: dbName},
+		}).Decode(&resp)
+		require.NoError(t, err)
+		if ops, ok := resp["inprog"].(bson.A); ok && len(ops) > 0 {
+			if op, ok := ops[0].(bson.M); ok {
+				opID = op["opid"]
+				break
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	require.NotNil(t, opID, "election Mongo operation never became active")
+	cancel()
+	select {
+	case <-done:
+		require.ErrorIs(t, electionErr, context.Canceled)
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocked Mongo operation ignored cancellation (ctx not threaded to Mongo ops)")
+	}
 }

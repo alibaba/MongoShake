@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -177,29 +178,60 @@ func (s *commitThenFailStore) EnsureAnchorGuard() error {
 	return s.MongoCheckpoint.EnsureAnchorGuard()
 }
 
-// T4: a committed-but-reply-failed adjustment must converge to the committed
-// durable anchor and continue, without re-persisting (#1052 v4 acceptance).
+// T4: a committed-but-reply-failed adjustment must be recovered by the SAME
+// running fetcher (self-retry) and deliver a real payload, not by a test thread
+// calling EnsureNetwork again (#1052 review P2). Stopping the fetcher after the
+// first error must fail this test (no payload).
+type committedSignalStore struct {
+	*commitThenFailStore
+	committed chan int64
+}
+
+func (s *committedSignalStore) AdjustFrom(expected int64, patch bson.M) (*ckpt.CheckpointContext, bool, error) {
+	mirror, adjusted, err := s.commitThenFailStore.AdjustFrom(expected, patch)
+	if adjusted && mirror != nil {
+		s.committed <- mirror.Timestamp
+	}
+	return mirror, adjusted, err
+}
+
 func TestHACommittedButResponseFailedConverges(t *testing.T) {
 	quorum.AlwaysMaster()
 	future := (time.Now().Unix() + 3600) << 32
 	s, conn, db := newHAAnchorSyncer(t, future, false)
 	mc := s.ckptManager.Delegate().(*ckpt.MongoCheckpoint)
-	wrapper := &commitThenFailStore{MongoCheckpoint: mc}
-	s.ckptManager.SetDelegate(wrapper)
+	committed := make(chan int64, 1)
+	store := &committedSignalStore{commitThenFailStore: &commitThenFailStore{MongoCheckpoint: mc}, committed: committed}
+	s.ckptManager.SetDelegate(store)
 	r := s.reader.(*sourceReader.OplogReader)
 	r.SetQueryTimestampOnEmpty(future)
 
-	// first attempt commits clamped then fails -> reader converges to durable
-	_ = r.EnsureNetwork()
-	clamped := durableCkpt(t, conn, db)
-	require.Greater(t, clamped, int64(0))
-	require.Less(t, clamped, future)
-	require.Equal(t, clamped, r.CurrentQueryTimestamp(), "must converge to the committed durable anchor")
-	require.Equal(t, 1, wrapper.calls)
-
-	// second attempt streams from the confirmed anchor, no re-persist
-	require.NoError(t, r.EnsureNetwork())
-	require.True(t, r.HasOpenCursor())
-	require.Equal(t, clamped, r.CurrentQueryTimestamp())
-	require.Equal(t, 1, wrapper.calls, "confirmed anchor must not be re-persisted")
+	stop, done := make(chan struct{}), make(chan struct{})
+	sourceReader.SetFetcherLifecycle(stop, done)
+	t.Cleanup(func() {
+		close(stop)
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Error("fetcher shutdown was not joined")
+		}
+		sourceReader.SetFetcherLifecycle(nil, nil)
+	})
+	r.StartFetcher()
+	select {
+	case <-committed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("conditional write never committed")
+	}
+	marker := fmt.Sprintf("ha_payload_%d", time.Now().UnixNano())
+	_, err := conn.Client.Database(db).Collection("marker").InsertOne(context.Background(), bson.M{"_id": marker})
+	require.NoError(t, err)
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) {
+		raw, _ := r.Next()
+		if bytes.Contains(raw, []byte(marker)) {
+			return // running fetcher recovered the committed anchor and delivered payload
+		}
+	}
+	t.Fatal("committed response loss stranded the running fetcher (no payload delivered)")
 }

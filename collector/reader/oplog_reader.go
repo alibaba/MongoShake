@@ -248,10 +248,26 @@ func (or *OplogReader) StartFetcher() {
 
 // fetch oplog tp store disk queue or memory
 func (or *OplogReader) fetcher() {
+	defer func() {
+		if fetcherDone != nil {
+			or.releaseCursor()
+			if or.conn != nil {
+				or.conn.Close()
+			}
+			close(fetcherDone)
+		}
+	}()
 	l.Logger.Infof("start %s fetcher with src[%v] replica-name[%v] query-ts[%v]",
 		or.String(), utils.BlockMongoUrlPassword(or.src, "***"), or.replset,
 		or.query[QueryTs].(bson.M)[QueryOpGT].(primitive.Timestamp))
 	for {
+		if fetcherStop != nil {
+			select {
+			case <-fetcherStop:
+				return
+			default:
+			}
+		}
 		if err := or.EnsureNetwork(); err != nil {
 			// EnsureNetwork returns CollectionCappedError when queryTs falls behind oldest oplog.
 			// Count consecutive capped errors and escalate to fatal after MaxCappedRetry.
@@ -641,4 +657,16 @@ func (or *OplogReader) releaseCursor() {
 
 func (or *OplogReader) FetchNewestTimestamp() (interface{}, error) {
 	return nil, fmt.Errorf("interface not implement")
+}
+
+// fetcherStop/fetcherDone are a bounded shutdown/join seam for tests that run a
+// real fetcher; nil in production. They do not alter initialization or retry.
+var (
+	fetcherStop <-chan struct{}
+	fetcherDone chan<- struct{}
+)
+
+// SetFetcherLifecycle installs the test shutdown/join channels for the fetcher.
+func SetFetcherLifecycle(stop <-chan struct{}, done chan<- struct{}) {
+	fetcherStop, fetcherDone = stop, done
 }

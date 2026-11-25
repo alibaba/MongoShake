@@ -151,8 +151,11 @@ func (s advancingCreateStore) CreateIfAbsent(doc bson.M) (*CheckpointContext, bo
 	// mirror and falsely report Adjusted).
 	res, werr := s.coll().UpdateOne(context.Background(),
 		bson.M{"name": "rs0"}, bson.M{"$set": bson.M{"ckpt": s.advanceTo}})
-	if werr != nil || res.MatchedCount != 1 {
-		return nil, true, fmt.Errorf("advance write not confirmed: matched=%d err=%v", res.MatchedCount, werr)
+	if werr != nil {
+		return nil, true, werr
+	}
+	if res.MatchedCount != 1 {
+		return nil, true, fmt.Errorf("advance write not confirmed: matched=%d", res.MatchedCount)
 	}
 	advanced, rerr := s.MongoCheckpoint.readMirror()
 	return advanced, true, rerr
@@ -288,6 +291,61 @@ func TestAdjustAnchorConcurrentWithGetNoPanic(t *testing.T) {
 		}()
 	}
 	wg.Wait() // must complete without panic or race
+}
+
+// P1 regression (fault-sensitive): pause the guard after ensureNetwork, invalidate
+// the delegate client, then run a concurrent Get. With the guard under ctxRecLock,
+// Get blocks until the guard finishes (no client clear mid-guard). Reverting the
+// guard outside the lock lets Get close the active client and the guard nil-derefs.
+func TestGuardSerializesDelegateLifecycle(t *testing.T) {
+	mc, conn, db := newAnchorTestStore(t)
+	seedAnchor(t, conn, db, bson.M{"name": "rs0", "ckpt": int64(100), "version": 2})
+	m := newAnchorTestManager(t, mc, db)
+	store := m.Delegate().(*MongoCheckpoint)
+	entered, resume := make(chan struct{}), make(chan struct{})
+	guardPauseHook = func() { close(entered); <-resume }
+	t.Cleanup(func() { guardPauseHook = nil })
+
+	adjusted := make(chan error, 1)
+	go func() {
+		defer func() {
+			if p := recover(); p != nil {
+				adjusted <- fmt.Errorf("GUARD_PANIC=%v", p)
+			}
+		}()
+		_, err := m.AdjustAnchor(100, 90)
+		adjusted <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("guard was not reached")
+	}
+	// session becomes unusable after ensureNetwork succeeded
+	require.NoError(t, store.client.Client.Disconnect(context.Background()))
+	got := make(chan error, 1)
+	go func() { _, _, err := m.Get(); got <- err }()
+	overlapped := false
+	select {
+	case <-got:
+		overlapped = true
+	case <-time.After(300 * time.Millisecond):
+		// Get blocked by the manager lock: correct serialization
+	}
+	close(resume)
+	select {
+	case <-adjusted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("adjust did not return")
+	}
+	if !overlapped {
+		select {
+		case <-got:
+		case <-time.After(10 * time.Second):
+			t.Fatal("Get did not return")
+		}
+	}
+	require.False(t, overlapped, "guard outside manager lock: concurrent Get closed its active delegate client")
 }
 
 func createIdx(t *testing.T, mc *MongoCheckpoint, model mongo.IndexModel) {

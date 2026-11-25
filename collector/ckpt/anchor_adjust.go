@@ -214,6 +214,9 @@ func (ckpt *MongoCheckpoint) EnsureAnchorGuard() error {
 	if !ckpt.ensureNetwork() {
 		return fmt.Errorf("%s anchor guard ensureNetwork failed", ckpt.Name)
 	}
+	if guardPauseHook != nil {
+		guardPauseHook()
+	}
 	if err := ckpt.collectionCollationSimple(); err != nil {
 		return err
 	}
@@ -309,3 +312,8 @@ func applyAnchorPatch(ctx *CheckpointContext, patch bson.M) {
 		ctx.FullFinishTs = v
 	}
 }
+
+// guardPauseHook is a test seam invoked after ensureNetwork in EnsureAnchorGuard;
+// nil in production. It lets a test invalidate the delegate client mid-guard to
+// prove the guard is serialized with Get under the manager lock.
+var guardPauseHook func()
