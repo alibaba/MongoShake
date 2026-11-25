@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -23,7 +24,13 @@ const (
 
 const criticalLevel zapcore.Level = zapcore.FatalLevel + 1
 
-var Logger = &ZapLogger{logger: zap.NewNop().Sugar()}
+var Logger = newNopLogger()
+
+func newNopLogger() *ZapLogger {
+	l := &ZapLogger{}
+	l.state.Store(&loggerState{sugared: zap.NewNop().Sugar()})
+	return l
+}
 
 var logLevelMap = map[string]zapcore.Level{
 	"all":     zapcore.DebugLevel,
@@ -34,10 +41,39 @@ var logLevelMap = map[string]zapcore.Level{
 	"error":   zapcore.ErrorLevel,
 }
 
+// ZapLogger is installed once in the package-level Logger and never replaced.
+// Re-initialisation swaps one immutable state value atomically, so goroutines
+// that are already logging cannot race with a later InitialLogger call, and a
+// concurrent Close can never see a new logger paired with the previous closers.
 type ZapLogger struct {
-	logger              *zap.SugaredLogger
-	stopBufferedWriters []func() error
-	stopOnce            sync.Once
+	state atomic.Pointer[loggerState]
+}
+
+type loggerState struct {
+	sugared *zap.SugaredLogger
+	closers *closeState
+}
+
+type closeState struct {
+	stop []func() error
+	once sync.Once
+}
+
+// generation counts successful New calls. The Logger pointer is stable by
+// design, so tests that need to detect re-initialisation compare this instead.
+var generation atomic.Uint64
+
+func Generation() uint64 { return generation.Load() }
+
+// sugared returns nil for a nil receiver or an uninitialised logger.
+func (l *ZapLogger) sugared() *zap.SugaredLogger {
+	if l == nil {
+		return nil
+	}
+	if s := l.state.Load(); s != nil {
+		return s.sugared
+	}
+	return nil
 }
 
 func New(logLevel, logDir, logFile string,
@@ -97,10 +133,11 @@ func New(logLevel, logDir, logFile string,
 	}
 
 	baseLogger := zap.New(zapcore.NewTee(cores...)).Sugar()
-	Logger = &ZapLogger{
-		logger:              baseLogger,
-		stopBufferedWriters: stopBufferedWriters,
-	}
+	Logger.state.Store(&loggerState{
+		sugared: baseLogger,
+		closers: &closeState{stop: stopBufferedWriters},
+	})
+	generation.Add(1)
 	return nil
 }
 
@@ -170,10 +207,9 @@ func formatArgs(args ...any) string {
 }
 
 func (l *ZapLogger) log(level zapcore.Level, message string) {
-	if l == nil || l.logger == nil {
-		return
+	if lg := l.sugared(); lg != nil {
+		lg.Desugar().Log(level, message)
 	}
-	l.logger.Desugar().Log(level, message)
 }
 
 func (l *ZapLogger) Printf(format string, args ...any) {
@@ -189,31 +225,27 @@ func (l *ZapLogger) Println(args ...any) {
 }
 
 func (l *ZapLogger) Debugf(format string, args ...any) {
-	if l == nil || l.logger == nil {
-		return
+	if lg := l.sugared(); lg != nil {
+		lg.Debugf(format, args...)
 	}
-	l.logger.Debugf(format, args...)
 }
 
 func (l *ZapLogger) Infof(format string, args ...any) {
-	if l == nil || l.logger == nil {
-		return
+	if lg := l.sugared(); lg != nil {
+		lg.Infof(format, args...)
 	}
-	l.logger.Infof(format, args...)
 }
 
 func (l *ZapLogger) Warnf(format string, args ...any) {
-	if l == nil || l.logger == nil {
-		return
+	if lg := l.sugared(); lg != nil {
+		lg.Warnf(format, args...)
 	}
-	l.logger.Warnf(format, args...)
 }
 
 func (l *ZapLogger) Errorf(format string, args ...any) {
-	if l == nil || l.logger == nil {
-		return
+	if lg := l.sugared(); lg != nil {
+		lg.Errorf(format, args...)
 	}
-	l.logger.Errorf(format, args...)
 }
 
 func (l *ZapLogger) Criticalf(format string, args ...any) {
@@ -278,10 +310,10 @@ func (l *ZapLogger) Crash(args ...any) {
 }
 
 func (l *ZapLogger) Sync() error {
-	if l == nil || l.logger == nil {
-		return nil
+	if lg := l.sugared(); lg != nil {
+		return lg.Sync()
 	}
-	return l.logger.Sync()
+	return nil
 }
 
 func (l *ZapLogger) Close() error {
@@ -289,13 +321,22 @@ func (l *ZapLogger) Close() error {
 		return nil
 	}
 
-	syncErr := l.Sync()
-	l.stopOnce.Do(func() {
-		for _, stop := range l.stopBufferedWriters {
-			if stopErr := stop(); syncErr == nil && stopErr != nil {
-				syncErr = stopErr
+	// Load once so Sync and the closer stop act on the same generation; two
+	// loads could Sync generation N but stop generation N+1's closers if a New
+	// lands between them.
+	s := l.state.Load()
+	var syncErr error
+	if s != nil && s.sugared != nil {
+		syncErr = s.sugared.Sync()
+	}
+	if s != nil && s.closers != nil {
+		s.closers.once.Do(func() {
+			for _, stop := range s.closers.stop {
+				if stopErr := stop(); syncErr == nil && stopErr != nil {
+					syncErr = stopErr
+				}
 			}
-		}
-	})
+		})
+	}
 	return syncErr
 }

@@ -196,14 +196,14 @@ func calculateSignature(object interface{}) (sign float64) {
 }
 
 func ExactlyMatch(first, second interface{}) bool {
+	// both of them are null is accept. This has to come first: reflect.TypeOf(nil)
+	// is a nil reflect.Type, so calling Kind() on it below would panic.
+	if first == nil && second == nil {
+		return true
+	}
 	if (first != nil && second == nil) || (first == nil && second != nil) ||
 		reflect.TypeOf(first).Kind() != reflect.TypeOf(second).Kind() {
 		return false
-	}
-
-	// both of them are null is accept
-	if first == nil && second == nil {
-		return true
 	}
 
 	switch o := first.(type) {
@@ -260,12 +260,12 @@ func ExactlyMatch(first, second interface{}) bool {
 }
 
 func intersectionInOrder(one bson.M, other bson.M) bool {
-	// TODO: BSON's object or array is already sorted ?! we can get the intersection more easier
-	// BUT for now. we don't make such assumption. so make it simple, we iterate every field
-	// in Map. and compare to another
+	// Keep scanning: returning on the first shared key would miss a later column
+	// whose values do match, and Go's randomised map order made that
+	// non-deterministic. Detecting more conflicts is the safe direction here.
 	for k1, v1 := range one {
-		if v2, exist := other[k1]; exist {
-			return ExactlyMatch(v1, v2)
+		if v2, exist := other[k1]; exist && ExactlyMatch(v1, v2) {
+			return true
 		}
 	}
 	return false

@@ -364,10 +364,12 @@ func TestFilteredTransactionMissingHistoryFailsBeforeCommit(t *testing.T) {
 }
 
 // Test fixtures must leave the shared logger owned by the surrounding suite.
+// The Logger pointer is stable by design, so compare the re-initialisation
+// counter: a fixture calling l.New would bump it and pollute the shared sink.
 func TestFilteredTxnBatcherPreservesSharedLogger(t *testing.T) {
-	shared := l.Logger
+	shared := l.Generation()
 	newFilteredTxnBatcher(t, "namespace")
-	require.Same(t, shared, l.Logger, "creating a transaction fixture must not replace the shared logger")
+	require.Equal(t, shared, l.Generation(), "creating a transaction fixture must not re-initialise the shared logger")
 }
 
 // An isolated child keeps unrelated legacy metric goroutines out of this

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 
 	nimo "github.com/gugemichael/nimo4go"
@@ -191,7 +192,14 @@ func (writer *TCPWriter) pollRemoteAckValue() {
 		result.setPayload(payload)
 		nimo.AssertTrue(result.length == uint32(len(result.payload)) && len(result.payload) != 0,
 			"acker receive bad payload queryAck")
-		binary.Read(bytes.NewBuffer(result.payload), binary.BigEndian, &writer.ack)
+		var ack int64
+		if err := binary.Read(bytes.NewBuffer(result.payload), binary.BigEndian, &ack); err != nil {
+			// malformed/short ack payload: keep the previous value rather than
+			// storing a partial zero (0 == ReplyOK would reset the ack LSN)
+			tcpErrorAndRelease(tcp, err.Error())
+			return
+		}
+		atomic.StoreInt64(&writer.ack, ack)
 	})
 }
 
@@ -214,7 +222,7 @@ func (writer *TCPWriter) Send(message *WMessage) int64 {
 		tcp.release()
 		return ReplyNetworkOpFail
 	}
-	return writer.ack
+	return atomic.LoadInt64(&writer.ack)
 }
 
 func (writer *TCPWriter) Prepare() bool {
