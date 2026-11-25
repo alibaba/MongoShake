@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sync"
 
+	"go.mongodb.org/mongo-driver/bson"
+
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	utils "github.com/alibaba/MongoShake/v2/common"
 )
@@ -24,6 +26,12 @@ type CheckpointManager struct {
 	fetchSet   bool
 	fullFinSet bool
 	delegate   CheckpointOperation
+
+	// anchor guard: only success is cached; failure stays un-ready and is
+	// re-verified on every call so an operator index fix self-heals (#1052 v3
+	// review P2-2). Online dropIndex/dropCollection requires a restart re-check.
+	guardLock  sync.Mutex
+	guardReady bool
 }
 
 func NewCheckpointManager(name string, startPosition int64) *CheckpointManager {
@@ -62,6 +70,11 @@ func NewCheckpointManager(name string, startPosition int64) *CheckpointManager {
 
 // Get return persistent checkpoint
 func (manager *CheckpointManager) Get() (*CheckpointContext, bool, error) {
+	// Serialize with Update: the reader's anchor-persist hook writes from the
+	// fetcher goroutine (#1052), so an unlocked reload could restore a stale
+	// future timestamp over a just-persisted adjusted anchor.
+	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
 	var exist bool
 	manager.ctx, exist = manager.delegate.Get()
 	if manager.ctx == nil {
@@ -86,9 +99,9 @@ func (manager *CheckpointManager) GetInMemory() *CheckpointContext {
 
 // Update checkpoint update memory & persistence(db or file)
 // The lock serializes concurrent checkpoint writers (the checkpoint routine
-// and the parallel-mode full-finish backfill, #1047). It does not make the
-// unlocked Get/GetInMemory readers race-free; those are sequenced by the
-// startup/handover protocol instead.
+// and the parallel-mode full-finish backfill, #1047) and the reload in Get.
+// It does not make the unlocked GetInMemory readers race-free; those are
+// sequenced by the startup/handover protocol instead.
 func (manager *CheckpointManager) Update(ts int64) error {
 	manager.ctxRecLock.Lock()
 	defer manager.ctxRecLock.Unlock()
@@ -205,4 +218,169 @@ func (manager *CheckpointManager) SetFullFinishTs(ts int64) {
 	}
 	manager.ctxRec.FullFinishTs = ts
 	manager.fullFinSet = true
+}
+
+// Delegate returns the storage delegate (fault-injection tests).
+func (manager *CheckpointManager) Delegate() CheckpointOperation {
+	return manager.delegate
+}
+
+// SetDelegate replaces the storage delegate (fault-injection tests only).
+func (manager *CheckpointManager) SetDelegate(op CheckpointOperation) {
+	manager.delegate = op
+}
+
+// PrecheckAnchorGuard verifies the covering unique index at HA startup so a
+// misconfigured store fails fast (exit-and-restart) instead of blocking the
+// first read. The lazy non-HA path uses ensureAnchorGuard directly and self-heals.
+// It takes ctxRecLock so the guard's delegate access shares the same client
+// lifecycle as Get/Update/FlushStaged (lock order: ctxRecLock -> guardLock).
+func (manager *CheckpointManager) PrecheckAnchorGuard() error {
+	store, ok := manager.delegate.(ConditionalAnchorStore)
+	if !ok {
+		return fmt.Errorf("checkpoint delegate lacks conditional anchor capability")
+	}
+	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
+	return manager.ensureAnchorGuard(store)
+}
+
+// ensureAnchorGuard is retryable: only a proven guard is cached as ready; a
+// failure leaves it un-ready so the next call re-verifies (operator fix self-heals).
+// HA startup preflight may still exit-and-restart; the lazy non-HA path honors
+// self-heal. Online index/collection drop requires a restart re-check.
+// Callers MUST hold ctxRecLock: the guard dereferences the delegate client, which
+// Get's error path closes/nils; without the manager lock a concurrent Get could
+// nil-deref the guard (#1052 review P1). Lock order is ctxRecLock -> guardLock.
+func (manager *CheckpointManager) ensureAnchorGuard(store ConditionalAnchorStore) error {
+	manager.guardLock.Lock()
+	defer manager.guardLock.Unlock()
+	if manager.guardReady {
+		return nil
+	}
+	if err := store.EnsureAnchorGuard(); err != nil {
+		return err
+	}
+	manager.guardReady = true
+	return nil
+}
+
+// AdjustAnchor conditionally moves the durable anchor from expected to clamped
+// for the pending-initial protocol (#1052 HA P1). It runs under ctxRecLock and
+// talks to the delegate directly (never the public Get/Update, which re-lock).
+// The guard check is inside the same lock so the whole EnsureAnchorGuard -> Get
+// -> CAS/Create -> mirror-commit lifecycle shares one client lifecycle.
+// The confirmed in-memory ctx is the post-storage mirror, not the stale base, so
+// a later normal full-field Update cannot roll back another writer's metadata.
+// Conflict / WriteUncertain / ReadFailed never commit nor clear staged flags.
+func (manager *CheckpointManager) AdjustAnchor(expected, clamped int64) (AnchorAdjustResult, error) {
+	store, ok := manager.delegate.(ConditionalAnchorStore)
+	if !ok {
+		return AnchorGuardFailed, fmt.Errorf("checkpoint delegate lacks conditional anchor capability")
+	}
+	manager.ctxRecLock.Lock()
+	defer manager.ctxRecLock.Unlock()
+	if err := manager.ensureAnchorGuard(store); err != nil {
+		return AnchorGuardFailed, err
+	}
+
+	base, exist := manager.delegate.Get()
+	if base == nil {
+		return AnchorReadFailed, fmt.Errorf("checkpoint read failed before anchor write (no write issued)")
+	}
+	staged := manager.stagedPatchLocked()
+	patch := bson.M{"ckpt": clamped, "version": utils.FcvCheckpoint.CurrentVersion}
+	for k, v := range staged {
+		patch[k] = v
+	}
+
+	if exist {
+		mirror, adjusted, err := store.AdjustFrom(expected, patch)
+		if err != nil {
+			return AnchorWriteUncertain, err
+		}
+		if adjusted {
+			if mirror == nil {
+				return AnchorReadFailed, fmt.Errorf("anchor adjusted but the confirmation mirror readback failed (no confirmed anchor)")
+			}
+			manager.commitAnchorMirrorLocked(mirror)
+			return AnchorAdjusted, nil
+		}
+		// not adjusted: re-read to tell a moved anchor from an absent record
+		base, exist = manager.delegate.Get()
+		if base == nil {
+			return AnchorReadFailed, fmt.Errorf("checkpoint re-read failed after anchor conflict (no write issued)")
+		}
+		if exist {
+			return AnchorConflict, nil
+		}
+		// absent -> fall through to conditional creation
+	}
+
+	doc := anchorCandidateDoc(base, clamped, staged)
+	mirror, created, err := store.CreateIfAbsent(doc)
+	if err != nil {
+		return AnchorWriteUncertain, err
+	}
+	if mirror == nil {
+		return AnchorReadFailed, fmt.Errorf("anchor readback returned no record after creation (no confirmed anchor)")
+	}
+	if !created {
+		return AnchorConflict, nil
+	}
+	// UpsertedCount>0 only proves THIS insert; the readback may already reflect a
+	// successor advancing the anchor. Verify it still matches the request before
+	// confirming, else converge to the readback value (#1052 v4 review addition 1).
+	if mirror.Timestamp != clamped {
+		return AnchorConflict, nil
+	}
+	manager.commitAnchorMirrorLocked(mirror)
+	return AnchorAdjusted, nil
+}
+
+func (manager *CheckpointManager) stagedPatchLocked() bson.M {
+	p := bson.M{}
+	if manager.ctxRec != nil {
+		if manager.finishSet {
+			p["oplog_disk_queue_apply_finish_ts"] = manager.ctxRec.OplogDiskQueueFinishTs
+		}
+		if manager.queueSet {
+			p["oplog_disk_queue"] = manager.ctxRec.OplogDiskQueue
+		}
+		if manager.fetchSet {
+			p["fetch_method"] = manager.ctxRec.FetchMethod
+		}
+		if manager.fullFinSet {
+			p["full_finish_ts"] = manager.ctxRec.FullFinishTs
+		}
+	}
+	return p
+}
+
+// commitAnchorMirrorLocked publishes the confirmed post-storage mirror and clears
+// the staged flags it already carried. It does NOT overlay old staged onto the
+// mirror: the readback is the confirmation source (#1052 v4 review addition 1).
+func (manager *CheckpointManager) commitAnchorMirrorLocked(mirror *CheckpointContext) {
+	manager.ctx = mirror
+	manager.ctxRec = nil
+	manager.finishSet = false
+	manager.queueSet = false
+	manager.fetchSet = false
+	manager.fullFinSet = false
+}
+
+func anchorCandidateDoc(base *CheckpointContext, clamped int64, staged bson.M) bson.M {
+	doc := bson.M{
+		CheckpointName:                     base.Name,
+		"ckpt":                             clamped,
+		"version":                          utils.FcvCheckpoint.CurrentVersion,
+		"fetch_method":                     base.FetchMethod,
+		"oplog_disk_queue":                 base.OplogDiskQueue,
+		"oplog_disk_queue_apply_finish_ts": base.OplogDiskQueueFinishTs,
+		"full_finish_ts":                   base.FullFinishTs,
+	}
+	for k, v := range staged {
+		doc[k] = v
+	}
+	return doc
 }
