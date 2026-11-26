@@ -1,23 +1,28 @@
 package collector
 
 import (
-	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
 	"github.com/alibaba/MongoShake/v2/collector/filter"
 	sourceReader "github.com/alibaba/MongoShake/v2/collector/reader"
+	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
 	"github.com/alibaba/MongoShake/v2/quorum"
 )
 
 // #1051 P2 regression: a pure-filter stream (only noop oplogs, lastOplog is the
-// startup fakeOplog with ts=0) must still advance the checkpoint. Waiting on the
-// zero-ts fakeOplog returns false immediately and must not be treated as a
-// Pause/Shutdown interrupt that skips the reader update and checkpoint write.
+// startup fakeOplog with ts=0) must still advance the persisted checkpoint to the
+// noop timestamp. Waiting on the zero-ts fakeOplog returns false immediately and
+// must not be treated as a Pause/Shutdown interrupt that skips the write.
+//
+// Drives batcherOnce synchronously for a bounded number of iterations (no leaked
+// goroutine, no cleanup race) and asserts the persisted value, not just a write
+// request count (a store that rejects writes must fail this test).
 func TestPureFilterStreamAdvancesCheckpoint(t *testing.T) {
 	quorum.AlwaysMaster()
 	store := &barrierCheckpointStore{}
@@ -35,36 +40,16 @@ func TestPureFilterStreamAdvancesCheckpoint(t *testing.T) {
 		syncer.batcher.Fini()
 	})
 
-	stop := make(chan struct{})
-	var stopped atomic.Bool
-	go func() {
-		defer stopped.Store(true)
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			noop := &oplog.GenericOplog{Parsed: &oplog.PartialLog{ParsedLog: oplog.ParsedLog{
-				Timestamp: primitive.Timestamp{T: 100, I: 1}, Operation: "n", Namespace: "test.documents",
-			}}}
-			select {
-			case syncer.logsQueue[0] <- []*oplog.GenericOplog{noop}:
-			case <-stop:
-				return
-			case <-time.After(50 * time.Millisecond):
-			}
-		}
-	}()
-	syncer.startBatcher()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if store.writes.Load() >= 1 {
-			close(stop)
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
+	noopTs := primitive.Timestamp{T: 100, I: 1}
+	noop := &oplog.GenericOplog{Parsed: &oplog.PartialLog{ParsedLog: oplog.ParsedLog{
+		Timestamp: noopTs, Operation: "n", Namespace: "test.documents",
+	}}}
+	state := &batcherLoopState{filterCheckTs: time.Now()}
+	// First iteration arms the filter flag; subsequent ones advance the checkpoint.
+	for i := 0; i < 4; i++ {
+		syncer.logsQueue[0] <- []*oplog.GenericOplog{noop}
+		syncer.batcherOnce(state)
 	}
-	close(stop)
-	t.Fatal("pure-filter stream did not advance checkpoint (zero-ts fakeOplog wait treated as interrupt)")
+	require.Equal(t, utils.TimeStampToInt64(noopTs), store.timestamp.Load(),
+		"pure-filter stream must persist the noop timestamp (a write-rejecting store must fail this)")
 }
