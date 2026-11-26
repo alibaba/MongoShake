@@ -51,7 +51,7 @@ func TestCheckCheckpointUpdateUsesWorkerAckWhenCheckpointPinned(t *testing.T) {
 
 	done := make(chan bool, 1)
 	go func() {
-		done <- syncer.checkCheckpointUpdate(true, newestTs)
+		done <- syncer.checkCheckpointUpdate(true, newestTs, true)
 	}()
 
 	select {

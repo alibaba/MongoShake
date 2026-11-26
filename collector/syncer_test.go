@@ -291,7 +291,7 @@ func TestCheckCheckpointUpdate(t *testing.T) {
 		nr++
 
 		syncer := &OplogSyncer{Replset: "test-barrier-false"}
-		result := syncer.checkCheckpointUpdate(false, 100)
+		result := syncer.checkCheckpointUpdate(false, 100, true)
 		assert.Equal(t, false, result, "should be equal")
 	}
 
@@ -306,7 +306,7 @@ func TestCheckCheckpointUpdate(t *testing.T) {
 		barrierCkptFlushFunc = func(sync *OplogSyncer) bool { return false }
 
 		syncer := &OplogSyncer{Replset: "test-already-reached"}
-		result := syncer.checkCheckpointUpdate(true, 100)
+		result := syncer.checkCheckpointUpdate(true, 100, true)
 		assert.Equal(t, true, result, "should be equal")
 	}
 
@@ -324,7 +324,7 @@ func TestCheckCheckpointUpdate(t *testing.T) {
 		barrierCkptFlushFunc = func(sync *OplogSyncer) bool { return true }
 
 		syncer := &OplogSyncer{Replset: "test-gradual"}
-		result := syncer.checkCheckpointUpdate(true, 50)
+		result := syncer.checkCheckpointUpdate(true, 50, true)
 		assert.Equal(t, true, result, "should be equal")
 		assert.True(t, callCount >= 5, "should have polled at least 5 times")
 	}
@@ -346,7 +346,7 @@ func TestCheckCheckpointUpdate(t *testing.T) {
 		barrierCkptFlushFunc = func(sync *OplogSyncer) bool { return false }
 
 		syncer := &OplogSyncer{Replset: "test-pause"}
-		result := syncer.checkCheckpointUpdate(true, 999)
+		result := syncer.checkCheckpointUpdate(true, 999, true)
 		assert.Equal(t, false, result, "should be equal")
 		assert.True(t, callCount >= 3, "should have polled at least 3 times before Pause")
 
@@ -370,7 +370,7 @@ func TestCheckCheckpointUpdate(t *testing.T) {
 		barrierCkptFlushFunc = func(sync *OplogSyncer) bool { return false }
 
 		syncer := &OplogSyncer{Replset: "test-shutdown"}
-		result := syncer.checkCheckpointUpdate(true, 999)
+		result := syncer.checkCheckpointUpdate(true, 999, true)
 		assert.Equal(t, false, result, "should be equal")
 		assert.True(t, callCount >= 2, "should have polled at least 2 times before Shutdown")
 

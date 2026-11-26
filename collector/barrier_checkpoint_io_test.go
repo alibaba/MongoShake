@@ -134,7 +134,7 @@ func TestBarrierCheckpointIORetriesAreRateLimited(t *testing.T) {
 					}
 				}
 			}()
-			result := syncer.checkCheckpointUpdate(true, 200)
+			result := syncer.checkCheckpointUpdate(true, 200, true)
 			close(stop)
 			<-stopped
 			require.False(t, result, "an incomplete worker must not release the barrier")
@@ -219,7 +219,7 @@ func TestBarrierCheckpointCompletedPinStillPersists(t *testing.T) {
 	syncer := newBarrierCheckpointIOSyncer(t, store, worker)
 	syncer.batcher.pinTxn(oplog.TxnID{}, 150)
 	syncer.batcher.stageTxnPinRelease(oplog.TxnID{}, 200)
-	require.True(t, syncer.checkCheckpointUpdate(true, 200))
+	require.True(t, syncer.checkCheckpointUpdate(true, 200, true))
 	require.Equal(t, int64(200), store.timestamp.Load(), "a completed pin is not a reason to skip final persistence")
 	require.Equal(t, int64(200), syncer.ckptManager.GetInMemory().Timestamp)
 	require.Equal(t, int64(1), store.writes.Load())

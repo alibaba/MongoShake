@@ -400,6 +400,11 @@ func (sync *OplogSyncer) startBatcher() {
 	filterCheckTs := time.Now()
 	filterFlag := false // marks whether previous log is filter
 	var pendingBarrierTs int64
+	// whether the pending barrier's newestTs is a dispatched DML ts (needs worker
+	// ack confirmation) or a filtered/exit ts force-written to the checkpoint
+	// (checkpoint authoritative). Carried across Pause/Shutdown resume so a
+	// filtered pending barrier is not re-confirmed with ackRequired=true (#1051).
+	var pendingBarrierAckRequired bool
 
 	nimo.GoRoutineInLoop(func() {
 		/*
@@ -413,7 +418,7 @@ func (sync *OplogSyncer) startBatcher() {
 		// Re-confirm barrier checkpoint if previous wait was interrupted by Pause/Shutdown.
 		// Do not process new ops until the DDL execution is confirmed.
 		if pendingBarrierTs > 0 {
-			if sync.checkCheckpointUpdate(true, pendingBarrierTs) {
+			if sync.checkCheckpointUpdate(true, pendingBarrierTs, pendingBarrierAckRequired) {
 				l.Logger.Infof("%s pending barrier checkpoint[%v] confirmed after resume",
 					sync, utils.ExtractTimestampForLog(pendingBarrierTs))
 				pendingBarrierTs = 0
@@ -459,10 +464,11 @@ func (sync *OplogSyncer) startBatcher() {
 
 			// flush checkpoint value
 			sync.checkpoint(true, 0)
-			if !sync.checkCheckpointUpdate(true, newestTs) {
+			if !sync.checkCheckpointUpdate(true, newestTs, false) {
 				l.Logger.Warnf("%s exit: barrier wait interrupted, checkpoint may not have reached %v. "+
 					"Not setting CanClose to avoid premature exit", sync, utils.ExtractTimestampForLog(newestTs))
 				pendingBarrierTs = newestTs
+				pendingBarrierAckRequired = false // exit/filter ts: checkpoint authoritative
 				return
 			}
 			sync.CanClose = true
@@ -483,8 +489,9 @@ func (sync *OplogSyncer) startBatcher() {
 
 			// flush checkpoint value
 			sync.checkpoint(barrier, 0)
-			if barrier && !sync.checkCheckpointUpdate(true, newestTs) {
+			if barrier && !sync.checkCheckpointUpdate(true, newestTs, true) {
 				pendingBarrierTs = newestTs
+				pendingBarrierAckRequired = true // dispatched DML ts: needs worker ack
 				return
 			}
 		} else {
@@ -542,7 +549,7 @@ func (sync *OplogSyncer) startBatcher() {
 				l.Logger.Infof("%s waiting last checkpoint[%v] updated", sync, newestTsLog)
 				// check last checkpoint updated
 
-				status := sync.checkCheckpointUpdate(true, utils.TimeStampToInt64(log.Timestamp))
+				status := sync.checkCheckpointUpdate(true, utils.TimeStampToInt64(log.Timestamp), false)
 				l.Logger.Infof("%s last checkpoint[%v] updated [%v]", sync, newestTsLog, status)
 			} else {
 				l.Logger.Infof("%s last log is empty, skip waiting checkpoint updated", sync)
@@ -557,7 +564,7 @@ func (sync *OplogSyncer) startBatcher() {
 	})
 }
 
-func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) bool {
+func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64, ackRequired bool) bool {
 	if !barrier || newestTs <= 0 {
 		return false
 	}
@@ -591,9 +598,6 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) boo
 
 		needFlush := false
 		if haveCheckpoint {
-			if checkpointTs >= newestTs {
-				return true
-			}
 			var ack, pin int64
 			var ackErr error
 			if sync.batcher != nil {
@@ -601,6 +605,18 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) boo
 				if ackErr == nil {
 					pin = sync.batcher.OldestUnackedTxnPinTs(ack)
 				}
+			}
+			// A durable checkpoint covering the barrier completes it only when the
+			// workers confirm progress: a checkpoint ahead of the acked progress
+			// (e.g. a future/migrated checkpoint) is not by itself proof the
+			// preceding DML is durable (#1051). ackRequired is false for filter/exit
+			// barriers whose newestTs is a filtered timestamp force-written to the
+			// checkpoint via inputTs (never dispatched, so ack can never reach it);
+			// there the checkpoint is the authoritative evidence. With no batcher the
+			// checkpoint is likewise the only evidence. Normal DML barriers are
+			// unchanged: the checkpoint is the persisted min worker ack.
+			if checkpointTs >= newestTs && (!ackRequired || sync.batcher == nil || (ackErr == nil && ack >= newestTs)) {
+				return true
 			}
 			// A genuinely pending transaction may keep the checkpoint below
 			// this barrier even though its workers are done. Do not put an
