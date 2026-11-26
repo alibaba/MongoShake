@@ -377,8 +377,22 @@ func (sync *OplogSyncer) calculateWorkerLowestCheckpoint() (v int64, err error) 
 		// reorder under atomic !
 		ack := atomic.LoadInt64(&worker.ack)
 		unack := atomic.LoadInt64(&worker.unack)
-		if ack == 0 && unack == 0 {
+		pending := atomic.LoadInt64(&worker.pending)
+		if ack == 0 && unack == 0 && pending == 0 {
 			// have no oplogs synced in this worker. skip
+		} else if pending > 0 {
+			// A batch is offered but not yet applied. ack is timestamp-granular
+			// and a same-timestamp batch may share unack, so ack==unack must not
+			// mark this worker done: keep the durable checkpoint strictly below
+			// the pending batch's ts so a restart re-fetches it (#1051 M3).
+			safe := unack - 1
+			if ack < safe {
+				safe = ack
+			}
+			if safe > 0 {
+				candidates = append(candidates, safe)
+			}
+			allAcked = false
 		} else if ack == unack || worker.IsAllAcked() {
 			// all oplogs have been acked for right now or previous status
 			worker.AllAcked(true)

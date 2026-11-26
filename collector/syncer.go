@@ -464,11 +464,17 @@ func (sync *OplogSyncer) startBatcher() {
 
 			// flush checkpoint value
 			sync.checkpoint(true, 0)
-			if !sync.checkCheckpointUpdate(true, newestTs, false) {
+			// newestTs is a dispatched ts when it came from lastLog (the >1 branch
+			// above); only a purely filtered exit target (lastFilterLog branch,
+			// never dispatched) keeps the checkpoint-authoritative exemption.
+			// lastLog is never nil (fakeOplog), so test the timestamp branch, not
+			// nil-ness or allEmpty (#1051 M2).
+			exitAckRequired := lastLog != nil && utils.TimeStampToInt64(lastLog.Timestamp) > 1
+			if !sync.checkCheckpointUpdate(true, newestTs, exitAckRequired) {
 				l.Logger.Warnf("%s exit: barrier wait interrupted, checkpoint may not have reached %v. "+
 					"Not setting CanClose to avoid premature exit", sync, utils.ExtractTimestampForLog(newestTs))
 				pendingBarrierTs = newestTs
-				pendingBarrierAckRequired = false // exit/filter ts: checkpoint authoritative
+				pendingBarrierAckRequired = exitAckRequired
 				return
 			}
 			sync.CanClose = true
@@ -549,7 +555,7 @@ func (sync *OplogSyncer) startBatcher() {
 				l.Logger.Infof("%s waiting last checkpoint[%v] updated", sync, newestTsLog)
 				// check last checkpoint updated
 
-				status := sync.checkCheckpointUpdate(true, utils.TimeStampToInt64(log.Timestamp), false)
+				status := sync.checkCheckpointUpdate(true, utils.TimeStampToInt64(log.Timestamp), true)
 				l.Logger.Infof("%s last checkpoint[%v] updated [%v]", sync, newestTsLog, status)
 			} else {
 				l.Logger.Infof("%s last log is empty, skip waiting checkpoint updated", sync)
@@ -609,20 +615,23 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64, ack
 			// A durable checkpoint covering the barrier completes it only when the
 			// workers confirm progress: a checkpoint ahead of the acked progress
 			// (e.g. a future/migrated checkpoint) is not by itself proof the
-			// preceding DML is durable (#1051). ackRequired is false for filter/exit
-			// barriers whose newestTs is a filtered timestamp force-written to the
-			// checkpoint via inputTs (never dispatched, so ack can never reach it);
-			// there the checkpoint is the authoritative evidence. With no batcher the
-			// checkpoint is likewise the only evidence. Normal DML barriers are
-			// unchanged: the checkpoint is the persisted min worker ack.
-			if checkpointTs >= newestTs && (!ackRequired || sync.batcher == nil || (ackErr == nil && ack >= newestTs)) {
+			// preceding DML is durable (#1051). ack is timestamp-granular, so also
+			// require every offered batch to be transferred (applied) — otherwise a
+			// same-timestamp batch still queued could be bypassed. ackRequired is
+			// false for filter/exit barriers whose newestTs is a filtered timestamp
+			// force-written to the checkpoint via inputTs (never dispatched, so ack
+			// can never reach it); there the checkpoint is the authoritative evidence.
+			// With no batcher the checkpoint is likewise the only evidence.
+			applied := !ackRequired || sync.batcher == nil || sync.batcher.allTransferred()
+			if checkpointTs >= newestTs && applied &&
+				(!ackRequired || sync.batcher == nil || (ackErr == nil && ack >= newestTs)) {
 				return true
 			}
 			// A genuinely pending transaction may keep the checkpoint below
 			// this barrier even though its workers are done. Do not put an
 			// unrelated checkpoint write on that ACK-only completion path.
 			ackSatisfied := ackErr == nil && ack >= newestTs
-			if ackSatisfied && pin > 0 && pin <= newestTs {
+			if ackSatisfied && pin > 0 && pin <= newestTs && applied {
 				l.Logger.Infof("%s[%v] barrier satisfied by worker ack[%v] >= newest[%v] while transaction pin[%v] remains",
 					sync, i, utils.ExtractTimestampForLog(ack), utils.ExtractTimestampForLog(newestTs),
 					utils.ExtractTimestampForLog(pin))
@@ -660,7 +669,7 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64, ack
 					}
 				}
 			}
-			if ackSatisfied {
+			if ackSatisfied && applied {
 				// ACKs define ordering. Failed persistence is retried by normal
 				// checkpoint processing once the batcher can make progress again.
 				return true

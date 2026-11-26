@@ -1,10 +1,17 @@
 package collector
 
 import (
+	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+
 	"github.com/alibaba/MongoShake/v2/collector/ckpt"
+	utils "github.com/alibaba/MongoShake/v2/common"
 	"github.com/alibaba/MongoShake/v2/oplog"
+	"github.com/alibaba/MongoShake/v2/tunnel"
+	"go.mongodb.org/mongo-driver/bson"
 )
 
 // #1051: a durable checkpoint ahead of the barrier target is not by itself proof
@@ -58,4 +65,64 @@ func TestBarrierFilterCheckpointCompletesWithoutAck(t *testing.T) {
 	}
 	barrierCkptFlushFunc = func(*OplogSyncer) bool { return false }
 	requireBarrierResult(t, startBarrierTestWaitAck(t, syncer, 100, false), true)
+}
+
+// #1051 P1: ack is timestamp-granular. A first batch A@100 acked (ack=unack=100)
+// must not let a barrier pass while a second same-timestamp batch B@100 is still
+// offered-but-not-transferred (pending>0). The barrier requires all offered
+// batches applied, not just ack >= newestTs.
+func TestBarrierSameTimestampPendingBatchBlocks(t *testing.T) {
+	syncer := newBarrierTestSyncer(t)
+	worker := &Worker{ack: 100, unack: 100, syncer: syncer}
+	atomic.StoreInt64(&worker.pending, 1) // B@100 offered, not yet transferred
+	syncer.batcher = &Batcher{workerGroup: []*Worker{worker}, txnPins: make(map[oplog.TxnID]*txnPin)}
+	barrierCkptGetFunc = func(*OplogSyncer) (*ckpt.CheckpointContext, error) {
+		return &ckpt.CheckpointContext{Timestamp: 100}, nil
+	}
+	barrierCkptFlushFunc = func(*OplogSyncer) bool { return false }
+	requireBarrierPending(t, startBarrierTestWait(t, syncer, 100))
+}
+
+// Once the same-timestamp batch is transferred (pending==0), the barrier completes.
+func TestBarrierSameTimestampTransferredCompletes(t *testing.T) {
+	syncer := newBarrierTestSyncer(t)
+	worker := &Worker{ack: 100, unack: 100, syncer: syncer}
+	atomic.StoreInt64(&worker.pending, 0) // all offered batches applied
+	syncer.batcher = &Batcher{workerGroup: []*Worker{worker}, txnPins: make(map[oplog.TxnID]*txnPin)}
+	barrierCkptGetFunc = func(*OplogSyncer) (*ckpt.CheckpointContext, error) {
+		return &ckpt.CheckpointContext{Timestamp: 100}, nil
+	}
+	barrierCkptFlushFunc = func(*OplogSyncer) bool { return false }
+	requireBarrierResult(t, startBarrierTestWait(t, syncer, 100), true)
+}
+
+// Offer increments pending; transfer completion decrements it (batch identity
+// survives same-timestamp merging because the count is per offered batch).
+func TestWorkerPendingTracksOfferAndTransfer(t *testing.T) {
+	worker := &Worker{queue: make(chan []*oplog.GenericOplog, 4)}
+	require.True(t, worker.Idle())
+	batch := []*oplog.GenericOplog{{Parsed: &oplog.PartialLog{ParsedLog: oplog.ParsedLog{Timestamp: primitive.Timestamp{T: 100, I: 1}}}}}
+	worker.Offer(batch)
+	require.False(t, worker.Idle())
+	require.Equal(t, int64(1), atomic.LoadInt64(&worker.pending))
+	// simulate transfer completion releasing the pending count
+	atomic.AddInt64(&worker.pending, -1)
+	require.True(t, worker.Idle())
+}
+
+// #1051 M1 wiring regression: exercise the REAL transfer path (not a manual
+// pending decrement) so removing the transfer-side decrement is caught. Offer
+// holds pending=1; transfer applies the batch via the tunnel and must release it.
+func TestWorkerTransferReleasesPending(t *testing.T) {
+	syncer := &OplogSyncer{Replset: "t", workerAckNotify: make(chan struct{}, 1), replMetric: &utils.ReplicationMetric{}}
+	worker := &Worker{syncer: syncer, queue: make(chan []*oplog.GenericOplog, 4)}
+	worker.writeController = &WriteController{worker: worker, tunnel: &tunnel.MockWriter{}}
+	batch := []*oplog.GenericOplog{{Parsed: &oplog.PartialLog{ParsedLog: oplog.ParsedLog{
+		Timestamp: primitive.Timestamp{T: 100, I: 1}, Operation: "i", Namespace: "test.documents",
+		Object: bson.D{{Key: "_id", Value: 1}},
+	}}}}
+	worker.Offer(batch)
+	require.False(t, worker.Idle(), "Offer must hold a pending count")
+	worker.transfer(batch)
+	require.True(t, worker.Idle(), "transfer must release the pending count via the real path")
 }

@@ -412,7 +412,12 @@ func TestBarrierPreservesDDLAndPreparedTransactionOrder(t *testing.T) {
 				// Keep an additional worker behind, even if its batch was empty.
 				target := utils.TimeStampToInt64(ops[0].Parsed.Timestamp)
 				for _, worker := range batcher.workerGroup {
-					<-worker.queue
+					b := <-worker.queue
+					if b != nil {
+						// simulate the worker transferring (applying) the batch,
+						// which releases the pending count held since Offer (#1051)
+						atomic.AddInt64(&worker.pending, -1)
+					}
 					atomic.StoreInt64(&worker.unack, target)
 					worker.AllAcked(false)
 				}
