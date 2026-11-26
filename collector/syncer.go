@@ -34,14 +34,19 @@ const (
 	PipelineQueueLen      = utils.VarSyncerPipelineQueueLen
 
 	SyncerFetchErrorRetryMs             = utils.VarSyncerFetchErrorRetryMs
-	FilterCheckpointGap                 = utils.VarSyncerFilterCheckpointGap
-	FilterCheckpointCheckInterval       = utils.VarSyncerFilterCheckpointCheckInterval
 	BarrierCheckpointLogInterval        = 3 * time.Second
 	BarrierCheckpointErrorRetryInterval = 900 * time.Millisecond
 	BarrierInterruptedRetryInterval     = 300 * time.Millisecond
 
 	// Deprecated: barrier logging is now limited by elapsed time.
 	CheckCheckpointUpdateTimes = utils.VarSyncerCheckCheckpointUpdateTimes
+)
+
+// Filter checkpoint pacing vars (mutable for tests; production values come from
+// utils.VarSyncerFilter*).
+var (
+	FilterCheckpointGap           = utils.VarSyncerFilterCheckpointGap
+	FilterCheckpointCheckInterval = utils.VarSyncerFilterCheckpointCheckInterval
 )
 
 // DDLCheckpointInterval is retained for source compatibility.
@@ -522,13 +527,13 @@ func (sync *OplogSyncer) startBatcher() {
 				}
 
 				// pass only if all received oplog are filtered for {FilterCheckpointCheckInterval} seconds.
-				if now.After(filterCheckTs.Add(FilterCheckpointCheckInterval*time.Second)) == false {
+				if now.After(filterCheckTs.Add(time.Duration(FilterCheckpointCheckInterval)*time.Second)) == false {
 					return
 				}
 
 				checkpointTs := utils.ExtractMongoTimestamp(sync.ckptManager.GetInMemory().Timestamp)
 				filterNewestTs := utils.ExtractMongoTimestamp(filterLog.Timestamp)
-				if filterNewestTs-FilterCheckpointGap > checkpointTs {
+				if filterNewestTs-int64(FilterCheckpointGap) > checkpointTs {
 					// if checkpoint has not been update for {FilterCheckpointGap} seconds, update
 					// checkpoint mandatory.
 					newestTs = utils.TimeStampToInt64(filterLog.Timestamp)
@@ -545,7 +550,11 @@ func (sync *OplogSyncer) startBatcher() {
 
 			filterFlag = false
 
-			if log != nil {
+			// Only wait for workers when there is a real dispatched timestamp. At
+			// startup lastOplog is a non-nil fakeOplog with ts=0; waiting on it
+			// returns false immediately and must not be treated as a Pause
+			// interrupt, or a pure-filter stream would never advance (#1051 P2).
+			if log != nil && utils.TimeStampToInt64(log.Timestamp) > 0 {
 				newestTsLog := utils.ExtractTimestampForLog(newestTs)
 				if newestTs < utils.TimeStampToInt64(log.Timestamp) {
 					l.Logger.Errorf("%s filter newestTs[%v] smaller than previous timestamp[%v]",
