@@ -65,6 +65,10 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 	}
 	l.Logger.Infof("load checkpoint value: %s", checkpoint)
 
+	if err := checkpoint.ValidateSpoolRestart(conf.Options.FullSyncReaderOplogStoreDisk); err != nil {
+		return err
+	}
+
 	// set fetch method if not exists or empty
 	if !exists || checkpoint.FetchMethod == "" {
 		sync.ckptManager.SetFetchMethod(conf.Options.IncrSyncMongoFetchMethod)
@@ -85,6 +89,21 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 		if err := sync.ckptManager.FlushStaged(); err != nil {
 			return fmt.Errorf("persist full sync finish position failed[%v]", err)
 		}
+	}
+
+	if checkpoint.SpoolCleanupPending() {
+		if err := spool.DeletePath(conf.Options.LogDirectory, checkpoint.OplogDiskQueue); err != nil {
+			return fmt.Errorf("delete completed pebble oplog spool[%v] failed[%v]",
+				checkpoint.OplogDiskQueue, err)
+		}
+		sync.ckptManager.SetOplogDiskQueueName("")
+		sync.ckptManager.SetOplogDiskFinishTs(checkpoint.OplogDiskQueueFinishTs)
+		if err := sync.ckptManager.Update(checkpoint.Timestamp); err != nil {
+			return fmt.Errorf("clear completed pebble oplog spool[%v] checkpoint metadata failed[%v]",
+				checkpoint.OplogDiskQueue, err)
+		}
+		sync.persister.SetFetchStage(utils.FetchStageStoreMemoryApply)
+		return nil
 	}
 
 	// not enable oplog persist?
@@ -113,21 +132,6 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 			}
 			return fmt.Errorf("persist new pebble oplog spool[%v] metadata failed[%v]", dqName, err)
 		}
-		return nil
-	}
-
-	if checkpoint.SpoolCleanupPending() {
-		if err := spool.DeletePath(conf.Options.LogDirectory, checkpoint.OplogDiskQueue); err != nil {
-			return fmt.Errorf("delete completed pebble oplog spool[%v] failed[%v]",
-				checkpoint.OplogDiskQueue, err)
-		}
-		sync.ckptManager.SetOplogDiskQueueName("")
-		sync.ckptManager.SetOplogDiskFinishTs(checkpoint.OplogDiskQueueFinishTs)
-		if err := sync.ckptManager.Update(checkpoint.Timestamp); err != nil {
-			return fmt.Errorf("clear completed pebble oplog spool[%v] checkpoint metadata failed[%v]",
-				checkpoint.OplogDiskQueue, err)
-		}
-		sync.persister.SetFetchStage(utils.FetchStageStoreMemoryApply)
 		return nil
 	}
 
@@ -166,9 +170,7 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 			utils.ExtractTimestampForLog(durableLastTs), utils.ExtractTimestampForLog(checkpoint.Timestamp))
 	}
 	// Publish the stage only after the existing queue and reader are ready.
-	if checkpoint.FullFinishTs > 0 {
-		sync.StartDiskApply()
-	}
+	sync.StartDiskApply()
 	return nil
 }
 

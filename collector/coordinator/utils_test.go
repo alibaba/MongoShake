@@ -863,19 +863,24 @@ func TestSelectSyncModeWithNamedSpool(t *testing.T) {
 	testSelectSyncMode = true
 	utils.GetAllTimestampInUTInput = map[string]utils.Pair{"rs": {First: int64(10), Second: int64(500)}}
 	conf.Options.CheckpointStorage = utils.VarCheckpointStorageApi
-	conf.Options.FullSyncReaderOplogStoreDisk = true
 	conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodOplog
 	conf.Options.SpecialSourceDBFlag = ""
 	conf.Options.MongoSUrl = ""
 	for _, tc := range []struct {
 		name                               string
+		mode                               string
+		diskEnabled                        bool
 		timestamp, fullFinish, spoolFinish int64
-		refuse                             bool
+		wantError                          string
 	}{
-		{"partial full copy", 100, 0, ckpt.InitCheckpoint, true},
-		{"initial position with a named spool", ckpt.InitCheckpoint, 0, ckpt.InitCheckpoint, true},
-		{"interrupted replay", 100, 200, ckpt.InitCheckpoint, false},
-		{"cleanup after legacy replay", 220, 0, 200, false},
+		{"partial full copy", utils.VarSyncModeAll, true, 100, 0, ckpt.InitCheckpoint, "full sync completion is unconfirmed"},
+		{"partial full copy with disk disabled", utils.VarSyncModeAll, false, 100, 0, ckpt.InitCheckpoint, "full sync completion is unconfirmed"},
+		{"initial position with disk enabled", utils.VarSyncModeAll, true, ckpt.InitCheckpoint, 0, ckpt.InitCheckpoint, "full sync completion is unconfirmed"},
+		{"initial position in incr mode", utils.VarSyncModeIncr, false, ckpt.InitCheckpoint, 0, ckpt.InitCheckpoint, "full sync completion is unconfirmed"},
+		{"interrupted replay", utils.VarSyncModeAll, true, 100, 200, ckpt.InitCheckpoint, ""},
+		{"interrupted replay in incr mode", utils.VarSyncModeIncr, false, 100, 200, ckpt.InitCheckpoint, "disk replay is unfinished"},
+		{"cleanup after legacy replay", utils.VarSyncModeAll, true, 220, 0, 200, ""},
+		{"cleanup after legacy replay in incr mode", utils.VarSyncModeIncr, false, 220, 0, 200, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -890,9 +895,10 @@ func TestSelectSyncModeWithNamedSpool(t *testing.T) {
 			}))
 			defer srv.Close()
 			conf.Options.CheckpointStorageCollection = srv.URL
-			mode, positions, _, bound, err := new(ReplicationCoordinator).selectSyncMode(utils.VarSyncModeAll)
-			if tc.refuse {
-				require.ErrorContains(t, err, "full sync completion is unconfirmed")
+			conf.Options.FullSyncReaderOplogStoreDisk = tc.diskEnabled
+			mode, positions, _, bound, err := new(ReplicationCoordinator).selectSyncMode(tc.mode)
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
 				return
 			}
 			require.NoError(t, err)
@@ -916,8 +922,18 @@ func TestSelectSyncModeWithNamedSpool(t *testing.T) {
 		}))
 		defer srv.Close()
 		conf.Options.CheckpointStorageCollection = srv.URL
+		conf.Options.FullSyncReaderOplogStoreDisk = true
 		_, _, _, _, err := new(ReplicationCoordinator).selectSyncMode(utils.VarSyncModeAll)
 		require.ErrorContains(t, err, "another replica set still references spool")
+
+		responses = []ckpt.CheckpointContext{
+			{},
+			{Name: "rs", Version: utils.FcvCheckpoint.CurrentVersion, Timestamp: ckpt.InitCheckpoint,
+				OplogDiskQueue: "partial", OplogDiskQueueFinishTs: ckpt.InitCheckpoint},
+		}
+		conf.Options.FullSyncReaderOplogStoreDisk = false
+		_, _, _, _, err = new(ReplicationCoordinator).selectSyncMode(utils.VarSyncModeAll)
+		require.ErrorContains(t, err, "full sync completion is unconfirmed")
 	})
 
 }

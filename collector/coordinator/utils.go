@@ -92,7 +92,7 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 			ckptVar, exist, err := ckptManager.Get()
 			if err != nil {
 				return 0, nil, false, 0, fmt.Errorf("get mongod[%v] checkpoint failed: %v", replName, err)
-			} else if exist && (ckptVar.Timestamp > ckpt.InitCheckpoint || (diskSpool && ckptVar.OplogDiskQueue != "")) {
+			} else if exist && (ckptVar.Timestamp > ckpt.InitCheckpoint || ckptVar.OplogDiskQueue != "") {
 				ckptRemote = ckptVar
 			}
 
@@ -114,12 +114,10 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 			l.Logger.Infof("%s ts.Oldest[%v] >= ckptRemote.Timestamp[%v], need full sync", replName,
 				ts.Oldest, ckptRemote.Timestamp)
 		default:
-			if diskSpool && ckptRemote.OplogDiskQueue != "" {
+			if ckptRemote.OplogDiskQueue != "" {
 				spoolName = ckptRemote.OplogDiskQueue
-				if !ckptRemote.SpoolCleanupPending() && ckptRemote.FullFinishTs <= 0 {
-					return 0, nil, false, 0, fmt.Errorf("replica set %q spool %q: full sync completion is unconfirmed; "+
-						"preserve the checkpoint, spool and partial target. Restart sync_mode=all with "+
-						"an empty target and fresh checkpoint storage to rebuild the full copy", replName, spoolName)
+				if err := ckptRemote.ValidateSpoolRestart(diskSpool); err != nil {
+					return 0, nil, false, 0, err
 				}
 			}
 			startTsMap[replName] = ckptRemote.Timestamp
@@ -129,9 +127,6 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 			continue
 		}
 
-		if !diskSpool {
-			return smallestNew, nil, false, 0, nil
-		}
 		// Check every shard before allowing a full copy to modify the target.
 		canIncr = false
 	}
