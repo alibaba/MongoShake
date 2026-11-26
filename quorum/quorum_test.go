@@ -85,13 +85,13 @@ func TestPromotionAndNetAddr(t *testing.T) {
 }
 
 func TestMakeSessionBadURIFailsFast(t *testing.T) {
-	_, err := makeSession("mongodb://127.0.0.1:1/?connectTimeoutMS=300&serverSelectionTimeoutMS=300")
+	_, err := makeSessionWithContext(context.Background(), "mongodb://127.0.0.1:1/?connectTimeoutMS=300&serverSelectionTimeoutMS=300")
 	assert.Error(t, err)
 }
 
 func TestCompeteMasterAgainstRealMongo(t *testing.T) {
 	uri := testURI(t)
-	conn, err := makeSession(uri)
+	conn, err := makeSessionWithContext(context.Background(), uri)
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -104,9 +104,9 @@ func TestCompeteMasterAgainstRealMongo(t *testing.T) {
 	UseElectionObjectId(primitive.NewObjectID())
 
 	// first insert wins the election
-	assert.True(t, competeMaster(coll))
+	assert.True(t, competeMasterCtx(context.Background(), coll))
 	// same _id again is a duplicate key -> lose, not crash
-	assert.False(t, competeMaster(coll))
+	assert.False(t, competeMasterCtx(context.Background(), coll))
 
 	var entry ElectionEntry
 	require.NoError(t, coll.FindOne(context.Background(), bson.M{"_id": electionObjectId}).Decode(&entry))
@@ -116,7 +116,7 @@ func TestCompeteMasterAgainstRealMongo(t *testing.T) {
 
 func TestMakeSessionGoodURI(t *testing.T) {
 	uri := testURI(t)
-	conn, err := makeSession(uri)
+	conn, err := makeSessionWithContext(context.Background(), uri)
 	require.NoError(t, err)
 	require.NotNil(t, conn.Client)
 	conn.Close()
