@@ -126,3 +126,29 @@ func TestWorkerTransferReleasesPending(t *testing.T) {
 	worker.transfer(batch)
 	require.True(t, worker.Idle(), "transfer must release the pending count via the real path")
 }
+
+// #1051 P1 regression: a worker with pending batches and zero ack must BLOCK the
+// checkpoint, not be excluded (which let a dual-worker setup advance past it).
+func TestCheckpointPendingZeroAckBlocks(t *testing.T) {
+	syncer := newBarrierTestSyncer(t)
+	w0 := &Worker{ack: 0, unack: 100, syncer: syncer}
+	atomic.StoreInt64(&w0.pending, 1) // 100 still queued, no ack
+	w1 := &Worker{ack: 150, unack: 200, syncer: syncer}
+	atomic.StoreInt64(&w1.pending, 1)
+	syncer.batcher = &Batcher{workerGroup: []*Worker{w0, w1}, txnPins: make(map[oplog.TxnID]*txnPin)}
+	_, err := syncer.calculateWorkerLowestCheckpoint()
+	require.Error(t, err, "zero-ack pending worker must block the checkpoint, not be excluded")
+}
+
+// Same-timestamp pending batch: contribution is ack-1 (strictly below the pending
+// batch ts), protecting both the batch head and same-ts batches.
+func TestCheckpointPendingSameTimestampConservative(t *testing.T) {
+	syncer := newBarrierTestSyncer(t)
+	ack := utils.TimeStampToInt64(primitive.Timestamp{T: 100, I: 5})
+	w := &Worker{ack: ack, unack: ack, syncer: syncer}
+	atomic.StoreInt64(&w.pending, 1) // same-ts batch still pending
+	syncer.batcher = &Batcher{workerGroup: []*Worker{w}, txnPins: make(map[oplog.TxnID]*txnPin)}
+	lowest, err := syncer.calculateWorkerLowestCheckpoint()
+	require.NoError(t, err)
+	require.Equal(t, ack-1, lowest, "checkpoint must stay strictly below the pending batch ts")
+}

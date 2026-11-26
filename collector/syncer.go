@@ -557,6 +557,12 @@ func (sync *OplogSyncer) startBatcher() {
 
 				status := sync.checkCheckpointUpdate(true, utils.TimeStampToInt64(log.Timestamp), true)
 				l.Logger.Infof("%s last checkpoint[%v] updated [%v]", sync, newestTsLog, status)
+				if !status {
+					// Wait interrupted (Pause/Shutdown): keep the current position;
+					// do not advance the reader or force-write the filtered checkpoint
+					// until the wait completes (#1051 P2).
+					return
+				}
 			} else {
 				l.Logger.Infof("%s last log is empty, skip waiting checkpoint updated", sync)
 			}
