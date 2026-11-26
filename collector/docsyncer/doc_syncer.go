@@ -483,6 +483,12 @@ func StartIndexSync(indexMap map[utils.NS][]bson.D, toUrl string,
 							l.Logger.Infof("skip index for ns[%v] not covered by field whitelist: %v", ns, index)
 							continue
 						}
+					} else if fields := conf.Options.FullSyncFieldBlacklistMap[ns.Str()]; len(fields) > 0 {
+						// field blacklist: skip indexes referencing any blacklisted field
+						if !filter.IndexSpecAllowed(index, fields) {
+							l.Logger.Infof("skip index for ns[%v] references blacklisted field: %v", ns, index)
+							continue
+						}
 					}
 
 					newIndex := bson.D{}

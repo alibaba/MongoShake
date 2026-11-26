@@ -260,12 +260,12 @@ func TestParseFieldWhitelists(t *testing.T) {
 		{
 			name:    "missing namespace.white",
 			in:      in{full: []string{"db1.c1:a"}},
-			wantErr: "field whitelist requires filter.namespace.white to be set",
+			wantErr: "field whitelist/blacklist requires filter.namespace.white to be set",
 		},
 		{
 			name:    "ns not covered by white",
 			in:      in{full: []string{"db1.c1:a"}, white: []string{"db2.c2"}},
-			wantErr: "field whitelist namespace(s) [db1.c1] not covered by filter.namespace.white",
+			wantErr: "field whitelist/blacklist namespace(s) [db1.c1] not covered by filter.namespace.white",
 		},
 		{
 			name:    "dotted field rejected",
@@ -280,7 +280,7 @@ func TestParseFieldWhitelists(t *testing.T) {
 		{
 			name:    "incr without change_stream rejected",
 			in:      in{incr: []string{"db1.c1:a"}, white: []string{"db1.c1"}, fetch: "oplog"},
-			wantErr: "incr_sync.field.whitelist requires incr_sync.mongo_fetch_method = change_stream",
+			wantErr: "incr_sync.field.whitelist/blacklist requires incr_sync.mongo_fetch_method = change_stream",
 		},
 		{
 			name:    "full/incr mismatch rejected",
@@ -311,7 +311,7 @@ func TestParseFieldWhitelists(t *testing.T) {
 				conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodChangeStream
 			}
 
-			err := parseFieldWhitelists()
+			err := parseFieldLists()
 			if c.wantErr == "" {
 				assert.NoError(t, err)
 				for ns, fields := range c.wantFull {
@@ -322,6 +322,109 @@ func TestParseFieldWhitelists(t *testing.T) {
 					sort.Strings(got)
 					assert.Equal(t, fields, got)
 				}
+			} else {
+				assert.EqualError(t, err, c.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseFieldBlacklists(t *testing.T) {
+	origin := conf.Options
+	defer func() { conf.Options = origin }()
+
+	cases := []struct {
+		name    string
+		fullWL  []string
+		incrWL  []string
+		fullBL  []string
+		incrBL  []string
+		white   []string
+		fetch   string
+		wantErr string
+	}{
+		{
+			name:   "blacklist ok",
+			fullBL: []string{"db1.c1:big,blob"}, incrBL: []string{"db1.c1:blob,big"},
+			white: []string{"db1.c1"}, fetch: "change_stream",
+		},
+		{
+			name:    "blacklist _id rejected",
+			fullBL:  []string{"db1.c1:_id,big"},
+			white:   []string{"db1.c1"},
+			wantErr: "full_sync.field.blacklist cannot exclude _id (it is always kept); got [db1.c1:_id,big]",
+		},
+		{
+			name:    "full whitelist+blacklist same ns rejected",
+			fullWL:  []string{"db1.c1:a"},
+			fullBL:  []string{"db1.c1:big"},
+			white:   []string{"db1.c1"},
+			wantErr: "ns[db1.c1] set in both full_sync.field.whitelist and full_sync.field.blacklist",
+		},
+		{
+			name:   "incr whitelist+blacklist same ns rejected",
+			incrWL: []string{"db1.c1:a"},
+			incrBL: []string{"db1.c1:big"},
+			white:  []string{"db1.c1"}, fetch: "change_stream",
+			wantErr: "ns[db1.c1] set in both incr_sync.field.whitelist and incr_sync.field.blacklist",
+		},
+		{
+			name:   "cross-phase mode conflict fullWL incrBL rejected",
+			fullWL: []string{"db1.c1:a"},
+			incrBL: []string{"db1.c1:big"},
+			white:  []string{"db1.c1"}, fetch: "change_stream",
+			wantErr: "ns[db1.c1] mode conflict: full_sync.field.whitelist vs incr_sync.field.blacklist",
+		},
+		{
+			name:   "cross-phase mode conflict fullBL incrWL rejected",
+			fullBL: []string{"db1.c1:big"},
+			incrWL: []string{"db1.c1:a"},
+			white:  []string{"db1.c1"}, fetch: "change_stream",
+			wantErr: "ns[db1.c1] mode conflict: full_sync.field.blacklist vs incr_sync.field.whitelist",
+		},
+		{
+			name:   "full/incr blacklist mismatch rejected",
+			fullBL: []string{"db1.c1:big,blob"},
+			incrBL: []string{"db1.c1:big"},
+			white:  []string{"db1.c1"}, fetch: "change_stream",
+			wantErr: "field blacklist mismatch for ns[db1.c1]: full_sync=[big blob], incr_sync=[big]",
+		},
+		{
+			name:   "incr blacklist without change_stream rejected",
+			incrBL: []string{"db1.c1:big"},
+			white:  []string{"db1.c1"}, fetch: "oplog",
+			wantErr: "incr_sync.field.whitelist/blacklist requires incr_sync.mongo_fetch_method = change_stream",
+		},
+		{
+			name:    "blacklist ns not covered rejected",
+			fullBL:  []string{"db1.c1:big"},
+			white:   []string{"db2.c2"},
+			wantErr: "field whitelist/blacklist namespace(s) [db1.c1] not covered by filter.namespace.white",
+		},
+		{
+			name:   "different ns different modes ok",
+			fullWL: []string{"db1.c1:a"}, fullBL: []string{"db2.c2:big"},
+			white: []string{"db1.c1", "db2.c2"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			conf.Options = conf.Configuration{
+				FullSyncFieldWhitelist: c.fullWL,
+				IncrSyncFieldWhitelist: c.incrWL,
+				FullSyncFieldBlacklist: c.fullBL,
+				IncrSyncFieldBlacklist: c.incrBL,
+				FilterNamespaceWhite:   c.white,
+			}
+			if c.fetch != "" {
+				conf.Options.IncrSyncMongoFetchMethod = c.fetch
+			} else {
+				conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodChangeStream
+			}
+			err := parseFieldLists()
+			if c.wantErr == "" {
+				assert.NoError(t, err)
 			} else {
 				assert.EqualError(t, err, c.wantErr)
 			}

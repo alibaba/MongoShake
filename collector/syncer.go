@@ -234,9 +234,9 @@ func NewOplogSyncer(
 		filterList = append(filterList, namespaceFilter)
 	}
 
-	// field-level whitelist projection (incremental, change_stream only)
-	if len(conf.Options.IncrSyncFieldWhitelistMap) != 0 {
-		filterList = append(filterList, filter.NewFieldFilter(conf.Options.IncrSyncFieldWhitelistMap))
+	// field-level whitelist/blacklist projection (incremental, change_stream only)
+	if len(conf.Options.IncrSyncFieldWhitelistMap) != 0 || len(conf.Options.IncrSyncFieldBlacklistMap) != 0 {
+		filterList = append(filterList, filter.NewFieldFilter(conf.Options.IncrSyncFieldWhitelistMap, conf.Options.IncrSyncFieldBlacklistMap))
 	}
 
 	// oplog filters. drop the oplog if any of the filter
