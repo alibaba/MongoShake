@@ -111,6 +111,21 @@ func TestPersisterInjectWritesDiskBatches(t *testing.T) {
 	assert.Equal(t, uint64(4), persister.diskWriteCount, "should be equal")
 }
 
+// A fetcher already on the disk path must honor a drain that finished before
+// it acquired the mutex, even while the acknowledged spool awaits deletion.
+func TestPersisterInjectAfterFinalDrain(t *testing.T) {
+	oldCapacity := conf.Options.IncrSyncFetcherBufferCapacity
+	conf.Options.IncrSyncFetcherBufferCapacity = 4
+	t.Cleanup(func() { conf.Options.IncrSyncFetcherBufferCapacity = oldCapacity })
+	retained := &fakeOplogSpool{name: "retained"}
+	p := &Persister{DiskQueue: retained, fetchStage: utils.FetchStageStoreMemoryApply}
+	record := mockOplogsBinaryWithTs(t, 42)
+	p.injectDuringDiskStage(record)
+	assert.Equal(t, [][]byte{record}, p.Buffer)
+	assert.Empty(t, p.diskBuffer)
+	assert.Empty(t, retained.data)
+}
+
 func TestInject(t *testing.T) {
 	// test Inject
 

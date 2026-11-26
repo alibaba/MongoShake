@@ -349,7 +349,7 @@ func TestCheckpointRetriesClearingQueueNameAfterPhaseBFailure(t *testing.T) {
 	assert.Equal(t, int64(-2), syncer.persister.diskQueueLastTs, "should be equal")
 }
 
-func TestLoadCheckpointReopensUnfinishedInitCheckpointSpool(t *testing.T) {
+func TestLoadCheckpointResumesDiskApplyAfterFullCopy(t *testing.T) {
 	origin := conf.Options
 	defer func() {
 		conf.Options = origin
@@ -376,6 +376,7 @@ func TestLoadCheckpointReopensUnfinishedInitCheckpointSpool(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(&ckpt.CheckpointContext{
 				Name:                   replset,
 				Timestamp:              200,
+				FullFinishTs:           250,
 				Version:                utils.FcvCheckpoint.CurrentVersion,
 				OplogDiskQueue:         queueName,
 				OplogDiskQueueFinishTs: ckpt.InitCheckpoint,
@@ -412,7 +413,7 @@ func TestLoadCheckpointReopensUnfinishedInitCheckpointSpool(t *testing.T) {
 
 	err = syncer.loadCheckpoint()
 	require.NoError(t, err)
-	assert.Equal(t, utils.FetchStageStoreDiskNoApply, syncer.persister.GetFetchStage(), "should be equal")
+	assert.Equal(t, utils.FetchStageStoreDiskApply, syncer.persister.GetFetchStage(), "should be equal")
 	require.NotNil(t, syncer.persister.DiskQueue, "should be equal")
 	stats := syncer.persister.DiskQueue.Stats()
 	assert.Equal(t, uint64(1), stats.Depth, "should be equal")

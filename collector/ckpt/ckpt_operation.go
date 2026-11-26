@@ -40,6 +40,13 @@ type CheckpointContext struct {
 	FullFinishTs int64 `bson:"full_finish_ts" json:"full_finish_ts"`
 }
 
+// SpoolCleanupPending reports that replay was acknowledged before a crash
+// left the local directory or its checkpoint reference to be removed.
+func (cc *CheckpointContext) SpoolCleanupPending() bool {
+	return cc.OplogDiskQueue != "" && cc.OplogDiskQueueFinishTs > InitCheckpoint &&
+		cc.Timestamp >= cc.OplogDiskQueueFinishTs
+}
+
 func (cc *CheckpointContext) String() string {
 	if ret, err := json.Marshal(cc); err != nil {
 		return err.Error()
