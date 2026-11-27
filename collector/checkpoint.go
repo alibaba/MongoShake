@@ -65,6 +65,10 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 	}
 	l.Logger.Infof("load checkpoint value: %s", checkpoint)
 
+	if err := checkpoint.ValidateSpoolRestart(conf.Options.FullSyncReaderOplogStoreDisk); err != nil {
+		return err
+	}
+
 	// set fetch method if not exists or empty
 	if !exists || checkpoint.FetchMethod == "" {
 		sync.ckptManager.SetFetchMethod(conf.Options.IncrSyncMongoFetchMethod)
@@ -85,6 +89,21 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 		if err := sync.ckptManager.FlushStaged(); err != nil {
 			return fmt.Errorf("persist full sync finish position failed[%v]", err)
 		}
+	}
+
+	if checkpoint.SpoolCleanupPending() {
+		if err := spool.DeletePath(conf.Options.LogDirectory, checkpoint.OplogDiskQueue); err != nil {
+			return fmt.Errorf("delete completed pebble oplog spool[%v] failed[%v]",
+				checkpoint.OplogDiskQueue, err)
+		}
+		sync.ckptManager.SetOplogDiskQueueName("")
+		sync.ckptManager.SetOplogDiskFinishTs(checkpoint.OplogDiskQueueFinishTs)
+		if err := sync.ckptManager.Update(checkpoint.Timestamp); err != nil {
+			return fmt.Errorf("clear completed pebble oplog spool[%v] checkpoint metadata failed[%v]",
+				checkpoint.OplogDiskQueue, err)
+		}
+		sync.persister.SetFetchStage(utils.FetchStageStoreMemoryApply)
+		return nil
 	}
 
 	// not enable oplog persist?
@@ -113,24 +132,6 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 			}
 			return fmt.Errorf("persist new pebble oplog spool[%v] metadata failed[%v]", dqName, err)
 		}
-		return nil
-	}
-
-	cleanupPending := checkpoint.OplogDiskQueue != "" &&
-		checkpoint.OplogDiskQueueFinishTs > ckpt.InitCheckpoint &&
-		checkpoint.Timestamp >= checkpoint.OplogDiskQueueFinishTs
-	if cleanupPending {
-		if err := spool.DeletePath(conf.Options.LogDirectory, checkpoint.OplogDiskQueue); err != nil {
-			return fmt.Errorf("delete completed pebble oplog spool[%v] failed[%v]",
-				checkpoint.OplogDiskQueue, err)
-		}
-		sync.ckptManager.SetOplogDiskQueueName("")
-		sync.ckptManager.SetOplogDiskFinishTs(checkpoint.OplogDiskQueueFinishTs)
-		if err := sync.ckptManager.Update(checkpoint.Timestamp); err != nil {
-			return fmt.Errorf("clear completed pebble oplog spool[%v] checkpoint metadata failed[%v]",
-				checkpoint.OplogDiskQueue, err)
-		}
-		sync.persister.SetFetchStage(utils.FetchStageStoreMemoryApply)
 		return nil
 	}
 
@@ -168,6 +169,8 @@ func (sync *OplogSyncer) loadCheckpoint() error {
 			"instead of remote checkpoint[%v]", sync.Replset,
 			utils.ExtractTimestampForLog(durableLastTs), utils.ExtractTimestampForLog(checkpoint.Timestamp))
 	}
+	// Publish the stage only after the existing queue and reader are ready.
+	sync.StartDiskApply()
 	return nil
 }
 
@@ -227,12 +230,15 @@ func (sync *OplogSyncer) checkpoint(flush bool, inputTs int64) bool {
 	lowest = sync.clampCheckpointByTxnPin(lowest, ackTs)
 
 	lowestInt64 := lowest
-	if conf.Options.FullSyncReaderOplogStoreDisk && sync.persister.diskQueueLastTs > 0 {
+	var lastTs int64
+	if conf.Options.FullSyncReaderOplogStoreDisk {
+		lastTs = atomic.LoadInt64(&sync.persister.diskQueueLastTs)
+	}
+	if lastTs > 0 {
 		checkpointTs := inMemoryTs
 		if err == nil && lowestInt64 > checkpointTs {
 			checkpointTs = lowestInt64
 		}
-		lastTs := sync.persister.diskQueueLastTs
 		if lastTs == ckpt.InitCheckpoint {
 			return sync.finishEmptyDiskSpool(checkpointTs)
 		}
@@ -316,7 +322,7 @@ func (sync *OplogSyncer) finishNonEmptyDiskSpool(checkpointTs, finishTs int64) b
 		l.Logger.Warnf("CheckpointOperation clear finished disk spool metadata failed: %v", err)
 		return false
 	}
-	sync.persister.diskQueueLastTs = -2
+	atomic.StoreInt64(&sync.persister.diskQueueLastTs, -2)
 	sync.recordDiskSpoolCheckpoint(checkpointTs)
 	return true
 }
@@ -352,7 +358,7 @@ func (sync *OplogSyncer) finishEmptyDiskSpool(checkpointTs int64) bool {
 		}
 	}
 
-	sync.persister.diskQueueLastTs = -2
+	atomic.StoreInt64(&sync.persister.diskQueueLastTs, -2)
 	sync.recordDiskSpoolCheckpoint(checkpointTs)
 	return true
 }

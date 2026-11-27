@@ -40,6 +40,30 @@ type CheckpointContext struct {
 	FullFinishTs int64 `bson:"full_finish_ts" json:"full_finish_ts"`
 }
 
+// SpoolCleanupPending reports that replay was acknowledged before a crash
+// left the local directory or its checkpoint reference to be removed.
+func (cc *CheckpointContext) SpoolCleanupPending() bool {
+	return cc.OplogDiskQueue != "" && cc.OplogDiskQueueFinishTs > InitCheckpoint &&
+		cc.Timestamp >= cc.OplogDiskQueueFinishTs
+}
+
+// ValidateSpoolRestart checks the persisted recovery state before a restart
+// can modify the target or bypass a queue left by an earlier configuration.
+func (cc *CheckpointContext) ValidateSpoolRestart(diskEnabled bool) error {
+	if cc.OplogDiskQueue == "" || cc.SpoolCleanupPending() {
+		return nil
+	}
+	if cc.FullFinishTs <= 0 {
+		return fmt.Errorf("replica set %q spool %q: full sync completion is unconfirmed; preserve the checkpoint, spool and partial target. "+
+			"Restart sync_mode=all with an empty target, fresh checkpoint storage and a new log directory to rebuild the full copy", cc.Name, cc.OplogDiskQueue)
+	}
+	if !diskEnabled {
+		return fmt.Errorf("replica set %q spool %q: disk replay is unfinished; restart with sync_mode=all, full_sync.reader.oplog_store_disk=true "+
+			"and the original checkpoint and log directory to resume replay", cc.Name, cc.OplogDiskQueue)
+	}
+	return nil
+}
+
 func (cc *CheckpointContext) String() string {
 	if ret, err := json.Marshal(cc); err != nil {
 		return err.Error()

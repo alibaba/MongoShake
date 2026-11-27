@@ -240,6 +240,9 @@ func TestBackfillFlushFailureIsNotFatalAndSelfHeals(t *testing.T) {
 
 	realTs := int64(1794904896)<<32 | 7
 	postFail.Store(true)
+	conf.Options.FullSyncReaderOplogStoreDisk = true
+	require.ErrorContains(t, sync.BackfillFullFinishTs(realTs), "before disk replay")
+	conf.Options.FullSyncReaderOplogStoreDisk = false
 	require.NoError(t, sync.BackfillFullFinishTs(realTs),
 		"a flush failure must not abort the completed full sync")
 	assert.Equal(t, int64(0), atomic.LoadInt64(&posts))

@@ -82,6 +82,9 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 		}
 	}
 
+	diskSpool := conf.Options.FullSyncReaderOplogStoreDisk
+	canIncr := true
+	spoolName := ""
 	for replName, ts := range tsMap {
 		var ckptRemote *ckpt.CheckpointContext
 		if mongosCkpt == nil {
@@ -89,10 +92,7 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 			ckptVar, exist, err := ckptManager.Get()
 			if err != nil {
 				return 0, nil, false, 0, fmt.Errorf("get mongod[%v] checkpoint failed: %v", replName, err)
-			} else if !exist || ckptVar.Timestamp <= 1 { // empty
-				// set nil to make code more clear
-				ckptRemote = nil
-			} else {
+			} else if exist && (ckptVar.Timestamp > ckpt.InitCheckpoint || ckptVar.OplogDiskQueue != "") {
 				ckptRemote = ckptVar
 			}
 
@@ -103,30 +103,40 @@ func (coordinator *ReplicationCoordinator) compareCheckpointAndDbTs(syncModeAll 
 			l.Logger.Infof("%s checkpoint using mongos: %s", replName, mongosCkpt)
 		}
 
-		if ckptRemote == nil {
-			if syncModeAll || confTsMongoTs > (1<<32) && ts.Oldest >= confTsMongoTs {
-				l.Logger.Infof("%s syncModeAll[%v] ts.Oldest[%v], confTsMongoTs[%v]", replName, syncModeAll, ts.Oldest,
-					confTsMongoTs)
-				return smallestNew, nil, false, 0, nil
+		switch {
+		case ckptRemote == nil:
+			if !syncModeAll && (confTsMongoTs <= 1<<32 || ts.Oldest < confTsMongoTs) {
+				startTsMap[replName] = confTsMongoTs
+				continue
 			}
-			startTsMap[replName] = confTsMongoTs
-		} else {
-			// checkpoint less than the oldest timestamp, ckpt.OplogDiskQueue == "" means not enable
-			// disk persist
-			if ts.Oldest >= ckptRemote.Timestamp && ckptRemote.OplogDiskQueue == "" {
-				l.Logger.Infof("%s ts.Oldest[%v] >= ckptRemote.Timestamp[%v], need full sync", replName,
-					ts.Oldest, ckptRemote.Timestamp)
-
-				// can't run incr sync directly
-				return smallestNew, nil, false, 0, nil
+			l.Logger.Infof("%s needs a full copy: no usable checkpoint", replName)
+		case ckptRemote.OplogDiskQueue == "" && ts.Oldest >= ckptRemote.Timestamp:
+			l.Logger.Infof("%s ts.Oldest[%v] >= ckptRemote.Timestamp[%v], need full sync", replName,
+				ts.Oldest, ckptRemote.Timestamp)
+		default:
+			if ckptRemote.OplogDiskQueue != "" {
+				spoolName = ckptRemote.OplogDiskQueue
+				if err := ckptRemote.ValidateSpoolRestart(diskSpool); err != nil {
+					return 0, nil, false, 0, err
+				}
 			}
-			startTsMap[replName] = int64(ckptRemote.Timestamp)
+			startTsMap[replName] = ckptRemote.Timestamp
 			if ckptRemote.FullFinishTs > restoredFullFinishTs {
 				restoredFullFinishTs = ckptRemote.FullFinishTs
 			}
+			continue
 		}
+
+		// Check every shard before allowing a full copy to modify the target.
+		canIncr = false
 	}
 
+	if !canIncr {
+		if spoolName != "" {
+			return 0, nil, false, 0, fmt.Errorf("cannot start a new full copy while another replica set still references spool %q; preserve the existing state and rebuild with a fresh target and checkpoint", spoolName)
+		}
+		return smallestNew, nil, false, 0, nil
+	}
 	return smallestNew, startTsMap, true, restoredFullFinishTs, nil
 }
 

@@ -338,13 +338,8 @@ func (sync *OplogSyncer) StartDiskApply() {
 // persisted: it stays an in-memory semantic, and a restart restores 0 with
 // conversion active, matching the pre-#1047 behavior (#1050 review M1).
 //
-// A flush failure here is NOT fatal (#1050 review F1): the workers already
-// hold the window, so this run is unaffected, and losing persistence only
-// means a restart falls back to the pre-#1047 conversion behavior. The staged
-// value rides along on the next successful checkpoint Update, so persistence
-// self-heals. Aborting a completed tens-of-hours full sync over an optional
-// optimization would be a bad trade. The serialize handover in loadCheckpoint
-// keeps fatal semantics, consistent with its Get() failure.
+// A named disk spool requires a durable completion marker before replay.
+// Other callers can still carry a staged overlap bound on the next update.
 func (sync *OplogSyncer) BackfillFullFinishTs(ts int64) error {
 	// Wait until Start() has initialized the checkpoint manager and loaded
 	// the durable context; docWg.Wait() alone does not synchronize with it.
@@ -360,6 +355,9 @@ func (sync *OplogSyncer) BackfillFullFinishTs(ts int64) error {
 	}
 	sync.ckptManager.SetFullFinishTs(ts)
 	if err := sync.ckptManager.FlushStaged(); err != nil {
+		if conf.Options.FullSyncReaderOplogStoreDisk {
+			return fmt.Errorf("persist full sync completion before disk replay: %w", err)
+		}
 		l.Logger.Warnf("%s persist full finish ts failed[%v]; window active in memory, "+
 			"staged value will ride the next checkpoint update", sync, err)
 	}

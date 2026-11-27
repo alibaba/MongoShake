@@ -155,35 +155,35 @@ func (p *Persister) Inject(input []byte) {
 		break
 	}
 
-	if p.enableDiskPersist {
-		// current fetch stage
-		fetchStage := p.GetFetchStage()
-		if fetchStage == utils.FetchStageStoreMemoryApply {
-			p.PushToPendingQueue(input)
-		} else if p.DiskQueue != nil {
-			p.diskQueueMutex.Lock()
-			defer p.diskQueueMutex.Unlock()
-			if p.DiskQueue != nil { // double check
-				if input != nil {
-					p.bufferDiskInput(input)
-				}
-				if p.shouldFlushDiskBuffer(input == nil) {
-					if err := p.flushDiskBufferLocked(); err != nil {
-						l.Logger.Panicf("persister inject replset[%v] put oplog batch to disk queue failed[%v]",
-							p.replset, err)
-					}
-				}
-			} else if input != nil {
-				p.PushToPendingQueue(input)
-			} else {
-				p.PushToPendingQueue(nil)
-			}
-		} else {
-			l.Logger.Panicf("persister inject replset[%v] has no diskQueue with fetch stage[%v]",
-				p.replset, utils.LogFetchStage(fetchStage))
-		}
-	} else {
+	if !p.enableDiskPersist || p.GetFetchStage() == utils.FetchStageStoreMemoryApply {
 		p.PushToPendingQueue(input)
+		return
+	}
+	p.injectDuringDiskStage(input)
+}
+
+func (p *Persister) injectDuringDiskStage(input []byte) {
+	p.diskQueueMutex.Lock()
+	defer p.diskQueueMutex.Unlock()
+
+	// The final drain may have completed while the fetcher waited for the
+	// mutex. The spool stays open until worker acknowledgement, so its
+	// presence alone cannot tell us where the next record belongs.
+	if p.GetFetchStage() == utils.FetchStageStoreMemoryApply {
+		p.PushToPendingQueue(input)
+		return
+	}
+	if p.DiskQueue == nil {
+		l.Logger.Panicf("persister inject replset[%v] has no diskQueue with fetch stage[%v]",
+			p.replset, utils.LogFetchStage(p.GetFetchStage()))
+	}
+	if input != nil {
+		p.bufferDiskInput(input)
+	}
+	if p.shouldFlushDiskBuffer(input == nil) {
+		if err := p.flushDiskBufferLocked(); err != nil {
+			l.Logger.Panicf("persister inject replset[%v] put oplog batch to disk queue failed[%v]", p.replset, err)
+		}
 	}
 }
 
@@ -390,16 +390,12 @@ Wait:
 			l.Logger.Panicf("persister replset[%v] retrieve advance drained pebble spool failed[%v]", p.replset, err)
 		}
 	}
+	lastTs := ckpt.InitCheckpoint
 	if replayedAny {
 		p.PushToPendingQueue(nil)
 
 		// parse the last oplog timestamp
-		lastTs := utils.TimeStampToInt64(p.GetQueryTsFromDiskQueue())
-		if lastTs > 0 {
-			p.diskQueueLastTs = lastTs
-		}
-	} else {
-		p.diskQueueLastTs = ckpt.InitCheckpoint
+		lastTs = utils.TimeStampToInt64(p.GetQueryTsFromDiskQueue())
 	}
 	depth, err = p.DiskQueue.Depth()
 	if err != nil {
@@ -410,6 +406,8 @@ Wait:
 			p.replset, depth)
 	}
 	p.SetFetchStage(utils.FetchStageStoreMemoryApply)
+	// Checkpoint cleanup may delete the spool as soon as this is published.
+	atomic.StoreInt64(&p.diskQueueLastTs, lastTs)
 	l.Logger.Infof("persister retriever for replset[%v] exits and retains pebble spool until checkpoint cleanup",
 		p.replset)
 }

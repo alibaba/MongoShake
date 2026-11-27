@@ -349,7 +349,27 @@ func TestCheckpointRetriesClearingQueueNameAfterPhaseBFailure(t *testing.T) {
 	assert.Equal(t, int64(-2), syncer.persister.diskQueueLastTs, "should be equal")
 }
 
-func TestLoadCheckpointReopensUnfinishedInitCheckpointSpool(t *testing.T) {
+func TestLoadCheckpointRejectsUnconfirmedFullCopy(t *testing.T) {
+	origin := conf.Options
+	t.Cleanup(func() { conf.Options = origin })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("unexpected checkpoint write via %s", r.Method)
+		}
+		_ = json.NewEncoder(w).Encode(ckpt.CheckpointContext{
+			Name: "rs", Version: utils.FcvCheckpoint.CurrentVersion, Timestamp: ckpt.InitCheckpoint,
+			OplogDiskQueue: "partial",
+		})
+	}))
+	defer server.Close()
+	conf.Options.CheckpointStorage = utils.VarCheckpointStorageApi
+	conf.Options.CheckpointStorageCollection = server.URL
+	conf.Options.FullSyncReaderOplogStoreDisk = true
+	syncer := &OplogSyncer{Replset: "rs", ckptManager: ckpt.NewCheckpointManager("rs", 0)}
+	require.ErrorContains(t, syncer.loadCheckpoint(), "full sync completion is unconfirmed")
+}
+
+func TestLoadCheckpointResumesDiskApplyAfterFullCopy(t *testing.T) {
 	origin := conf.Options
 	defer func() {
 		conf.Options = origin
@@ -376,6 +396,7 @@ func TestLoadCheckpointReopensUnfinishedInitCheckpointSpool(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(&ckpt.CheckpointContext{
 				Name:                   replset,
 				Timestamp:              200,
+				FullFinishTs:           250,
 				Version:                utils.FcvCheckpoint.CurrentVersion,
 				OplogDiskQueue:         queueName,
 				OplogDiskQueueFinishTs: ckpt.InitCheckpoint,
@@ -412,7 +433,7 @@ func TestLoadCheckpointReopensUnfinishedInitCheckpointSpool(t *testing.T) {
 
 	err = syncer.loadCheckpoint()
 	require.NoError(t, err)
-	assert.Equal(t, utils.FetchStageStoreDiskNoApply, syncer.persister.GetFetchStage(), "should be equal")
+	assert.Equal(t, utils.FetchStageStoreDiskApply, syncer.persister.GetFetchStage(), "should be equal")
 	require.NotNil(t, syncer.persister.DiskQueue, "should be equal")
 	stats := syncer.persister.DiskQueue.Stats()
 	assert.Equal(t, uint64(1), stats.Depth, "should be equal")
@@ -473,6 +494,12 @@ func TestLoadCheckpointPersistsNewSpoolMetadataBeforeFetch(t *testing.T) {
 }
 
 func TestLoadCheckpointCompletesPendingSpoolCleanup(t *testing.T) {
+	for _, mode := range []string{utils.VarSyncModeAll, utils.VarSyncModeIncr} {
+		t.Run(mode, func(t *testing.T) { testLoadCheckpointCompletesPendingSpoolCleanup(t, mode) })
+	}
+}
+
+func testLoadCheckpointCompletesPendingSpoolCleanup(t *testing.T, mode string) {
 	origin := conf.Options
 	defer func() {
 		conf.Options = origin
@@ -517,9 +544,9 @@ func TestLoadCheckpointCompletesPendingSpoolCleanup(t *testing.T) {
 
 	conf.Options.CheckpointStorage = utils.VarCheckpointStorageApi
 	conf.Options.CheckpointStorageCollection = server.URL
-	conf.Options.FullSyncReaderOplogStoreDisk = true
+	conf.Options.FullSyncReaderOplogStoreDisk = mode == utils.VarSyncModeAll
 	conf.Options.LogDirectory = logDir
-	conf.Options.SyncMode = utils.VarSyncModeAll
+	conf.Options.SyncMode = mode
 	conf.Options.IncrSyncFetcherBufferCapacity = 10
 	conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodOplog
 

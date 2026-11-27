@@ -2,11 +2,15 @@ package coordinator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -849,4 +853,87 @@ func TestSelectSyncModeRestoresFullFinishTs(t *testing.T) {
 	assert.Equal(t, nil, err, "should be equal")
 	assert.Equal(t, utils.VarSyncModeIncr, mode, "should be equal")
 	assert.Equal(t, int64(95<<32), restored, "mongos-only path must restore full_finish_ts")
+}
+
+func TestSelectSyncModeWithNamedSpool(t *testing.T) {
+	original, oldMock, oldInput := conf.Options, testSelectSyncMode, utils.GetAllTimestampInUTInput
+	t.Cleanup(func() {
+		conf.Options, testSelectSyncMode, utils.GetAllTimestampInUTInput = original, oldMock, oldInput
+	})
+	testSelectSyncMode = true
+	utils.GetAllTimestampInUTInput = map[string]utils.Pair{"rs": {First: int64(10), Second: int64(500)}}
+	conf.Options.CheckpointStorage = utils.VarCheckpointStorageApi
+	conf.Options.IncrSyncMongoFetchMethod = utils.VarIncrSyncMongoFetchMethodOplog
+	conf.Options.SpecialSourceDBFlag = ""
+	conf.Options.MongoSUrl = ""
+	for _, tc := range []struct {
+		name                               string
+		mode                               string
+		diskEnabled                        bool
+		timestamp, fullFinish, spoolFinish int64
+		wantError                          string
+	}{
+		{"partial full copy", utils.VarSyncModeAll, true, 100, 0, ckpt.InitCheckpoint, "full sync completion is unconfirmed"},
+		{"partial full copy with disk disabled", utils.VarSyncModeAll, false, 100, 0, ckpt.InitCheckpoint, "full sync completion is unconfirmed"},
+		{"initial position with disk enabled", utils.VarSyncModeAll, true, ckpt.InitCheckpoint, 0, ckpt.InitCheckpoint, "full sync completion is unconfirmed"},
+		{"initial position in incr mode", utils.VarSyncModeIncr, false, ckpt.InitCheckpoint, 0, ckpt.InitCheckpoint, "full sync completion is unconfirmed"},
+		{"interrupted replay", utils.VarSyncModeAll, true, 100, 200, ckpt.InitCheckpoint, ""},
+		{"interrupted replay in incr mode", utils.VarSyncModeIncr, false, 100, 200, ckpt.InitCheckpoint, "disk replay is unfinished"},
+		{"cleanup after legacy replay", utils.VarSyncModeAll, true, 220, 0, 200, ""},
+		{"cleanup after legacy replay in incr mode", utils.VarSyncModeIncr, false, 220, 0, 200, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					t.Errorf("startup preflight mutated checkpoint via %s", r.Method)
+				}
+				_ = json.NewEncoder(w).Encode(ckpt.CheckpointContext{
+					Name: "rs", Version: utils.FcvCheckpoint.CurrentVersion,
+					Timestamp: tc.timestamp, FullFinishTs: tc.fullFinish,
+					OplogDiskQueue: "queue", OplogDiskQueueFinishTs: tc.spoolFinish,
+				})
+			}))
+			defer srv.Close()
+			conf.Options.CheckpointStorageCollection = srv.URL
+			conf.Options.FullSyncReaderOplogStoreDisk = tc.diskEnabled
+			mode, positions, _, bound, err := new(ReplicationCoordinator).selectSyncMode(tc.mode)
+			if tc.wantError != "" {
+				require.ErrorContains(t, err, tc.wantError)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, utils.VarSyncModeIncr, mode)
+			assert.Equal(t, tc.timestamp, positions["rs"])
+			assert.Equal(t, tc.fullFinish, bound)
+		})
+	}
+	t.Run("another shard requires a new full copy", func(t *testing.T) {
+		utils.GetAllTimestampInUTInput["other"] = utils.GetAllTimestampInUTInput["rs"]
+		// The HTTP checkpoint delegate uses the same endpoint for all shards.
+		// Return the missing checkpoint first to exercise the former early exit.
+		responses := []ckpt.CheckpointContext{
+			{},
+			{Name: "rs", Version: utils.FcvCheckpoint.CurrentVersion, Timestamp: 100,
+				FullFinishTs: 200, OplogDiskQueue: "queue", OplogDiskQueueFinishTs: ckpt.InitCheckpoint},
+		}
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_ = json.NewEncoder(w).Encode(responses[0])
+			responses = responses[1:]
+		}))
+		defer srv.Close()
+		conf.Options.CheckpointStorageCollection = srv.URL
+		conf.Options.FullSyncReaderOplogStoreDisk = true
+		_, _, _, _, err := new(ReplicationCoordinator).selectSyncMode(utils.VarSyncModeAll)
+		require.ErrorContains(t, err, "another replica set still references spool")
+
+		responses = []ckpt.CheckpointContext{
+			{},
+			{Name: "rs", Version: utils.FcvCheckpoint.CurrentVersion, Timestamp: ckpt.InitCheckpoint,
+				OplogDiskQueue: "partial", OplogDiskQueueFinishTs: ckpt.InitCheckpoint},
+		}
+		conf.Options.FullSyncReaderOplogStoreDisk = false
+		_, _, _, _, err = new(ReplicationCoordinator).selectSyncMode(utils.VarSyncModeAll)
+		require.ErrorContains(t, err, "full sync completion is unconfirmed")
+	})
+
 }
