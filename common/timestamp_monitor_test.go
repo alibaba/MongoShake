@@ -14,10 +14,14 @@ import (
 )
 
 func TestTimestampQueryMonitorActualConnection(t *testing.T) {
-	oldLogger := l.Logger
-	t.Cleanup(func() { l.Logger = oldLogger })
 	dir := t.TempDir()
 	require.NoError(t, l.New("info", dir, "timestamp.log", true, 20, 1, 0))
+	t.Cleanup(func() {
+		_ = l.Logger.Close()
+		// Close flushes the logger but does not detach its file output. Route
+		// subsequent tests to stdout before TempDir removes the log directory.
+		require.NoError(t, l.New("info", "", "", true, 20, 1, 2))
+	})
 	monitor := timestampQueryMonitor("mongodb://user:secret@seed:27017", VarMongoConnectModeStandalone)
 	reply, err := bson.Marshal(bson.M{"cursor": bson.M{
 		"ns": "local.oplog.rs", "firstBatch": bson.A{bson.M{"ts": primitive.Timestamp{T: 123, I: 7}}},

@@ -20,6 +20,7 @@ import (
 // Use a dedicated hidden secondary with replication paused after seeding oplog
 // entries, then advance the primary. Discovery excludes the hidden member, so
 // the old secondaryPreferred check deterministically reads the wrong bounds.
+// See timestamp_node_live_test.md for fixture setup, execution, and cleanup.
 func TestGetAllTimestampStandaloneMatchesReaderLive(t *testing.T) {
 	uri := os.Getenv("MONGOSHAKE_TIMESTAMP_HIDDEN_SOURCE")
 	if uri == "" {
@@ -27,17 +28,25 @@ func TestGetAllTimestampStandaloneMatchesReaderLive(t *testing.T) {
 	}
 	u, err := url.Parse(uri)
 	require.NoError(t, err)
+	if u.Path == "" {
+		u.Path = "/"
+	}
 	ip := net.ParseIP(u.Hostname())
 	require.True(t, ip != nil && ip.IsLoopback(), "only dedicated loopback nodes are allowed")
 	require.Empty(t, u.User)
 	require.NotContains(t, u.Host, ",")
-	oldOptions, oldLogger := conf.Options, l.Logger
-	t.Cleanup(func() { conf.Options, l.Logger = oldOptions, oldLogger })
+	oldOptions := conf.Options
+	t.Cleanup(func() { conf.Options = oldOptions })
 	conf.Options.MongoConnectMode = utils.VarMongoConnectModeStandalone
 	conf.Options.IncrSyncReaderFetchBatchSize = 32
 	conf.Options.MongoSslRootCaFile = ""
 	dir := t.TempDir()
 	require.NoError(t, l.New("info", dir, "timestamp.log", true, 20, 1, 0))
+	t.Cleanup(func() {
+		_ = l.Logger.Close()
+		// Close does not detach file output; do so before TempDir is removed.
+		require.NoError(t, l.New("info", "", "", true, 20, 1, 2))
+	})
 
 	for _, direct := range []string{"", "false", "true"} {
 		t.Run("direct_"+direct, func(t *testing.T) {
