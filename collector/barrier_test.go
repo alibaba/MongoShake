@@ -38,6 +38,11 @@ func newBarrierTestSyncer(t *testing.T) *OplogSyncer {
 // only the waiting goroutine changes sentinel flags while a wait is running.
 func startBarrierTestWait(t *testing.T, syncer *OplogSyncer, target int64) <-chan bool {
 	t.Helper()
+	return startBarrierTestWaitAck(t, syncer, target, true)
+}
+
+func startBarrierTestWaitAck(t *testing.T, syncer *OplogSyncer, target int64, ackRequired bool) <-chan bool {
+	t.Helper()
 	get := barrierCkptGetFunc
 	var cancel atomic.Bool
 	barrierCkptGetFunc = func(syncer *OplogSyncer) (*ckpt.CheckpointContext, error) {
@@ -50,7 +55,7 @@ func startBarrierTestWait(t *testing.T, syncer *OplogSyncer, target int64) <-cha
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		result <- syncer.checkCheckpointUpdate(true, target)
+		result <- syncer.checkCheckpointUpdate(true, target, ackRequired)
 	}()
 	t.Cleanup(func() {
 		cancel.Store(true)
@@ -114,7 +119,7 @@ func TestBarrierCheckpointFlushesReadyWorkersBeforeAckFallback(t *testing.T) {
 		persisted = 100
 		return true
 	}
-	require.True(t, syncer.checkCheckpointUpdate(true, 100))
+	require.True(t, syncer.checkCheckpointUpdate(true, 100, true))
 	require.Equal(t, int64(100), persisted, "persist ready ACKs before using the upstream pinned-checkpoint fallback")
 	require.Equal(t, 2, reads, "read back a successful flush immediately")
 }
@@ -138,7 +143,7 @@ func TestBarrierCheckpointFlushesAckThatAdvancesDuringSuccessfulFlush(t *testing
 		persisted = worker.GetAck()
 		return true
 	}
-	require.True(t, syncer.checkCheckpointUpdate(true, 100))
+	require.True(t, syncer.checkCheckpointUpdate(true, 100, true))
 	require.Equal(t, 2, flushes)
 	require.Equal(t, int64(100), persisted, "a final barrier must persist the ACK that arrived during its initial flush")
 }
@@ -265,7 +270,7 @@ func TestBarrierCheckpointReadErrorDoesNotRelease(t *testing.T) {
 		return &ckpt.CheckpointContext{Timestamp: 50}, nil
 	}
 	barrierCkptFlushFunc = func(*OplogSyncer) bool { return false }
-	require.False(t, syncer.checkCheckpointUpdate(true, 100))
+	require.False(t, syncer.checkCheckpointUpdate(true, 100, true))
 	require.Equal(t, 2, reads)
 }
 
@@ -285,7 +290,7 @@ func TestBarrierCheckpointResumeReconfirmsProgress(t *testing.T) {
 				}
 				return false
 			}
-			require.False(t, syncer.checkCheckpointUpdate(true, 100))
+			require.False(t, syncer.checkCheckpointUpdate(true, 100, true))
 			utils.IncrSentinelOptions.Pause = false
 			utils.IncrSentinelOptions.Shutdown = false
 			// Resume must flush and confirm the same target before continuing.
@@ -293,7 +298,7 @@ func TestBarrierCheckpointResumeReconfirmsProgress(t *testing.T) {
 				persisted = 100
 				return true
 			}
-			require.True(t, syncer.checkCheckpointUpdate(true, 100))
+			require.True(t, syncer.checkCheckpointUpdate(true, 100, true))
 		})
 	}
 }
@@ -407,7 +412,12 @@ func TestBarrierPreservesDDLAndPreparedTransactionOrder(t *testing.T) {
 				// Keep an additional worker behind, even if its batch was empty.
 				target := utils.TimeStampToInt64(ops[0].Parsed.Timestamp)
 				for _, worker := range batcher.workerGroup {
-					<-worker.queue
+					b := <-worker.queue
+					if b != nil {
+						// simulate the worker transferring (applying) the batch,
+						// which releases the pending count held since Offer (#1051)
+						atomic.AddInt64(&worker.pending, -1)
+					}
 					atomic.StoreInt64(&worker.unack, target)
 					worker.AllAcked(false)
 				}

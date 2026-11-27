@@ -40,6 +40,11 @@ type Worker struct {
 	// ack offset (used for checkpoint)
 	ack, unack int64
 	count      uint64
+	// pending counts batches offered but not yet transferred (applied). It is
+	// incremented in Offer and decremented when transfer completes, so a barrier
+	// can require all preceding work to be applied even when batches share a
+	// timestamp (ack is timestamp-granular and cannot distinguish them, #1051).
+	pending int64
 	// if all oplogs are acked for right now
 	allAcked bool
 	// retransmit on tunnel controller tunnel required
@@ -116,10 +121,18 @@ func (worker *Worker) setAck(ack int64) {
 
 func (worker *Worker) Offer(batch []*oplog.GenericOplog) {
 	if batch != nil {
+		atomic.AddInt64(&worker.pending, 1)
 		atomic.StoreInt64(&worker.unack, utils.TimeStampToInt64(batch[len(batch)-1].Parsed.Timestamp))
 	}
 	worker.queue <- batch
 	worker.updateJobsQueuedMetric()
+}
+
+// Idle reports whether every offered batch has been transferred (applied). A
+// barrier uses this to ensure preceding DML is applied before dispatching DDL,
+// independent of timestamp-granular ack (#1051).
+func (worker *Worker) Idle() bool {
+	return atomic.LoadInt64(&worker.pending) == 0
 }
 
 func (worker *Worker) shouldDelay() bool {
@@ -231,6 +244,9 @@ func (worker *Worker) transfer(batch []*oplog.GenericOplog) {
 				// update ack
 				worker.setAck(replyAndAcked)
 				worker.observePutDelay(replyAndAcked, time.Now().UTC())
+				// this offered batch has been applied; release the pending count
+				// held since Offer so barriers can see preceding work is done.
+				atomic.AddInt64(&worker.pending, -1)
 				done = true
 			}
 			// remove all unack values which are smaller than worker.ack

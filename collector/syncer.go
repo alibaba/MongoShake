@@ -34,14 +34,19 @@ const (
 	PipelineQueueLen      = utils.VarSyncerPipelineQueueLen
 
 	SyncerFetchErrorRetryMs             = utils.VarSyncerFetchErrorRetryMs
-	FilterCheckpointGap                 = utils.VarSyncerFilterCheckpointGap
-	FilterCheckpointCheckInterval       = utils.VarSyncerFilterCheckpointCheckInterval
 	BarrierCheckpointLogInterval        = 3 * time.Second
 	BarrierCheckpointErrorRetryInterval = 900 * time.Millisecond
 	BarrierInterruptedRetryInterval     = 300 * time.Millisecond
 
 	// Deprecated: barrier logging is now limited by elapsed time.
 	CheckCheckpointUpdateTimes = utils.VarSyncerCheckCheckpointUpdateTimes
+)
+
+// Filter checkpoint pacing vars (mutable for tests; production values come from
+// utils.VarSyncerFilter*).
+var (
+	FilterCheckpointGap           = utils.VarSyncerFilterCheckpointGap
+	FilterCheckpointCheckInterval = utils.VarSyncerFilterCheckpointCheckInterval
 )
 
 // DDLCheckpointInterval is retained for source compatibility.
@@ -394,170 +399,199 @@ func (sync *OplogSyncer) Start() {
 	}
 }
 
+// batcherLoopState carries the per-loop state of the batcher so one iteration
+// can be driven synchronously in tests (no leaked goroutine, #1051).
+type batcherLoopState struct {
+	filterCheckTs             time.Time
+	filterFlag                bool // marks whether previous log is filter
+	pendingBarrierTs          int64
+	pendingBarrierAckRequired bool
+}
+
 // fetch all oplog from logs queue, batched together and then send to different workers.
 func (sync *OplogSyncer) startBatcher() {
-	var batcher = sync.batcher
-	filterCheckTs := time.Now()
-	filterFlag := false // marks whether previous log is filter
-	var pendingBarrierTs int64
-
+	state := &batcherLoopState{filterCheckTs: time.Now()}
 	nimo.GoRoutineInLoop(func() {
-		/*
-		 * judge self is master?
-		 */
-		if !quorum.IsMaster() {
-			utils.YieldInMs(SyncerFetchErrorRetryMs)
+		sync.batcherOnce(state)
+	})
+}
+
+// batcherOnce runs one iteration of the batcher loop.
+func (sync *OplogSyncer) batcherOnce(state *batcherLoopState) {
+	batcher := sync.batcher
+	/*
+	 * judge self is master?
+	 */
+	if !quorum.IsMaster() {
+		utils.YieldInMs(SyncerFetchErrorRetryMs)
+		return
+	}
+
+	// Re-confirm barrier checkpoint if previous wait was interrupted by Pause/Shutdown.
+	// Do not process new ops until the DDL execution is confirmed.
+	if state.pendingBarrierTs > 0 {
+		if sync.checkCheckpointUpdate(true, state.pendingBarrierTs, state.pendingBarrierAckRequired) {
+			l.Logger.Infof("%s pending barrier checkpoint[%v] confirmed after resume",
+				sync, utils.ExtractTimestampForLog(state.pendingBarrierTs))
+			state.pendingBarrierTs = 0
+		} else {
+			time.Sleep(BarrierInterruptedRetryInterval)
 			return
 		}
+	}
 
-		// Re-confirm barrier checkpoint if previous wait was interrupted by Pause/Shutdown.
-		// Do not process new ops until the DDL execution is confirmed.
-		if pendingBarrierTs > 0 {
-			if sync.checkCheckpointUpdate(true, pendingBarrierTs) {
-				l.Logger.Infof("%s pending barrier checkpoint[%v] confirmed after resume",
-					sync, utils.ExtractTimestampForLog(pendingBarrierTs))
-				pendingBarrierTs = 0
-			} else {
-				time.Sleep(BarrierInterruptedRetryInterval)
-				return
-			}
+	// As much as we can batch more from logs queue. batcher can merge
+	// a sort of oplogs from different logs queue one by one. the max number
+	// of oplogs in batch is limited by AdaptiveBatchingMaxSize
+	batchedOplog, barrier, allEmpty, exit := batcher.BatchMore()
+
+	// it's better to handle filter in BatchMore function, but I don't want to touch this file anymore
+	if conf.Options.FilterOplogGids {
+		if err := sync.filterOplogGid(batchedOplog); err != nil {
+			l.Logger.Panicf("%v", err)
+		}
+	}
+
+	var newestTs int64
+	if exit {
+		l.Logger.Infof("%s have reached exit signal", sync)
+		// should exit now, make sure the checkpoint is updated before that
+		lastLog, lastFilterLog := batcher.getLastOplog()
+		newestTs = 1 // default is 1
+		if lastLog != nil && utils.TimeStampToInt64(lastLog.Timestamp) > newestTs {
+			newestTs = utils.TimeStampToInt64(lastLog.Timestamp)
+		} else if newestTs == 1 && lastFilterLog != nil {
+			// only set to the lastFilterLog timestamp if all before oplog filtered.
+			newestTs = utils.TimeStampToInt64(lastFilterLog.Timestamp)
 		}
 
-		// As much as we can batch more from logs queue. batcher can merge
-		// a sort of oplogs from different logs queue one by one. the max number
-		// of oplogs in batch is limited by AdaptiveBatchingMaxSize
-		batchedOplog, barrier, allEmpty, exit := batcher.BatchMore()
-
-		// it's better to handle filter in BatchMore function, but I don't want to touch this file anymore
-		if conf.Options.FilterOplogGids {
-			if err := sync.filterOplogGid(batchedOplog); err != nil {
-				l.Logger.Panicf("%v", err)
-			}
-		}
-
-		var newestTs int64
-		if exit {
-			l.Logger.Infof("%s have reached exit signal", sync)
-			// should exit now, make sure the checkpoint is updated before that
-			lastLog, lastFilterLog := batcher.getLastOplog()
-			newestTs = 1 // default is 1
-			if lastLog != nil && utils.TimeStampToInt64(lastLog.Timestamp) > newestTs {
-				newestTs = utils.TimeStampToInt64(lastLog.Timestamp)
-			} else if newestTs == 1 && lastFilterLog != nil {
-				// only set to the lastFilterLog timestamp if all before oplog filtered.
-				newestTs = utils.TimeStampToInt64(lastFilterLog.Timestamp)
-			}
-
-			if lastLog != nil && !allEmpty {
-				// push to worker
-				if worked := batcher.dispatchBatches(batchedOplog); worked {
-					sync.replMetric.SetLSN(newestTs)
-					// update latest fetched timestamp in memory
-					sync.reader.UpdateQueryTimestamp(newestTs)
-				}
-			}
-
-			// flush checkpoint value
-			sync.checkpoint(true, 0)
-			if !sync.checkCheckpointUpdate(true, newestTs) {
-				l.Logger.Warnf("%s exit: barrier wait interrupted, checkpoint may not have reached %v. "+
-					"Not setting CanClose to avoid premature exit", sync, utils.ExtractTimestampForLog(newestTs))
-				pendingBarrierTs = newestTs
-				return
-			}
-			sync.CanClose = true
-			l.Logger.Infof("%s blocking and waiting exits, checkpoint: %v", sync, utils.ExtractTimestampForLog(newestTs))
-			select {} // block forever, wait outer routine exits
-		} else if log, filterLog := batcher.getLastOplog(); log != nil && !allEmpty {
-			// if all filtered, still update checkpoint
-			newestTs = utils.TimeStampToInt64(log.Timestamp)
-
+		if lastLog != nil && !allEmpty {
 			// push to worker
 			if worked := batcher.dispatchBatches(batchedOplog); worked {
 				sync.replMetric.SetLSN(newestTs)
 				// update latest fetched timestamp in memory
 				sync.reader.UpdateQueryTimestamp(newestTs)
 			}
+		}
 
-			filterFlag = false
+		// flush checkpoint value
+		sync.checkpoint(true, 0)
+		// newestTs is a dispatched ts when it came from lastLog (the >1 branch
+		// above); only a purely filtered exit target (lastFilterLog branch,
+		// never dispatched) keeps the checkpoint-authoritative exemption.
+		// lastLog is never nil (fakeOplog), so test the timestamp branch, not
+		// nil-ness or allEmpty (#1051 M2).
+		exitAckRequired := lastLog != nil && utils.TimeStampToInt64(lastLog.Timestamp) > 1
+		if !sync.checkCheckpointUpdate(true, newestTs, exitAckRequired) {
+			l.Logger.Warnf("%s exit: barrier wait interrupted, checkpoint may not have reached %v. "+
+				"Not setting CanClose to avoid premature exit", sync, utils.ExtractTimestampForLog(newestTs))
+			state.pendingBarrierTs = newestTs
+			state.pendingBarrierAckRequired = exitAckRequired
+			return
+		}
+		sync.CanClose = true
+		l.Logger.Infof("%s blocking and waiting exits, checkpoint: %v", sync, utils.ExtractTimestampForLog(newestTs))
+		select {} // block forever, wait outer routine exits
+	} else if log, filterLog := batcher.getLastOplog(); log != nil && !allEmpty {
+		// if all filtered, still update checkpoint
+		newestTs = utils.TimeStampToInt64(log.Timestamp)
 
-			// flush checkpoint value
-			sync.checkpoint(barrier, 0)
-			if barrier && !sync.checkCheckpointUpdate(true, newestTs) {
-				pendingBarrierTs = newestTs
+		// push to worker
+		if worked := batcher.dispatchBatches(batchedOplog); worked {
+			sync.replMetric.SetLSN(newestTs)
+			// update latest fetched timestamp in memory
+			sync.reader.UpdateQueryTimestamp(newestTs)
+		}
+
+		state.filterFlag = false
+
+		// flush checkpoint value
+		sync.checkpoint(barrier, 0)
+		if barrier && !sync.checkCheckpointUpdate(true, newestTs, true) {
+			state.pendingBarrierTs = newestTs
+			state.pendingBarrierAckRequired = true // dispatched DML ts: needs worker ack
+			return
+		}
+	} else {
+		// if log is nil, check whether filterLog is empty
+		if filterLog == nil {
+			// no need to update
+			l.Logger.Debugf("%s filterLog is nil", sync)
+			return
+		} else if utils.TimeStampToInt64(filterLog.Timestamp) <= sync.ckptManager.GetInMemory().Timestamp {
+			// no need to update
+			l.Logger.Debugf("%s filterLogTs[%v] is small than ckptTs[%v], skip this filterLogTs", sync,
+				filterLog.Timestamp, utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp))
+			return
+		} else {
+			now := time.Now()
+
+			// return if filterFlag == false
+			if state.filterFlag == false {
+				state.filterFlag = true
+				state.filterCheckTs = now
+				return
+			}
+
+			// pass only if all received oplog are filtered for {FilterCheckpointCheckInterval} seconds.
+			if now.After(state.filterCheckTs.Add(time.Duration(FilterCheckpointCheckInterval)*time.Second)) == false {
+				return
+			}
+
+			checkpointTs := utils.ExtractMongoTimestamp(sync.ckptManager.GetInMemory().Timestamp)
+			filterNewestTs := utils.ExtractMongoTimestamp(filterLog.Timestamp)
+			if filterNewestTs-int64(FilterCheckpointGap) > checkpointTs {
+				// if checkpoint has not been update for {FilterCheckpointGap} seconds, update
+				// checkpoint mandatory.
+				newestTs = utils.TimeStampToInt64(filterLog.Timestamp)
+				l.Logger.Infof("%s try to update checkpoint mandatory from %v to %v", sync,
+					utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp),
+					filterLog.Timestamp)
+			} else {
+				l.Logger.Debugf("%s filterLogTs[%v] not bigger than checkpoint[%v]",
+					sync, filterLog.Timestamp,
+					utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp))
+				return
+			}
+		}
+
+		state.filterFlag = false
+
+		// Only wait for workers when there is a real dispatched timestamp. At
+		// startup lastOplog is a non-nil fakeOplog with ts=0; waiting on it
+		// returns false immediately and must not be treated as a Pause
+		// interrupt, or a pure-filter stream would never advance (#1051 P2).
+		if log != nil && utils.TimeStampToInt64(log.Timestamp) > 0 {
+			newestTsLog := utils.ExtractTimestampForLog(newestTs)
+			if newestTs < utils.TimeStampToInt64(log.Timestamp) {
+				l.Logger.Errorf("%s filter newestTs[%v] smaller than previous timestamp[%v]",
+					sync, newestTsLog, log.Timestamp)
+			}
+
+			l.Logger.Infof("%s waiting last checkpoint[%v] updated", sync, newestTsLog)
+			// check last checkpoint updated
+
+			status := sync.checkCheckpointUpdate(true, utils.TimeStampToInt64(log.Timestamp), true)
+			l.Logger.Infof("%s last checkpoint[%v] updated [%v]", sync, newestTsLog, status)
+			if !status {
+				// Wait interrupted (Pause/Shutdown): keep the current position;
+				// do not advance the reader or force-write the filtered checkpoint
+				// until the wait completes (#1051 P2).
 				return
 			}
 		} else {
-			// if log is nil, check whether filterLog is empty
-			if filterLog == nil {
-				// no need to update
-				l.Logger.Debugf("%s filterLog is nil", sync)
-				return
-			} else if utils.TimeStampToInt64(filterLog.Timestamp) <= sync.ckptManager.GetInMemory().Timestamp {
-				// no need to update
-				l.Logger.Debugf("%s filterLogTs[%v] is small than ckptTs[%v], skip this filterLogTs", sync,
-					filterLog.Timestamp, utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp))
-				return
-			} else {
-				now := time.Now()
-
-				// return if filterFlag == false
-				if filterFlag == false {
-					filterFlag = true
-					filterCheckTs = now
-					return
-				}
-
-				// pass only if all received oplog are filtered for {FilterCheckpointCheckInterval} seconds.
-				if now.After(filterCheckTs.Add(FilterCheckpointCheckInterval*time.Second)) == false {
-					return
-				}
-
-				checkpointTs := utils.ExtractMongoTimestamp(sync.ckptManager.GetInMemory().Timestamp)
-				filterNewestTs := utils.ExtractMongoTimestamp(filterLog.Timestamp)
-				if filterNewestTs-FilterCheckpointGap > checkpointTs {
-					// if checkpoint has not been update for {FilterCheckpointGap} seconds, update
-					// checkpoint mandatory.
-					newestTs = utils.TimeStampToInt64(filterLog.Timestamp)
-					l.Logger.Infof("%s try to update checkpoint mandatory from %v to %v", sync,
-						utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp),
-						filterLog.Timestamp)
-				} else {
-					l.Logger.Debugf("%s filterLogTs[%v] not bigger than checkpoint[%v]",
-						sync, filterLog.Timestamp,
-						utils.ExtractTimestampForLog(sync.ckptManager.GetInMemory().Timestamp))
-					return
-				}
-			}
-
-			filterFlag = false
-
-			if log != nil {
-				newestTsLog := utils.ExtractTimestampForLog(newestTs)
-				if newestTs < utils.TimeStampToInt64(log.Timestamp) {
-					l.Logger.Errorf("%s filter newestTs[%v] smaller than previous timestamp[%v]",
-						sync, newestTsLog, log.Timestamp)
-				}
-
-				l.Logger.Infof("%s waiting last checkpoint[%v] updated", sync, newestTsLog)
-				// check last checkpoint updated
-
-				status := sync.checkCheckpointUpdate(true, utils.TimeStampToInt64(log.Timestamp))
-				l.Logger.Infof("%s last checkpoint[%v] updated [%v]", sync, newestTsLog, status)
-			} else {
-				l.Logger.Infof("%s last log is empty, skip waiting checkpoint updated", sync)
-			}
-
-			// update latest fetched timestamp in memory
-			sync.reader.UpdateQueryTimestamp(newestTs)
-			// flush checkpoint by the newest filter oplog value
-			sync.checkpoint(false, newestTs)
-			return
+			l.Logger.Infof("%s last log is empty, skip waiting checkpoint updated", sync)
 		}
-	})
+
+		// update latest fetched timestamp in memory
+		sync.reader.UpdateQueryTimestamp(newestTs)
+		// flush checkpoint by the newest filter oplog value
+		sync.checkpoint(false, newestTs)
+		return
+	}
 }
 
-func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) bool {
+func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64, ackRequired bool) bool {
 	if !barrier || newestTs <= 0 {
 		return false
 	}
@@ -591,9 +625,6 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) boo
 
 		needFlush := false
 		if haveCheckpoint {
-			if checkpointTs >= newestTs {
-				return true
-			}
 			var ack, pin int64
 			var ackErr error
 			if sync.batcher != nil {
@@ -602,11 +633,26 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) boo
 					pin = sync.batcher.OldestUnackedTxnPinTs(ack)
 				}
 			}
+			// A durable checkpoint covering the barrier completes it only when the
+			// workers confirm progress: a checkpoint ahead of the acked progress
+			// (e.g. a future/migrated checkpoint) is not by itself proof the
+			// preceding DML is durable (#1051). ack is timestamp-granular, so also
+			// require every offered batch to be transferred (applied) — otherwise a
+			// same-timestamp batch still queued could be bypassed. ackRequired is
+			// false for filter/exit barriers whose newestTs is a filtered timestamp
+			// force-written to the checkpoint via inputTs (never dispatched, so ack
+			// can never reach it); there the checkpoint is the authoritative evidence.
+			// With no batcher the checkpoint is likewise the only evidence.
+			applied := !ackRequired || sync.batcher == nil || sync.batcher.allTransferred()
+			if checkpointTs >= newestTs && applied &&
+				(!ackRequired || sync.batcher == nil || (ackErr == nil && ack >= newestTs)) {
+				return true
+			}
 			// A genuinely pending transaction may keep the checkpoint below
 			// this barrier even though its workers are done. Do not put an
 			// unrelated checkpoint write on that ACK-only completion path.
 			ackSatisfied := ackErr == nil && ack >= newestTs
-			if ackSatisfied && pin > 0 && pin <= newestTs {
+			if ackSatisfied && pin > 0 && pin <= newestTs && applied {
 				l.Logger.Infof("%s[%v] barrier satisfied by worker ack[%v] >= newest[%v] while transaction pin[%v] remains",
 					sync, i, utils.ExtractTimestampForLog(ack), utils.ExtractTimestampForLog(newestTs),
 					utils.ExtractTimestampForLog(pin))
@@ -644,7 +690,7 @@ func (sync *OplogSyncer) checkCheckpointUpdate(barrier bool, newestTs int64) boo
 					}
 				}
 			}
-			if ackSatisfied {
+			if ackSatisfied && applied {
 				// ACKs define ordering. Failed persistence is retried by normal
 				// checkpoint processing once the batcher can make progress again.
 				return true

@@ -225,6 +225,18 @@ func (batcher *Batcher) dispatchBatches(batchGroup [][]*oplog.GenericOplog) (wor
 	return
 }
 
+// allTransferred reports whether every worker has applied all offered batches.
+// A barrier requires this so preceding DML is applied before DDL, even when
+// batches share a timestamp (#1051).
+func (batcher *Batcher) allTransferred() bool {
+	for _, worker := range batcher.workerGroup {
+		if !worker.Idle() {
+			return false
+		}
+	}
+	return true
+}
+
 // get a batch
 func (batcher *Batcher) getBatch() []*oplog.GenericOplog {
 	syncer := batcher.syncer
