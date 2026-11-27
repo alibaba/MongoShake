@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sort"
@@ -9,6 +10,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/event"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
@@ -173,7 +175,49 @@ type TimestampNode struct {
 	Newest int64
 }
 
-// GetAllTimestamp get all newest timestamp
+// timestampQueryMonitor records the server that actually returned the oplog entry.
+// A seed URI (or a separate hello command) does not identify the selected server.
+func timestampQueryMonitor(sourceURL, connectMode string) *event.CommandMonitor {
+	return &event.CommandMonitor{Succeeded: func(_ context.Context, e *event.CommandSucceededEvent) {
+		if e.CommandName != "find" || e.DatabaseName != localDB {
+			return
+		}
+		ns, ok := e.Reply.Lookup("cursor", "ns").StringValueOK()
+		if !ok || ns != localDB+"."+OplogNS {
+			return
+		}
+		seconds, increment, ok := e.Reply.Lookup("cursor", "firstBatch", "0", "ts").TimestampOK()
+		if !ok {
+			return
+		}
+		l.Logger.Infof("Read oplog timestamp source[%s], connectMode[%s], actualConnection[%s], ts[%v]",
+			BlockMongoUrlPassword(sourceURL, "***"), connectMode, e.ConnectionID,
+			primitive.Timestamp{T: seconds, I: increment})
+	}}
+}
+
+func getTimestampRangeByURL(source *MongoSource, sslRootFile, connectMode string) (int64, int64, error) {
+	conn, err := newMongoCommunityConnWithMonitor(source.URL, connectMode, true,
+		ReadWriteConcernDefault, ReadWriteConcernDefault, sslRootFile,
+		timestampQueryMonitor(source.URL, connectMode))
+	if err != nil {
+		return 0, 0, err
+	}
+	defer conn.Close()
+	if source.ReplicaName == VarReplicaNameMongos {
+		return TimeStampToInt64(conn.CurrentDate()), 0, nil
+	}
+	newest, err := GetNewestTimestampByConn(conn)
+	if err != nil {
+		return 0, 0, err
+	}
+	oldest, err := GetOldestTimestampByConn(conn)
+	return newest, oldest, err
+}
+
+// GetAllTimestamp gets the newest and oldest oplog timestamps.
+// Standalone uses a direct connection, so both bounds come from the reader's node.
+// Each successful query logs the actual connection that returned its timestamp.
 // connectMode must be the mode the incremental reader will fetch with: the oplog
 // window belongs to whichever member serves the read, so probing a secondary
 // while the reader is pinned to the primary (or the reverse) judges the
@@ -189,21 +233,13 @@ func GetAllTimestamp(sources []*MongoSource, connectMode string, sslRootFile str
 	tsMap := make(map[string]TimestampNode)
 
 	for _, src := range sources {
-		fromMongos := false
-		if src.ReplicaName == VarReplicaNameMongos {
-			fromMongos = true
-		}
-		newest, err := GetNewestTimestampByUrl(src.URL, fromMongos, connectMode, sslRootFile)
+		newest, oldest, err := getTimestampRangeByURL(src, sslRootFile, connectMode)
 		if err != nil {
 			return nil, 0, 0, 0, 0, err
 		} else if newest == 0 {
 			return nil, 0, 0, 0, 0, fmt.Errorf("illegal newest timestamp == 0")
 		}
 
-		oldest, err := GetOldestTimestampByUrl(src.URL, fromMongos, connectMode, sslRootFile)
-		if err != nil {
-			return nil, 0, 0, 0, 0, err
-		}
 		tsMap[src.ReplicaName] = TimestampNode{
 			Oldest: oldest,
 			Newest: newest,
