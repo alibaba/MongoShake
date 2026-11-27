@@ -528,6 +528,7 @@ func (bw *BulkWriter) doUpdateOnInsert(database, collection string, metadata bso
 func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, oplogs []*OplogRecord, upsert bool) error {
 
 	var models []mongo.WriteModel
+	var modelOplogs []*OplogRecord
 	for _, log := range oplogs {
 		var newObject interface{}
 
@@ -586,6 +587,7 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 			updateCmd = "replace"
 		}
 
+		modelOplogs = append(modelOplogs, log)
 		l.Logger.Debugf("bulk_writer: %s %v after_modify_doc:%v", updateCmd, newObject, log.original.partialLog)
 	}
 
@@ -595,46 +597,50 @@ func (bw *BulkWriter) doUpdate(database, collection string, metadata bson.E, opl
 		return nil
 	}
 
-	opts := options.BulkWrite()
+	opts := options.BulkWrite().SetOrdered(true)
 	if bypassDocumentValidationFor(collection) {
 		opts = opts.SetBypassDocumentValidation(true)
 	}
-	res, err := bw.conn.Client.Database(database).Collection(collection).BulkWrite(
-		context.Background(), models, opts)
+	target := bw.conn.Client.Database(database).Collection(collection)
+	for len(models) > 0 {
+		res, err := target.BulkWrite(context.Background(), models, opts)
+		if err == nil {
+			return nil
+		}
 
-	if err != nil {
-		// parse error
 		index, errMsg, dup := utils.FindFirstErrorIndexAndMessageN(err)
-		var oplogRecord *OplogRecord
-		if index != -1 {
-			oplogRecord = oplogs[index]
-			l.Logger.Warnf("detail error info with index[%v] msg[%v] dup[%v], isFullSyncStage[%v], oplog[%v] res[%v]",
-				index, errMsg, dup, parseLastTimestamp(oplogs) <= bw.fullFinishTs,
-				*oplogRecord.original.partialLog, res)
+		if index < 0 || index >= len(modelOplogs) {
+			return err
+		}
+		failedOplog := modelOplogs[index].original.partialLog
+		inFullSyncWindow := utils.TimeStampToInt64(failedOplog.Timestamp) <= bw.fullFinishTs
+		l.Logger.Warnf("detail error info with index[%v] msg[%v] dup[%v], isFullSyncStage[%v], oplog[%v] res[%v]",
+			index, errMsg, dup, inFullSyncWindow, *failedOplog, res)
+
+		if bulkErr, ok := err.(mongo.BulkWriteException); ok {
+			if bulkErr.WriteConcernError != nil || len(bulkErr.WriteErrors) > 1 {
+				return err
+			}
+			if len(bulkErr.WriteErrors) == 1 && IgnoreError(bulkErr.WriteErrors[0], "u", inFullSyncWindow) {
+				l.Logger.Warnf("ignore update error[%v] during full sync overlap at oplog ts[%v]", err, failedOplog.Timestamp)
+				// Ordered writes stop at the failed model. Send only the unattempted tail.
+				models = models[index+1:]
+				modelOplogs = modelOplogs[index+1:]
+				continue
+			}
 		}
 
 		if utils.DuplicateKey(err) {
-			RecordDuplicatedOplog(bw.conn, collection, oplogs)
-			// create single writer to write one by one
+			RecordDuplicatedOplog(bw.conn, collection, modelOplogs)
 			sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
-			return sw.doUpdate(database, collection, metadata, oplogs[index:], upsert)
-		}
-
-		// error can be ignored
-		if IgnoreError(err, "u", parseLastTimestamp(oplogs) <= bw.fullFinishTs) {
-			l.Logger.Warnf("ignore error[%v] when run operation[%v], initialSync[%v]", err, "u",
-				parseLastTimestamp(oplogs) <= bw.fullFinishTs)
-
-			// re-run (index, len(oplogs) - 1]
-			sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
-			return sw.doUpdate(database, collection, metadata, oplogs[index+1:], upsert)
+			return sw.doUpdate(database, collection, metadata, modelOplogs[index:], upsert)
 		}
 		if strings.Contains(err.Error(), shardKeyUpdateErr) {
 			l.Logger.Errorf("multiUpdateShardKey err_string:%s, index:%d, redo update shardKey singly",
 				err.Error(), index)
 
 			sw := NewDbWriter(bw.conn, bson.E{}, false, bw.fullFinishTs)
-			return sw.doUpdate(database, collection, metadata, oplogs[index:], upsert)
+			return sw.doUpdate(database, collection, metadata, modelOplogs[index:], upsert)
 		}
 
 		l.Logger.Errorf("doUpdate run upsert/update[%v] failed[%v]", upsert, err)
