@@ -3,6 +3,7 @@ package filter
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -233,9 +234,10 @@ func (filter *MigrateFilter) Filter(log *oplog.PartialLog) bool {
 // NamespaceFilter
 // because regexp use the default perl engine which is not support inverse match, so use two rules to match
 type NamespaceFilter struct {
-	whiteRule      string
-	blackRule      string
-	whiteDBRuleMap map[string]bool
+	whiteRule        *regexp.Regexp
+	blackRule        *regexp.Regexp
+	invalidWhiteRule bool
+	whiteDBRuleMap   map[string]bool
 }
 
 // convert input namespace filter to regex string
@@ -269,15 +271,26 @@ func covertToWhiteDBRule(input []string) map[string]bool {
 	return whiteDBRuleMap
 }
 
+func compileNamespaceRule(input []string) (*regexp.Regexp, error) {
+	rule := convertToRule(input)
+	if rule == "" {
+		return nil, nil
+	}
+	return regexp.Compile(rule)
+}
+
 func NewNamespaceFilter(white, black []string) *NamespaceFilter {
-	whiteRule := convertToRule(white)
-	blackRule := convertToRule(black)
+	// Compile once per filter instead of once per namespace. Preserve the
+	// previous MatchString error handling: invalid patterns match nothing.
+	whiteRule, whiteErr := compileNamespaceRule(white)
+	blackRule, _ := compileNamespaceRule(black)
 	whiteDBRuleMap := covertToWhiteDBRule(white)
 
 	return &NamespaceFilter{
-		whiteRule:      whiteRule,
-		blackRule:      blackRule,
-		whiteDBRuleMap: whiteDBRuleMap,
+		whiteRule:        whiteRule,
+		blackRule:        blackRule,
+		invalidWhiteRule: whiteErr != nil,
+		whiteDBRuleMap:   whiteDBRuleMap,
 	}
 }
 
