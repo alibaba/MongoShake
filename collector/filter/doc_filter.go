@@ -2,7 +2,6 @@ package filter
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	conf "github.com/alibaba/MongoShake/v2/collector/configure"
@@ -119,20 +118,11 @@ func (filter *NamespaceFilter) FilterNs(namespace string) bool {
 
 // filterNsByRules checks namespace against white/black list regex rules.
 func (filter *NamespaceFilter) filterNsByRules(namespace string) bool {
-	if filter.whiteRule != "" {
-		if match, _ := regexp.MatchString(filter.whiteRule, namespace); !match {
-			// filter
-			return true
-		}
+	// An invalid whitelist used to match nothing, unlike an empty whitelist.
+	if filter.invalidWhiteRule || (filter.whiteRule != nil && !filter.whiteRule.MatchString(namespace)) {
+		return true
 	}
-	if filter.blackRule != "" {
-		if match, _ := regexp.MatchString(filter.blackRule, namespace); match {
-			// filter
-			return true
-		}
-	}
-
-	return false
+	return filter.blackRule != nil && filter.blackRule.MatchString(namespace)
 }
 
 func NewDocFilterList() DocFilterChain {
